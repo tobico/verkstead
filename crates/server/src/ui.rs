@@ -37,18 +37,18 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileMade, FileMaking,
-    FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten, FolderListing,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
-    PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileListsView, FileMade,
+    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
+    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
+    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -239,6 +239,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // else's — see [`crate::files`].
         .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
         .route("/api/ui/conversations/{id}/files/folder", get(folder))
+        // And the one that answers about no folder in particular: every root's
+        // files at once, which is what the quick-open palette matches over — see
+        // [`file_list`]. Git's own list per root rather than a walk, read afresh
+        // every time that palette opens, there being no watcher until stage 04.
+        .route("/api/ui/conversations/{id}/files/list", get(file_list))
         // And one file of one of those folders, opened: what it holds, what
         // kind of thing that turned out to be, and the version a write names
         // itself as being over — see [`file`]. Asked for by path like the
@@ -3017,6 +3022,55 @@ async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         roots: crate::files::roots(&conversation),
     })
     .into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/files/list` — every root's files, which is
+/// what the quick-open palette matches over.
+///
+/// One ask for the whole Conversation, a list under each root it belongs to:
+/// the palette offers every file the human could open, and two roots can hold
+/// the same path, so which root a row is in is part of the row (ADR 0019, *The
+/// tree*).
+///
+/// Git's own list rather than a walk — what it tracks, plus what it does not
+/// track and does not ignore — and capped per root, a root that was cut short
+/// saying so: see [`crate::files::list`]. Read afresh every time the palette
+/// opens, there being no watcher until the stage after this one and a list read
+/// once going stale the first time the agent writes anything.
+///
+/// **No refusals.** Nothing here is about a path somebody named, so there is no
+/// bound to measure and nothing to say no to: a Conversation with no Worktrees
+/// answers with no roots, and a root git will not answer about answers with no
+/// files.
+async fn file_list(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as the roots beside it: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees to list.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileListsView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileListsView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: git is a process, and one per root.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::list(&crate::files::roots(&conversation))
+    })
+    .await;
+
+    match read {
+        Ok(lists) => Json(lists).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "listing a Conversation's files failed");
+            unavailable("this conversation's files could not be listed")
+        }
+    }
 }
 
 /// `GET /api/ui/conversations/{id}/files/folder?path=<path>` — what one folder

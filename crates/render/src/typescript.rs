@@ -23,9 +23,9 @@ use crate::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
-    FileDeleting, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
     OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
     ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
@@ -236,6 +236,12 @@ fn the_viewers_types_are_written_from_these() {
     // *The tree*). The listing writes its entries with it.
     FileRootsView::export_all(&config).unwrap();
     FolderListing::export_all(&config).unwrap();
+
+    // And every root's files at once, which is what the quick-open palette
+    // matches over: git's own list of what each root holds, read afresh every
+    // time the palette opens and capped per root (ADR 0019, *The tree*). The
+    // lists write the root each of them belongs to with them.
+    FileListsView::export_all(&config).unwrap();
 
     // And one file of one of those folders, opened: what kind of thing it
     // turned out to be, the version a write will name itself as being over, and

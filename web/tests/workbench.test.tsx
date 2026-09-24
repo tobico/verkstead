@@ -41,6 +41,7 @@ import type {
   ConversationUnarchived,
   ConversationView,
   FileDeleted,
+  FileListsView,
   FileMade,
   FileReading,
   FileRenamed,
@@ -221,6 +222,10 @@ import {
   renamedRefusal,
 } from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
+// And the quick-open palette Ctrl+P drops over it, whose two sentences are read
+// off the component that words them.
+import { NOTHING_TO_SEARCH, onlyPartOf } from "../src/workbench/Quick";
+import quickPane from "../src/workbench/Quick.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -360,6 +365,7 @@ import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
+import codeFiles from "./fixtures/code-files.json" with { type: "json" };
 import codeFile from "./fixtures/code-file.json" with { type: "json" };
 import codeImage from "./fixtures/code-image.json" with { type: "json" };
 import codeWritten from "./fixtures/code-written.json" with { type: "json" };
@@ -17838,6 +17844,10 @@ const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
 /// own and each companion's, which is what bounds the files API (ADR 0019).
 const ROOTS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/roots`;
 
+/// And where every one of their files is listed at once, which is what the
+/// quick-open palette matches over (ADR 0019, *The tree*).
+const FILES_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/list`;
+
 /// And where one folder of one of them is read, which is what expanding a row
 /// asks for.
 function folderOf(path: string): string {
@@ -24725,6 +24735,287 @@ describe("the code pane's groups", () => {
 /// Remembered per device beside the pane widths, and for the same reason:
 /// how the frame stands in front of this human is theirs, and a phone that gave
 /// Code the window has said nothing about a laptop's columns.
+describe("the code pane's quick open", () => {
+  /// The palette itself, or nothing where it is not up — the one dialog this
+  /// pane ever draws over itself.
+  function palette(container: ParentNode): HTMLDialogElement | null {
+    return container.querySelector<HTMLDialogElement>(
+      `dialog.${quickPane.palette}`,
+    );
+  }
+
+  /// The field in it, which is where the hands are the moment it opens.
+  function field(container: ParentNode): HTMLInputElement {
+    const found = container.querySelector<HTMLInputElement>(
+      `dialog.${quickPane.palette} .${quickPane.field}`,
+    );
+
+    if (!found) {
+      throw new Error("the palette is not up");
+    }
+
+    return found;
+  }
+
+  /// And the rows under it, as what each says: the file, where it is under its
+  /// root, and which root that is.
+  function offered(container: ParentNode): Array<[string, string, string]> {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `dialog.${quickPane.palette} [role="option"]`,
+      ),
+    ].map((row) => [
+      row.querySelector(`.${quickPane.name}`)?.textContent ?? "",
+      row.querySelector(`.${quickPane.under}`)?.textContent ?? "",
+      row.querySelector(`.${quickPane.repo}`)?.textContent ?? "",
+    ]);
+  }
+
+  /// What the palette says where it has no rows to draw.
+  function said(container: ParentNode): string | undefined {
+    return (
+      container.querySelector(`dialog.${quickPane.palette} p`)?.textContent ??
+      undefined
+    );
+  }
+
+  /// Ctrl+P, fired where the caret really is — the listener being the
+  /// document's, so that it arrives whichever half of the pane the hands were
+  /// in.
+  function ctrlP(on: Element = document.body): boolean {
+    return fireEvent.keyDown(on, { key: "p", ctrlKey: true });
+  }
+
+  /// Typing into the field, which is the whole of the interaction.
+  function type(container: ParentNode, text: string): void {
+    fireEvent.input(field(container), { target: { value: text } });
+  }
+
+  /// The groups the pane is drawing, and what is in each of them.
+  function groups(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.group}`,
+      ),
+    ];
+  }
+
+  function holding(container: ParentNode): string[][] {
+    return groups(container).map((group) => [
+      ...group.querySelectorAll<HTMLButtonElement>(`.${codePane.tab}`),
+    ].map((tab) => tab.textContent ?? ""));
+  }
+
+  /// One of the fixture list's files, by the name at the end of it.
+  function pathOf(name: string): string {
+    const found = (codeFiles as FileListsView).roots
+      .flatMap((root) => root.files)
+      .find((path) => path.endsWith(`/${name}`));
+
+    if (!found) {
+      throw new Error(`the fixture list has no ${name}`);
+    }
+
+    return found;
+  }
+
+  /// What the server answers a read of one of them with.
+  function reading(path: string, text: string): FileReading {
+    return { Text: { path, text, version: `${path}-1`, writable: true } };
+  }
+
+  /// The pane, with the conversation's files answered the way the palette asks
+  /// for them and nothing else open.
+  ///
+  /// Awaited as far as the pane being drawn, because the keystroke is the
+  /// document's: a Ctrl+P fired before this pane has mounted is a press nobody
+  /// is listening for.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(FILES_OF_IT, json(codeFiles)),
+      ...answers,
+    );
+
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.group}`,
+        ),
+      ).toHaveLength(1),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// Ctrl+P drops the palette, and typing part of a path lists what matched
+  /// across every root — each row saying which root it is in, because two of
+  /// them can hold the same path.
+  it("opens on Ctrl+P and lists matches from every root", async () => {
+    const { container } = await opened();
+
+    expect(palette(container)).toBeNull();
+
+    // Taken from the browser, whose own Print is not what anybody meant by it.
+    expect(ctrlP()).toBe(false);
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    type(container, "readme");
+
+    await waitFor(() =>
+      expect(offered(container)).toEqual([
+        ["README.md", "README.md", COMPANION_ROOT.repo],
+        ["README.md", "README.md", OWN_ROOT.repo],
+      ]),
+    );
+  });
+
+  /// And the best match is the first row: a name that begins with what was
+  /// typed above the same letters falling where they may.
+  it("puts the best match first", async () => {
+    const { container } = await opened();
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    type(container, "re");
+
+    await waitFor(() => expect(offered(container).length).toBeGreaterThan(1));
+
+    const rows = offered(container);
+
+    expect(rows[0]?.[0]).toBe("README.md");
+    expect(rows.at(-1)).toEqual([
+      "lib.rs",
+      "crates/server/lib.rs",
+      OWN_ROOT.repo,
+    ]);
+  });
+
+  /// Enter opens the row the keyboard is on, as a tab of the active group —
+  /// which is the group last pressed into, the palette standing over the whole
+  /// pane rather than in any one of them.
+  it("opens the pick into the active group", async () => {
+    const lib = pathOf("lib.rs");
+    const readme = `${OWN_ROOT.path}/README.md`;
+
+    const { container } = await opened(
+      whenever(fileOf(lib), json(reading(lib, "fn main() {}\n"))),
+      whenever(fileOf(readme), json(reading(readme, "# verkstead\n"))),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "lib");
+
+    await waitFor(() => expect(offered(container)).toHaveLength(1));
+    fireEvent.keyDown(field(container), { key: "Enter" });
+
+    // The palette goes with the press: what it was for has happened.
+    await waitFor(() => expect(holding(container)).toEqual([["lib.rs"]]));
+    expect(palette(container)).toBeNull();
+
+    // And a second group, which is the active one from the moment it is made:
+    // the next pick opens there rather than back where the first one went.
+    const tab = container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.tab}`,
+    )!;
+    fireEvent.contextMenu(tab, { clientX: 10, clientY: 10 });
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+    fireEvent.click(
+      [...menu.querySelectorAll("button")].find(
+        (one) => one.textContent === "Split right",
+      )!,
+    );
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "readme");
+
+    // The conversation's own, which is the row the walk starts on.
+    await waitFor(() => expect(offered(container)).toHaveLength(2));
+    fireEvent.keyDown(field(container), { key: "ArrowDown" });
+    fireEvent.keyDown(field(container), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([["lib.rs"], ["lib.rs", "README.md"]]),
+    );
+  });
+
+  /// Escape leaves nothing behind: no tab, nothing read, and a palette opened
+  /// again is an empty field rather than the last search still in it.
+  it("leaves nothing behind on Escape", async () => {
+    const { container, fetching } = await opened();
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "readme");
+    await waitFor(() => expect(offered(container)).toHaveLength(2));
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    await waitFor(() => expect(palette(container)).toBeNull());
+    expect(holding(container)).toEqual([[]]);
+    expect(
+      fetching.mock.calls.filter(([asked]) =>
+        String(asked).includes("/files/file?"),
+      ),
+    ).toHaveLength(0);
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    expect(field(container).value).toBe("");
+
+    // And the list is read afresh with it: there is no watcher until the stage
+    // after this one, so a list kept from the last opening would be a palette
+    // offering a file the agent has since moved.
+    await waitFor(() => expect(askedFor(fetching, FILES_OF_IT)).toBe(2));
+  });
+
+  /// A root the server cut short says so, rather than quietly matching over
+  /// half a checkout.
+  it("says which root is only part here", async () => {
+    const lists = codeFiles as FileListsView;
+    const { container } = await opened(
+      whenever(
+        FILES_OF_IT,
+        json({
+          roots: [{ ...lists.roots[0]!, cut: true }, lists.roots[1]!],
+        }),
+      ),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`dialog.${quickPane.palette} .${quickPane.cut}`)
+          ?.textContent,
+      ).toBe(onlyPartOf(OWN_ROOT.repo)),
+    );
+  });
+
+  /// And a conversation with nothing checked out opens a palette that says
+  /// there is nothing to search — the tree's own answer about the same nothing.
+  it("says so where the conversation has no worktree", async () => {
+    const { container } = await opened(
+      whenever(ROOTS_OF_IT, json({ roots: [] })),
+      whenever(FILES_OF_IT, json({ roots: [] })),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    await waitFor(() => expect(said(container)).toBe(NOTHING_TO_SEARCH));
+  });
+});
+
 describe("the maximise toggle in the code pane", () => {
   /// Where the toggle's state is kept, asked for by the name a browser would
   /// find it under rather than through the module that writes it — the way the

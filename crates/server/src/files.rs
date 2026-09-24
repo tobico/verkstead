@@ -74,6 +74,13 @@
 //! puts in front of whatever cannot be taken back, so what arrives here has been
 //! asked about.
 //!
+//! **And the palette is given every root at once** — see [`list`]: git's own
+//! list of what each root holds, tracked and untracked-not-ignored, read afresh
+//! every time the palette opens and capped at [`MAX_LISTED`] per root. The one
+//! reading here that is not about a path somebody named, and so the one with no
+//! bound to measure: what it answers *is* the paths, and a root git will not
+//! answer about has none.
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -91,11 +98,11 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
 use verkstead_render::{
-    FileDeleted, FileMade, FileReading, FileRenamed, FileRoot, FileWritten, FolderEntry,
-    FolderListing,
+    FileDeleted, FileList, FileListsView, FileMade, FileReading, FileRenamed, FileRoot,
+    FileWritten, FolderEntry, FolderListing,
 };
 
-use crate::repos::feeding;
+use crate::repos::{feeding, git};
 use crate::resolved::{Resolved, resolve};
 use crate::store;
 
@@ -641,6 +648,98 @@ pub(crate) fn delete(roots: &[FileRoot], path: &Path) -> FileDeleted {
         },
     }
 }
+
+/// Every root's files, which is what the quick-open palette matches over.
+///
+/// Blocking: one run of `git ls-files` per root.
+///
+/// **Git's own list rather than a walk**: what it tracks, plus what it does not
+/// track and does not ignore, which is the same account of a repository the
+/// folder listing takes its ignores from. A walk would have to ask about every
+/// directory it went into and then ask git about the lot anyway — and it would
+/// walk a `target/` to find out it was not wanted.
+///
+/// **A root git will not answer about has nothing here.** No git on the machine,
+/// a Worktree that has gone, a directory that is not a repository: the listing
+/// beside this one falls the other way and shows a folder whole, because there
+/// the answer is what to *leave out* and a tree with nothing in it would be
+/// worse than a tree with a `target/` in it. Here git's answer is the list
+/// itself, so there is nothing to fall back to.
+///
+/// **And every root is answered about**, whatever it says — a root with no files
+/// is a row of the palette that says so, where a root missing from the answer
+/// would be a checkout the human cannot tell from one holding nothing.
+pub(crate) fn list(roots: &[FileRoot]) -> FileListsView {
+    FileListsView {
+        roots: roots.iter().map(listed).collect(),
+    }
+}
+
+/// One root's, capped at [`MAX_LISTED`].
+///
+/// **Spelled in full the way the root is**, which is the join [`make`] makes and
+/// makes for this reason: the page opens what it is given, and a path it had
+/// joined with a `/` under a Worktree spelled with a `\` would be a second name
+/// for a file the tree already has a name for — two names, two buffers, two
+/// tabs over one file.
+///
+/// Deduplicated on the way in, because one path can come back twice: a file in
+/// conflict is in the index once per stage, and `ls-files` says it once per
+/// stage with it. `--deduplicate` would do it in git, and is newer than the git
+/// on plenty of machines this runs on.
+fn listed(root: &FileRoot) -> FileList {
+    let at = Path::new(&root.path);
+
+    // `--others` is what is untracked and `--exclude-standard` is what makes
+    // that *not ignored*: without it the answer is the whole build directory.
+    // NUL-separated, so that a path with a newline or a quote in it arrives as
+    // itself rather than as git's own quoting of it.
+    let answer = git(
+        at,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )
+    .unwrap_or_default();
+
+    let mut seen = HashSet::new();
+    let mut files = Vec::new();
+    let mut cut = false;
+
+    for under in answer.split('\0').filter(|path| !path.is_empty()) {
+        if !seen.insert(under) {
+            continue;
+        }
+
+        if files.len() == MAX_LISTED {
+            cut = true;
+            break;
+        }
+
+        files.push(at.join(under).display().to_string());
+    }
+
+    FileList {
+        repo: root.repo.clone(),
+        path: root.path.clone(),
+        files,
+        cut,
+    }
+}
+
+/// How many of one root's files the palette is given.
+///
+/// A monorepo answers with a few hundred thousand paths and none of them would
+/// be read on a page: what a palette is for is the file whose path nobody
+/// remembers, and nobody scrolls to it. Ten thousand is over the whole of every
+/// ordinary checkout — this one is under a thousand — so the cap is a bound on
+/// the pathological case rather than something a human meets, and the root that
+/// meets it says so rather than quietly matching over half a checkout.
+pub(crate) const MAX_LISTED: usize = 10_000;
 
 /// Whether something is at `onto` that is not `real` itself.
 ///
@@ -2162,5 +2261,135 @@ mod tests {
             delete(&roots, &worktree.join("README.md")),
             FileDeleted::RootGone
         );
+    }
+
+    /// The files of one root, as the paths they would be opened by — which is
+    /// the whole point of this reading.
+    fn files(list: &FileListsView, at: usize) -> Vec<String> {
+        list.roots[at].files.clone()
+    }
+
+    /// What git tracks and what it does not track and does not ignore, both —
+    /// and nothing it ignores, nothing inside `.git`, and no folders.
+    #[test]
+    fn a_roots_list_is_what_git_tracks_and_what_it_does_not_ignore() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+        std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+        std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+        std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+        std::fs::write(worktree.join("build.log"), "").unwrap();
+
+        let listed = list(&[root(&worktree)]);
+
+        assert_eq!(listed.roots.len(), 1);
+        assert_eq!(listed.roots[0].repo, "verkstead");
+        assert_eq!(listed.roots[0].path, worktree.display().to_string());
+        assert!(!listed.roots[0].cut);
+
+        // `.gitignore` and `README.md` are tracked; `crates/server/lib.rs` is
+        // untracked and not ignored; `target/` and `*.log` are ignored, and the
+        // git directory is in nobody's answer.
+        let mut paths = files(&listed, 0);
+        paths.sort();
+
+        assert_eq!(
+            paths,
+            [
+                worktree.join(".gitignore").display().to_string(),
+                worktree.join("README.md").display().to_string(),
+                worktree.join("crates/server/lib.rs").display().to_string(),
+            ]
+        );
+    }
+
+    /// Every root is answered about, in the roots' own order, each with the
+    /// Repo it is a checkout of — two roots being able to hold the same path.
+    #[test]
+    fn every_root_is_a_list_of_its_own_in_the_order_they_come() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let alongside = repository(&held.path().join("askance"));
+
+        std::fs::write(worktree.join("notes.md"), "mine\n").unwrap();
+        std::fs::write(alongside.join("notes.md"), "theirs\n").unwrap();
+
+        let mut companion = root(&alongside);
+        companion.repo = "askance".to_owned();
+        companion.own = false;
+        companion.writable = false;
+
+        let listed = list(&[root(&worktree), companion]);
+
+        assert_eq!(
+            listed
+                .roots
+                .iter()
+                .map(|one| one.repo.as_str())
+                .collect::<Vec<_>>(),
+            ["verkstead", "askance"]
+        );
+
+        // The same path under two roots, spelled in full each time: which of
+        // them a row is in is the root it is under rather than anything the
+        // name says.
+        assert!(files(&listed, 0).contains(&worktree.join("notes.md").display().to_string()));
+        assert!(files(&listed, 1).contains(&alongside.join("notes.md").display().to_string()));
+
+        // And a read-only root is listed like any other: it is a root to read,
+        // and quick open opens files rather than writing them.
+        assert!(!listed.roots[1].cut);
+    }
+
+    /// A root git will not answer about lists nothing — which is the folder
+    /// listing's rule read the other way up: there git's answer says what to
+    /// leave out, and here it *is* the list.
+    #[test]
+    fn a_root_git_will_not_answer_about_lists_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let plain = held.path().join("not-a-repository");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("README.md"), "# not a checkout\n").unwrap();
+
+        let listed = list(&[root(&plain)]);
+
+        assert!(files(&listed, 0).is_empty(), "{:?}", listed.roots[0].files);
+        assert!(!listed.roots[0].cut);
+
+        // And so does a Worktree that is no longer on disk, which is the same
+        // answer for the same reason: nobody is there to ask.
+        let gone = held.path().join("gone");
+        let listed = list(&[root(&gone)]);
+
+        assert!(files(&listed, 0).is_empty(), "{:?}", listed.roots[0].files);
+    }
+
+    /// A root holding more than the cap is cut, and says so — the palette
+    /// saying it rather than quietly matching over half a checkout.
+    #[test]
+    fn a_root_over_the_cap_is_cut_and_says_so() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let many = worktree.join("many");
+        std::fs::create_dir(&many).unwrap();
+
+        // One over the cap, counting the two the repository was made with: the
+        // list stops at the cap and the flag is what says there was more.
+        for at in 0..=MAX_LISTED {
+            std::fs::write(many.join(format!("{at}.rs")), "").unwrap();
+        }
+
+        let listed = list(&[root(&worktree)]);
+
+        assert_eq!(listed.roots[0].files.len(), MAX_LISTED);
+        assert!(listed.roots[0].cut);
+
+        // And a root under it is not cut, which is every ordinary checkout.
+        std::fs::remove_dir_all(&many).unwrap();
+        let listed = list(&[root(&worktree)]);
+
+        assert!(!listed.roots[0].cut);
     }
 }

@@ -1,0 +1,25 @@
+{
+  "roots": [
+    {
+      "cut": false,
+      "files": [
+        "/var/lib/verkstead/worktrees/verkstead-code-pane/Cargo.toml",
+        "/var/lib/verkstead/worktrees/verkstead-code-pane/crates/server/lib.rs",
+        "/var/lib/verkstead/worktrees/verkstead-code-pane/icon.png",
+        "/var/lib/verkstead/worktrees/verkstead-code-pane/.gitignore",
+        "/var/lib/verkstead/worktrees/verkstead-code-pane/README.md"
+      ],
+      "path": "/var/lib/verkstead/worktrees/verkstead-code-pane",
+      "repo": "verkstead"
+    },
+    {
+      "cut": false,
+      "files": [
+        "/var/lib/verkstead/worktrees/askance-code-pane/.gitignore",
+        "/var/lib/verkstead/worktrees/askance-code-pane/README.md"
+      ],
+      "path": "/var/lib/verkstead/worktrees/askance-code-pane",
+      "repo": "askance"
+    }
+  ]
+}

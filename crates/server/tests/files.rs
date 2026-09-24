@@ -1,7 +1,8 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
 //! real Conversation: which roots there are, what one folder of one of them
 //! holds, what one file of one of those is — that file saved back, one of them
-//! renamed, and one taken away.
+//! renamed, one taken away — and every root's files at once, which is what the
+//! quick-open palette matches over.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -29,8 +30,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    FileDeleted, FileDeleting, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -1327,4 +1328,99 @@ async fn a_delete_outside_this_conversations_roots_is_refused() {
     };
     assert_eq!(none, FileDeleted::Outside);
     assert!(worktree.join("README.md").exists());
+}
+
+/// Quick open is answered for the whole Conversation at once: a list per root,
+/// in the roots' own order, each naming the Repo it is a checkout of — two
+/// roots being able to hold the same path, and a palette row having to say
+/// which of them it is offering.
+#[tokio::test]
+async fn the_file_lists_are_every_root_of_the_conversation_in_order() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // A checkout somebody has been building in: a tracked file, an untracked
+    // one that is not ignored, and the build directory the `.gitignore` keeps
+    // out of it.
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+    std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+
+    let view: FileListsView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/list"),
+    )
+    .await;
+
+    assert_eq!(
+        view.roots
+            .iter()
+            .map(|list| (list.repo.as_str(), list.path.as_str(), list.cut))
+            .collect::<Vec<_>>(),
+        vec![
+            ("verkstead", worktree.to_str().unwrap(), false),
+            ("askance", companions[0].to_str().unwrap(), false),
+        ]
+    );
+
+    // Spelled in full the way the root is, which is what a tab is opened by:
+    // the same string the tree would have handed over for the same file.
+    let mut own = view.roots[0].files.clone();
+    own.sort();
+
+    assert_eq!(
+        own,
+        [
+            worktree.join(".gitignore").display().to_string(),
+            worktree.join("README.md").display().to_string(),
+            worktree.join("crates/server/lib.rs").display().to_string(),
+        ]
+    );
+
+    // And the read-only companion is listed like any other root: it is a
+    // checkout to read, and quick open opens files rather than writing them.
+    let mut alongside = view.roots[1].files.clone();
+    alongside.sort();
+
+    assert_eq!(
+        alongside,
+        [
+            companions[0].join(".gitignore").display().to_string(),
+            companions[0].join("README.md").display().to_string(),
+        ]
+    );
+}
+
+/// And a Conversation with nothing checked out has nothing to search, which is
+/// a palette saying so rather than anything to report.
+#[tokio::test]
+async fn a_conversation_with_no_worktree_lists_no_files() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let view: FileListsView = get(
+        &app,
+        &format!("/api/ui/conversations/{drafting}/files/list"),
+    )
+    .await;
+
+    assert!(view.roots.is_empty(), "{:?}", view.roots);
+
+    // And a Conversation nothing at all knows about, which is the same nothing.
+    let none: FileListsView = get(&app, "/api/ui/conversations/404/files/list").await;
+    assert!(none.roots.is_empty(), "{:?}", none.roots);
 }

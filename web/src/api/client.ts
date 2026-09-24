@@ -38,6 +38,7 @@ import type {
   DirectoryListing,
   FileDeleted,
   FileDeleting,
+  FileListsView,
   FileMade,
   FileMaking,
   FileReading,
@@ -720,6 +721,26 @@ export function deletePath(id: number, path: string): Promise<FileDeleted> {
   return post<FileDeleted>(`/api/ui/conversations/${id}/files/delete`, {
     path,
   } satisfies FileDeleting);
+}
+
+/// And every root's files at once, which is what the quick-open palette matches
+/// over.
+///
+/// Git's own list per root — what it tracks, plus what it does not track and
+/// does not ignore — rather than a walk, and capped per root, a root that was
+/// cut short saying so in the answer (ADR 0019, *The tree*).
+///
+/// **Read afresh every time the palette opens**, which is what makes the list
+/// worth reading at all: there is no watcher until the stage after this one,
+/// and a list read once would go stale the first time the agent wrote
+/// anything.
+///
+/// Nothing here is refused: what it answers is every path there is to name, so
+/// there is no path of anybody's to measure against the roots. A Conversation
+/// with no Worktrees answers with no roots, and a root git will not answer
+/// about answers with no files.
+export function listFiles(id: number): Promise<FileListsView> {
+  return get<FileListsView>(`/api/ui/conversations/${id}/files/list`);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

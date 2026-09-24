@@ -1982,6 +1982,65 @@ export type FileDeleted = "Deleted" | "IsRoot" | "ReadOnly" | "Outside" | "Under
 export type FileDeleting = { path: string, };
 
 /**
+ * One root's, which is git's own list of what is in it.
+ *
+ * **What git tracks, plus what it does not track and does not ignore** — the
+ * same account of what a repository holds that the folder listing takes its
+ * ignores from, asked here as the whole list rather than one folder at a time.
+ * A root git will not answer about — no git on the machine, a Worktree that has
+ * gone, a directory that is not a repository — has no files here at all, which
+ * is that reading's own rule read the other way up: git's answer *is* the
+ * list, so no answer is no list.
+ */
+export type FileList = { 
+/**
+ * The Repo's name, which is what a row of the palette says it is in: a
+ * path alone would not say which checkout it was a path in.
+ */
+repo: string, 
+/**
+ * And the root itself, which is what the part of a path under it is cut
+ * off the front of — the tree's own reading of a row's name, made on a
+ * palette row instead.
+ */
+path: string, 
+/**
+ * The files, each spelled in full the way the root is.
+ *
+ * In full rather than as the part under the root, so that a file opened
+ * from here is the same path — the same string — the tree would have
+ * opened: a Worktree on Windows is spelled with a `\`, and a path the page
+ * joined with a `/` would be a second name for one file, which is two
+ * buffers and two tabs (see [`FolderEntry::path`], which is the same join
+ * made for the same reason).
+ */
+files: Array<string>, 
+/**
+ * And whether the list was cut short of everything this root holds.
+ *
+ * A monorepo answers with a few hundred thousand paths and none of them
+ * would be read on a page, so a root is capped — and a root that was cut
+ * says so, because a palette quietly matching over half a checkout is a
+ * palette that says a file is not there.
+ */
+cut: boolean, };
+
+/**
+ * Every root's files, which is what the quick-open palette matches over.
+ *
+ * One ask answers the whole Conversation — a list per root, under the root it
+ * belongs to — because what the palette offers is every file the human could
+ * open and two roots can hold the same path (ADR 0019, *The tree*). The order
+ * is [`FileRootsView`]'s: the Conversation's own first, then each companion's.
+ *
+ * **Read afresh every time the palette opens.** There is no watcher until the
+ * stage after this one, and a list read once would go stale the first time the
+ * agent wrote anything — a palette offering a file that has gone, and never
+ * offering one that has arrived.
+ */
+export type FileListsView = { roots: Array<FileList>, };
+
+/**
  * What became of making one.
  *
  * **A new file is empty and a new folder holds nothing** — there is no

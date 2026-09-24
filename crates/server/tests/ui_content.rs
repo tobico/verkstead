@@ -3237,6 +3237,26 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And what the quick-open palette matches over: every root of that same
+    // Conversation, with git's own list of what each holds under it.
+    //
+    // The same two checkouts, read the same way — a real `git ls-files` rather
+    // than a made-up list, because what this fixture is pinning is which files
+    // are in the answer: the tracked and the untracked-not-ignored, and nothing
+    // out of the `target/` the checkout has been building in.
+    write(
+        "code-files.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!("/api/ui/conversations/{coding}/files/list"),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
     // And what a file pressed in that tree opens as: the two kinds that carry
     // content — text, which is what the editor draws, and a picture, which is
     // previewed in its tab.

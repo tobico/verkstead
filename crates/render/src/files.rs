@@ -52,6 +52,13 @@
 //! whatever cannot be taken back; what is answered here is the press already
 //! made.
 //!
+//! **And the palette matches over all of them at once** — see [`FileListsView`]
+//! and [`FileList`]: git's own list of what each root holds, tracked and
+//! untracked-not-ignored, read afresh every time the palette opens and capped
+//! per root, a root that was cut short saying so. The one reading here that is
+//! not about a path somebody named: what it answers is every path there is to
+//! name.
+//!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
 //! a different sentence for the human and none of them is a failure to retry: a
@@ -643,4 +650,61 @@ pub enum FileDeleted {
     /// held open on Windows, or a folder that grew a file between the walk and
     /// the removal.
     Unwritable { why: String },
+}
+
+/// Every root's files, which is what the quick-open palette matches over.
+///
+/// One ask answers the whole Conversation — a list per root, under the root it
+/// belongs to — because what the palette offers is every file the human could
+/// open and two roots can hold the same path (ADR 0019, *The tree*). The order
+/// is [`FileRootsView`]'s: the Conversation's own first, then each companion's.
+///
+/// **Read afresh every time the palette opens.** There is no watcher until the
+/// stage after this one, and a list read once would go stale the first time the
+/// agent wrote anything — a palette offering a file that has gone, and never
+/// offering one that has arrived.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileListsView {
+    pub roots: Vec<FileList>,
+}
+
+/// One root's, which is git's own list of what is in it.
+///
+/// **What git tracks, plus what it does not track and does not ignore** — the
+/// same account of what a repository holds that the folder listing takes its
+/// ignores from, asked here as the whole list rather than one folder at a time.
+/// A root git will not answer about — no git on the machine, a Worktree that has
+/// gone, a directory that is not a repository — has no files here at all, which
+/// is that reading's own rule read the other way up: git's answer *is* the
+/// list, so no answer is no list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileList {
+    /// The Repo's name, which is what a row of the palette says it is in: a
+    /// path alone would not say which checkout it was a path in.
+    pub repo: String,
+
+    /// And the root itself, which is what the part of a path under it is cut
+    /// off the front of — the tree's own reading of a row's name, made on a
+    /// palette row instead.
+    pub path: String,
+
+    /// The files, each spelled in full the way the root is.
+    ///
+    /// In full rather than as the part under the root, so that a file opened
+    /// from here is the same path — the same string — the tree would have
+    /// opened: a Worktree on Windows is spelled with a `\`, and a path the page
+    /// joined with a `/` would be a second name for one file, which is two
+    /// buffers and two tabs (see [`FolderEntry::path`], which is the same join
+    /// made for the same reason).
+    pub files: Vec<String>,
+
+    /// And whether the list was cut short of everything this root holds.
+    ///
+    /// A monorepo answers with a few hundred thousand paths and none of them
+    /// would be read on a page, so a root is capped — and a root that was cut
+    /// says so, because a palette quietly matching over half a checkout is a
+    /// palette that says a file is not there.
+    pub cut: bool,
 }

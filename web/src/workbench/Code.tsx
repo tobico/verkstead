@@ -110,11 +110,12 @@
 //! terminal asked for, the tab standing on a shell that would not start. A
 //! split's own new group is active, that being where the work was going.
 //!
-//! **And four keystrokes act on it, from wherever in the pane the hands are.**
+//! **And five keystrokes act on it, from wherever in the pane the hands are.**
 //! Ctrl+PageDown and Ctrl+PageUp turn the active group to the next tab and to
 //! the one before it, wrapping at each end; Ctrl+\ splits it beside itself, the
 //! split its bar's icon and its tab menu make; Ctrl+` opens a shell in it, the
-//! one **New terminal** opens. They hang on the document where Ctrl+S already
+//! one **New terminal** opens; and Ctrl+P drops the quick-open palette over the
+//! pane, which opens what it is given into that same group. They hang on the document where Ctrl+S already
 //! hangs, for as long as Code is mounted, which is the whole of their reach —
 //! so a press arrives whichever half of the pane it was made in, and what it
 //! acts on is the active group rather than whatever has the focus. Ctrl+W and
@@ -130,6 +131,14 @@
 //! and either of the last two as the line saying why there is nothing to draw.
 //! A file in a read-only root opens read-only and takes no typing, which is the
 //! root's own flag rather than the file's mode.
+//!
+//! **And one is opened by name as well, out of the quick-open palette** — see
+//! [`./Quick`], which Ctrl+P drops over the whole pane. It matches file names
+//! across every root the Conversation has, on a list read when it opens, and
+//! what Enter takes opens into the active group exactly as a press in the tree
+//! does: the tree is how a file is found by where it sits, and this is how one
+//! is found by what it is called (ADR 0019, *The tree*). Escape leaves nothing
+//! behind at all.
 //!
 //! **The editor is Monaco**, whole, in [`./Editor`]: every built-in language
 //! coloured and the four bundled services answering, fetched as a chunk of its
@@ -428,6 +437,7 @@ import {
   type Way,
 } from "./layout";
 import { PaneHead } from "./PaneHead";
+import { Quick } from "./Quick";
 import { Tree } from "./Tree";
 import styles from "./Code.module.css";
 import shell from "../Panes.module.css";
@@ -2391,6 +2401,14 @@ export function Code(props: {
     }
   };
 
+  /// Whether the quick-open palette is up.
+  ///
+  /// The pane's own rather than the keeping's, unlike the tabs and the tree
+  /// beside them: a palette is a press being made rather than something that is
+  /// open, so a pane swapped away for an Event and back comes back without one —
+  /// which is what closing it having opened nothing already means.
+  const [quick, setQuick] = createSignal(false);
+
   /// What this pane takes from the keyboard: Ctrl+S, and the four keystrokes a
   /// browser leaves to the page.
   ///
@@ -2403,7 +2421,10 @@ export function Code(props: {
   ///
   /// Ctrl+PageDown and Ctrl+PageUp walk the active group's tabs and wrap at
   /// each end, Ctrl+\ splits it beside itself the way its bar's icon does, and
-  /// Ctrl+` opens a shell in it the way **New terminal** does. Ctrl+W and
+  /// Ctrl+` opens a shell in it the way **New terminal** does, and Ctrl+P drops
+  /// the quick-open palette over the pane — VS Code's own key, taking the
+  /// browser's Print with it, which is still on the browser's own menu where
+  /// anybody who meant it would look. Ctrl+W and
   /// Ctrl+Tab are the window's own and are deliberately not among them: a page
   /// that swallowed either would be a pane fighting the browser around it.
   ///
@@ -2440,6 +2461,12 @@ export function Code(props: {
         void save(open.file);
         return;
       }
+
+      case "p":
+      case "P":
+        event.preventDefault();
+        setQuick(true);
+        return;
 
       case "PageDown":
       case "PageUp":
@@ -3126,6 +3153,22 @@ export function Code(props: {
           }
         }}
       />
+
+      {/* And the quick-open palette, while Ctrl+P has one up: a field over every
+          root's files, matched on the page, opening the pick into the active
+          group — see [`./Quick`], which is where the list is read.
+
+          Drawn only while it is open rather than told whether it is, unlike the
+          two cards above: what makes its list fresh is that it is read when the
+          palette opens, and a component mounted when the palette opens is what
+          makes those the same moment. */}
+      <Show when={quick()}>
+        <Quick
+          conversation={props.conversation.id}
+          open={openFile}
+          close={() => setQuick(false)}
+        />
+      </Show>
     </>
   );
 }

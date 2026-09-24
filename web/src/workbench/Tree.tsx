@@ -106,8 +106,14 @@
 //! still there to be copied out. A tab that vanished under somebody with unsaved
 //! text would take the text with it.
 //!
-//! No quick open yet: that is the rest of this stage. And no git status marks,
-//! which are stage 04's with the watcher that keeps them honest.
+//! **And quick open is not in here**: the palette Ctrl+P drops is over the
+//! pane rather than in the tree — see [`./Quick`] — because what it matches is
+//! every root at once and what it opens is a tab. This half of the pane is how
+//! a file is found by where it sits, and that one is how it is found by what it
+//! is called.
+//!
+//! No git status marks yet, which are stage 04's with the watcher that keeps
+//! them honest.
 
 import {
   faChevronDown,

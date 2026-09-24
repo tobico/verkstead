@@ -1,0 +1,111 @@
+/* The quick-open palette — see `Quick.tsx`. A card over the page holding a
+   field and the matches under it, drawn in the app's one modal: what is here is
+   how wide that card is, the field inside it, and the rows' own two lines.
+
+   The rows themselves are the app's dropdown rows, out of `picking.module.css`,
+   because that is what a list somebody is choosing from looks like here — the
+   same height for the same finger and the same surface under the walk. What
+   this file adds is what a row of *this* list says, which is a name, a path and
+   the Repo it is in. */
+
+/* Wider than the app's other modals, which are forms of short fields: what is
+   read here is a path, and a path in a checkout is a sentence. */
+.palette {
+  width: min(44rem, calc(100% - 2rem));
+}
+
+/* The label above the field. Drawn rather than hidden, because it names the
+   card as well as the field — the dialog has no heading of its own, a palette
+   being a thing to type into rather than a thing to read. */
+.label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The field, drawn as every text field in the app is, and a little larger:
+   it is the one control on the card and the whole of what the hands are doing. */
+.field {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.field:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* What a root cut short says, under the field: a sentence about the list rather
+   than about anything in it, so it sits between the field and the rows. */
+.cut {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The rows, in the card rather than hung off the field: there is nothing else
+   on this card for them to come down over, and a list that scrolled the card
+   would scroll the field out of reach of the hands still typing into it.
+
+   Capped and scrolling inside the cap, for the reason the dropdown's rows are:
+   a palette is read rather than walked, and what is past the bottom of it is
+   found by typing another letter. */
+.rows {
+  max-height: 22rem;
+  margin-top: 0.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* One row: what it is called and where it is on one side, the Repo on the
+   other. The dropdown's own row underneath this — height, radius, surface —
+   with the two ends pushed apart. */
+.row {
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* The near end of it, which is two lines in one column: a row is scanned by the
+   names down its left edge, and the path under each is what tells two files of
+   the same name apart. */
+.where {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* And the path under it, quieter and smaller — the answer to *which one*
+   rather than the answer. Cut at its end where it is too long for the card,
+   which is where a path is least missed: what is at the end of it is the name
+   drawn above. */
+.under {
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* And the far end: which checkout the file is in. Quiet, and never cut — it is
+   a repository name, and it is the one thing on the row that a second row with
+   the same path differs by. */
+.repo {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
