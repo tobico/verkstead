@@ -255,7 +255,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And the one that answers about no folder in particular: every root's
         // files at once, which is what the quick-open palette matches over — see
         // [`file_list`]. Git's own list per root rather than a walk, read afresh
-        // every time that palette opens, there being no watcher until stage 04.
+        // every time that palette opens, a list kept between openings going
+        // stale the first time the agent writes anything.
         .route("/api/ui/conversations/{id}/files/list", get(file_list))
         // And one file of one of those folders, opened: what it holds, what
         // kind of thing that turned out to be, and the version a write names
@@ -3048,8 +3049,9 @@ async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> Ht
 /// Git's own list rather than a walk — what it tracks, plus what it does not
 /// track and does not ignore — and capped per root, a root that was cut short
 /// saying so: see [`crate::files::list`]. Read afresh every time the palette
-/// opens, there being no watcher until the stage after this one and a list read
-/// once going stale the first time the agent writes anything.
+/// opens, a list kept between openings going stale the first time the agent
+/// writes anything — and a palette is up for seconds, so nothing follows it the
+/// way the tree follows the disk.
 ///
 /// **No refusals.** Nothing here is about a path somebody named, so there is no
 /// bound to measure and nothing to say no to: a Conversation with no Worktrees

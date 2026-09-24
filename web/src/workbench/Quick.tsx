@@ -16,10 +16,12 @@
 //! state on the pane, and the focus back where the press was made.
 //!
 //! **The list is read when the palette opens**, once, and every keystroke after
-//! that is matched on the page — see [`./matching`]. There is no watcher until
-//! the stage after this one, so a list read and kept would go stale the first
-//! time the agent wrote anything; and a request per keystroke would be a round
-//! trip inside the gap between two letters. This component is mounted only
+//! that is matched on the page — see [`./matching`]. A list read and kept
+//! between openings would go stale the first time the agent wrote anything, and
+//! nothing follows it the way the tree follows the disk: a palette is up for
+//! seconds, and the read on the way up is younger than any Nudge would be. And
+//! a request per keystroke would be a round trip inside the gap between two
+//! letters. This component is mounted only
 //! while the palette is up, which is what makes those two the same thing.
 //!
 //! **Every root at once, each row saying which it is in.** Two roots can hold

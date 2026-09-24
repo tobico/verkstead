@@ -14,20 +14,31 @@
 //! would be a recursive walk of a rust checkout's `target/` before the pane had
 //! drawn. The shape a path field's browse already has, and for the same reason.
 //!
-//! **And read again on every expand.** A folder collapsed forgets what it held,
-//! so opening it is a fresh reading of the disk. Nothing yet tells the page that
-//! the disk moved — the agent writes, a build runs, a terminal tab checks out a
-//! branch — so the collapse is the only moment there is to be sure by. Stage 04
-//! of the roadmap is the watcher that makes that unnecessary; until then this is
-//! what keeps the tree honest.
+//! **And it follows the disk.** The agent writes, a build runs, a terminal tab
+//! checks out a branch — and a watcher on the server says so as a `files` Nudge
+//! for the conversation, on which every folder this tree has open is read again
+//! (ADR 0019, *Following the disk*). One read per expanded folder and none for
+//! the rest, which is the whole reason the tree reads one folder at a time. A
+//! folder that came back saying what it already said is not drawn again; one
+//! that has gone collapses and takes its rows with it; and a name half typed
+//! into a row's field, or a menu standing open, is the human's and is left
+//! exactly where it is.
+//!
+//! The subscription is the tree's own rather than a row of the table in
+//! `nudge.ts` — see [`whenFilesMove`], which is where the reasoning is: that
+//! table invalidates queries, and these listings are not queries.
+//!
+//! **And read again on every expand**, which stands as well: a folder collapsed
+//! forgets what it held, so opening it is a fresh reading of the disk rather
+//! than what the watcher last left there.
 //!
 //! **And which folders are open outlives the pane**, because the walk down to a
 //! file is work the human did. The details pane is taken down whenever
 //! something else is drawn in it, so what is open is held above the swap with
 //! the tabs and the unsaved text rather than in this file — see `keeping.ts`.
 //! A swap is not an expand, so what comes back is the listing that was last
-//! read rather than a fresh one; the collapse is still where the tree is made
-//! honest.
+//! read — and a pane that was down was subscribed to nothing, so the first
+//! Nudge after it is drawn again is what puts it right.
 //!
 //! **What git ignores is not in it**, and neither is `.git`. Both are the
 //! server's doing — git is asked rather than reimplemented — so what arrives
@@ -95,9 +106,11 @@
 //! folder, one the press is not about and does not read again. One sentence for
 //! both, the mistake being one mistake.
 //!
-//! Afterwards the folder is read again, there being no watcher until stage 04,
-//! and a new file opens as a tab in the active group the way a file pressed in
-//! the tree does. A new folder opens nothing: there is nothing in it to open.
+//! Afterwards the folder is read again — by the press rather than by the Nudge
+//! the making will also raise, because the row belongs on the screen the moment
+//! the server says it is there — and a new file opens as a tab in the active
+//! group the way a file pressed in the tree does. A new folder opens nothing:
+//! there is nothing in it to open.
 //!
 //! **And a rename is handed to the pane beside the tree**, which is where every
 //! other place the path is written down is: the tabs, the buffers, the bar a
@@ -126,8 +139,8 @@
 //! a file is found by where it sits, and that one is how it is found by what it
 //! is called.
 //!
-//! No git status marks yet, which are stage 04's with the watcher that keeps
-//! them honest.
+//! No git status marks yet. They are the last of this stage, and they are read
+//! again on the Nudge the rows above already follow.
 
 import {
   faChevronDown,
@@ -138,8 +151,10 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   createUniqueId,
+  onCleanup,
   type Accessor,
   type JSX,
   type Setter,
@@ -166,6 +181,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { whenFilesMove } from "../nudge";
 import styles from "./Tree.module.css";
 
 /// Each way a folder can come back holding nothing, in the words of what it is.
@@ -332,6 +348,23 @@ function rows(listing: FolderListing): FolderEntry[] | null {
   return typeof listing === "string" || !("Listed" in listing)
     ? null
     : listing.Listed.entries;
+}
+
+/// And whether a folder read again came back saying exactly what it already
+/// said.
+///
+/// Asked because writing a listing is redrawing it: every row under a folder is
+/// drawn from that listing's own entries, so a listing put back rebuilds the
+/// lot of them — the row under the pointer, the row a menu is open over, and
+/// the field standing where a name is being typed. Nearly every Nudge is about
+/// some other folder, so nearly every re-read comes back to this and the tree
+/// is left alone.
+///
+/// By what the two say rather than field by field: both are the server's own
+/// JSON, written by the one endpoint in the one order, so two listings that say
+/// the same thing are the same string.
+function same(was: FolderListing, now: FolderListing): boolean {
+  return JSON.stringify(was) === JSON.stringify(now);
 }
 
 /// A new row being named, under the folder it is going into.
@@ -607,10 +640,10 @@ export function Tree(props: {
 
   /// Read a folder off the disk and hold what came back.
   ///
-  /// Every time, because nothing here is told when the disk moves and the folder
-  /// may have been rewritten by the agent since it was last drawn — which is why
-  /// a making reads it again rather than adding the row it just asked for, and
-  /// why a rename does rather than moving one.
+  /// Every time rather than only where nothing has been read: the answer to a
+  /// press is what is on the disk now, which is why a making reads the folder
+  /// again rather than adding the row it just asked for, and why a rename does
+  /// rather than moving one.
   const read = (path: string): Promise<void> => {
     setReading((was) => (was.includes(path) ? was : [...was, path]));
 
@@ -652,6 +685,78 @@ export function Tree(props: {
 
     void read(path);
   };
+
+  /// And read one again because the disk moved, rather than because somebody
+  /// pressed it.
+  ///
+  /// The same one request, and three differences in what is done with the
+  /// answer — all of them because nobody asked for this:
+  ///
+  /// - **A folder that came back saying what it already said is not written**,
+  ///   so nothing under it is drawn again: see [`same`], which is what keeps a
+  ///   Nudge about some other folder off this one's rows.
+  /// - **A folder that has gone is forgotten**, which collapses it and takes
+  ///   its rows with it. Its own row goes with the listing above it, read again
+  ///   in the same breath — and a folder left open at a path that is not there
+  ///   would be drawn expanded again the day something is made at that name.
+  /// - **A request that never landed is no news at all.** An expand that fails
+  ///   draws the sentence where its rows would be, because somebody is waiting
+  ///   on it; a connection that dropped under a tree nobody touched is not a
+  ///   reason to take away what it is drawing.
+  ///
+  /// And a folder shut while the read was out is left shut: what came back is
+  /// about a row the tree is no longer drawing, and putting it back would be a
+  /// Nudge undoing a press.
+  const again = (path: string): Promise<void> =>
+    listFolder(props.conversation, path)
+      .then((listing) => {
+        setHeld((was) => {
+          if (was[path] === undefined || same(was[path], listing)) {
+            return was;
+          }
+
+          if (rows(listing) === null) {
+            const rest = { ...was };
+            delete rest[path];
+            return rest;
+          }
+
+          return { ...was, [path]: listing };
+        });
+      })
+      .catch(() => {});
+
+  /// And the whole of what a `files` Nudge comes to here: every folder the tree
+  /// has open, read again (ADR 0019, *Following the disk*).
+  ///
+  /// One read per expanded folder and none for the rest — a folder nobody has
+  /// opened is not drawn, so there is nothing about it to be wrong, which is the
+  /// whole reason the tree reads one folder at a time. The roots above are a
+  /// query and are read back by the table in `nudge.ts`; what is inside them is
+  /// this.
+  ///
+  /// Nothing else here is touched. A name half typed into a row's field, a menu
+  /// open over a row, the card asking about a delete: those are the human's, and
+  /// a Nudge is news about the disk rather than a press.
+  const follow = (): void => {
+    for (const path of Object.keys(held())) {
+      void again(path);
+    }
+  };
+
+  // And what brings that news is the pane's own attachment: the server watches
+  // this Conversation's Worktrees while a Code pane is drawn on it, and says
+  // they moved as a `files` Nudge down the stream every other change comes down
+  // (ADR 0019, *Following the disk*).
+  //
+  // A subscription of the tree's own rather than a row of that table: what the
+  // table does is invalidate queries, and these listings are not queries — they
+  // are held above the pane with the tabs, so that a swap to an Event and back
+  // does not throw away the walk down to a file. Let go of with the tree, so a
+  // pane that is not drawn reads nothing.
+  createEffect(() => {
+    onCleanup(whenFilesMove(props.conversation, follow));
+  });
 
   /// A right-click on a row asks what can be done with it.
   ///
@@ -761,9 +866,10 @@ export function Tree(props: {
   /// leaving a tab open over a file the tree is not drawing. Refused here
   /// because here is the last place the two halves are apart; see [`A_PATH`].
   ///
-  /// Afterwards the folder is read again — there being no watcher until stage 04
-  /// — and a new file opens as a tab in the active group the way a file pressed
-  /// in the tree does. A new folder opens nothing.
+  /// Afterwards the folder is read again by the press itself rather than left to
+  /// the Nudge the making raises — the row belongs under the field the moment
+  /// the server says it is there — and a new file opens as a tab in the active
+  /// group the way a file pressed in the tree does. A new folder opens nothing.
   const make = (asked: Making, name: string): void => {
     if (!aName(name)) {
       setSaid(A_PATH);

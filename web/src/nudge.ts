@@ -47,6 +47,55 @@ const STREAM = "/api/ui/nudges";
 /// site root rather than a module of this bundle.
 const RELAYED = "nudge";
 
+/// Every pane following the disk for itself, and which Conversation each of
+/// them is drawn on — see [`whenFilesMove`].
+const following = new Set<{ conversation: number; look: () => void }>();
+
+/// Hear every `files` Nudge for one Conversation, for as long as the returned
+/// closer is not called.
+///
+/// **The one seam beside the table.** What a Nudge comes to is nearly always an
+/// invalidation — [`standsFor`] names the queries a kind is about and the cache
+/// reads them back — and the Code pane's tree is the thing on the page no query
+/// key reaches: its folder listings are held above the pane with the tabs and
+/// the unsaved text, so that a swap to an Event and back does not throw away
+/// the walk down to a file (see `workbench/keeping.ts`). So the pane takes out
+/// a subscription of its own while it is drawn, rather than the tree being
+/// rewritten as queries — and what it does with the news is its own business:
+/// re-read the folders it has expanded, and the versions of the files it has
+/// open as the editors learn to follow them.
+///
+/// **And the widest reaction reaches it too.** A page that cannot say what it
+/// missed reads back everything it is showing (see [`lookAgain`]), and a tree is
+/// something it is showing — so a reconnect, a relayed push and the document
+/// becoming visible again tell every subscriber, whichever Conversation it is
+/// on.
+export function whenFilesMove(
+  conversation: number,
+  look: () => void,
+): () => void {
+  const listener = { conversation, look };
+
+  following.add(listener);
+
+  return () => {
+    following.delete(listener);
+  };
+}
+
+/// Tell them: one Conversation's, or — where the page cannot say what moved —
+/// all of them.
+///
+/// Over a copy, because what a subscriber does about the news is its own and
+/// may be to stop listening.
+function tell(conversation: number | null): void {
+  for (const listener of [...following]) {
+    if (conversation === null || listener.conversation === conversation) {
+      listener.look();
+    }
+  }
+}
+
 /// Listen on both channels, looking again at every Nudge either brings, until
 /// the returned closer is called.
 export function listenForNudges(queries: QueryClient): () => void {
@@ -180,6 +229,13 @@ function lookAgainAt(queries: QueryClient, moved: Nudge | null): void {
     // to be refetched when something mounts it.
     void queries.invalidateQueries({ queryKey: key });
   }
+
+  // And the pane that follows the disk for itself, where this is the kind it is
+  // following: the queries above are its tree's roots, and what it holds beside
+  // them is a walk no key names — see [`whenFilesMove`].
+  if (moved.kind === "files") {
+    tell(moved.conversation);
+  }
 }
 
 /// Which queries a kind of Nudge is about, or `null` for a kind this page does
@@ -228,11 +284,12 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // The Worktrees moved: something wrote, made, or took a file away, and the
     // Code pane's watcher said so (ADR 0019, *Following the disk*).
     //
-    // The tree's roots and nothing else yet — a root that appeared or went, in
-    // a reading that costs a row apiece and disturbs nothing that is open. What
-    // is *inside* them is the folders the tree has expanded and the files the
-    // pane has open, and those come to this row as the pane learns to follow
-    // them.
+    // The tree's roots, which is every read of this kind a query key can name
+    // — a root that appeared or went, in a reading that costs a row apiece and
+    // disturbs nothing that is open. What is *inside* them is not a query at
+    // all: the folders the tree has expanded are held above the pane with the
+    // tabs, and what re-reads those is the pane's own subscription beside this
+    // table — see [`whenFilesMove`], which this kind tells as well.
     //
     // Nothing above the pane is here on purpose. A file written in a Worktree
     // moves no record at all: there is no Event for it, no Timeline row and
@@ -339,4 +396,9 @@ function onComingBack(queries: QueryClient): () => void {
 /// when something mounts it.
 function lookAgain(queries: QueryClient): void {
   void queries.invalidateQueries();
+
+  // And every subscriber with them, whichever Conversation it is on: this is
+  // the reaction of a page that cannot say what it missed, and what a pane
+  // holds outside the cache went stale with everything in it.
+  tell(null);
 }

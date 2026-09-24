@@ -54,6 +54,7 @@ import {
   serving,
   whenever,
 } from "./serving";
+import { Streaming, stream, streaming } from "./streaming";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
@@ -191,65 +192,6 @@ const SET_ARRIVED: Nudge = {
   conversation: CONVERSATION.id,
 };
 
-/// A stand-in for the browser's `EventSource`, which jsdom has none of — and
-/// which a test would want its own of anyway, having no other way to put a
-/// Nudge on the wire or to sever the connection carrying it.
-class Streaming {
-  /// Every stream the app has opened, newest last.
-  static opened: Streaming[] = [];
-
-  private readonly listeners = new Map<string, Array<(event: Event) => void>>();
-  closed = false;
-
-  constructor(readonly url: string) {
-    Streaming.opened.push(this);
-  }
-
-  addEventListener(name: string, listener: (event: Event) => void): void {
-    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  /// What the browser does when the connection is established — on the first
-  /// one and on every reconnect after it, which is the whole of how a page
-  /// finds out it was away.
-  opens(): void {
-    this.fire("open");
-  }
-
-  /// One Nudge, as the server writes it: a named event whose data says what
-  /// moved. `said` is passed through untouched, so a test may put something
-  /// down the wire that no page could read.
-  nudges(said: unknown = SET_ARRIVED): void {
-    const data = typeof said === "string" ? said : JSON.stringify(said);
-
-    for (const listener of this.listeners.get("nudge") ?? []) {
-      listener(new MessageEvent("nudge", { data }));
-    }
-  }
-
-  private fire(name: string): void {
-    for (const listener of this.listeners.get(name) ?? []) {
-      listener(new Event(name));
-    }
-  }
-}
-
-/// The stream the app opened, newest first — which is the one it is listening
-/// on. There is one at a time and not one per app: the connection is given back
-/// whenever the page is hidden and taken again when it is looked at, so a page
-/// that has been away has opened more than one over its life.
-function stream(): Streaming {
-  const opened = Streaming.opened.at(-1);
-  if (!opened) {
-    throw new Error("the app opened no stream");
-  }
-  return opened;
-}
-
 /// A stand-in for `navigator.serviceWorker`, the page's end of the relay, which
 /// jsdom has none of either.
 class Container {
@@ -328,8 +270,7 @@ function away(state: "visible" | "hidden"): void {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Streaming.opened = [];
-  vi.stubGlobal("EventSource", Streaming);
+  streaming();
 });
 
 afterEach(() => {
@@ -362,7 +303,7 @@ describe("the Nudge stream", () => {
     await waitFor(() => screen.getByText(ALREADY_THERE));
     stream().opens();
 
-    stream().nudges();
+    stream().nudges(SET_ARRIVED);
 
     await waitFor(() => screen.getByText(ARRIVAL.title));
     // The clock never moved and nothing here runs on one: the second read is
@@ -639,10 +580,12 @@ describe("what a Nudge is about", () => {
   /// the sweep opens a conversation and stops at its timeline, and nothing
   /// there is drawn over a worktree's files.
   ///
-  /// The tree's roots alone here — a root that appeared or went — which is what
-  /// the page has to read again before it can read anything inside one. The
-  /// folders it has expanded and the files it has open join this row as the
-  /// pane learns to follow them.
+  /// The tree's roots here — a root that appeared or went — which is what the
+  /// page has to read again before it can read anything inside one, and the one
+  /// read of this kind a query key names. What is *inside* a root is the pane's
+  /// own subscription beside that table rather than a row of it, so where those
+  /// re-reads are asked about is the tree's own tests — see
+  /// `workbench.test.tsx`, *and the disk moving under it*.
   it("reads the Code pane's roots back where its tree is drawing them", async () => {
     const roots = `/api/ui/conversations/${CONVERSATION.id}/files/roots`;
 
@@ -886,7 +829,7 @@ describe("the connection the stream holds", () => {
     // And it is a stream that hears Nudges, rather than one nothing is listening
     // on: what arrives down this one is drawn like anything else.
     stream().opens();
-    stream().nudges();
+    stream().nudges(SET_ARRIVED);
     await waitFor(() => screen.getByText(ARRIVAL.title));
   });
 

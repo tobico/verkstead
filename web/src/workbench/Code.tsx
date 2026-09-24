@@ -789,9 +789,10 @@ export function Code(props: {
   //
   // Nothing travels either way and nothing is drawn about it. What moving on
   // disk comes to is a `files` Nudge down the stream every other change comes
-  // down, and the re-reads it stands for are `nudge.ts`'s — so a watcher that
-  // never started costs this pane a tree that does not follow rather than
-  // anything to say.
+  // down, and what that comes to is `nudge.ts`'s: the roots off its table, and
+  // the folders the tree has expanded off the subscription the tree takes out
+  // beside it. So a watcher that never started costs this pane a tree that does
+  // not follow rather than anything to say.
   //
   // Held open rather than asked for and renewed, the way a terminal tab holds
   // its attach: it dies with the tab whatever becomes of the browser, so a

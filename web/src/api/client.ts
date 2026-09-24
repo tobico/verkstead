@@ -602,6 +602,11 @@ export function filesSocket(id: number): string {
 /// and why the tree asks again for every level somebody expands. Git-ignored
 /// paths and `.git` are not in the answer.
 ///
+/// **And why a `files` Nudge is cheap to follow.** The tree re-reads the
+/// folders it has expanded and nothing else, which is one of these apiece — a
+/// listing rather than a walk, and none at all for the folders nobody has
+/// opened (ADR 0019, *Following the disk*).
+///
 /// Every refusal is in the body rather than in the status: a path outside every
 /// root, a path under `.git`, a worktree that has gone and a folder that has are
 /// four different sentences to draw where the rows would be.
@@ -727,7 +732,9 @@ export function renamePath(
 /// tree*).
 ///
 /// What comes back says it landed or says why it did not, and either way the
-/// folder above the row is read again — there being no watcher until stage 04.
+/// folder above the row is read again by the press itself: the row goes the
+/// moment the server says it has, rather than when the Nudge the deletion
+/// raises comes back round.
 /// The open tab of a file that has gone stays, read-only, saying so: see
 /// `Code.tsx`, which is where a tab keeps its text after the file under it goes.
 export function deletePath(id: number, path: string): Promise<FileDeleted> {

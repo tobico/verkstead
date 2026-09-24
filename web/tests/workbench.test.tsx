@@ -52,6 +52,7 @@ import type {
   GrillingStarted,
   Merging,
   NoticeEvent,
+  Nudge,
   PendingSteerView,
   PairingView,
   ProfileEntry,
@@ -330,6 +331,12 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+// And the Nudge stream, for the one pane that follows it rather than the cache:
+// the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
+// those listings are held above the pane rather than in a query — see
+// `whenFilesMove` in `src/nudge.ts`.
+import { listenForNudges } from "../src/nudge";
+import { stream, streaming } from "./streaming";
 // The stand-in for Monaco, and what it wrote down about what the pane did with
 // it. The same module `vi.mock` above put in place of the seam, imported the
 // ordinary way — so this is that instance and not a second one.
@@ -19697,6 +19704,243 @@ describe("the code pane's file tree", () => {
         "true",
       ),
     );
+  });
+
+  /// And the disk moving under it, which is what the tree follows: a watcher on
+  /// the server says the conversation's worktrees moved, and every folder this
+  /// tree has open is read again (ADR 0019, *Following the disk*).
+  describe("and the disk moving under it", () => {
+    /// The page listening on the Nudge stream, which the bench does not wire:
+    /// `mount` renders the workbench under a client of its own rather than
+    /// `App`, and the stream is held at the app's root — see `App.tsx`.
+    ///
+    /// Stood up here because a `files` Nudge is the only thing that makes this
+    /// tree read anything nobody pressed. What it re-reads is held above the
+    /// pane with the tabs rather than in a query, so there is no invalidation
+    /// that could stand in for one.
+    let stop: (() => void) | undefined;
+
+    afterEach(() => {
+      stop?.();
+      stop = undefined;
+    });
+
+    /// The watcher saying those worktrees moved, which carries a conversation
+    /// and nothing else (ADR-0009): what moved is not in it, and the page reads
+    /// again to find out.
+    function moved(): void {
+      stream().nudges({
+        kind: "files",
+        conversation: GRILLING.id,
+      } satisfies Nudge);
+    }
+
+    /// One folder of a worktree as the endpoint answers it, holding whatever
+    /// the test says it is holding at the moment it is asked — which is what a
+    /// `mkdir` in a terminal tab moves. A name ending in a separator is a
+    /// folder, the way `ls -F` marks one; `null` is the folder itself gone.
+    function listing(path: string, holding: () => string[] | null): Answer {
+      return whenever(folderOf(path), () => {
+        const held = holding();
+
+        if (held === null) {
+          return json("Missing" satisfies FolderListing)();
+        }
+
+        return json({
+          Listed: {
+            path,
+            entries: held.map((name) => ({
+              name: name.replace(/\/$/, ""),
+              path: `${path}/${name.replace(/\/$/, "")}`,
+              folder: name.endsWith("/"),
+            })),
+          },
+        } satisfies FolderListing)();
+      });
+    }
+
+    /// The pane with the conversation's own root expanded and the page
+    /// listening, which is where every test below starts: a tree with nothing
+    /// open has nothing to follow.
+    async function watching(...answers: Parameters<typeof serving>) {
+      streaming();
+      const fetching = withTerminals([], ...answers);
+      const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(mounted.container)).toHaveLength(2));
+      fireEvent.click(row(mounted.container, OWN_ROOT.repo));
+      await waitFor(() =>
+        expect(named(mounted.container)).toContain("Cargo.toml"),
+      );
+
+      stop = listenForNudges(mounted.client);
+      stream().opens();
+
+      return { ...mounted, fetching };
+    }
+
+    /// A folder made in a terminal tab is a row of the tree without anybody
+    /// pressing anything, and one taken away is a row that goes.
+    it("draws a folder made under an expanded one, and drops one removed", async () => {
+      let holding = ["crates/", "Cargo.toml"];
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+      );
+
+      expect(named(container)).not.toContain("docs");
+
+      // `mkdir docs`, and the watcher saying the worktree moved.
+      holding = ["crates/", "docs/", "Cargo.toml"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("docs"));
+      // Where it belongs, which is where the listing puts it rather than at the
+      // end of what was already drawn.
+      expect(named(container)).toEqual([
+        OWN_ROOT.repo,
+        "crates",
+        "docs",
+        "Cargo.toml",
+        `${COMPANION_ROOT.repo}read-only`,
+      ]);
+
+      // And `rm -r docs`, which takes the row away again.
+      holding = ["crates/", "Cargo.toml"];
+      moved();
+
+      await waitFor(() => expect(named(container)).not.toContain("docs"));
+    });
+
+    /// And an expanded folder that has gone takes its rows with it, and is not
+    /// drawn as expanded again when something is made at its name.
+    it("stops drawing an expanded folder that has gone", async () => {
+      const crates = `${OWN_ROOT.path}/crates`;
+      let holding: string[] = ["crates/", "Cargo.toml"];
+      let inside: string[] | null = ["server/"];
+
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+        listing(crates, () => inside),
+      );
+
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(named(container)).toContain("server"));
+
+      // `rm -r crates`: it is off the listing above it, and the folder itself
+      // answers that it is no longer there.
+      holding = ["Cargo.toml"];
+      inside = null;
+      moved();
+
+      await waitFor(() => expect(named(container)).not.toContain("crates"));
+      expect(named(container)).not.toContain("server");
+
+      // And `mkdir crates` again is a folder nobody has opened: the tree forgot
+      // what the old one held, so the row comes back shut rather than drawn
+      // around rows read before it went.
+      holding = ["crates/", "Cargo.toml"];
+      inside = ["client/"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("crates"));
+      expect(row(container, "crates").getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+      expect(named(container)).not.toContain("server");
+      expect(named(container)).not.toContain("client");
+    });
+
+    /// One read per expanded folder and none for the rest, which is the whole
+    /// reason the tree reads one folder at a time: a Nudge says the worktrees
+    /// moved and nothing about where, and what a folder nobody has opened holds
+    /// is not drawn.
+    it("costs one read per expanded folder, and none for the shut ones", async () => {
+      const crates = `${OWN_ROOT.path}/crates`;
+      const web = `${OWN_ROOT.path}/web`;
+
+      const { container, fetching } = await watching(
+        listing(OWN_ROOT.path, () => ["crates/", "web/", "Cargo.toml"]),
+        listing(crates, () => ["server/"]),
+        listing(web, () => ["src/"]),
+      );
+
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(named(container)).toContain("server"));
+
+      const open = [OWN_ROOT.path, crates];
+      const before = open.map((path) => askedFor(fetching, folderOf(path)));
+      expect(askedFor(fetching, folderOf(web))).toBe(0);
+
+      moved();
+
+      await waitFor(() =>
+        open.forEach((path, at) => {
+          expect(askedFor(fetching, folderOf(path)), path).toBe(
+            before[at]! + 1,
+          );
+        }),
+      );
+
+      // And the folder nobody opened is still unread: it is not drawn, so there
+      // is nothing about it to be wrong.
+      expect(askedFor(fetching, folderOf(web))).toBe(0);
+    });
+
+    /// And what the human is in the middle of is left exactly where it is,
+    /// whichever of the two it is: a Nudge is news about the disk rather than a
+    /// press.
+    it("leaves a menu standing and a name half typed where they are", async () => {
+      let holding = ["crates/", "Cargo.toml"];
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+      );
+
+      fireEvent.contextMenu(row(container, OWN_ROOT.repo), {
+        clientX: 120,
+        clientY: 200,
+      });
+
+      const drop = (): HTMLElement | null =>
+        container.querySelector<HTMLElement>(
+          `.${shell.detailsPane} .${treePane.rowActions} > .${dropdown.drop}`,
+        );
+
+      const making = await drawn<HTMLButtonElement>(
+        container,
+        `.${shell.detailsPane} .${treePane.newFile}`,
+      );
+
+      // The agent writes into the folder the menu is open over, which moves the
+      // rows under it and not the menu.
+      holding = ["crates/", "Cargo.toml", "LICENSE"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("LICENSE"));
+      expect(drop()).not.toBeNull();
+
+      fireEvent.click(making);
+
+      const field = await drawn<HTMLInputElement>(
+        container,
+        `.${shell.detailsPane} .${treePane.field}`,
+      );
+      fireEvent.input(field, { target: { value: "notes." } });
+
+      // And the agent writes something else into the same folder while they are
+      // still typing the name.
+      holding = ["crates/", "Cargo.toml", "README.md"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      const still = container.querySelector<HTMLInputElement>(
+        `.${shell.detailsPane} .${treePane.field}`,
+      );
+
+      expect(still).not.toBeNull();
+      expect(still!.value).toBe("notes.");
+    });
   });
 });
 

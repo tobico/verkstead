@@ -96,8 +96,10 @@
 //! **Not a record.** Nothing here writes to the *store*, puts anything on a
 //! Timeline or reaches a Share — a save is the human's own hand in their own
 //! checkout, and the record of it is the commit they make afterwards. It is a
-//! reading of the disk, made afresh every time the tree asks — which is what an expand is, until the watcher of stage
-//! 04 tells the page the disk has moved.
+//! reading of the disk, made afresh every time the tree asks — which is an
+//! expand, a making or a rename, and every `files` Nudge the watcher announces:
+//! the page re-reads the folders it has expanded, a listing apiece, because a
+//! Nudge carries no payload and a folder is one `read_dir`.
 
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
@@ -1818,9 +1820,9 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&at).unwrap(), "");
 
-        // And it is a row of the folder the moment it is read again, there being
-        // no watcher to say so until stage 04 — spelled the way the row under it
-        // is, which is what lets the tab and the row be the one file.
+        // And it is a row of the folder the moment it is read again, which is
+        // what the press does with the answer — spelled the way the row under
+        // it is, which is what lets the tab and the row be the one file.
         let listing = folder(&[root(&worktree)], &worktree.join("src"));
         assert_eq!(names(listing.clone()), ["lib.rs"]);
         assert_eq!(
@@ -2066,8 +2068,8 @@ mod tests {
             "what was in it is what is in it"
         );
 
-        // And it is the row the folder draws the moment it is read again, there
-        // being no watcher to say so until stage 04.
+        // And it is the row the folder draws the moment it is read again, which
+        // is what the press does with the answer.
         assert_eq!(names(folder(&roots, &worktree.join("src"))), ["main.rs"]);
     }
 
@@ -2318,8 +2320,8 @@ mod tests {
         );
         assert!(!worktree.join("src/lib.rs").exists());
 
-        // And it is off the listing the moment the folder is read again, there
-        // being no watcher to say so until stage 04.
+        // And it is off the listing the moment the folder is read again, which
+        // is what the press does with the answer.
         assert_eq!(names(folder(&roots, &worktree.join("src"))), ["main.rs"]);
     }
 
