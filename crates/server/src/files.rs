@@ -64,7 +64,8 @@
 //! than anything in one. The check for a name already taken is a look rather
 //! than the making's atomic create, there being no portable rename that refuses
 //! to overwrite — which is the one window in this module, and is said where it
-//! is.
+//! is. What moves is the entry the tree drew rather than what it points at, the
+//! way the removal below takes one away.
 //!
 //! **And takes one away** — see [`delete`]: a path in a root, and a folder
 //! with everything under it. The rename's order of checks with nothing where the
@@ -491,6 +492,14 @@ pub(crate) fn make(roots: &[FileRoot], path: &Path, making: Making) -> FileMade 
 /// itself, which is what a name differing only in its case is on a filesystem
 /// that does not tell two cases apart: `README.md` to `readme.md` is a rename to
 /// allow rather than a name already taken.
+///
+/// **And what is moved is the entry the tree drew**, rather than what it
+/// resolves to — [`delete`]'s reading said about a move, for its reason: a row
+/// that is a link is a name to move, and the file at the end of it is somebody
+/// else's. Moved off `real` it would be a link left dangling exactly where the
+/// row is, a file nobody asked about somewhere new, and an answer naming a path
+/// with nothing at it for the tab to follow to. `real` is still what the bound
+/// measures, and the two name the same entry for everything that is not a link.
 pub(crate) fn rename(roots: &[FileRoot], path: &Path, name: &str) -> FileRenamed {
     // One plain segment and nothing else. A name with a separator in it, a `..`
     // or a `.` is a path somebody spelled into a field that asks for a name —
@@ -541,27 +550,28 @@ pub(crate) fn rename(roots: &[FileRoot], path: &Path, name: &str) -> FileRenamed
         return FileRenamed::UnderGit;
     }
 
-    // Beside the path as the filesystem really has it, rather than beside the
-    // path as it was spelled: what a move touches is the real directory, which
-    // is the one the bound above measured against the real root.
-    let Some(beside) = real.parent() else {
-        return FileRenamed::Outside;
-    };
-
-    let onto = beside.join(name);
+    // The folder that was asked for with the new name joined on — which is
+    // where the entry the tree drew goes, and is the path that comes back.
+    // [`FileMade::Made`]'s rule and the same join, so that the path a tab
+    // follows its file to is character for character the path the next listing
+    // of that folder draws the row under; and one binding for both, so the move
+    // and the answer cannot drift apart.
+    let onto = folder.join(name);
 
     if standing(&onto, &real) {
         return FileRenamed::Taken;
     }
 
-    match std::fs::rename(&real, &onto) {
-        // Spelled as the folder that was asked for with the new name joined on,
-        // rather than off the resolved parent and rather than echoing anything:
-        // [`FileMade::Made`]'s rule and the same join, so that the path a tab
-        // follows its file to is character for character the path the next
-        // listing of that folder draws the row under.
+    // And what is moved is that entry rather than what it resolves to, which is
+    // [`delete`]'s reading said about a move: a row that is a link is a name to
+    // move, and the file at the end of it is somebody else's — moved off `real`
+    // it would be a link left dangling where the tree drew it, a file nobody
+    // asked about somewhere new, and an answer naming a path with nothing at
+    // it. The two name the same entry for everything that is not a link, the
+    // bound having measured both.
+    match std::fs::rename(path, &onto) {
         Ok(()) => FileRenamed::Renamed {
-            path: folder.join(name).display().to_string(),
+            path: onto.display().to_string(),
         },
         Err(error) => FileRenamed::Unwritable {
             why: format!("the server cannot rename it: {error}"),

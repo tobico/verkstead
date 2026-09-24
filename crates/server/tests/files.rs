@@ -1009,6 +1009,46 @@ async fn a_rename_moves_it_within_the_folder_it_is_in() {
     assert!(!worktree.join("src").exists());
 }
 
+/// And what moves is the entry the tree drew rather than what it points at: a
+/// row that is a link is a name to move, and the file at the end of it is
+/// somebody else's — which is the deletion's own reading said about a move.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_rename_moves_the_link_rather_than_what_it_points_at() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src")).unwrap();
+    std::fs::write(worktree.join("src/real.rs"), "real\n").unwrap();
+    std::os::unix::fs::symlink(worktree.join("src/real.rs"), worktree.join("link.rs")).unwrap();
+
+    // The row is `link.rs`, in the root rather than in `src` — so the answer is
+    // a path in the root, and it is the path that now has something at it.
+    assert_eq!(
+        rename(&app, conversation, &worktree.join("link.rs"), "moved.rs").await,
+        FileRenamed::Renamed {
+            path: worktree.join("moved.rs").display().to_string()
+        }
+    );
+    assert!(
+        std::fs::symlink_metadata(worktree.join("moved.rs"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert!(!worktree.join("link.rs").exists());
+
+    // And the file at the end of it is exactly where it was, under the name it
+    // had: nothing about a link's row is about what it points at.
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("src/real.rs")).unwrap(),
+        "real\n"
+    );
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src")).await),
+        ["real.rs"]
+    );
+}
+
 /// A root cannot be renamed, whichever root it is: it is a Worktree rather than
 /// something in one, and what the human knows it by is the Repo it is a checkout
 /// of. The tree offers no Rename row on one, so this is the endpoint refusing on
