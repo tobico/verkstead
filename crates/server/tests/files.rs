@@ -1,7 +1,7 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
 //! real Conversation: which roots there are, what one folder of one of them
-//! holds, what one file of one of those is — that file saved back, and one of
-//! them renamed.
+//! holds, what one file of one of those is — that file saved back, one of them
+//! renamed, and one taken away.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -29,8 +29,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite,
-    FileWritten, FolderEntry, FolderListing,
+    FileDeleted, FileDeleting, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -1158,5 +1158,173 @@ async fn a_rename_outside_this_conversations_roots_is_refused() {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
     };
     assert_eq!(none, FileRenamed::Outside);
+    assert!(worktree.join("README.md").exists());
+}
+
+/// And one taken away out of that same menu: whatever is at a path, a folder
+/// with everything under it.
+async fn remove(app: &Router, conversation: i64, at: &Path) -> FileDeleted {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{conversation}/files/delete"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileDeleting {
+                        path: at.display().to_string(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the delete failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the delete answered {body}: {error}"))
+}
+
+/// A folder deleted goes with everything under it, in one press and one call —
+/// and its row is off the listing the next time the tree reads the folder above
+/// it, which is the whole of what the menu's fourth row does.
+#[tokio::test]
+async fn a_delete_takes_a_folder_and_everything_under_it() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src/inner")).unwrap();
+    std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+    std::fs::write(worktree.join("src/lib.rs"), "fn main() {}\n").unwrap();
+
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("src/lib.rs")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!worktree.join("src/lib.rs").exists());
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src")).await),
+        ["inner"]
+    );
+
+    // And the folder above it, which takes what is left under it: one confirm
+    // in front of the press, and one call behind it.
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("src")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!worktree.join("src").exists());
+    assert_eq!(
+        names(folder(&app, conversation, &worktree).await),
+        [".gitignore", "README.md"]
+    );
+}
+
+/// A root cannot be deleted, whichever root it is: a Worktree is the ground a
+/// session stands in rather than something in one. The tree offers no Delete row
+/// on a root, so this is the endpoint refusing on its own account.
+#[tokio::test]
+async fn a_root_is_refused_and_a_read_only_one_loses_nothing() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        remove(&app, conversation, &worktree).await,
+        FileDeleted::IsRoot
+    );
+    assert_eq!(
+        remove(&app, conversation, &companions[1]).await,
+        FileDeleted::IsRoot
+    );
+    assert!(worktree.is_dir());
+    assert!(companions[1].is_dir());
+
+    // The read-write companion deletes like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        remove(&app, conversation, &companions[0].join("README.md")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!companions[0].join("README.md").exists());
+
+    assert_eq!(
+        remove(&app, conversation, &companions[1].join("README.md")).await,
+        FileDeleted::ReadOnly
+    );
+    assert!(companions[1].join("README.md").exists());
+}
+
+/// And a deletion is bounded by exactly the roots a read is: this Conversation's
+/// checkouts and nothing else on the machine.
+#[tokio::test]
+async fn a_delete_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        remove(&app, conversation, &elsewhere.join("README.md")).await,
+        FileDeleted::Outside
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("../README.md")).await,
+        FileDeleted::Outside
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join(".git/config")).await,
+        FileDeleted::UnderGit
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("nowhere.md")).await,
+        FileDeleted::Missing
+    );
+    assert_eq!(
+        std::fs::read_to_string(elsewhere.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+    assert!(worktree.join(".git").exists());
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileDeleted = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/delete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileDeleting {
+                            path: worktree.join("README.md").display().to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileDeleted::Outside);
     assert!(worktree.join("README.md").exists());
 }

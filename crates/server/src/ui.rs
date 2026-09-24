@@ -37,13 +37,13 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileMade, FileMaking, FileReading, FileRenamed,
-    FileRenaming, FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, PairingView,
-    Parked, PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileMade, FileMaking,
+    FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten, FolderListing,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
+    PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
     ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
     SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
@@ -285,6 +285,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // A name rather than a path in the body, which is what keeps the move
         // inside the root it started in: two roots are two repositories.
         .route("/api/ui/conversations/{id}/files/rename", post(rename_path))
+        // And the one that takes a row away rather than moving it: whatever is
+        // at a path, a folder with everything under it — see [`delete_path`].
+        // One route for both kinds for the rename's reason, and the confirm in
+        // front of it is the viewer's, the way the app asks about anything that
+        // cannot be taken back.
+        .route("/api/ui/conversations/{id}/files/delete", post(delete_path))
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -3323,6 +3329,65 @@ async fn rename_path(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "renaming a file of a Worktree failed");
             unavailable("it could not be renamed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/delete` — whatever is at a path, taken
+/// off the disk, a folder with everything under it.
+///
+/// The path in the body and nothing else, which is [`new_file`]'s request said
+/// about something that is there: what is at the end of it is the filesystem's
+/// business rather than the request's, so one route takes both kinds the way the
+/// rename above does.
+///
+/// **The confirm is the viewer's, in front of the press** — the card the app
+/// puts up for whatever cannot be taken back, the one a busy shell and a dirty
+/// tab already raise. So a request arriving here has been asked about, and one
+/// confirm covers a folder's whole contents rather than one per file (ADR 0019,
+/// *The tree*).
+///
+/// Refused in the body like everything else here, with the rename's own refusal
+/// among them: a root, which is a Worktree rather than anything in one — and a
+/// Worktree deleted is the ground taken out from under a session standing in it.
+///
+/// **Not a record**, for the reason nothing else in `files` is: it is the
+/// human's own hand in their own checkout.
+async fn delete_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileDeleting>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileDeleted::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileDeleted::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a path is resolved, and a tree is walked where what is
+    // there is a folder.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::delete(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "deleting a file of a Worktree failed");
+            unavailable("it could not be deleted")
         }
     }
 }

@@ -1,6 +1,6 @@
 //! The files half of Code: the roots its tree stands on, one folder of one of
 //! them at a time, one file of one of those opened — and a file or a folder
-//! made in one of them, or renamed.
+//! made in one of them, renamed, or taken away.
 //!
 //! **A root is a Worktree** — the Conversation's own first, then each
 //! companion's in the order the Conversation carries them
@@ -43,6 +43,14 @@
 //! repositories, and a file taken out of one checkout and put in another is not
 //! a thing a tree gets to do. One refusal of its own beyond the making's: a root
 //! itself, which is a Worktree rather than something in one.
+//!
+//! **And takes one away** — see [`FileDeleting`] and [`FileDeleted`]: a path in
+//! a root, and a folder goes with everything under it. The rename's refusals
+//! said about something that is about to stop being there, a root among them —
+//! and one fewer, there being no name in the request for anything to be taken
+//! by. What asks first is the viewer, the confirm the app puts in front of
+//! whatever cannot be taken back; what is answered here is the press already
+//! made.
 //!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
@@ -558,5 +566,81 @@ pub enum FileRenamed {
     /// The server could not move it, and this is why — permissions, a folder
     /// that is not empty where one is being moved over, or a path that went
     /// between the check and the move.
+    Unwritable { why: String },
+}
+
+/// Something in a root, taken away.
+///
+/// One field, [`FileMaking`]'s: a path is the whole of what the tree has to
+/// say, and what is at the end of it is the filesystem's business rather than
+/// the request's — a file and a folder go the same way, and a folder takes
+/// everything under it (ADR 0019, *The tree*).
+///
+/// **There is no confirm in here.** The card that asks goes up before the press
+/// is made, in the viewer, the way the app asks about every other thing that
+/// cannot be taken back — so a request that arrives has been asked about, and
+/// one confirm covers a folder's whole contents rather than one per file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileDeleting {
+    pub path: String,
+}
+
+/// What became of taking it away.
+///
+/// [`FileRenamed`]'s answers said about something that is about to stop being
+/// there, less the one about a name: nothing is named here, so nothing can be
+/// taken and nothing can be spelled as a path. What is left is the bound, the
+/// root's own flag, and the one that is a root's alone — a Worktree is not
+/// something a file tree deletes, whatever the tree would be left drawing.
+///
+/// **It lands or it does not**, so the word that says it landed carries
+/// nothing: the row goes from the tree, the folder above it is read again, and
+/// every open tab of that path is a tab this side already knows about. Where
+/// [`FileRenamed::Renamed`] has a path to answer with, this has the path it was
+/// asked by.
+///
+/// Each refusal is a sentence in front of the human rather than a status code,
+/// the way every other answer of this API is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileDeleted {
+    /// It is off the disk, and a folder's contents went with it.
+    Deleted,
+
+    /// It is a root, which is a Worktree rather than something in one.
+    ///
+    /// [`FileRenamed::IsRoot`]'s refusal, and a deletion's is the harder of the
+    /// two: a Worktree deleted is the session's own ground taken out from under
+    /// it, and what a Worktree is unmade by is the Conversation that made it.
+    /// The tree offers no Delete row on a root, so this is the endpoint refusing
+    /// on its own account.
+    IsRoot,
+
+    /// The root it is in takes no writes: a read-only companion, checked out
+    /// detached and there to be read.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch.
+    UnderGit,
+
+    /// The Worktree it is in is no longer on disk.
+    RootGone,
+
+    /// It is not there: deleted already, renamed, or committed away by a
+    /// checkout in a terminal beside the tree.
+    ///
+    /// Which is the one refusal a human may well want to read as the thing
+    /// having happened — it is gone either way — and is still worth telling
+    /// apart: a row the tree drew over something that was not there is a tree
+    /// that has been stale since before the press.
+    Missing,
+
+    /// The server could not take it away, and this is why — permissions, a file
+    /// held open on Windows, or a folder that grew a file between the walk and
+    /// the removal.
     Unwritable { why: String },
 }

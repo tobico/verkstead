@@ -22,6 +22,6 @@ Roadmap stage: [03: Working the tree](docs/roadmaps/code-pane/03-working-the-tre
 
 - [x] 01: The row menu, and new file and new folder — [details](01-row-menu-and-making.md)
 - [x] 02: Rename, and the tabs that follow it — [details](02-rename.md)
-- [ ] 03: Delete, and the tab that stays — [details](03-delete.md)
+- [x] 03: Delete, and the tab that stays — [details](03-delete.md)
 - [ ] 04: Quick open — [details](04-quick-open.md)
 - [ ] 05: The pane's menu, and its three settings — [details](05-editor-settings.md)

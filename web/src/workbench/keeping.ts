@@ -40,7 +40,10 @@
 //!
 //! The readings are not written down with it. What a file says is the disk's to
 //! answer and a page coming back asks it afresh, the human's restored text
-//! going over the top of what comes back — see `Code.tsx`. A page holding text
+//! going over the top of what comes back — see `Code.tsx`. Which is what brings
+//! a *deleted* file's tab back as well: the read answers that the file is
+//! missing, the device hands over the text it kept, and the tab is drawn as gone
+//! with that text in it rather than as a refusal to read. A page holding text
 //! nobody has saved still warns before it goes, the browser's own way, because
 //! storage is a convenience the whole way down and a browser that refuses it
 //! would otherwise lose that text without a word — see [`unsaved`].
@@ -498,6 +501,22 @@ export function disk(
     : undefined;
 }
 
+/// And whether a file is gone from the disk with its text still open over it.
+///
+/// Which is what a tab left standing over a deleted file is: the reading is the
+/// answer a read of that path gives now, and the buffer is the text as it was —
+/// the only copy of it there is (ADR 0019, *The tree*). `Missing` with no buffer
+/// behind it is the other thing: a file somebody tried to open and could not,
+/// with nothing in its tab to lose.
+///
+/// Kept here rather than in the pane because [`dirty`] below is the one that
+/// asks it, and what the device writes down is what dirty says.
+export function gone(kept: Kept, path: string): boolean {
+  return (
+    kept.readings()[path] === "Missing" && kept.buffers()[path] !== undefined
+  );
+}
+
 /// Whether a file has text in it that is not on the disk.
 ///
 /// The buffer against the reading, which is the whole of what dirty means here:
@@ -505,11 +524,21 @@ export function disk(
 /// buffer is what would be written over it. So a file typed into and typed back
 /// is clean again, which is what VS Code's own dot says too.
 ///
+/// **And a file the disk no longer has at all is dirty**, which is the same idea
+/// read over a reading that is not text: every word of it is in the buffer and
+/// none of it is on the disk. Which is what puts the dot on a deleted file's
+/// tab, what makes the × ask before it throws the text away, and — because this
+/// is what a device writes down — what brings that text back through a reload.
+///
 /// A file with no buffer yet is not dirty: the read is in flight, or what came
 /// back was not text at all, and neither is a tab with something in it to lose.
 export function dirty(kept: Kept, path: string): boolean {
   const read = disk(kept, path);
   const held = kept.buffers()[path];
 
-  return read !== undefined && held !== undefined && held.text() !== read.text;
+  if (held === undefined) {
+    return false;
+  }
+
+  return read === undefined ? gone(kept, path) : held.text() !== read.text;
 }

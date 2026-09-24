@@ -40,6 +40,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileDeleted,
   FileMade,
   FileReading,
   FileRenamed,
@@ -190,6 +191,7 @@ import {
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
   FILE_REFUSAL,
+  GONE,
   MOVED,
   NOTHING_OPEN,
   TERMINAL_REFUSAL,
@@ -209,10 +211,12 @@ import editorPane from "../src/workbench/Editor.module.css";
 import monacoModule from "../src/workbench/monaco.ts?raw";
 // And the tree down its side, over every worktree the conversation has.
 import {
+  DELETED_REFUSAL,
   FOLDER_REFUSAL,
   MADE_REFUSAL,
   NO_ROOTS,
   RENAMED_REFUSAL,
+  deletedRefusal,
   madeRefusal,
   renamedRefusal,
 } from "../src/workbench/Tree";
@@ -19611,6 +19615,11 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
   /// business rather than the request's.
   const RENAMING = `/api/ui/conversations/${GRILLING.id}/files/rename`;
 
+  /// And where one is taken away, which is one route for both kinds for the
+  /// rename's reason: a delete is one thing to do, and a folder goes with
+  /// everything under it.
+  const DELETING = `/api/ui/conversations/${GRILLING.id}/files/delete`;
+
   /// The folder rows of the tree, roots among them: both are folders, and a root
   /// is the one of them that is not a path segment.
   function folders(container: ParentNode): HTMLButtonElement[] {
@@ -19696,6 +19705,51 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     );
   }
 
+  /// The card a Delete puts up, or nothing where nothing is being asked about.
+  /// On the body, a `dialog` being drawn in the top layer.
+  function card(): HTMLDialogElement | null {
+    return document.body.querySelector<HTMLDialogElement>(
+      `dialog.${treePane.confirming}`,
+    );
+  }
+
+  function carded(): Promise<HTMLDialogElement> {
+    return waitFor(() => {
+      const up = card();
+
+      if (!up) {
+        throw new Error("nothing is being asked about");
+      }
+
+      return up;
+    });
+  }
+
+  /// And one of its two presses, by what it says — which is how a human finds
+  /// one.
+  function confirms(asking: ParentNode, says: string): HTMLButtonElement {
+    const found = [...asking.querySelectorAll<HTMLButtonElement>("button")].find(
+      (one) => one.textContent === says,
+    );
+
+    if (!found) {
+      throw new Error(`the card has no ${says}`);
+    }
+
+    return found;
+  }
+
+  /// Every request that went out to one of these routes, as the bodies they
+  /// were sent with.
+  function asked(
+    fetching: ReturnType<typeof serving>,
+    route: string,
+  ): Array<{ path: string }> {
+    return fetching.mock.calls
+      .filter(([path, init]) => String(path) === route && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { path: string });
+  }
+
   /// The tabs of the group, which is where a new file opens.
   function tabs(container: ParentNode): HTMLButtonElement[] {
     return [
@@ -19720,10 +19774,10 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     return { ...mounted, fetching };
   }
 
-  /// A root offers the two things that can be made in it and no Rename: a root is
-  /// a worktree rather than anything in one. Nothing is dropped until a row is
-  /// right-clicked.
-  it("offers New file and New folder on a root, and no Rename", async () => {
+  /// A root offers the two things that can be made in it and neither of the two
+  /// that act on it: a root is a worktree rather than anything in one. Nothing is
+  /// dropped until a row is right-clicked.
+  it("offers New file and New folder on a root, and no Rename or Delete", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
@@ -19745,20 +19799,27 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
 
     rightClick(row(container, "crates"));
     await waitFor(() =>
-      expect(offered(container)).toEqual(["New file", "New folder", "Rename"]),
+      expect(offered(container)).toEqual([
+        "New file",
+        "New folder",
+        "Rename",
+        "Delete",
+      ]),
     );
   });
 
-  /// And a file row offers Rename alone: there is nowhere in a file to make
-  /// anything. Delete is the task after this one.
-  it("offers Rename alone on a file row", async () => {
+  /// And a file row offers those two alone: there is nowhere in a file to make
+  /// anything.
+  it("offers Rename and Delete alone on a file row", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
 
     expect(rightClick(row(container, "Cargo.toml", files))).toBe(true);
 
-    await waitFor(() => expect(offered(container)).toEqual(["Rename"]));
+    await waitFor(() =>
+      expect(offered(container)).toEqual(["Rename", "Delete"]),
+    );
     expect(field(container)).toBeNull();
   });
 
@@ -20189,9 +20250,10 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     await waitFor(() => expect(tabs(container)).toHaveLength(1));
   });
 
-  /// A root offers no Rename row at all, so the one path this field can never
-  /// name is the one that would move a worktree.
-  it("offers no Rename on a root", async () => {
+  /// A root offers neither Rename nor Delete, so the one path this field can
+  /// never name is the one that would move a worktree — and there is no press
+  /// anywhere that would take one away.
+  it("offers no Rename and no Delete on a root", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
@@ -20200,6 +20262,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
 
     await waitFor(() => expect(drop(container)).toBeTruthy());
     expect(offered(container)).not.toContain("Rename");
+    expect(offered(container)).not.toContain("Delete");
   });
 
   /// And what goes up is a name rather than a path, so there is no shape a
@@ -20337,6 +20400,139 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
       "it is read-only",
     );
     expect(renamedRefusal({ Renamed: { path: "/anywhere" } })).toBeNull();
+  });
+
+  /// Delete: the card goes up over the row, and only the press inside it takes
+  /// anything away — one confirm for a folder, which goes with everything under
+  /// it (ADR 0019, *The tree*).
+  it("takes a folder away with everything under it, after one confirm", async () => {
+    const crates = `${OWN_ROOT.path}/crates`;
+    const inside = `${crates}/server`;
+
+    // What the root holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a delete re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        folderOf(crates),
+        json({
+          Listed: {
+            path: crates,
+            entries: [{ name: "server", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST"),
+    );
+
+    // A folder with something drawn under it, which is what one confirm has to
+    // cover.
+    fireEvent.click(row(container, "crates"));
+    await waitFor(() => expect(named(container)).toContain("server"));
+
+    rightClick(row(container, "crates"));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    // The card names the row and says how much of it is about to go — and
+    // nothing has been asked of the server yet: the press is still ahead of it.
+    const asking = await carded();
+    expect(asking.textContent).toContain("Delete this folder?");
+    expect(asking.textContent).toContain("everything in it goes with it");
+    expect(asked(fetching, DELETING)).toHaveLength(0);
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.filter((entry) => entry.name !== "crates"),
+      },
+    };
+
+    fireEvent.click(confirms(asking, "Delete crates"));
+
+    // One call, for the whole of it: the path and no more.
+    await waitFor(() => expect(asked(fetching, DELETING)).toEqual([{ path: crates }]));
+
+    // And the row is gone with everything that was drawn under it, the folder
+    // above it having been read again.
+    await waitFor(() => expect(named(container)).not.toContain("crates"));
+    expect(named(container)).not.toContain("server");
+    expect(card()).toBeNull();
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// And every way out of that card but the one press leaves the row exactly
+  /// where it is: a delete cannot be taken back, so nothing is taken until the
+  /// human has said so.
+  it("asks before it takes anything, and a way out leaves the row", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    const asking = await carded();
+    expect(asking.textContent).toContain("Delete this file?");
+    expect(asking.textContent).not.toContain("everything in it");
+
+    fireEvent.click(confirms(asking, "Keep it"));
+
+    await waitFor(() => expect(card()).toBeNull());
+    expect(asked(fetching, DELETING)).toHaveLength(0);
+    expect(named(container)).toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// A refusal comes back into the card the press was made in, with the card
+  /// still up and the row still where it was.
+  it("draws the sentence a refused delete came back with, taking nothing", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(DELETING, json("Missing" satisfies FileDeleted), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    fireEvent.click(confirms(await carded(), "Delete Cargo.toml"));
+
+    await waitFor(() =>
+      expect(card()?.textContent).toContain(DELETED_REFUSAL.Missing),
+    );
+
+    expect(named(container)).toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// And each refusal of a delete is its own sentence rather than one "could
+  /// not be deleted", because only the human can tell which of them they are
+  /// looking at.
+  it("words every refusal of a delete as the thing it is", () => {
+    expect(new Set(Object.values(DELETED_REFUSAL)).size).toBe(
+      Object.keys(DELETED_REFUSAL).length,
+    );
+
+    expect(DELETED_REFUSAL.IsRoot).toContain("worktree");
+    expect(DELETED_REFUSAL.UnderGit).toContain(".git");
+    expect(DELETED_REFUSAL.Missing).toContain("no longer");
+
+    // And the one the server words itself, being the only one this side could
+    // not have worked out.
+    expect(deletedRefusal({ Unwritable: { why: "it is read-only" } })).toBe(
+      "it is read-only",
+    );
+    expect(deletedRefusal("Deleted")).toBeNull();
   });
 });
 
@@ -21513,6 +21709,169 @@ describe("a file opened out of the code pane's tree", () => {
         });
 
         await waitFor(() => expect(dots(container)).toHaveLength(0));
+      });
+    });
+
+    /// And what a delete in the tree does to the tab standing over that file,
+    /// which is the other half of a tab following its file: the tab **stays**
+    /// (ADR 0019, *The tree*).
+    describe("and the file deleted out of the tree while it is open", () => {
+      /// Where a row of the tree is taken away: the path, and a folder goes
+      /// with everything under it.
+      const DELETING = `/api/ui/conversations/${GRILLING.id}/files/delete`;
+
+      /// What the delete endpoint answers with.
+      function removes(): Answer {
+        return whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST");
+      }
+
+      /// The line a tab whose file has gone draws over its text.
+      function gone(container: ParentNode): string | null | undefined {
+        return container.querySelector(`.${shell.detailsPane} .${codePane.gone}`)
+          ?.textContent;
+      }
+
+      /// Delete the row called `was`, which is the menu, the card, and the
+      /// press inside it.
+      async function deletes(container: ParentNode, was: string): Promise<void> {
+        const found = [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.file}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(was));
+
+        if (!found) {
+          throw new Error(`no file row called ${was}`);
+        }
+
+        fireEvent.contextMenu(found, { clientX: 20, clientY: 40 });
+
+        fireEvent.click(
+          await waitFor(() => {
+            const one = container.querySelector<HTMLButtonElement>(
+              `.${shell.detailsPane} .${treePane.delete}`,
+            );
+
+            if (!one) {
+              throw new Error("the menu has no Delete");
+            }
+
+            return one;
+          }),
+        );
+
+        const asking = await waitFor(() => {
+          const up = document.body.querySelector<HTMLDialogElement>(
+            `dialog.${treePane.confirming}`,
+          );
+
+          if (!up) {
+            throw new Error("nothing is being asked about");
+          }
+
+          return up;
+        });
+
+        fireEvent.click(
+          [...asking.querySelectorAll<HTMLButtonElement>("button")].find(
+            (one) => one.textContent === `Delete ${was}`,
+          )!,
+        );
+      }
+
+      /// The tab stays with its text in it, read-only and saying the file is
+      /// gone — and Ctrl+S writes nothing, there being nothing to write over.
+      it("keeps the tab read-only over its text, and saves nothing", async () => {
+        const { container, fetching } = await opened(
+          saves(WRITTEN),
+          removes(),
+        );
+
+        await types(container, "mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        await deletes(container, "Cargo.toml");
+
+        // The tab is still in the bar under the same name: a tab that vanished
+        // would take the text with it.
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+
+        // With the text still in it, and nothing to type over it with.
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
+
+        // And the dot is still on it: every word of what is there is text the
+        // disk has not got, which is what makes the × ask before it goes.
+        expect(dots(container)).toHaveLength(1);
+
+        // Ctrl+S writes nothing: there is nothing on the disk to write over.
+        ctrlS(container);
+        await lands();
+        expect(saved(fetching)).toHaveLength(0);
+      });
+
+      /// And the × is the one thing that closes it, and it asks first: what is
+      /// in the tab is the only copy of that text there is.
+      it("asks before the cross throws the text away", async () => {
+        const { container } = await opened(removes());
+
+        await types(container, "mine\n");
+        await deletes(container, "Cargo.toml");
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+
+        fireEvent.click(crosses(container).at(-1)!);
+
+        expect((await carded()).textContent).toContain("Cargo.toml");
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+      });
+
+      /// And a reload comes back to that tab, still saying so, with the text
+      /// still in it — which is what makes *copy it out later* a promise: the
+      /// device writes down the text of every open file the disk has not got,
+      /// and a file that is gone is the whole of one.
+      it("comes back to that tab after a reload, text and all", async () => {
+        const first = await opened(reads(codeFile as FileReading, "Missing"), removes());
+
+        await types(first.container, "mine\n");
+        await deletes(first.container, "Cargo.toml");
+        await waitFor(() =>
+          expect(
+            first.container.querySelector(
+              `.${shell.detailsPane} .${codePane.gone}`,
+            )?.textContent,
+          ).toBe(GONE),
+        );
+
+        // Which is on the device by now: the text of a file the disk has not
+        // got, which is what a file that is gone is all of.
+        expect(
+          JSON.parse(
+            localStorage.getItem(`verkstead.code-unsaved.${GRILLING.id}`)!,
+          ) as Record<string, string>,
+        ).toEqual({ [TEXT.path]: "mine\n" });
+
+        // The page goes and comes back: the read finds the file missing, and
+        // the text the device kept goes into the tab rather than a line saying
+        // the file could not be read.
+        cleanup();
+
+        const { container } = await expanded(
+          OWN_ROOT,
+          codeFolder as FolderListing,
+          reads("Missing"),
+        );
+
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
       });
     });
   });

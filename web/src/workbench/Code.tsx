@@ -187,6 +187,21 @@
 //! buffer under both, so both tabs follow together. See [`renamed`], which is
 //! where every place the path was written down is moved.
 //!
+//! **And a deleted file's tab stays**, read-only, saying the file is gone, with
+//! whatever was in it still there to be read and copied out. A tab that vanished
+//! under somebody with unsaved text would take the text with it, so the row goes
+//! from the tree and the tab does not: Ctrl+S in it writes nothing — there is
+//! nothing to write over — and the × closes it the way it closes any other tab,
+//! asking first, because what it throws away is text the disk has not got. A
+//! folder deleted carries every tab inside it, the way a folder renamed does.
+//! See [`deleted`].
+//!
+//! **And it survives a reload**, because the text of a file the disk has not got
+//! is exactly what this device writes down: a page that comes back reads the
+//! file, finds it missing, and puts the remembered text into a tab drawn as gone
+//! rather than as a refusal to read — which is what makes *copy it out later* a
+//! promise rather than a hope.
+//!
 //! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
 //! a reload and can be linked to. The second pane nothing on the record opens: a
@@ -549,6 +564,21 @@ export const WRITE_REFUSAL: Record<
 /// and a stale write is refused*).
 export const MOVED =
   "This file changed on disk while you were editing it, so nothing was saved.";
+
+/// And what a tab whose file has gone says, over the text it still has.
+///
+/// Drawn as a bar above the editor rather than in place of it, which is the
+/// whole of the point: the file is gone and the text is not, and what the human
+/// has to be told is that the second is now the only copy (ADR 0019, *The
+/// tree*). Said where the *Reload* / *Keep mine* bar is said, being the other
+/// thing that is true of the file rather than of the editor.
+///
+/// Not one of [`FILE_REFUSAL`]'s: `Missing` there is a file that was never
+/// opened, and the tab has nothing in it to keep. This is the same answer read
+/// against a buffer that is still holding text — see [`Opened`], where the two
+/// are told apart.
+export const GONE =
+  "This file is gone from the disk. What is here is the text as it was, kept so it can be copied out; nothing can be saved to it.";
 
 /// What a tab is known by, which is the one string that can stand for either.
 ///
@@ -2021,6 +2051,65 @@ export function Code(props: {
     }
   };
 
+  /// And a file taken away out of the tree keeps its tab, which is the other
+  /// half of a tab following its file.
+  ///
+  /// **The tab stays, read-only, saying the file is gone**, with whatever was in
+  /// it still there to be read and copied out (ADR 0019, *The tree*): a tab that
+  /// vanished under somebody with unsaved text would take the text with it, and
+  /// the × is the one thing that closes it — asking first, the text being text
+  /// the disk has not got.
+  ///
+  /// So what moves is the *reading* and nothing else: it becomes the answer a
+  /// read of that path would give now, and the buffer under it is left exactly
+  /// where it is. Which is also what makes the tab dirty, and so what this device
+  /// writes down — see `keeping.ts`, where gone and dirty are the one comparison.
+  ///
+  /// **A folder carries everything under it**, on the prefix [`renamed`] moves
+  /// on and for its reason: one press took the whole of it, so every tab inside
+  /// it and every folder of the tree expanded beneath it goes the same way.
+  const deleted = (path: string): void => {
+    // What the delete reached: the path itself, and anything under it where it
+    // was a folder. Spelled with either separator, for the reason [`renamed`]'s
+    // is — a path here is spelled the way the root it came from is.
+    const gone = (one: string): boolean => {
+      if (one === path) {
+        return true;
+      }
+
+      const next = one.slice(path.length, path.length + 1);
+
+      return one.startsWith(path) && (next === "/" || next === "\\");
+    };
+
+    batch(() => {
+      // Every open file that has gone reads as missing, which is what its tab
+      // draws the line over its text from — and is what a read of that path
+      // would answer now, so a reload comes back to the same tab.
+      setReadings((was) =>
+        Object.fromEntries(
+          Object.entries(was).map(([at, read]) => [
+            at,
+            gone(at) ? "Missing" : read,
+          ]),
+        ),
+      );
+
+      // And whatever the last save left standing goes with it: a bar is a
+      // question about a file on the disk, and there is no longer one.
+      setBars((was) =>
+        Object.fromEntries(Object.entries(was).filter(([at]) => !gone(at))),
+      );
+
+      // And the folders of the tree that were open under it, listings and all: a
+      // folder kept here is a folder the tree draws without reading again, and
+      // one that is not there would be a column of rows that are not either.
+      setExpanded((was) =>
+        Object.fromEntries(Object.entries(was).filter(([at]) => !gone(at))),
+      );
+    });
+  };
+
   /// What the disk said about one open file, and whether there is text in it
   /// that the disk has not got.
   ///
@@ -2076,6 +2165,15 @@ export function Code(props: {
           // text the device came back holding, where this is the read that
           // restored the tab.
           hold(path, restored ?? reading.Text.text);
+        } else if (reading === "Missing") {
+          // A file that is gone keeps whatever text there is, which is the whole
+          // of what its tab is for: what this device came back holding goes into
+          // the buffer, and a buffer that is already here is left exactly as it
+          // is. Letting go here would be the one read that threw the last copy
+          // of somebody's text away.
+          if (restored !== undefined) {
+            hold(path, restored);
+          }
         } else {
           release(path);
         }
@@ -2530,6 +2628,7 @@ export function Code(props: {
           pick={pick}
           carried={taken}
           renamed={renamed}
+          deleted={deleted}
           held={expanded}
           setHeld={setExpanded}
         />
@@ -3182,13 +3281,26 @@ function Opened(props: {
   /// is here over it, so that the next save lands.
   keep: () => void;
 }): JSX.Element {
+  /// Whether the file is gone from the disk with its text still here, which is
+  /// what a tab left standing over a deleted file is.
+  ///
+  /// The buffer is what tells this from the refusal beside it: `Missing` with
+  /// nothing behind it is a file somebody tried to open and could not, and there
+  /// is nothing to draw; `Missing` over a buffer is a file that *was* open, and
+  /// the text in it is now the only copy there is (ADR 0019, *The tree*).
+  ///
+  /// Which is also what a reload comes back to, the read of a restored tab
+  /// answering `Missing` and the device handing over the text it kept.
+  const gone = (): boolean =>
+    props.reading === "Missing" && props.buffer !== undefined;
+
   /// The refusal this came back as, where it came back as one — the server's
   /// own sentence for the unreadable, which is the only one of them that says
   /// something this side could not have worked out.
   const why = (): string | null => {
     const read = props.reading;
 
-    if (read === undefined) {
+    if (read === undefined || gone()) {
       return null;
     }
 
@@ -3236,7 +3348,27 @@ function Opened(props: {
       </Show>
       <Show when={refused()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Show>
 
+      {/* And the line over a file that has gone, in the bar's own place: what is
+          under it is the text as it was, and what it says is that this is now
+          the only copy of it. A statement rather than a question — there is
+          nothing to choose between, the file being gone either way. */}
+      <Show when={gone()}>
+        <p class={styles.gone} role="status">
+          {GONE}
+        </p>
+      </Show>
+
       <Switch fallback={<Empty>Opening this file…</Empty>}>
+        {/* Before the refusal below, which this would otherwise be one of: a
+            file that is gone with its text still here is a tab to read rather
+            than a sentence about a file that could not be opened. */}
+        <Match when={gone()}>
+          <Editor
+            name={props.name}
+            model={props.buffer?.model}
+            writable={false}
+          />
+        </Match>
         <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
         <Match when={text()}>
           {(read) => (

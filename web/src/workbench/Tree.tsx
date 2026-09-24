@@ -65,12 +65,12 @@
 //! a read-only root — the root's own flag, which the roots listing already
 //! carries, so the rows are not drawn rather than drawn to be refused.
 //!
-//! **And Rename, on every row but a root.** A root is a worktree rather than
-//! anything in one, and what the human knows it by is the repository it is a
-//! checkout of — so the row is not drawn there, which is also why it is the one
-//! thing a row has to know about itself: the folder it was drawn in. A row with
-//! none is a root. A file row offers Rename and nothing else; delete is the task
-//! after this one.
+//! **And Rename and Delete, on every row but a root.** A root is a worktree
+//! rather than anything in one, and what the human knows it by is the repository
+//! it is a checkout of — so neither row is drawn there, which is also why it is
+//! the one thing a row has to know about itself: the folder it was drawn in. A
+//! row with none is a root. A file row offers those two and nothing else, there
+//! being nowhere in a file to make anything.
 //!
 //! **And the name is typed in place.** For a making, the row pressed expands and
 //! a new row appears under it carrying nothing but a field; for a rename, the
@@ -92,8 +92,22 @@
 //! where a tab is retitled and re-keyed onto the new one. The folders open
 //! beneath a renamed folder move with it, because they are kept there too.
 //!
-//! No delete and no quick open yet: those are the rest of this stage. And no git
-//! status marks, which are stage 04's with the watcher that keeps them honest.
+//! **And Delete asks first, in a card.** It is the one row here that cannot be
+//! taken back, so what goes up is the confirm the app puts in front of anything
+//! that cannot be — the same card a busy terminal and a dirty tab raise —
+//! naming the row and, where it is a folder, saying that everything in it goes
+//! with it. One confirm for a folder rather than one per file, the server taking
+//! the whole of it in one call. A refusal comes back into that card, which is
+//! where the press was made.
+//!
+//! **And a deleted file's tab is the pane's to keep**, the way a renamed one's
+//! is: what the tree hands over is the path, and what happens to it is in
+//! `Code.tsx` — the tab stays, read-only, saying the file is gone, with its text
+//! still there to be copied out. A tab that vanished under somebody with unsaved
+//! text would take the text with it.
+//!
+//! No quick open yet: that is the rest of this stage. And no git status marks,
+//! which are stage 04's with the watcher that keeps them honest.
 
 import {
   faChevronDown,
@@ -105,6 +119,7 @@ import {
   Show,
   Switch,
   createSignal,
+  createUniqueId,
   type Accessor,
   type JSX,
   type Setter,
@@ -112,7 +127,9 @@ import {
 
 import { Icon } from "../Icon";
 import { ContextMenu } from "../Menu";
+import { Modal } from "../Modal";
 import {
+  deletePath,
   listFileRoots,
   listFolder,
   makeFile,
@@ -120,6 +137,7 @@ import {
   renamePath,
 } from "../api/client";
 import type {
+  FileDeleted,
   FileMade,
   FileRenamed,
   FileRoot,
@@ -211,6 +229,42 @@ export function renamedRefusal(renamed: FileRenamed): string | null {
   return RENAMED_REFUSAL[renamed];
 }
 
+/// And each way a delete can be refused, in the words of what it is.
+///
+/// The rename's sentences less the one about a name: nothing is named here, so
+/// nothing can be taken and nothing typed can be a path. Drawn in the card the
+/// press was made in rather than beside a field — there is no field, and the
+/// card is what is still on the screen when the answer comes back.
+///
+/// The root's is the endpoint's own answer arriving where the tree cannot ask
+/// for it, the row never being offered on a root: worded anyway, because a
+/// refusal nobody worded is a refusal drawn as blank.
+export const DELETED_REFUSAL: Record<
+  Exclude<Extract<FileDeleted, string>, "Deleted">,
+  string
+> = {
+  IsRoot: "A worktree is not deleted from here.",
+  ReadOnly: "Nothing can be written in this worktree.",
+  Outside: "That is not in any of this conversation's worktrees.",
+  UnderGit: "Code does not touch what is inside a repository's .git.",
+  RootGone: "This worktree is no longer on disk.",
+  Missing: "That is no longer there.",
+};
+
+/// What a delete came back saying, where it was refused — and `null` where it
+/// landed.
+///
+/// The unwritable one is the server's own sentence, being the only one of them
+/// that says something this side could not have worked out: permissions, a file
+/// held open, or a folder that grew one between the walk and the removal.
+export function deletedRefusal(deleted: FileDeleted): string | null {
+  if (typeof deleted !== "string") {
+    return "Unwritable" in deleted ? deleted.Unwritable.why : null;
+  }
+
+  return deleted === "Deleted" ? null : DELETED_REFUSAL[deleted];
+}
+
 /// And what the tree says when the conversation has no worktrees at all.
 ///
 /// Which is a conversation before its grilling has cut one, and one that has
@@ -258,6 +312,18 @@ interface Making {
 interface Renaming {
   over: string;
   within: string;
+}
+
+/// And a row being asked about before it is taken away.
+///
+/// [`Renaming`]'s two fields — the path, and the folder that is read again once
+/// it has gone — with the one thing a card has to say that a path does not: a
+/// folder takes its contents with it, and a file does not.
+///
+/// Not a [`Field`], because it is not one: what a delete opens is a card over
+/// the page rather than a field on a row, and both may be open at once.
+interface Removal extends Renaming {
+  folder: boolean;
 }
 
 /// The one field the tree ever has open, and what it is about.
@@ -323,6 +389,18 @@ export function Tree(props: {
   /// The folders open under a renamed folder move with it there too, the tree's
   /// own being kept beside the tabs — see `keeping.ts`.
   renamed: (from: string, to: string) => void;
+
+  /// And what a delete in it came to: the path that is no longer there.
+  ///
+  /// Handed over for the rename's reason, and for one of its own: a tab whose
+  /// file has gone **stays**, read-only, saying so, with its text still there to
+  /// be copied out — a tab that vanished under somebody with unsaved text would
+  /// take the text with it (ADR 0019, *The tree*). Which is the pane's to do,
+  /// every place a path is written down being over there.
+  ///
+  /// A folder carries everything under it here too, the one press having taken
+  /// the whole of it.
+  deleted: (path: string) => void;
 
   /// Which folders are open, and what each of them last read.
   ///
@@ -417,6 +495,20 @@ export function Tree(props: {
 
   /// And what the server refused the last Enter with, where it refused one.
   const [said, setSaid] = createSignal<string | null>(null);
+
+  /// Which row a Delete has been pressed on and is being asked about, where one
+  /// is: the path, whether it is a folder, and the folder it stands in.
+  ///
+  /// The whole of what the card says, and `null` while no card is up. Its own
+  /// signal beside the field above rather than a third shape of it: a card over
+  /// the page and a field on a row are not one thing drawn two ways, and both
+  /// may be open at once — a name half typed on one row is not a reason to
+  /// refuse a press on another.
+  const [removing, setRemoving] = createSignal<Removal | null>(null);
+
+  /// And what the server refused that press with, where it refused one — drawn
+  /// in the card, which is where the press was made.
+  const [refused, setRefused] = createSignal<string | null>(null);
 
   /// Whether an Enter is in flight, so that a second one while the first is
   /// still being answered does not make two rows or move one twice.
@@ -521,6 +613,20 @@ export function Tree(props: {
   /// stands where it stands.
   const rename = (over: string, within: string): void => {
     opening({ over, within }, named(over, within));
+  };
+
+  /// And ask about taking one away, which is the card rather than a field:
+  /// Delete is the one row of this menu that cannot be taken back, so what the
+  /// press opens is the confirm the app puts in front of anything that cannot be
+  /// (ADR 0019, *The tree*).
+  ///
+  /// The field is left exactly where it is. A name half typed on one row is not
+  /// something a press on another should throw away, and the card is drawn over
+  /// the page rather than among the rows.
+  const asking = (over: string, within: string, folder: boolean): void => {
+    setPointed(null);
+    setRefused(null);
+    setRemoving({ over, within, folder });
   };
 
   /// Either of them: the menu goes, and the field opens holding whatever it
@@ -638,6 +744,43 @@ export function Tree(props: {
       });
   };
 
+  /// And take it away, which is the card's own press made.
+  ///
+  /// **One call for a folder**, everything under it going with it: one confirm
+  /// in front of the press is enough because there is one press behind it.
+  ///
+  /// Afterwards the folder above the row is read again, as it is for a making
+  /// and a rename — and the path goes to the pane beside the tree, where the tab
+  /// of a file that has gone stays read-only with its text still in it.
+  const remove = (asked: Removal): void => {
+    working = true;
+    setRefused(null);
+
+    void deletePath(props.conversation, asked.over)
+      .then((done) => {
+        if (done !== "Deleted") {
+          setRefused(deletedRefusal(done));
+          return;
+        }
+
+        setRemoving(null);
+
+        // A field anywhere inside what has just gone is a field on a row that is
+        // not there any more — a folder shut takes one the same way.
+        if (about(field())?.startsWith(asked.over) === true) leave();
+
+        props.deleted(asked.over);
+
+        void read(asked.within);
+      })
+      // A request that never landed is the same thing to say as one the server
+      // refused: a sentence in the card, with the card still up.
+      .catch((error: Error) => setRefused(error.message))
+      .finally(() => {
+        working = false;
+      });
+  };
+
   return (
     <div class={styles.tree} aria-label="This conversation's files">
       <Switch fallback={<Empty>Reading this conversation's worktrees…</Empty>}>
@@ -725,29 +868,143 @@ export function Tree(props: {
               </For>
             </Show>
 
-            {/* And everything but a root renames: a root is a worktree rather
-                than anything in one, and a row with no folder around it is a
-                root. */}
+            {/* And everything but a root renames and deletes: a root is a
+                worktree rather than anything in one, and a row with no folder
+                around it is a root. In the order ADR 0019 names the four in,
+                which is also the order of what they cost. */}
             <Show when={pointed()?.within}>
               {(within) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  class={styles.rename}
-                  onClick={() => {
-                    const asked = pointed();
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class={styles.rename}
+                    onClick={() => {
+                      const asked = pointed();
 
-                    if (asked !== null) rename(asked.path, within());
-                  }}
-                >
-                  Rename
-                </button>
+                      if (asked !== null) rename(asked.path, within());
+                    }}
+                  >
+                    Rename
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class={styles.delete}
+                    onClick={() => {
+                      const asked = pointed();
+
+                      if (asked !== null) {
+                        asking(asked.path, within(), asked.folder);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </>
               )}
             </Show>
           </>
         )}
       </ContextMenu>
+
+      {/* And the card that Delete puts up before anything goes, which the press
+          that made it is waiting on. Outside the Switch above for the menu's
+          reason: it is drawn over the page rather than among the rows. */}
+      <Removing
+        asked={removing()}
+        said={refused}
+        keep={() => setRemoving(null)}
+        remove={() => {
+          const asked = removing();
+
+          if (asked !== null && !working) remove(asked);
+        }}
+      />
     </div>
+  );
+}
+
+/// What a Delete on a row is answered with, before anything is taken away:
+/// which row it is, what is about to happen to it, and the two ways out.
+///
+/// **The app's own confirm card**, the one a busy terminal and a tab with
+/// unsaved text in it raise — the same modal, the same pair of presses, the same
+/// shape — because it is the same question: a press that cannot be taken back,
+/// put back to the human before it is made (ADR 0019, *The tree*).
+///
+/// **A folder says it takes its contents with it**, which is the one thing this
+/// card says that the others do not have to: what is about to go is a row of a
+/// tree, and how much is under that row is exactly what the human cannot see
+/// from the row itself. One confirm for the whole of it rather than one per
+/// file.
+///
+/// And a refusal is drawn in here rather than beside the row: the card is what
+/// is on the screen when the answer comes back, and what it is about is the
+/// press that was made in it.
+function Removing(props: {
+  /// The row being asked about, or `null` while nothing is.
+  asked: Removal | null;
+  /// What the server refused the press with, where it refused one.
+  said: Accessor<string | null>;
+  /// The way back, which Escape and a press on the backdrop come to as well:
+  /// every way out of this card but the one button keeps the row.
+  keep: () => void;
+  /// And the press it asked about, made.
+  remove: () => void;
+}): JSX.Element {
+  // Generated rather than written, the way every other card in the app names
+  // itself: more than one pane stands on a page at once.
+  const id = createUniqueId();
+
+  /// What the row is called, which is what the card names throughout: the path
+  /// with the folder it stands in cut off the front of it.
+  const name = (): string =>
+    props.asked === null ? "" : named(props.asked.over, props.asked.within);
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Delete this {props.asked?.folder === true ? "folder" : "file"}?
+      </p>
+      <p class={styles.confirmingWhy}>
+        <Show
+          when={props.asked?.folder === true}
+          fallback={`${name()} will be taken off the disk.`}
+        >
+          {`${name()} will be taken off the disk, and everything in it goes with it.`}
+        </Show>{" "}
+        This cannot be undone.
+      </p>
+
+      {/* And what the server refused it with, where it refused one — in the
+          card, with the card still up. */}
+      <Show when={props.said()}>
+        {(why) => <ErrorLine class={styles.refused}>{why()}</ErrorLine>}
+      </Show>
+
+      <div class={styles.confirmingOut}>
+        {/* Both classes, as every other confirm pair in the app carries them:
+            the global one is the paint, and the module's is what the row above
+            stands the filled press out of. */}
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep it
+        </button>
+        <button type="button" onClick={() => props.remove()}>
+          Delete {name()}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

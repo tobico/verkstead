@@ -1947,6 +1947,41 @@ export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * What became of taking it away.
+ *
+ * [`FileRenamed`]'s answers said about something that is about to stop being
+ * there, less the one about a name: nothing is named here, so nothing can be
+ * taken and nothing can be spelled as a path. What is left is the bound, the
+ * root's own flag, and the one that is a root's alone — a Worktree is not
+ * something a file tree deletes, whatever the tree would be left drawing.
+ *
+ * **It lands or it does not**, so the word that says it landed carries
+ * nothing: the row goes from the tree, the folder above it is read again, and
+ * every open tab of that path is a tab this side already knows about. Where
+ * [`FileRenamed::Renamed`] has a path to answer with, this has the path it was
+ * asked by.
+ *
+ * Each refusal is a sentence in front of the human rather than a status code,
+ * the way every other answer of this API is.
+ */
+export type FileDeleted = "Deleted" | "IsRoot" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | { "Unwritable": { why: string, } };
+
+/**
+ * Something in a root, taken away.
+ *
+ * One field, [`FileMaking`]'s: a path is the whole of what the tree has to
+ * say, and what is at the end of it is the filesystem's business rather than
+ * the request's — a file and a folder go the same way, and a folder takes
+ * everything under it (ADR 0019, *The tree*).
+ *
+ * **There is no confirm in here.** The card that asks goes up before the press
+ * is made, in the viewer, the way the app asks about every other thing that
+ * cannot be taken back — so a request that arrives has been asked about, and
+ * one confirm covers a folder's whole contents rather than one per file.
+ */
+export type FileDeleting = { path: string, };
+
+/**
  * What became of making one.
  *
  * **A new file is empty and a new folder holds nothing** — there is no

@@ -616,6 +616,24 @@
   gap: 0.5rem;
 }
 
+/* And the line a tab whose file has gone draws over its text: the same bar in
+   the same place, without the presses — there is nothing to choose between, the
+   file being gone either way, so what stands here is the sentence alone.
+
+   Above the editor rather than in place of it, which is the whole of the point:
+   the file is gone and the text is not, and what is under this line is now the
+   only copy of it. */
+.gone {
+  flex: none;
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
 /* The maximise toggle, at the end of the pane's header: the press that hides
    the sidebar and the Timeline so that the editor has the window, and the one
    that brings them back.

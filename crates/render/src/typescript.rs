@@ -22,18 +22,19 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileMade,
-    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
-    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
+    FileDeleting, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
+    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -263,6 +264,14 @@ fn the_viewers_types_are_written_from_these() {
     // Worktree rather than anything in one.
     FileRenaming::export_all(&config).unwrap();
     FileRenamed::export_all(&config).unwrap();
+
+    // And one taken away out of it: the path and no more, a folder going with
+    // everything under it. The rename's refusals less the one about a name,
+    // there being no name in the request — and the confirm in front of the
+    // press is the viewer's, the way the app asks about anything that cannot
+    // be taken back.
+    FileDeleting::export_all(&config).unwrap();
+    FileDeleted::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

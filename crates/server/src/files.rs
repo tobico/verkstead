@@ -66,6 +66,14 @@
 //! to overwrite — which is the one window in this module, and is said where it
 //! is.
 //!
+//! **And takes one away** — see [`delete`]: a path in a root, and a folder
+//! with everything under it. The rename's order of checks with nothing where the
+//! name's would be, and the removal is of the entry the tree drew rather than of
+//! what it points at — a link is unlinked, and the file at the end of it is
+//! somebody else's. What asks the human first is the viewer, the confirm the app
+//! puts in front of whatever cannot be taken back, so what arrives here has been
+//! asked about.
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -83,7 +91,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
 use verkstead_render::{
-    FileMade, FileReading, FileRenamed, FileRoot, FileWritten, FolderEntry, FolderListing,
+    FileDeleted, FileMade, FileReading, FileRenamed, FileRoot, FileWritten, FolderEntry,
+    FolderListing,
 };
 
 use crate::repos::feeding;
@@ -549,6 +558,86 @@ pub(crate) fn rename(roots: &[FileRoot], path: &Path, name: &str) -> FileRenamed
         },
         Err(error) => FileRenamed::Unwritable {
             why: format!("the server cannot rename it: {error}"),
+        },
+    }
+}
+
+/// Take whatever is at `path` off the disk, a folder with everything under it.
+///
+/// Blocking: a path is resolved, one entry is looked at, and a tree is walked
+/// where that entry is a directory.
+///
+/// **The whole of the check is [`rename`]'s, less the name.** Nothing is named
+/// here, so there is nothing to be taken and nothing that could be spelled as a
+/// path out of the root: what is left is the bound, a root itself, and the
+/// root's own flag, in that order, with the disk touched only after all three.
+///
+/// **A root is refused**, which is the refusal that is this and the rename's
+/// alone and is the harder of the two here: a Worktree deleted is the ground
+/// taken out from under whatever session is standing in it, and a Worktree is
+/// unmade by the Conversation that made it rather than by a row of a file tree.
+/// Asked as it was spelled and again resolved, the bound's own two measurements.
+///
+/// **And what is removed is the entry the tree drew**, rather than what it
+/// resolves to: the removal names `path` rather than the resolved `real`, so a
+/// symlink is unlinked and the file at the end of it is left alone — which is
+/// what the row under the hand was. The two name the same entry by then, the
+/// bound having measured both.
+///
+/// **One call for a folder**, which is what makes one confirm enough: a
+/// directory goes with everything under it in a single `remove_dir_all`, so
+/// there is no half-deleted tree for a refusal to leave behind and nothing for
+/// the human to be asked twice about.
+pub(crate) fn delete(roots: &[FileRoot], path: &Path) -> FileDeleted {
+    let (root, real) = match bound(roots, path) {
+        Bound::Inside { root, real } => (root, real),
+        Bound::Outside => return FileDeleted::Outside,
+        Bound::UnderGit => return FileDeleted::UnderGit,
+        Bound::RootGone => return FileDeleted::RootGone,
+        Bound::Missing => return FileDeleted::Missing,
+    };
+
+    // A root is a Worktree rather than something in one — [`rename`]'s refusal,
+    // read the same way and for a harder version of its reason.
+    let at_the_root = Path::new(&root.path);
+
+    if at_the_root == path || matches!(resolve(at_the_root), Resolved::At(it) if it == real) {
+        return FileDeleted::IsRoot;
+    }
+
+    // The root's own flag rather than the entry's mode — [`write`]'s reading,
+    // [`make`]'s and [`rename`]'s, for their reason.
+    if !root.writable {
+        return FileDeleted::ReadOnly;
+    }
+
+    // Of the entry rather than of what it points at, which is what says whether
+    // a tree is being walked or one name is being unlinked: a link to a
+    // directory is a name to take away, not a directory to empty.
+    let entry = match std::fs::symlink_metadata(path) {
+        Ok(entry) => entry,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FileDeleted::Missing,
+        Err(error) => {
+            return FileDeleted::Unwritable {
+                why: format!("the server cannot read it: {error}"),
+            };
+        }
+    };
+
+    let taken = if entry.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+
+    match taken {
+        Ok(()) => FileDeleted::Deleted,
+        // Gone between the look and the removal, which is the agent's hand in
+        // the same checkout: the row is not there, which is what the press was
+        // asking for.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileDeleted::Missing,
+        Err(error) => FileDeleted::Unwritable {
+            why: format!("the server cannot delete it: {error}"),
         },
     }
 }
@@ -1917,6 +2006,161 @@ mod tests {
         assert_eq!(
             rename(&roots, &worktree.join("README.md"), "NOTES.md"),
             FileRenamed::RootGone
+        );
+    }
+    /// A file deleted goes off the disk and out of the folder's next listing,
+    /// which is the whole of what the menu's fourth row does.
+    #[test]
+    fn a_file_deleted_goes_off_the_disk() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("src/lib.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(worktree.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            delete(&roots, &worktree.join("src/lib.rs")),
+            FileDeleted::Deleted
+        );
+        assert!(!worktree.join("src/lib.rs").exists());
+
+        // And it is off the listing the moment the folder is read again, there
+        // being no watcher to say so until stage 04.
+        assert_eq!(names(folder(&roots, &worktree.join("src"))), ["main.rs"]);
+    }
+
+    /// A folder deleted takes everything under it, in the one call — which is
+    /// what makes one confirm in front of the press enough.
+    #[test]
+    fn a_folder_deleted_takes_what_is_under_it() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir_all(worktree.join("src/inner/deeper")).unwrap();
+        std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+        std::fs::write(worktree.join("src/inner/deeper/deepest.rs"), "deepest\n").unwrap();
+
+        assert_eq!(
+            delete(&[root(&worktree)], &worktree.join("src")),
+            FileDeleted::Deleted
+        );
+
+        assert!(!worktree.join("src").exists());
+        assert!(worktree.join("README.md").exists(), "and nothing beside it");
+    }
+
+    /// A link is unlinked, and what it points at is left where it is: what the
+    /// row under the hand was is the entry, rather than the file at the end of
+    /// it.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_unlinked_and_what_it_points_at_stays() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::write(worktree.join("notes.md"), "notes\n").unwrap();
+        std::os::unix::fs::symlink("notes.md", worktree.join("alias.md")).unwrap();
+
+        assert_eq!(
+            delete(&[root(&worktree)], &worktree.join("alias.md")),
+            FileDeleted::Deleted
+        );
+
+        assert!(!worktree.join("alias.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("notes.md")).unwrap(),
+            "notes\n",
+            "the file at the end of it is somebody else's"
+        );
+    }
+
+    /// A root is a Worktree rather than something in one, so nothing here takes
+    /// one away — the refusal this shares with a rename, answered whether the
+    /// root takes writes or not.
+    #[test]
+    fn a_root_itself_cannot_be_deleted() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        assert_eq!(delete(&[root(&worktree)], &worktree), FileDeleted::IsRoot);
+        assert!(worktree.is_dir());
+
+        let companion = repository(&held.path().join("companion"));
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        assert_eq!(delete(&roots, &companion), FileDeleted::IsRoot);
+        assert!(companion.is_dir());
+    }
+
+    /// A read-only root loses nothing in it, before the disk is touched at all —
+    /// the root's own flag, which is what the tree read when it left the row off
+    /// the menu.
+    #[test]
+    fn a_read_only_root_deletes_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let companion = repository(&held.path().join("companion"));
+
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        assert_eq!(
+            delete(&roots, &companion.join("README.md")),
+            FileDeleted::ReadOnly
+        );
+        assert!(companion.join("README.md").exists());
+    }
+
+    /// And a deletion is bounded the way a write is: a Conversation's own
+    /// checkouts and no more, whatever path a request names.
+    #[test]
+    fn a_deletion_is_bounded_the_way_a_write_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let elsewhere = repository(&held.path().join("elsewhere"));
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            delete(&roots, &elsewhere.join("README.md")),
+            FileDeleted::Outside
+        );
+        assert_eq!(
+            delete(&roots, &worktree.join("../elsewhere/README.md")),
+            FileDeleted::Outside
+        );
+
+        // A repository's insides, which Code does not touch.
+        assert_eq!(
+            delete(&roots, &worktree.join(".git/config")),
+            FileDeleted::UnderGit
+        );
+
+        // The path is not there, which is not the same thing as the Worktree
+        // having gone.
+        assert_eq!(
+            delete(&roots, &worktree.join("nowhere.md")),
+            FileDeleted::Missing
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(elsewhere.join("README.md")).unwrap(),
+            "# a repository\n"
+        );
+        assert!(worktree.join(".git/config").exists());
+
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(
+            delete(&roots, &worktree.join("README.md")),
+            FileDeleted::RootGone
         );
     }
 }

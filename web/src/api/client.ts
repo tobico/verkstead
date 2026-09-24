@@ -36,6 +36,8 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileDeleted,
+  FileDeleting,
   FileMade,
   FileMaking,
   FileReading,
@@ -699,6 +701,25 @@ export function renamePath(
     path,
     name,
   } satisfies FileRenaming);
+}
+
+/// And one of them taken away: whatever is at a path, a folder with everything
+/// under it.
+///
+/// **The confirm is drawn before this is called**, which is the one thing about
+/// this endpoint worth saying twice: a deletion cannot be taken back, so the
+/// card the app puts up for a busy shell and a dirty tab goes up over the row
+/// first, and one confirm covers a folder's whole contents (ADR 0019, *The
+/// tree*).
+///
+/// What comes back says it landed or says why it did not, and either way the
+/// folder above the row is read again — there being no watcher until stage 04.
+/// The open tab of a file that has gone stays, read-only, saying so: see
+/// `Code.tsx`, which is where a tab keeps its text after the file under it goes.
+export function deletePath(id: number, path: string): Promise<FileDeleted> {
+  return post<FileDeleted>(`/api/ui/conversations/${id}/files/delete`, {
+    path,
+  } satisfies FileDeleting);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.
