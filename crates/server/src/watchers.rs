@@ -51,7 +51,11 @@
 //! watcher started is watched without anything being restarted: the paths a burst
 //! made, renamed or took away are measured against the disk when it is announced,
 //! and what is there is walked from while what has gone is forgotten — see
-//! [`Watching::caught_up`].
+//! [`Watching::caught_up`]. And where a burst named no paths at all — a watcher
+//! that lost its place, a burst too wide to remember them — the whole of every
+//! root is walked instead, and that walk is the whole account of what is there:
+//! anything it does not name has gone, which is the only word about a removal
+//! such a burst ever gives.
 //!
 //! **And each root's git `index` and `HEAD`, and nothing else under a
 //! repository's insides.** The commit's own writes are the Worktree moving too,
@@ -497,6 +501,12 @@ impl Watching {
     /// watched, one it took away is forgotten, and the insides are taken hold of
     /// again.
     ///
+    /// A burst that named no paths — one the watcher lost its place in, or one
+    /// too wide to have remembered them — is the whole of every root instead, and
+    /// there the walk is the whole account of what is there: a directory it does
+    /// not name is forgotten, that being the only word about a removal such a
+    /// burst ever gives. See [`Held::spread_whole`].
+    ///
     /// Blocking: the walk is [`crate::files::watchable`], which reads
     /// directories and runs git.
     fn caught_up(&mut self, burst: Burst) {
@@ -506,9 +516,7 @@ impl Watching {
             true => {
                 self.insides = self.roots.iter().flat_map(|root| insides(root)).collect();
 
-                for root in &self.roots {
-                    self.held.spread(root, root);
-                }
+                self.held.spread_whole(&self.roots);
             }
 
             // Or the paths this burst named, each measured against the disk: a
@@ -567,6 +575,11 @@ struct Held {
     /// What is watched, so that a directory is walked once rather than once per
     /// burst that writes in it.
     ///
+    /// Added to by the walk and taken from by a removal, and squared with the
+    /// disk whenever the whole of a root is walked — see [`Held::spread_whole`],
+    /// which is where the reason a record of watching what is not there costs
+    /// anything is.
+    ///
     /// The insides are not in here: they are watched afresh every burst, and
     /// what this set is for is knowing what has been walked.
     watched: HashSet<PathBuf>,
@@ -584,6 +597,43 @@ impl Held {
 
         for each in crate::files::watchable(root, at, left) {
             self.hold(each);
+        }
+    }
+
+    /// And every non-ignored directory of every one of `roots`, with whatever is
+    /// no longer among them forgotten.
+    ///
+    /// **The one place a directory is forgotten without a word about it having
+    /// gone**, and the reason this is not [`Held::spread`] per root. A whole walk
+    /// is the whole account of what is there, and it is asked for by exactly the
+    /// two things that throw a burst's own paths away: a watcher that lost its
+    /// place, and a burst too wide to remember. So a removal inside one of those
+    /// is a removal nothing else will ever mention — a `git checkout` across a
+    /// branch that moves more than [`MOST_MOVED`] files is one, and it is the
+    /// ordinary way this arises.
+    ///
+    /// Left in, a directory that has gone would cost twice: a watch of the
+    /// allowance spent on nothing, so that a long-lived pane creeps up to
+    /// [`MAX_WATCHED`] and quietly stops following anything new; and a name
+    /// [`Held::already`] answers *yes* about, so that a directory made again at it
+    /// is one nothing ever watches and a file written straight into it is a Nudge
+    /// nobody gets.
+    ///
+    /// Nothing is said to the watcher about what is dropped, for [`Held::forget`]'s
+    /// reason: the kernel let the watch go with the directory.
+    fn spread_whole(&mut self, roots: &[PathBuf]) {
+        let mut found = HashSet::new();
+
+        for root in roots {
+            let left = MAX_WATCHED.saturating_sub(found.len());
+
+            found.extend(crate::files::watchable(root, root, left));
+        }
+
+        self.watched.retain(|held| found.contains(held));
+
+        for at in found {
+            self.hold(at);
         }
     }
 
@@ -863,4 +913,63 @@ async fn attached(
     // going — and the attachment above is let go of as this returns, whichever
     // way it returned.
     while socket.recv().await.is_some() {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The register a walk keeps, over a watcher that is asked about nothing:
+    /// what is under test here is which directories are *believed* watched, and
+    /// the events are the socket's own tests' subject — see `tests/watching.rs`.
+    fn register() -> Held {
+        Held {
+            conversation_id: 1,
+            watcher: notify::recommended_watcher(|_: notify::Result<notify::Event>| {})
+                .expect("this machine gives a watcher"),
+            watched: HashSet::new(),
+        }
+    }
+
+    /// A whole walk is the whole account of what is there, so a directory that
+    /// has gone is forgotten by it.
+    ///
+    /// Which is the only word about a removal the two bursts that ask for a whole
+    /// walk ever give: a watcher that lost its place, and one too wide to have
+    /// remembered its paths. Left in, the name would be one [`Held::already`]
+    /// answers *yes* about — so a directory made again at it would be watched by
+    /// nothing, and a file written straight into it would be a Nudge nobody gets.
+    #[test]
+    fn a_whole_walk_forgets_a_directory_that_has_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_owned();
+
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::create_dir(root.join("docs")).unwrap();
+
+        let mut held = register();
+        held.spread_whole(std::slice::from_ref(&root));
+
+        assert!(held.already(&root));
+        assert!(held.already(&root.join("src")));
+        assert!(held.already(&root.join("docs")));
+
+        // `rm -r docs` inside a burst whose paths were thrown away, so nothing
+        // ever said this directory had gone.
+        std::fs::remove_dir(root.join("docs")).unwrap();
+        held.spread_whole(std::slice::from_ref(&root));
+
+        assert!(held.already(&root.join("src")));
+        assert!(
+            !held.already(&root.join("docs")),
+            "a directory that is not there is still believed watched"
+        );
+
+        // And one made again at the same name is walked again rather than taken
+        // for one that already is.
+        std::fs::create_dir(root.join("docs")).unwrap();
+        held.spread_whole(std::slice::from_ref(&root));
+
+        assert!(held.already(&root.join("docs")));
+    }
 }
