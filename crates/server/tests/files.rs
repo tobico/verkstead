@@ -784,9 +784,15 @@ async fn a_new_file_and_a_new_folder_land_in_the_worktree() {
         }
     );
 
-    let file = worktree.join("crates/lib.rs");
+    // Asked for the way the viewer asks — the folder spelled the way the root
+    // is, with a `/` before the name, that being the one separator the page
+    // contributes — and answered back joined the way this platform joins, which
+    // is the spelling the next listing of that folder draws the row under.
+    let asked = format!("{}/lib.rs", worktree.join("crates").display());
+    let file = worktree.join("crates").join("lib.rs");
+
     assert_eq!(
-        make(&app, conversation, &file, "file").await,
+        make(&app, conversation, Path::new(&asked), "file").await,
         FileMade::Made {
             path: file.display().to_string()
         }

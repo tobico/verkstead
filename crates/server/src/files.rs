@@ -385,6 +385,14 @@ pub(crate) enum Making {
 /// would be a window for the agent to write the same name into, and a human
 /// told the name was free while their file went over somebody's work.
 ///
+/// What the *refusal* is worded as is not portable, though: Windows says access
+/// denied rather than already-exists where the kind standing there is not the
+/// kind asked for — a directory under `CREATE_NEW`, a file under
+/// `CreateDirectoryW` — so a failure with something at the name is read as the
+/// name being taken. That look is on the failure path alone and is about
+/// something that is already there, so the atomic create is still the whole of
+/// the check and there is no window it opens.
+///
 /// **What comes back is the folder joined to the name**, rather than the path as
 /// it arrived: the viewer joins with a `/` wherever it runs, and a Worktree on
 /// Windows is spelled with a `\`, so an echo would hand the tab a second name for
@@ -455,6 +463,21 @@ pub(crate) fn make(roots: &[FileRoot], path: &Path, making: Making) -> FileMade 
             path: folder.join(name).display().to_string(),
         },
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => FileMade::Taken,
+
+        // And the same refusal where the filesystem worded it as something
+        // else, which is Windows: `CREATE_NEW` over a *directory* and
+        // `CreateDirectoryW` over a *file* both come back as access denied
+        // rather than as already-exists, and [`FileMade::Taken`] promises the
+        // one answer for all four crossings.
+        //
+        // A look rather than a second create, and only on the failure path —
+        // where what it is asking about is something that is already there, so
+        // there is no window for it to be wrong about and the atomic create
+        // above is still the whole of the check. Of the entry rather than of
+        // what it points at, a link standing at the name being something in the
+        // way whatever is at the end of it.
+        Err(_) if std::fs::symlink_metadata(&at).is_ok() => FileMade::Taken,
+
         Err(error) => FileMade::Unwritable {
             why: format!("the server cannot make it: {error}"),
         },
@@ -1672,7 +1695,11 @@ mod tests {
         let worktree = repository(&held.path().join("worktree"));
         std::fs::create_dir(worktree.join("src")).unwrap();
 
-        let at = worktree.join("src/lib.rs");
+        // Segment by segment rather than in one string, so that it is spelled
+        // the way this platform spells a path: what comes back is the folder
+        // joined to the name, and a `/` written into the middle of it here
+        // would be a name only one of the two ever used.
+        let at = worktree.join("src").join("lib.rs");
 
         assert_eq!(
             make(&[root(&worktree)], &at, Making::File),
@@ -1702,9 +1729,11 @@ mod tests {
         let worktree = repository(&held.path().join("worktree"));
         std::fs::create_dir(worktree.join("src")).unwrap();
 
-        // Asked for with a separator that is not this platform's own, which is
-        // what the viewer sends on Windows.
-        let asked = format!("{}/src/lib.rs", worktree.display());
+        // Asked for exactly the way the viewer asks: the folder spelled the way
+        // the root it came from is, with a `/` before the name — which is the
+        // one separator the page ever contributes, and on Windows is not this
+        // platform's own.
+        let asked = format!("{}/lib.rs", worktree.join("src").display());
 
         assert_eq!(
             make(&[root(&worktree)], Path::new(&asked), Making::File),
@@ -1759,14 +1788,56 @@ mod tests {
 
         // And across the two kinds both ways: a file where a folder stands, and
         // a folder where a file does, are one refusal and one thing to do about
-        // it.
+        // it. These two are where Windows words the refusal as access denied
+        // rather than as already-exists, and where the look on the failure path
+        // reads it back as what it is.
         assert_eq!(
             make(&roots, &worktree.join("src"), Making::File),
             FileMade::Taken
         );
+        assert!(
+            worktree.join("src").is_dir(),
+            "the folder is still a folder"
+        );
+
         assert_eq!(
             make(&roots, &worktree.join("README.md"), Making::Folder),
             FileMade::Taken
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "# a repository\n",
+            "and the file is still the file"
+        );
+    }
+
+    /// And a making that failed with *nothing* at the name is still the
+    /// sentence about a disk rather than a name already taken — which is the
+    /// bound on the look above, the one that reads a refusal Windows worded
+    /// another way.
+    #[test]
+    #[cfg(unix)]
+    fn a_making_that_failed_over_nothing_says_why_rather_than_taken() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let shut = worktree.join("shut");
+
+        std::fs::create_dir(&shut).unwrap();
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let made = make(&[root(&worktree)], &shut.join("mine.rs"), Making::File);
+
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Root writes whatever the mode says and CI runs as somebody, so the
+        // making is allowed to have landed. What it must never be is `Taken`:
+        // there was no name taken, and telling the human to pick another one
+        // would send them round a loop that has nothing at the end of it.
+        assert!(
+            matches!(made, FileMade::Unwritable { .. } | FileMade::Made { .. }),
+            "a folder that takes no writes answers why, got {made:?}"
         );
     }
 
@@ -1927,8 +1998,11 @@ mod tests {
         std::fs::write(worktree.join("src/lib.rs"), "").unwrap();
 
         // Asked for with a separator that is not this platform's own, which is
-        // what the viewer sends on Windows.
-        let asked = format!("{}/src/lib.rs", worktree.display());
+        // what a path arriving from a page may carry: the answer is the folder
+        // as it was spelled with the new name joined onto it the way this
+        // platform joins, so the tab and the next listing's row are the one
+        // string.
+        let asked = format!("{}/lib.rs", worktree.join("src").display());
 
         assert_eq!(
             rename(&[root(&worktree)], Path::new(&asked), "main.rs"),
