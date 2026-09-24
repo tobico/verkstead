@@ -234,6 +234,9 @@ pub mod unseen;
 mod updates;
 mod viewer;
 mod waiting;
+/// Following the disk: the watcher a Code pane's attachment runs over the
+/// Worktrees it is drawn on, and the `files` Nudge it announces them moving as.
+mod watchers;
 mod worktrees;
 mod wrapping;
 
@@ -306,6 +309,13 @@ pub(crate) struct AppState {
     /// a Conversation has one session and may have any number of terminals, and
     /// what runs on one is the human rather than an agent.
     terminals: terminals::Terminals,
+
+    /// And which Conversations have a Code pane attached, with the watcher the
+    /// first attachment on each started — see [`watchers`]. A register beside
+    /// the terminals' for the terminals' reason: a Conversation may be drawn in
+    /// any number of panes, and what the watcher turns on is whether it is
+    /// drawn in any.
+    watchers: watchers::Watchers,
 
     /// The watcher each Conversation's latest pick armed — see [`followers`].
     /// Beside the sessions rather than inside them, because a watcher is a task
@@ -934,6 +944,7 @@ fn routed(
         waits: Waits::new(),
         sessions,
         terminals: terminals::Terminals::new(),
+        watchers: watchers::Watchers::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         signals: done::Signals::new(),

@@ -41,6 +41,8 @@ import marks from "../src/workbench/Mark.module.css";
 import outputPane from "../src/workbench/Output.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
+// And the tree of the Code pane, whose roots are what a `files` Nudge reads back.
+import tree from "../src/workbench/Tree.module.css";
 // The panes themselves, for the one an Event is opened into.
 import shell from "../src/Panes.module.css";
 import { drawn } from "./bench";
@@ -54,6 +56,7 @@ import {
 } from "./serving";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
+import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import drafting from "./fixtures/conversation.json" with { type: "json" };
@@ -69,6 +72,12 @@ import answering from "./fixtures/set-answering.json" with { type: "json" };
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
+
+/// And the editor, for the one test below that opens Code: what is asked there
+/// is which reads a `files` Nudge causes, never what Monaco drew — so nothing
+/// here mounts twenty-three megabytes of it in a jsdom with no layout. See
+/// `tests/editing.ts`, which `workbench.test.tsx` stands the same seam in.
+vi.mock("../src/workbench/editing", () => import("./editing"));
 
 /// The Conversation the human is looking at, with a session's Question Sets on
 /// its Timeline — which is where a Set arrives now that there is no list of
@@ -532,6 +541,12 @@ const ABOUT: Record<string, readonly string[]> = {
   transcript: [],
   screen: [OPENED],
   commit: [OPENED],
+  // The one kind that is only ever about a pane that happens to be open: a file
+  // written in a worktree moves no record at all — no Event, no Timeline row,
+  // nothing in the sidebar — so none of the five moves for it, and neither does
+  // the conversation itself. What it does move is the Code pane's tree, asked
+  // about where that is drawn in the test after this sweep.
+  files: [],
   set: [OPENED, SIDEBAR],
   liveness: [OPENED],
   conversation: [OPENED, SIDEBAR],
@@ -614,6 +629,67 @@ describe("what a Nudge is about", () => {
         expect(askedFor(fetching, path), path).toBe(before[at]! + 1);
       }),
     );
+  });
+
+  /// The worktrees moving, asked about where the pane that follows them is
+  /// drawn: Code, whose tree stands on the roots this kind reads back
+  /// (ADR 0019, *Following the disk*).
+  ///
+  /// Its own test rather than a row of the sweep, for the two above's reason:
+  /// the sweep opens a conversation and stops at its timeline, and nothing
+  /// there is drawn over a worktree's files.
+  ///
+  /// The tree's roots alone here — a root that appeared or went — which is what
+  /// the page has to read again before it can read anything inside one. The
+  /// folders it has expanded and the files it has open join this row as the
+  /// pane learns to follow them.
+  it("reads the Code pane's roots back where its tree is drawing them", async () => {
+    const roots = `/api/ui/conversations/${CONVERSATION.id}/files/roots`;
+
+    // The pane holds a socket open for as long as it is drawn, which is what
+    // runs the watcher this Nudge comes from — and jsdom would dial a real one.
+    const opened: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          opened.push(url);
+        }
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        close(): void {}
+      },
+    );
+
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}/code`);
+    const fetching = serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(`${OPENED}/terminals`, json({ live: [] })),
+      whenever(roots, json(codeRoots)),
+    );
+    const { container } = render(() => <App />);
+
+    // Drawn once the tree has its roots, which is the reading this is about.
+    await waitFor(() => {
+      const drawn = container.querySelectorAll(`.${tree.repo}`);
+      if (drawn.length !== codeRoots.roots.length) {
+        throw new Error("the tree has not drawn its roots");
+      }
+    });
+    stream().opens();
+    const before = askedFor(fetching, roots);
+
+    stream().nudges({ kind: "files", conversation: CONVERSATION.id });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() => expect(askedFor(fetching, roots)).toBe(before + 1));
+
+    // And the pane really did say it was drawn, which is the other half of the
+    // same arrangement: a Nudge of this kind only ever arrives because of it.
+    expect(
+      opened.some((url) => url.endsWith(`${OPENED}/files/attach`)),
+    ).toBe(true);
   });
 
   /// The Agent Profiles, asked about where one is drawn: a draft's setup, whose

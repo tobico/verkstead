@@ -225,6 +225,23 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
         ["conversation", String(moved.conversation)],
       ];
 
+    // The Worktrees moved: something wrote, made, or took a file away, and the
+    // Code pane's watcher said so (ADR 0019, *Following the disk*).
+    //
+    // The tree's roots and nothing else yet — a root that appeared or went, in
+    // a reading that costs a row apiece and disturbs nothing that is open. What
+    // is *inside* them is the folders the tree has expanded and the files the
+    // pane has open, and those come to this row as the pane learns to follow
+    // them.
+    //
+    // Nothing above the pane is here on purpose. A file written in a Worktree
+    // moves no record at all: there is no Event for it, no Timeline row and
+    // nothing in the sidebar, and a commit that *would* move those is the
+    // `commit` kind above. This is the one kind that is only ever about a pane
+    // that happens to be open.
+    case "files":
+      return [["file-roots", moved.conversation]];
+
     // A Set arrived, was answered, or was closed: the Set itself, the Timeline
     // Event standing for it, and the sidebar row, whose *waiting on you* mark
     // is exactly this.

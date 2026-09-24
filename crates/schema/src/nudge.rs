@@ -35,6 +35,20 @@ pub enum Nudge {
     /// A commit landed on a Conversation's branch.
     Commit { conversation: i64 },
 
+    /// The Worktrees of a Conversation moved: something wrote, made, or took a
+    /// file away.
+    ///
+    /// The one kind that comes off the disk rather than off a record — a
+    /// watcher the server runs while a Code pane is attached to the
+    /// Conversation and not otherwise (ADR-0019, *Following the disk*). An
+    /// agent writing, a build filling a folder, a terminal tab checking out a
+    /// branch: each of them moves the Worktree under a pane that is drawing it.
+    ///
+    /// What it does not say is *what* moved, and deliberately: the page re-reads
+    /// the folders it has expanded and the files it has open, and a re-read is
+    /// cheap because a folder is one listing and a version is one hash.
+    Files { conversation: i64 },
+
     /// A Question Set in a Conversation arrived, was answered, or was closed
     /// unanswered.
     Set { conversation: i64 },

@@ -410,6 +410,7 @@ import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import {
   closeTerminal,
+  filesSocket,
   listTerminals,
   openTerminal,
   readFile,
@@ -779,6 +780,30 @@ export function Code(props: {
   }));
 
   onCleanup(() => held.removeQueries({ queryKey: holding(), exact: true }));
+
+  // And the word to the server that this pane is drawn, which is the whole of
+  // how the disk is followed (ADR 0019, *Following the disk*): the server
+  // watches this Conversation's worktrees while a Code pane is attached and not
+  // otherwise, and what says one is, is a socket held open for as long as it
+  // stands.
+  //
+  // Nothing travels either way and nothing is drawn about it. What moving on
+  // disk comes to is a `files` Nudge down the stream every other change comes
+  // down, and the re-reads it stands for are `nudge.ts`'s — so a watcher that
+  // never started costs this pane a tree that does not follow rather than
+  // anything to say.
+  //
+  // Held open rather than asked for and renewed, the way a terminal tab holds
+  // its attach: it dies with the tab whatever becomes of the browser, so a
+  // laptop shut mid-edit stops the watcher without anybody having to notice.
+  // And let go of on the way out, which is a details pane swapped for an Event
+  // as much as it is one closed — the server waits a moment for the pane to
+  // come back before it stops anything, so a swap costs no watcher.
+  createEffect(() => {
+    const attached = new WebSocket(filesSocket(props.conversation.id));
+
+    onCleanup(() => attached.close());
+  });
 
   // And the editor, fetched because this pane is open and for no other reason
   // (ADR 0019, *Monaco, whole*). Here rather than in the tab that will want it,

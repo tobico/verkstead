@@ -583,6 +583,19 @@ export function listFileRoots(id: number): Promise<FileRootsView> {
   return get<FileRootsView>(`/api/ui/conversations/${id}/files/roots`);
 }
 
+/// And where a Code pane says it is drawn: a socket it holds open for as long
+/// as it is, which is what runs the server's watcher over those worktrees
+/// (ADR 0019, *Following the disk*).
+///
+/// Nothing travels either way. What the pane hears about the disk is a `files`
+/// Nudge down the stream every other change comes down; what this is for is
+/// being *open*, the way a terminal tab's attach is — it dies with the tab
+/// whatever becomes of the browser, so a laptop shut mid-edit stops the watcher
+/// without anybody having to notice.
+export function filesSocket(id: number): string {
+  return socketAt(`/api/ui/conversations/${id}/files/attach`);
+}
+
 /// And what one folder of one of them holds.
 ///
 /// One folder per ask and never a walk — the shape a path field browses with,

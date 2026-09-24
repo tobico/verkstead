@@ -5924,10 +5924,25 @@ class Attached {
   }
 }
 
+/// What the Code pane's own attachment is dialled at: the socket it holds open
+/// for as long as it is drawn, which is what runs the server's watcher over the
+/// worktrees it is showing (ADR 0019, *Following the disk*).
+///
+/// Nothing is drawn or said about it, so no test below is about it save the one
+/// that is — and it is a socket, so every count of them has to leave it out.
+const FILES_ATTACH = "/files/attach";
+
+/// Every socket opened onto a *screen* — a session's or a terminal's — which is
+/// what the counts here are about. The pane's own attachment is not one of
+/// them: it carries nothing and stands for no tab.
+function screens(): Attached[] {
+  return Attached.opened.filter((one) => !one.url.endsWith(FILES_ATTACH));
+}
+
 /// Wait for the page to have attached, and hand back the socket it opened.
 function attached(): Promise<Attached> {
   return waitFor(() => {
-    const socket = Attached.opened[0];
+    const socket = screens()[0];
     if (!socket) {
       throw new Error("nothing has attached to a screen");
     }
@@ -18007,6 +18022,79 @@ describe("the way into the code pane", () => {
   });
 });
 
+describe("the code pane saying it is drawn", () => {
+  /// The whole of how the disk is followed: the server watches a conversation's
+  /// worktrees while a Code pane is attached to it and not otherwise, and what
+  /// says one is, is a socket held open for as long as the pane stands
+  /// (ADR 0019, *Following the disk*).
+  ///
+  /// Held open rather than asked for and renewed, the way a terminal tab holds
+  /// its attach — so it dies with the tab whatever becomes of the browser.
+  function pane(): Attached[] {
+    return Attached.opened.filter((one) => one.url.endsWith(FILES_ATTACH));
+  }
+
+  it("holds a socket open on the conversation for as long as it is drawn", async () => {
+    withTerminals([]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+
+    const attached = await waitFor(() => {
+      const [one] = pane();
+      if (!one) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return one;
+    });
+
+    expect(attached.url.startsWith("ws://")).toBe(true);
+    expect(
+      attached.url.endsWith(
+        `/api/ui/conversations/${GRILLING.id}/files/attach`,
+      ),
+    ).toBe(true);
+
+    // And nothing goes up it: what the pane hears about the disk is a Nudge
+    // down the stream every other change comes down, and this is open rather
+    // than spoken through.
+    expect(attached.sent).toEqual([]);
+    expect(attached.closed).toBe(false);
+  });
+
+  /// And it lets it go on the way out, which is what stops the watcher. A pane
+  /// swapped for an Event is this too — the server waits a moment for the pane
+  /// to come back before it stops anything, so a swap costs no watcher.
+  it("lets the socket go when the pane is taken down", async () => {
+    withTerminals([]);
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    const [attached] = await waitFor(() => {
+      const open = pane();
+      if (open.length === 0) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return open;
+    });
+
+    unmount();
+
+    await waitFor(() => expect(attached!.closed).toBe(true));
+  });
+
+  /// And a pane that never opened says nothing: the watcher is on demand, and a
+  /// conversation nobody has opened Code on costs the server no watch.
+  it("says nothing at all where the pane was never opened", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${shell.middlePane} .${timeline.agentOutput}`);
+
+    expect(pane()).toHaveLength(0);
+  });
+});
+
 describe("a conversation's terminal in the code pane", () => {
   /// The server holds the shell, so the pane is the way back to it rather than
   /// where it lives: a reload attaches to what is already running instead of
@@ -18073,7 +18161,7 @@ describe("a conversation's terminal in the code pane", () => {
           String(path) === TERMINALS_OF_IT && init?.method === "POST",
       ),
     ).toHaveLength(0);
-    expect(Attached.opened).toHaveLength(0);
+    expect(screens()).toHaveLength(0);
 
     // And the press in the empty state is what opens one.
     fireEvent.click(nothing.querySelector("button")!);
@@ -18283,7 +18371,7 @@ describe("a conversation's terminal in the code pane", () => {
       ).toHaveLength(1),
     );
 
-    expect(Attached.opened).toHaveLength(0);
+    expect(screens()).toHaveLength(0);
   });
 
   /// And every other refusal has a sentence of its own, because each is a
@@ -18399,7 +18487,7 @@ describe("the code pane's tabs", () => {
       ["true", "false", "false"],
     );
 
-    await waitFor(() => expect(Attached.opened).toHaveLength(3));
+    await waitFor(() => expect(screens()).toHaveLength(3));
     expect(windows(container).map((window) => window.hidden)).toEqual([
       false,
       true,
@@ -18867,7 +18955,7 @@ describe("the code pane's tabs", () => {
 
       // And nothing asked for another.
       expect(asked(fetching)).toBe(1);
-      expect(Attached.opened).toHaveLength(1);
+      expect(screens()).toHaveLength(1);
 
       // New terminal is a press, and it replaces the tab that was only there to
       // say why.
@@ -18909,7 +18997,7 @@ describe("the code pane's tabs", () => {
       );
 
       expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Terminal"]);
-      expect(Attached.opened).toHaveLength(0);
+      expect(screens()).toHaveLength(0);
       expect(asked(fetching)).toBe(1);
 
       // And New terminal asks again, which is the one thing that does: the
@@ -23497,7 +23585,7 @@ describe("the code pane's groups", () => {
       await split(container, tabs(container)[0]!, "Split right");
 
       await waitFor(() => expect(groups(container)).toHaveLength(2));
-      await waitFor(() => expect(Attached.opened).toHaveLength(3));
+      await waitFor(() => expect(screens()).toHaveLength(3));
 
       // The one grid on the page: a terminal has none until its first repaint,
       // and terminal 2's is the only socket that has been painted.
@@ -23516,7 +23604,7 @@ describe("the code pane's groups", () => {
 
       // No fourth socket, and the third one still open: the box the grid is in
       // was moved rather than made again.
-      expect(Attached.opened).toHaveLength(3);
+      expect(screens()).toHaveLength(3);
       expect(socket.closed).toBe(false);
 
       // The very grid that was in the group it came from, in the group it

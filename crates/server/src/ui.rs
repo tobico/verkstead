@@ -238,6 +238,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // scoped, the roots being that Conversation's checkouts and nothing
         // else's — see [`crate::files`].
         .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
+        // And the one that reads nothing at all: the socket a Code pane holds
+        // open for as long as it is drawn, which is how it says it is attached
+        // — and what runs the watcher behind the `files` Nudge while one is
+        // (ADR 0019, *Following the disk*) — see [`crate::watchers`].
+        //
+        // Beside the files it is about rather than beside the terminals' own
+        // attach, though it is the same gesture: what it turns on is the tree
+        // and the editors following the disk, and the terminals are the other
+        // half of this pane.
+        .route(
+            "/api/ui/conversations/{id}/files/attach",
+            get(crate::watchers::attach),
+        )
         .route("/api/ui/conversations/{id}/files/folder", get(folder))
         // And the one that answers about no folder in particular: every root's
         // files at once, which is what the quick-open palette matches over — see
@@ -5514,7 +5527,7 @@ fn no_such_set(id: &str) -> HttpResponse {
 
 /// There is no such Conversation to read. Worded like the Set's, and for the
 /// same reason: what was asked for is what a typed URL held.
-fn no_such_conversation(id: &str) -> HttpResponse {
+pub(crate) fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Conversation {id}")),
@@ -5621,7 +5634,7 @@ fn no_such_pull_request() -> HttpResponse {
     )
 }
 
-fn unavailable(message: &str) -> HttpResponse {
+pub(crate) fn unavailable(message: &str) -> HttpResponse {
     refused(StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(message))
 }
 
