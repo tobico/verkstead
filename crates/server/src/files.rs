@@ -82,6 +82,13 @@
 //! bound to measure: what it answers *is* the paths, and a root git will not
 //! answer about has none.
 //!
+//! **And the watcher is told which directories to watch** — see [`watchable`]:
+//! every non-ignored directory of a root, walked by the same ignore rules the
+//! tree hides by, so that what follows the disk for the pane follows the part of
+//! it the pane draws. The one reading here that is a walk, and it is one because
+//! the platform's watcher takes a watch per directory and a `target/` would
+//! spend a machine's whole allowance on rows nobody can see.
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -93,7 +100,7 @@
 //! 04 tells the page the disk has moved.
 
 use std::collections::HashSet;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -207,7 +214,8 @@ pub(crate) fn folder(roots: &[FileRoot], path: &Path) -> FolderListing {
         })
         .collect();
 
-    let ignored = ignored(root, &entries);
+    let asking: Vec<String> = entries.iter().map(asked_about).collect();
+    let ignored = ignored(root, &asking);
     entries.retain(|entry| !ignored.contains(&asked_about(entry)));
     ordered(&mut entries);
 
@@ -774,6 +782,101 @@ fn listed(root: &FileRoot) -> FileList {
 /// meets it says so rather than quietly matching over half a checkout.
 pub(crate) const MAX_LISTED: usize = 10_000;
 
+/// The directories of `root` a watcher of it watches: `from` and every
+/// non-ignored directory under it, `from` first and the rest breadth-first.
+///
+/// Blocking: one `read_dir` per directory it goes into, and one run of
+/// `check-ignore` per level it goes down.
+///
+/// **Ignore-aware, because the alternative exhausts the machine**
+/// ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Following the disk*).
+/// The recommended watcher on Linux takes an inotify watch per directory, so a
+/// recursive watch over a Rust `target/` would spend a machine's whole allowance
+/// on files nobody can see. What is left out here is what the tree already hides
+/// — git's own answer through [`ignored`], and `.git` by name — so a pane is
+/// told about the rows it draws and about nothing else.
+///
+/// **A level at a time rather than a directory at a time**, which is what keeps
+/// the git runs down to the depth of a checkout rather than the width of it: a
+/// level's directories are read, every subdirectory of the lot is asked about in
+/// one `check-ignore`, and what survives is the next level. An ignored directory
+/// is never opened at all, which is why a checkout carrying a `target/` of a
+/// hundred thousand files is walked in a moment.
+///
+/// **A root git will not answer about is walked whole**, the way the tree lists
+/// one whole — see [`ignored`], where that falls out. What it costs is a build
+/// directory watched in a directory that was no checkout.
+///
+/// **Links are not followed.** A directory reached through one is either in this
+/// walk already under its own name or outside the root altogether, so following
+/// one would be a way out of the Worktree and a way round in a circle.
+///
+/// **And `from` is where a walk after the first starts.** A directory made after
+/// the watcher started is watched without anything being restarted, and what is
+/// walked for it is the directory and whatever arrived inside it — a whole tree
+/// moved in being one event and any number of directories.
+///
+/// At most `most` of them, which is what the watcher asking has left of the
+/// machine's allowance — see [`crate::watchers::MAX_WATCHED`], where the bound
+/// is and where the reason for one is.
+pub(crate) fn watchable(root: &Path, from: &Path, most: usize) -> Vec<PathBuf> {
+    if most == 0 || inside_git(root, from) || !from.is_dir() {
+        return Vec::new();
+    }
+
+    // The root is watched whatever git says about its own top — which is
+    // nothing, a repository not ignoring itself. Anything below one is asked.
+    let asked = spelled_as_a_folder(from);
+
+    if from != root && ignored(root, std::slice::from_ref(&asked)).contains(&asked) {
+        return Vec::new();
+    }
+
+    let mut watchable = vec![from.to_owned()];
+    let mut level = vec![from.to_owned()];
+
+    while !level.is_empty() && watchable.len() < most {
+        let mut below: Vec<PathBuf> = level.iter().flat_map(|at| folders_in(at)).collect();
+
+        let asking: Vec<String> = below.iter().map(|at| spelled_as_a_folder(at)).collect();
+        let ignored = ignored(root, &asking);
+
+        below.retain(|at| !ignored.contains(&spelled_as_a_folder(at)));
+        below.truncate(most - watchable.len());
+
+        watchable.extend_from_slice(&below);
+        level = below;
+    }
+
+    watchable
+}
+
+/// The directories `at` holds, spelled the way `at` is.
+///
+/// Of the entries themselves rather than of what they point at — see
+/// [`watchable`], where the links are — and `.git` is not among them however it
+/// got there. An entry that will not read is left out, and so is one whose name
+/// is not UTF-8: the tree leaves both out of a listing, and git cannot be asked
+/// about a path that will not spell.
+fn folders_in(at: &Path) -> Vec<PathBuf> {
+    let Ok(reading) = std::fs::read_dir(at) else {
+        return Vec::new();
+    };
+
+    reading
+        .filter_map(|read| {
+            let read = read.ok()?;
+            let name = read.file_name().to_str()?.to_owned();
+
+            if name == GIT || !read.file_type().ok()?.is_dir() {
+                return None;
+            }
+
+            Some(at.join(name))
+        })
+        .collect()
+}
+
 /// Whether something is at `onto` that is not `real` itself.
 ///
 /// The look a rename does for a name already taken. Of the entry rather than of
@@ -999,14 +1102,16 @@ fn inside_git(root: &Path, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Which of `entries` git says are ignored in `root`, as the paths they were
-/// asked about by.
+/// Which of the paths in `asking` git says are ignored in `root`, spelled the
+/// way they were asked about — see [`asked_about`] and
+/// [`spelled_as_a_folder`], which is how a caller spells them.
 ///
-/// One run of `check-ignore` for the whole folder, with the paths fed in on
-/// stdin: what comes back is the ignored ones, and a folder of ten thousand
+/// One run of `check-ignore` for the whole of the asking, with the paths fed in
+/// on stdin: what comes back is the ignored ones, and a folder of ten thousand
 /// rows is still one process. Which is why the paths go in on stdin rather than
 /// as arguments — a folder wide enough to be worth reading this way is a folder
-/// wide enough to overrun a command line.
+/// wide enough to overrun a command line. [`watchable`] asks a level of the
+/// walk at a time for the same reason, and pays the same one process for it.
 ///
 /// **Git rather than a reimplementation.** What a checkout ignores is its own
 /// `.gitignore` files at every level, the repository's `info/exclude` and the
@@ -1019,19 +1124,16 @@ fn inside_git(root: &Path, path: &Path) -> bool {
 /// is not a repository, a repository mid-rebase — ignores nothing, so the
 /// folder lists whole. What that costs is a `target/` drawn in the tree of a
 /// checkout that was not a checkout, and what a refusal would cost is the tree.
-fn ignored(root: &Path, entries: &[FolderEntry]) -> HashSet<String> {
-    if entries.is_empty() {
+fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
+    let asked: String = asking.iter().map(|ask| format!("{ask}\0")).collect();
+
+    if asked.is_empty() {
         return HashSet::new();
     }
 
-    let asking: String = entries
-        .iter()
-        .map(|entry| format!("{}\0", asked_about(entry)))
-        .collect();
-
     // Exit 1 is the ordinary "nothing here is ignored" rather than a failure —
     // see [`crate::repos::feeding`], which is where the codes are read.
-    feeding(root, &["check-ignore", "-z", "--stdin"], &asking, &[0, 1])
+    feeding(root, &["check-ignore", "-z", "--stdin"], &asked, &[0, 1])
         .unwrap_or_default()
         .split('\0')
         .filter(|path| !path.is_empty())
@@ -1047,9 +1149,15 @@ fn ignored(root: &Path, entries: &[FolderEntry]) -> HashSet<String> {
 /// spelled the way it was asked, which is what lets the two be matched up.
 fn asked_about(entry: &FolderEntry) -> String {
     match entry.folder {
-        true => format!("{}/", entry.path),
+        true => spelled_as_a_folder(Path::new(&entry.path)),
         false => entry.path.clone(),
     }
+}
+
+/// And how a directory on its own is spelled to git, which is the spelling
+/// [`watchable`] asks by — everything it asks about being one.
+fn spelled_as_a_folder(path: &Path) -> String {
+    format!("{}/", path.display())
 }
 
 /// Folders first, then by name — the browse's order, which is what the eye
@@ -1068,6 +1176,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::watchers::MAX_WATCHED;
 
     /// A root at `path`, writable and the Conversation's own, which is what
     /// nearly every test here wants: what a root *says* is the roots endpoint's
@@ -2475,5 +2584,160 @@ mod tests {
         let listed = list(&[root(&worktree)]);
 
         assert!(!listed.roots[0].cut);
+    }
+
+    /// What the watcher is given: every non-ignored directory of the root, the
+    /// root itself first, and neither `.git` nor what git ignores among them.
+    #[test]
+    fn the_walk_is_every_directory_the_tree_would_draw() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        for at in ["src/deep/deeper", "docs", "target/debug/build", "src/logs"] {
+            std::fs::create_dir_all(worktree.join(at)).unwrap();
+        }
+
+        assert_eq!(
+            walked(&worktree, &worktree),
+            [
+                "",
+                "docs",
+                "src",
+                "src/deep",
+                "src/deep/deeper",
+                // `*.log` is a rule about files, and a directory called `logs`
+                // is not one of them.
+                "src/logs",
+            ],
+        );
+    }
+
+    /// And a walk from a directory that has just appeared is that directory and
+    /// what arrived inside it, which is how a `mkdir` in a terminal comes to be
+    /// watched without anything being restarted.
+    #[test]
+    fn a_walk_from_a_directory_that_appeared_is_it_and_what_is_under_it() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("made/inside")).unwrap();
+
+        assert_eq!(
+            walked(&worktree, &worktree.join("made")),
+            ["made", "made/inside"],
+        );
+    }
+
+    /// An ignored directory is nothing to walk from either: a build making its
+    /// own `target/` is a directory that appeared, and the answer about it is the
+    /// answer the tree gives.
+    #[test]
+    fn an_ignored_directory_is_walked_from_nowhere() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+
+        assert_eq!(
+            walked(&worktree, &worktree.join("target")),
+            Vec::<String>::new()
+        );
+
+        // And neither is the git directory, whatever asked about it.
+        assert_eq!(
+            walked(&worktree, &worktree.join(".git")),
+            Vec::<String>::new()
+        );
+
+        // Nor a directory that is not there at all, which is what a rename leaves
+        // behind at the name it moved off.
+        assert_eq!(
+            walked(&worktree, &worktree.join("gone")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// A root git will not answer about is walked whole, the way the tree lists
+    /// one whole: what a refusal would cost is the watch.
+    #[test]
+    fn a_root_git_will_not_answer_about_is_walked_whole() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = held.path().join("worktree");
+        std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+
+        assert_eq!(walked(&worktree, &worktree), ["", "target", "target/debug"]);
+    }
+
+    /// And the walk is bounded, because the watch behind it is: what the watcher
+    /// has left of its allowance is what it asks for, and a checkout wider than
+    /// that is cut rather than refused.
+    #[test]
+    fn the_walk_stops_where_the_allowance_does() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        for at in ["one", "two", "three"] {
+            std::fs::create_dir(worktree.join(at)).unwrap();
+        }
+
+        assert_eq!(watchable(&worktree, &worktree, 3).len(), 3);
+
+        // And nothing at all where there is nothing left of it, which is the
+        // walk a watcher already at its cap asks for.
+        assert_eq!(walked(&worktree, &worktree), ["", "one", "three", "two"]);
+        assert_eq!(watchable(&worktree, &worktree, 0), Vec::<PathBuf>::new());
+    }
+
+    /// A checkout carrying a large ignored directory is walked in a moment,
+    /// because an ignored directory is never opened at all.
+    ///
+    /// The number here is a thousand directories nobody should look inside, and
+    /// what the walk pays for them is one `check-ignore` answer about the one
+    /// directory above them. A second is a hundred times what that takes and is
+    /// the claim the stage makes, so the measurement is of the right thing and
+    /// nowhere near the wire.
+    #[test]
+    fn a_large_ignored_directory_is_walked_past_in_a_moment() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        for at in 0..1_000 {
+            std::fs::create_dir_all(worktree.join(format!("target/debug/{at}"))).unwrap();
+        }
+
+        std::fs::create_dir(worktree.join("src")).unwrap();
+
+        let started = std::time::Instant::now();
+        let walked = walked(&worktree, &worktree);
+
+        assert_eq!(walked, ["", "src"]);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "walking past an ignored directory took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The walk of `from` in `root`, as the paths under the root rather than as
+    /// the whole of them, sorted so that the reading is of what is watched rather
+    /// than of the order a filesystem happened to hand back.
+    fn walked(root: &Path, from: &Path) -> Vec<String> {
+        let mut walked: Vec<String> = watchable(root, from, MAX_WATCHED)
+            .iter()
+            .map(|at| {
+                at.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+
+        // Where it started first, and the rest by name: what the walk promises
+        // about its order is breadth-first, which is neither.
+        if let Some(rest) = walked.get_mut(1..) {
+            rest.sort();
+        }
+
+        walked
     }
 }

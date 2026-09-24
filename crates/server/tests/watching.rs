@@ -18,6 +18,13 @@
 //! because the events they are about come off the kernel on a thread of their
 //! own — a paused runtime would run the clock out before the disk had said
 //! anything.
+//!
+//! **And nothing here waits out the walk.** The roots are watched before the
+//! walk goes down them and the walk is finished before anything at all is
+//! announced, so a file written at the top and heard about is the whole of the
+//! Worktree being watched — which is what `following` below is, and what every
+//! test past the first of them starts from. A length of time waited instead
+//! would be a number to guess at and a test to re-guess it on a loaded machine.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -457,4 +464,241 @@ async fn a_conversation_that_is_not_there_is_refused() {
         dialled.is_err(),
         "a Conversation that is not there should have no attachment to take"
     );
+}
+
+/// A folder made in a Worktree, the way a terminal tab makes one, and every
+/// folder above it.
+fn made(worktree: &Path, under: &str) {
+    std::fs::create_dir_all(worktree.join(under)).unwrap();
+}
+
+/// A Code pane drawn and a page listening, with the walk of the Worktree behind
+/// it already done.
+///
+/// The roots are watched before the walk goes down them and the walk is finished
+/// before anything at all is announced, so a file written at the top and heard
+/// about is the whole of the Worktree being watched by the time the Nudge
+/// arrives. Which is why nothing here waits out a length of time: what the
+/// waiting is for is the walk, and the Nudge is the walk saying it is over.
+async fn following(
+    app: &Router,
+    at: SocketAddr,
+    conversation: i64,
+    worktree: &Path,
+) -> (Pane, Listening) {
+    let pane = Pane::drawn(at, conversation).await;
+    let mut page = Listening::open(app).await;
+
+    wrote(worktree, "walked");
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+
+    // And anything that write was still being announced as, drained before
+    // whatever this was setting up for.
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    (pane, page)
+}
+
+/// A file written three levels down in a Worktree produces one `files` Nudge:
+/// the watch is the whole of the checkout rather than the top of it.
+#[tokio::test]
+async fn a_file_written_three_levels_down_reaches_the_page() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    // Made before the pane attached, so what this reads is the walk rather than
+    // a folder being noticed as it appeared — that is its own test below.
+    made(&worktree, "crates/server/src");
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    wrote(&worktree, "crates/server/src/files.rs");
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        vec![Nudge::Files { conversation }],
+        "a file written three levels down should be one Nudge"
+    );
+
+    drop(pane);
+}
+
+/// And a build filling an ignored directory reaches nobody: what a `cargo build`
+/// writes is thousands of files under a `target/` the tree does not draw, and
+/// nothing inside it is watched at all.
+///
+/// The directory is made *after* the pane attached, which is the harder half:
+/// a directory that appeared is walked from where it appeared, and this one is
+/// one the walk is to refuse.
+#[tokio::test]
+async fn a_build_filling_an_ignored_directory_reaches_nobody() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    std::fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    // The build makes its own directory, which is the Worktree moving and is
+    // announced — and is the last thing about it anybody hears.
+    made(&worktree, "target/debug/deps");
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    for each in 0..500 {
+        wrote(&worktree, &format!("target/debug/deps/{each}.o"));
+    }
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        Vec::new(),
+        "nothing inside an ignored directory should be watched"
+    );
+
+    drop(pane);
+}
+
+/// A folder made after the watcher started is watched, without anything being
+/// restarted: the making is one Nudge, and a file written in it is another.
+#[tokio::test]
+async fn a_folder_made_after_the_watcher_started_is_watched() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    // Two levels at once, the way `mkdir -p` makes them: the folder below the
+    // one that appeared is inside the same making and is never announced on its
+    // own, so it is watched by the walk from the folder above it or not at all.
+    made(&worktree, "made/deeper");
+
+    // The Nudge is sent after the burst has been caught up with, so a folder the
+    // page has just been told about is one the next write in it is heard from.
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    wrote(&worktree, "made/deeper/notes.md");
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        vec![Nudge::Files { conversation }],
+        "a folder made after the watcher started should be watched"
+    );
+
+    drop(pane);
+}
+
+/// A commit made in a terminal tab reaches the page, and so does a checkout.
+///
+/// Neither touches a file of the Worktree: what moves is the index and HEAD of
+/// the repository's insides, which is why those two are watched and why a
+/// Worktree's are found by asking git where its git directory is — a linked
+/// worktree's `.git` is a file pointing at the repository's `worktrees/<name>`,
+/// and it is that index a commit made here rewrites.
+#[tokio::test]
+async fn a_commit_and_a_checkout_in_a_terminal_reach_the_page() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    // Written and staged before the pane attached, so that what the page hears
+    // below is the commit rather than the writing or the staging.
+    wrote(&worktree, "notes.md");
+    git(&worktree, &["add", "notes.md"]);
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    // A commit made on a branch rewrites the index without moving HEAD, so the
+    // index is the one that catches it.
+    git(&worktree, &["commit", "-m", "notes"]);
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Files { conversation },
+        "a commit clears the marks without touching a file, so the page has to hear it"
+    );
+
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    // And HEAD is what catches a checkout — a branch made at the commit it is
+    // already on moves nothing else at all.
+    git(&worktree, &["checkout", "-b", "elsewhere"]);
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Files { conversation },
+        "a checkout moves HEAD, so the page has to hear that too"
+    );
+
+    drop(pane);
+}
+
+/// And a read of a Worktree is not the Worktree moving — neither the walk's own
+/// nor the human's.
+///
+/// A watched directory says so when a file in it is so much as opened, and the
+/// walk a new folder asks for runs a git per level that opens the `.gitignore`
+/// of each one it passes. Counted as movement, a walk would announce itself, the
+/// announcement would be walked, and a Code pane sitting on a Worktree nobody
+/// was touching would nudge for ever.
+#[tokio::test]
+async fn reading_a_worktree_is_not_the_worktree_moving() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    // The walk's own reading: one Nudge for the folder that was made, and not a
+    // word about the git that walked it.
+    made(&worktree, "made");
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        vec![Nudge::Files { conversation }],
+        "a folder made should be one Nudge, the walk it asks for included"
+    );
+
+    // And the human's, which is a file opened in the editor.
+    std::fs::read(worktree.join("README.md")).unwrap();
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        Vec::new(),
+        "a file read should be nothing at all"
+    );
+
+    drop(pane);
+}
+
+/// And a folder taken away and made again at the same name is watched again.
+///
+/// The kernel drops a watch with the directory it was on, so a watcher that went
+/// on believing it held this one would leave the name watched by nobody: the
+/// folder would be drawn by the tree and nothing written in it would ever reach
+/// the page.
+#[tokio::test]
+async fn a_folder_taken_away_and_made_again_is_watched_again() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    made(&worktree, "src");
+
+    let (pane, mut page) = following(&app, at, conversation, &worktree).await;
+
+    std::fs::remove_dir_all(worktree.join("src")).unwrap();
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    made(&worktree, "src");
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+    let _ = page.heard(Duration::from_millis(100)).await;
+
+    wrote(&worktree, "src/lib.rs");
+
+    assert_eq!(
+        page.heard(SETTLING).await,
+        vec![Nudge::Files { conversation }],
+        "a folder made again at a name that was watched should be watched again"
+    );
+
+    drop(pane);
 }

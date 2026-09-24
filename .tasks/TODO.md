@@ -18,7 +18,7 @@ Roadmap stage: [04: Following the disk](docs/roadmaps/code-pane/04-following-the
 ## Tasks
 
 - [x] 01: The kind and the attachment — [details](01-the-kind-and-the-attachment.md)
-- [ ] 02: The watcher walks the Worktree — [details](02-walking-the-worktree.md)
+- [x] 02: The watcher walks the Worktree — [details](02-walking-the-worktree.md)
 - [ ] 03: The tree follows — [details](03-the-tree-follows.md)
 - [ ] 04: Editors follow — [details](04-editors-follow.md)
 - [ ] 05: Git marks — [details](05-git-marks.md)
