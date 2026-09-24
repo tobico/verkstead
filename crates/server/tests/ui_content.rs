@@ -3237,6 +3237,26 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And what the quick-open palette matches over: every root of that same
+    // Conversation, with git's own list of what each holds under it.
+    //
+    // The same two checkouts, read the same way — a real `git ls-files` rather
+    // than a made-up list, because what this fixture is pinning is which files
+    // are in the answer: the tracked and the untracked-not-ignored, and nothing
+    // out of the `target/` the checkout has been building in.
+    write(
+        "code-files.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!("/api/ui/conversations/{coding}/files/list"),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
     // And what a file pressed in that tree opens as: the two kinds that carry
     // content — text, which is what the editor draws, and a picture, which is
     // previewed in its tab.
@@ -3327,6 +3347,42 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )
         .await,
     );
+
+    // And what the tree draws its marks from: what git says about every root of
+    // that Conversation, folded so that a folder wears the strongest mark of
+    // anything under it (ADR 0019, *The tree*).
+    //
+    // Last of the Code fixtures, because it is the one that reads what the ones
+    // before it *did*: the save above really wrote `Cargo.toml`, and the
+    // untracked files of that checkout are really untracked. A tracked file is
+    // edited here first so that the fixture carries one of each mark — the whole
+    // of what a tree tells apart — which no hand-written payload could have
+    // arrived at, git's own account of a checkout being the entire subject.
+    std::fs::write(
+        code_root.join("worktrees/verkstead-code-pane/README.md"),
+        "# verkstead\n\nEdited beside the tree.\n",
+    )
+    .unwrap();
+
+    write(
+        "code-status.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!("/api/ui/conversations/{coding}/files/status"),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    // And no fixture for a file or a folder made out of a row's menu, for the
+    // refused save's reason and one of its own: what a making answers with is
+    // the path it was asked at, so the payload is a path the test that drives
+    // the tree has already typed — a pinned one would be a second answer about
+    // where the checkout of *this* machine's fixtures is, and the refusals are
+    // each a word and the sentence the field draws from it.
 
     // And what the Remote access section reads: what this machine's Tailscale
     // is doing. One fixture per state the pane draws differently, because each

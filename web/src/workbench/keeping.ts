@@ -14,12 +14,39 @@
 //! Conversation, because every one of these is: a file is a path in a Worktree,
 //! and a terminal is a number in one Conversation's register.
 //!
-//! **In the page rather than on the device**, which is this stage's half of it.
-//! Stage 02 of the roadmap puts the same thing in the browser's storage so that
-//! a reload comes back to it as well (ADR 0019, *Tabs and groups*); what is
-//! here survives the swap and nothing further. What it does do about a reload
-//! is warn before one: a page holding text nobody has saved says so on the way
-//! out, the browser's own way — see [`unsaved`].
+//! **The layout is here too**, which is where the tabs are: the tree of splits
+//! with a group of tabs at every leaf, and which of those groups was last
+//! pressed into — see [`./layout`]. How somebody divided the pane is as much
+//! theirs as what they opened in it, and a swap to an Event and back that came
+//! back undivided would be that work thrown away with the rest.
+//!
+//! **The buffers are here too**, which is the one thing in this list that is
+//! not simply the human's doing (ADR 0019, *Tabs and groups*). A Monaco model
+//! is registered at the file's own address and the package refuses a second one
+//! there, so a buffer made by the editor drawing it could never be the buffer a
+//! second editor of the same file was drawn over — and one text under two views
+//! is what a file open in two groups has to be. Made when a file is first
+//! opened and disposed when its last view closes; everything that reads or
+//! writes the text — the dot, Ctrl+S, **Reload** — goes through [`Buffer`]
+//! rather than through a string beside it.
+//!
+//! **And on the device as well**, which is what carries it through a reload —
+//! see [`./remembering`]. What is here is what survives a swap; what is written
+//! down there is the layout, each group's tabs and the one it is showing, and
+//! the text of every buffer the disk has not got, per Conversation in the
+//! browser's own storage (ADR 0019, *Tabs and groups*). So a keeping is made
+//! out of whatever this device was last holding rather than empty, and goes on
+//! writing itself down as it moves.
+//!
+//! The readings are not written down with it. What a file says is the disk's to
+//! answer and a page coming back asks it afresh, the human's restored text
+//! going over the top of what comes back — see `Code.tsx`. Which is what brings
+//! a *deleted* file's tab back as well: the read answers that the file is
+//! missing, the device hands over the text it kept, and the tab is drawn as gone
+//! with that text in it rather than as a refusal to read. A page holding text
+//! nobody has saved still warns before it goes, the browser's own way, because
+//! storage is a convenience the whole way down and a browser that refuses it
+//! would otherwise lose that text without a word — see [`unsaved`].
 //!
 //! The terminals are the exception inside the exception. A tab is kept, and the
 //! shell under it is not this page's to keep: the register is the server's, and
@@ -27,16 +54,33 @@
 //! So the pane reads the register on every opening and settles its tabs against
 //! it — see `Code.tsx`.
 
-import { createSignal, type Accessor, type Setter } from "solid-js";
+import {
+  createSignal,
+  getOwner,
+  runWithOwner,
+  type Accessor,
+  type Setter,
+} from "solid-js";
 
 import type { FileReading, FolderListing } from "../api/types";
+import { load, type Model } from "./editing";
+import { group as made, type Group, type Layout } from "./layout";
+import { recalled, remembered, remembering, revived } from "./remembering";
 
-/// One tab of the group: a terminal by the number the server issued it, or a
+/// One tab of a group: a terminal by the number the server issued it, or a
 /// file by its path.
 ///
 /// Two shapes rather than one with a kind beside it, because the two are named
 /// by different things and nothing ever has to ask a tab what it is without
 /// then using the answer.
+///
+/// **And one of these objects is one view.** It stands in exactly one group,
+/// the pane draws exactly one box for it, and that box travels with it when it
+/// is dragged into another group — which is what keeps a terminal's socket and
+/// an editor's caret through the move. So the same file open in two groups is
+/// two of these rather than one in both, and what says they are two views of
+/// the one thing is what is *in* them: a path, or a number. See `copied` in
+/// `Code.tsx`, which is what a split makes the second one with.
 export type Tab = { terminal: number } | { file: string };
 
 /// What a file's last save came to, where it came to anything the tab draws.
@@ -47,26 +91,114 @@ export type Tab = { terminal: number } | { file: string };
 /// and nothing ever asks which one it is holding without then using the answer.
 export type Bar = "moved" | { why: string };
 
+/// One open file's buffer: the text the human is typing into.
+///
+/// The model is Monaco's own, and is where the text, the undo stack and the
+/// language all are. It is made at `Uri.file(<the path>)`, which is the whole
+/// of how a file is coloured — the package registered every extension when it
+/// registered every language, so a `.rs` file is Rust because Monaco says it is
+/// — and it is that address that makes there be exactly one of these per file.
+///
+/// **The signal beside it is what this side reads.** A model is not reactive,
+/// so a dot that asked one for its text would be drawn once and never again;
+/// what keeps the two in step is the model's own change event, which is the
+/// only thing that writes the signal. So the model is where the text *is* and
+/// the signal is how anything here asks what it says.
+export interface Buffer {
+  /// The model, which is what an editor is opened over.
+  model: Model;
+
+  /// The text as it stands, followed: what the dot on the tab, Ctrl+S and the
+  /// warning on the way out of the page all compare against the reading.
+  text: Accessor<string>;
+
+  /// And text put in from somewhere that is not an editor: **Reload**, and the
+  /// disk moving under a tab nobody has typed into. The disk's text, into a
+  /// buffer the human may still be reading — every view of the file shows it,
+  /// there being one buffer under them.
+  ///
+  /// Only where the two have come apart. Writing a model what it already says
+  /// would cost the caret and the undo stack of every view of it, and **Reload**
+  /// on a file the agent moved back to what it was is a press that should come
+  /// to nothing.
+  ///
+  /// **And only the part of it that moved** — see [`written`]. An agent's edit
+  /// arrives under somebody who is reading the file and nobody asked for it
+  /// (ADR 0019, *Following the disk*), so what is written is the lines that
+  /// differ rather than the file: the caret stays where it was, the undo stack
+  /// stands, and a scrolled view does not jump to the top.
+  put: (text: string) => void;
+}
+
 /// Everything one Conversation has open in Code.
 ///
 /// The pane's own signals, made out here instead of in it. Handed over whole
 /// rather than read through an accessor apiece: what the pane does with them is
 /// what it did when they were its own.
 export interface Kept {
-  /// Every tab there is, in the order they were opened — files and terminals
-  /// alike, in the one order, because they are the one bar.
-  tabs: Accessor<Tab[]>;
-  setTabs: Setter<Tab[]>;
+  /// How the pane is divided: the tree of splits, with a group of tabs at
+  /// every leaf — see [`./layout`]. The one thing the pane draws from, which
+  /// is what the flat list of tabs and the single record of which one was
+  /// showing became.
+  layout: Accessor<Layout>;
+  setLayout: Setter<Layout>;
+
+  /// The group last pressed into, by its id: where a file pressed in the tree
+  /// opens, where a new terminal lands, and what Ctrl+S is a save of.
+  active: Accessor<number>;
+  setActive: Setter<number>;
+
+  /// A group with nothing in it, which is what a split puts beside or below
+  /// the one it was made from. The id is this keeping's own count and is never
+  /// reused, so it names one group for as long as the page stands.
+  group: () => Group;
 
   /// What each open file came back as: the text and its version, the picture,
   /// or the line saying why there is nothing to draw.
   readings: Accessor<Record<string, FileReading>>;
   setReadings: Setter<Record<string, FileReading>>;
 
-  /// And the buffer behind each: the text as it stands in the editor, which
-  /// starts as what was read and is what the human types into.
-  buffers: Accessor<Record<string, string>>;
-  setBuffers: Setter<Record<string, string>>;
+  /// And the buffer behind each: the text as it stands, which starts as what
+  /// was read and is what the human types into. One per open file path, however
+  /// many views of it there are — see [`Buffer`].
+  buffers: Accessor<Record<string, Buffer>>;
+
+  /// Open a file's buffer at what the disk said, or — where the file already
+  /// has one — put that text into it, which is what **Reload** does.
+  ///
+  /// The one way a buffer is ever made. Monaco is fetched first, so nothing is
+  /// here the moment this is called and a file let go of before the chunk lands
+  /// gets no buffer at all; a chunk that never arrives is the line the editor
+  /// draws in place of itself, and this has nothing to add to it.
+  hold: (path: string, text: string) => void;
+
+  /// And let one go, which disposes the model.
+  ///
+  /// Called when a file's last view closes, because the address is Monaco's own
+  /// register: a model left in it is a file that could never be opened again.
+  release: (path: string) => void;
+
+  /// Move what this device is holding for a file onto another path.
+  ///
+  /// What a rename does to a tab whose read has not landed yet: the buffer is
+  /// re-made at the new path by the pane, and the text the device came back
+  /// holding is what that read will put into it — so a rename in the seconds
+  /// after a reload would otherwise leave that text waiting under a path
+  /// nothing is going to ask about again.
+  ///
+  /// Nothing at all for a file this device is holding no text for, which is
+  /// nearly every one of them.
+  carry: (from: string, to: string) => void;
+
+  /// The text this device was holding for a file when the page last went, where
+  /// it is still holding it.
+  ///
+  /// Asked by the read that happens *because* the tab came back, which is the
+  /// one read that puts the human's text over what the disk says now (see
+  /// `Code.tsx`). It goes when that text reaches a buffer, or when the file is
+  /// let go of — so a **Reload** pressed afterwards is the disk, and a read that
+  /// never landed leaves the text where the device can still be holding it.
+  recall: (path: string) => string | undefined;
 
   /// Which folders of the tree are open, and what each of them last read.
   ///
@@ -88,10 +220,6 @@ export interface Kept {
   /// anything.
   titles: Accessor<Record<number, string>>;
   setTitles: Setter<Record<number, string>>;
-
-  /// Which tab the human turned to, where they have turned to one — by its key.
-  chosen: Accessor<string | undefined>;
-  setChosen: Setter<string | undefined>;
 
   /// And what each open file's save last came to, where it came to anything to
   /// draw.
@@ -129,6 +257,16 @@ export interface Keeping {
 export function keeping(): Keeping {
   const kept = new Map<number, Kept>();
 
+  /// Whose the effects that write a keeping down belong to: this page, rather
+  /// than whatever happened to be drawing when the keeping was first asked for.
+  ///
+  /// A keeping is made the first time a Conversation's Code is drawn, which is
+  /// inside the details pane — and that pane is taken down the moment somebody
+  /// opens an Event. An effect owned by it would go with it, so a device would
+  /// stop writing down anything that happened after the first swap. This owner
+  /// is the page's own, and lasts as long as the keeping does.
+  const page = getOwner();
+
   const of = (conversation: number): Kept => {
     const already = kept.get(conversation);
 
@@ -136,10 +274,12 @@ export function keeping(): Keeping {
       return already;
     }
 
-    const opened = empty();
-    kept.set(conversation, opened);
+    const make = (): Kept => opened(conversation);
+    const held = page === null ? make() : runWithOwner(page, make)!;
 
-    return opened;
+    kept.set(conversation, held);
+
+    return held;
   };
 
   const unsaved = (): boolean =>
@@ -150,42 +290,271 @@ export function keeping(): Keeping {
   return { of, unsaved };
 }
 
-/// One Conversation's, with nothing open in it yet.
-function empty(): Kept {
-  const [tabs, setTabs] = createSignal<Tab[]>([]);
+/// One Conversation's, as this device last left it — and with nothing open in
+/// it where this device has never opened anything.
+///
+/// The layout, the tabs and the text come off the browser's storage, which is
+/// what makes a reload come back to the splits (see [`./remembering`]). What
+/// does not is the readings: the pane reads every restored file afresh and puts
+/// the human's text over the top of it, so a file that moved while the page was
+/// away is dirty against what is really there.
+function opened(conversation: number): Kept {
+  /// What this device was last holding, where it was holding anything: the tree
+  /// with its groups made again, and which of them was active.
+  const restored = remembered(conversation);
+  const came = restored === null ? null : revived(restored);
+
+  /// And the text it had typed into each file and not saved, by path.
+  ///
+  /// Each entry stands until there is a buffer to answer for that file — which
+  /// is what the read restoring the tab makes — or until the file is let go of,
+  /// and is what the device goes on holding in the meantime.
+  const recalling = recalled(conversation);
+
+  /// What the next group is called. Counted up and never reused, so a group
+  /// closed and another opened are two groups rather than one name meaning two
+  /// things — and a restored layout takes up above the highest id in it, so a
+  /// group made after the reload answers to nothing that came back.
+  let groups = came?.last ?? 0;
+
+  const group = (): Group => made((groups += 1));
+
+  // Where the pane starts: what came back, or — where nothing did — undivided,
+  // which is one group with nothing in it. A split is something the human asks
+  // for, and the group it is asked of is this one.
+  const began =
+    came ??
+    (() => {
+      const first = group();
+
+      return { layout: { group: first } as Layout, active: first.id };
+    })();
+
+  const [layout, setLayout] = createSignal<Layout>(began.layout);
+  const [active, setActive] = createSignal(began.active);
   const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
-  const [buffers, setBuffers] = createSignal<Record<string, string>>({});
+  const [buffers, setBuffers] = createSignal<Record<string, Buffer>>({});
   const [expanded, setExpanded] = createSignal<Record<string, FolderListing>>(
     {},
   );
   const [over, setOver] = createSignal<Record<number, string>>({});
   const [titles, setTitles] = createSignal<Record<number, string>>({});
-  const [chosen, setChosen] = createSignal<string | undefined>();
   const [bars, setBars] = createSignal<Record<string, Bar>>({});
 
   let refusals = 0;
 
-  return {
-    tabs,
-    setTabs,
+  /// Which paths a buffer is wanted for, which is what a chunk that lands after
+  /// the tab has gone is checked against: the fetch is a promise, and a file
+  /// closed while it was in flight would otherwise be a model registered at an
+  /// address nothing is ever going to dispose.
+  const wanted = new Set<string>();
+
+  const hold = (path: string, text: string): void => {
+    const already = buffers()[path];
+
+    if (already !== undefined) {
+      already.put(text);
+      return;
+    }
+
+    wanted.add(path);
+
+    void load()
+      .then((monaco) => {
+        if (!wanted.has(path) || buffers()[path] !== undefined) {
+          return;
+        }
+
+        const model = monaco.editor.createModel(
+          text,
+          undefined,
+          monaco.Uri.file(path),
+        );
+        const [held, setHeld] = createSignal(text);
+
+        // The one thing that writes the signal: every edit, wherever it was
+        // typed, arrives here — which is how two views of one file wear the one
+        // dot. Disposed with the model, Monaco's listeners being the model's.
+        model.onDidChangeContent(() => setHeld(model.getValue()));
+
+        const put = (next: string): void => written(model, next);
+
+        setBuffers((was) => ({ ...was, [path]: { model, text: held, put } }));
+      })
+      // A chunk that never arrived is a tab with no editor in it, which is what
+      // `Editor.tsx` says in words. Nothing to add to it from here.
+      .catch(() => {});
+  };
+
+  const release = (path: string): void => {
+    wanted.delete(path);
+
+    // And a file let go of is one nothing is holding text for: what came off
+    // the device with it goes rather than waiting for a tab that is not coming
+    // back.
+    delete recalling[path];
+
+    const buffer = buffers()[path];
+
+    if (buffer === undefined) {
+      return;
+    }
+
+    buffer.model.dispose();
+    setBuffers((was) => {
+      const rest = { ...was };
+      delete rest[path];
+      return rest;
+    });
+  };
+
+  /// What this device was holding for this file when the page went, where it is
+  /// still holding it: the read that restores a tab is the one read that wants
+  /// it, and every read after that is somebody asking for the disk.
+  const recall = (path: string): string | undefined => recalling[path];
+
+  /// And the same text moved onto another path, which is what a rename does to
+  /// a tab whose read has not landed yet.
+  const carry = (from: string, to: string): void => {
+    const held = recalling[from];
+
+    if (held === undefined) {
+      return;
+    }
+
+    delete recalling[from];
+    recalling[to] = held;
+  };
+
+  const kept: Kept = {
+    layout,
+    setLayout,
+    active,
+    setActive,
+    group,
     readings,
     setReadings,
     buffers,
-    setBuffers,
+    hold,
+    release,
+    recall,
+    carry,
     expanded,
     setExpanded,
     over,
     setOver,
     titles,
     setTitles,
-    chosen,
-    setChosen,
     bars,
     setBars,
     saving: new Set<string>(),
     askedAt: new Map<number, number>(),
     refuse: () => (refusals -= 1),
   };
+
+  // And from here it writes itself down as it moves, which is what a reload
+  // comes back to — the layout as the tree says it, and the text of every
+  // buffer the disk has not got. Asked of [`dirty`] rather than compared here,
+  // so that what the device keeps and what the dot on a tab means are the one
+  // idea.
+  //
+  // **Over whatever has no buffer to answer for it yet**, which is a page that
+  // has only just loaded: the files are being read, Monaco is on its way, and
+  // there is not a buffer among them. What came off the device is written back
+  // as it came until one of them arrives, so a second reload before any of that
+  // lands — or a read that never lands at all — comes back to the same text
+  // rather than to a key this page emptied while it was getting ready.
+  remembering(conversation, {
+    layout,
+    active,
+    unsaved: () => {
+      const live = kept.buffers();
+
+      return {
+        ...Object.fromEntries(
+          Object.entries(recalling).filter(
+            ([path]) => live[path] === undefined,
+          ),
+        ),
+        ...Object.fromEntries(
+          Object.keys(live)
+            .filter((path) => dirty(kept, path))
+            .map((path) => [path, live[path]!.text()]),
+        ),
+      };
+    },
+  });
+
+  return kept;
+}
+
+/// Put text into a model from outside any editor, writing only the part of it
+/// that moved.
+///
+/// What [`Buffer::put`] is, and the whole of how an edit nobody asked for
+/// arrives gently. `setValue` would be the obvious call and is the wrong one:
+/// Monaco treats it as the buffer being replaced, so every view of the file
+/// loses its undo stack and has its caret put back at the first character —
+/// which is fine for a file being opened and not for the agent rewriting a
+/// function at the foot of a file somebody is reading at the top of.
+///
+/// So what goes in is one edit over the middle: the head the two texts share
+/// and the tail they share are left exactly as they are, and what is between
+/// them is replaced. A caret before the change does not move at all, one after
+/// it travels with the text, and the undo stack takes it as an edit like any
+/// other — so Ctrl+Z after a reload is what it was before it, one step back.
+///
+/// Nothing at all where the two say the same thing, which is what makes
+/// **Reload** on a file the agent moved back to what it was a press that comes
+/// to nothing.
+function written(model: Model, next: string): void {
+  const was = model.getValue();
+
+  if (was === next) {
+    return;
+  }
+
+  /// How much of the front the two share, in characters.
+  let head = 0;
+  const shortest = Math.min(was.length, next.length);
+
+  while (head < shortest && was[head] === next[head]) {
+    head += 1;
+  }
+
+  /// And how much of the back, counted no further than the head: the two halves
+  /// of one text must not overlap, or the edit would be over a range that runs
+  /// backwards.
+  let tail = 0;
+
+  while (
+    tail < shortest - head &&
+    was[was.length - 1 - tail] === next[next.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+
+  const from = model.getPositionAt(head);
+  const to = model.getPositionAt(was.length - tail);
+
+  model.pushEditOperations(
+    // Nothing about where the carets were, and nothing about where they are to
+    // go: this is not a press, so what each view's own caret does is whatever
+    // the edit under it does to it.
+    null,
+    [
+      {
+        range: {
+          startLineNumber: from.lineNumber,
+          startColumn: from.column,
+          endLineNumber: to.lineNumber,
+          endColumn: to.column,
+        },
+        text: next.slice(head, next.length - tail),
+      },
+    ],
+    () => null,
+  );
 }
 
 /// What the disk said about one open file, where what it said was text.
@@ -204,6 +573,22 @@ export function disk(
     : undefined;
 }
 
+/// And whether a file is gone from the disk with its text still open over it.
+///
+/// Which is what a tab left standing over a deleted file is: the reading is the
+/// answer a read of that path gives now, and the buffer is the text as it was —
+/// the only copy of it there is (ADR 0019, *The tree*). `Missing` with no buffer
+/// behind it is the other thing: a file somebody tried to open and could not,
+/// with nothing in its tab to lose.
+///
+/// Kept here rather than in the pane because [`dirty`] below is the one that
+/// asks it, and what the device writes down is what dirty says.
+export function gone(kept: Kept, path: string): boolean {
+  return (
+    kept.readings()[path] === "Missing" && kept.buffers()[path] !== undefined
+  );
+}
+
 /// Whether a file has text in it that is not on the disk.
 ///
 /// The buffer against the reading, which is the whole of what dirty means here:
@@ -211,11 +596,21 @@ export function disk(
 /// buffer is what would be written over it. So a file typed into and typed back
 /// is clean again, which is what VS Code's own dot says too.
 ///
+/// **And a file the disk no longer has at all is dirty**, which is the same idea
+/// read over a reading that is not text: every word of it is in the buffer and
+/// none of it is on the disk. Which is what puts the dot on a deleted file's
+/// tab, what makes the × ask before it throws the text away, and — because this
+/// is what a device writes down — what brings that text back through a reload.
+///
 /// A file with no buffer yet is not dirty: the read is in flight, or what came
 /// back was not text at all, and neither is a tab with something in it to lose.
 export function dirty(kept: Kept, path: string): boolean {
   const read = disk(kept, path);
   const held = kept.buffers()[path];
 
-  return read !== undefined && held !== undefined && held !== read.text;
+  if (held === undefined) {
+    return false;
+  }
+
+  return read === undefined ? gone(kept, path) : held.text() !== read.text;
 }

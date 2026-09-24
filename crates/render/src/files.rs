@@ -1,5 +1,6 @@
 //! The files half of Code: the roots its tree stands on, one folder of one of
-//! them at a time, and one file of one of those opened.
+//! them at a time, one file of one of those opened — and a file or a folder
+//! made in one of them, renamed, or taken away.
 //!
 //! **A root is a Worktree** — the Conversation's own first, then each
 //! companion's in the order the Conversation carries them
@@ -30,6 +31,41 @@
 //! so that the next save lands. Last writer wins was decided against — an
 //! agent's edit silently overwritten by a human who never saw it is exactly
 //! what the version exists to surface.
+//!
+//! **And a row of the tree makes one** — see [`FileMaking`] and [`FileMade`]:
+//! an empty file or a folder, under a folder of a root, named in full. One
+//! refusal of its own, a name that is already taken, and every other one is the
+//! write's said about a path that is not there yet.
+//!
+//! **And renames one** — see [`FileRenaming`] and [`FileRenamed`]: a path in a
+//! root, and the name it is to have. A *name* rather than a path, which is what
+//! keeps a rename inside the root it started in — two roots are two
+//! repositories, and a file taken out of one checkout and put in another is not
+//! a thing a tree gets to do. One refusal of its own beyond the making's: a root
+//! itself, which is a Worktree rather than something in one.
+//!
+//! **And takes one away** — see [`FileDeleting`] and [`FileDeleted`]: a path in
+//! a root, and a folder goes with everything under it. The rename's refusals
+//! said about something that is about to stop being there, a root among them —
+//! and one fewer, there being no name in the request for anything to be taken
+//! by. What asks first is the viewer, the confirm the app puts in front of
+//! whatever cannot be taken back; what is answered here is the press already
+//! made.
+//!
+//! **And the palette matches over all of them at once** — see [`FileListsView`]
+//! and [`FileList`]: git's own list of what each root holds, tracked and
+//! untracked-not-ignored, read afresh every time the palette opens and capped
+//! per root, a root that was cut short saying so. The one reading here that is
+//! not about a path somebody named: what it answers is every path there is to
+//! name.
+//!
+//! **And the rows carry git's account of themselves** — see [`FileStatusView`]
+//! and [`Marked`]: one status read per root, folded so that a folder wears the
+//! strongest mark of anything under it, so what the agent changed is visible
+//! before a diff is (ADR 0019, *The tree*). The second reading here that is
+//! about no path in particular, and the one that is read again on a `commit` as
+//! well as on a `files` Nudge: a commit clears every mark in a Worktree without
+//! touching a file.
 //!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
@@ -357,4 +393,415 @@ pub enum FileWritten {
     /// The server could not write it, and this is why — permissions, a full
     /// disk, or a file that went between the reading and the writing.
     Unwritable { why: String },
+}
+
+/// A file or a folder to be made, named in full.
+///
+/// One field, because a path is the one thing the tree has to say: a row of it
+/// holds the folder it was listed from, and what a human types into the field
+/// under that row is a name joined onto it — which is exactly how
+/// [`FolderEntry::path`] is built, and is why every other endpoint here is
+/// asked by path as well.
+///
+/// What is at the end of that path is what is made, and the folder above it is
+/// the one it is made in: so a Worktree that has gone, a folder that has gone
+/// and a root that takes no writes are all answers about the path's *parent*,
+/// and [`FileMade::Taken`] is the one about its last segment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileMaking {
+    pub path: String,
+}
+
+/// What became of making one.
+///
+/// **A new file is empty and a new folder holds nothing** — there is no
+/// template and no content in the request, because what is being made is a row
+/// in the tree. A file made this way opens as a tab the human then types into
+/// and saves through [`FileWrite`], which is where content has always come
+/// from.
+///
+/// The refusals are [`FileWritten`]'s said about a path that is not there yet,
+/// with one of their own: a name that is already taken. Each of them is a
+/// sentence drawn beside the field the name was typed into rather than a status
+/// code, the way every other answer of this API is
+/// ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The tree*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileMade {
+    /// It is on disk, and this is where — the path as it was asked for, which
+    /// is what the tab a new file opens in is opened at.
+    ///
+    /// Answered back rather than assumed, for [`FolderEntry::path`]'s reason:
+    /// what the tree holds is spelled the way the root it came from is, and a
+    /// path the viewer built for itself out of a resolved one would read as
+    /// somewhere else on a machine whose temporary directory is a symlink.
+    Made { path: String },
+
+    /// Something of that name is already in the folder, and nothing was
+    /// written.
+    ///
+    /// Whatever it is: a file where a folder was asked for, a folder where a
+    /// file was, or a link to either. What the human has to do about it is the
+    /// same in every case — type another name — and a refusal that told them
+    /// which kind of thing is in the way would be telling them about a row the
+    /// tree is already drawing.
+    Taken,
+
+    /// The root it would be in takes no writes: a read-only companion, checked
+    /// out detached and there to be read.
+    ///
+    /// The root's own flag rather than the folder's mode — [`FileWritten::ReadOnly`]'s
+    /// rule, for its reason. The tree draws neither row under such a root, so
+    /// this is the endpoint refusing on its own account rather than anything a
+    /// press can reach.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    ///
+    /// Which is what a path that climbs comes to as well: the name typed into
+    /// the field is joined onto a folder of the tree, and a `..` in it is a
+    /// path spelled out of a root rather than a name.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch.
+    UnderGit,
+
+    /// The Worktree it would be in is no longer on disk.
+    RootGone,
+
+    /// The folder it would go in is not there: deleted, renamed, or committed
+    /// away by a checkout in a terminal beside the tree.
+    Missing,
+
+    /// Something is at the folder it would go in and it is not a folder.
+    NotAFolder,
+
+    /// The server could not make it, and this is why — permissions, a full
+    /// disk, or a folder that went between the check and the making.
+    Unwritable { why: String },
+}
+
+/// Something in a root, renamed: what it is now, and what it is to be called.
+///
+/// **A name rather than a path**, which is the whole of why a rename cannot
+/// cross two roots ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The
+/// tree*). Two roots are two repositories, and a file taken out of one checkout
+/// and put in another is not something the pane has any way to ask for: the
+/// field is drawn over the row, it holds a name, and what the server does with
+/// it is join it onto the folder the row is already in.
+///
+/// So this is [`FileMaking`] split in two. The making carries one path because
+/// what it names is not there yet and the name is the last segment of it; this
+/// carries the path of something that *is* there and the name it is to have,
+/// and a `name` with a separator in it is a path rather than a name — see
+/// [`FileRenamed::Outside`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileRenaming {
+    /// What is being renamed, as the tree has it.
+    pub path: String,
+
+    /// And what it is to be called: one segment, which is what was typed into
+    /// the field drawn over the row.
+    pub name: String,
+}
+
+/// What became of renaming it.
+///
+/// [`FileMade`]'s answers said about a move rather than a making — a name
+/// already taken, a root that takes no writes, a path outside every root, a path
+/// under `.git`, a Worktree that has gone, a path that has — with the one that
+/// is a rename's alone: a root itself, which is a Worktree rather than anything
+/// in one and has no name here to change. What the human knows a root by is the
+/// Repo it is a checkout of, and that is the registry's business rather than the
+/// tree's.
+///
+/// Each of them is a sentence drawn beside the field the name was typed into
+/// rather than a status code, the way every other answer of this API is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileRenamed {
+    /// It has moved, and this is where — the folder it was already in with the
+    /// new name joined on.
+    ///
+    /// Answered back rather than assumed, for [`FileMade::Made`]'s reason: what
+    /// the tree holds is spelled the way the root it came from is, and a viewer
+    /// that joined with a `/` on a machine whose paths use a `\` would be
+    /// handing the tab a second name for the one file.
+    ///
+    /// **And it is what every open tab follows.** A tab at the old path is
+    /// retitled and re-keyed onto this one, and a folder renamed carries
+    /// everything under it — see `Code.tsx`, where that is done.
+    Renamed { path: String },
+
+    /// Something of that name is already in the folder, and nothing moved.
+    ///
+    /// Whatever it is, for [`FileMade::Taken`]'s reason: what the human does
+    /// about it is type another name in every case.
+    ///
+    /// Not what the thing being renamed is: a name that differs from the one it
+    /// has only in its case is a rename this allows, a filesystem that does not
+    /// tell two cases apart being the one place where a thing is standing in its
+    /// own way.
+    Taken,
+
+    /// It is a root, which is a Worktree rather than something in one.
+    ///
+    /// The refusal that is a rename's alone. The tree offers no Rename row on a
+    /// root, so this is the endpoint refusing on its own account — and a root
+    /// renamed would be a Worktree moved out from under the session working in
+    /// it, which is not something a file tree gets to do.
+    IsRoot,
+
+    /// The root it is in takes no writes: a read-only companion, checked out
+    /// detached and there to be read.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    ///
+    /// Which is what a name that is not a name comes to as well: a `name` with a
+    /// separator in it, or one spelled `..`, is a path out of the folder the row
+    /// is in rather than something to call the row — and the one thing this
+    /// endpoint will not do is move anything between two roots.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch —
+    /// asked of what it is now and of what it would be called both, a name
+    /// spelled `.git` being the one way past the first.
+    UnderGit,
+
+    /// The Worktree it is in is no longer on disk.
+    RootGone,
+
+    /// The root is there and this is not: deleted, renamed, or committed away by
+    /// a checkout in a terminal beside the tree.
+    Missing,
+
+    /// The server could not move it, and this is why — permissions, a folder
+    /// that is not empty where one is being moved over, or a path that went
+    /// between the check and the move.
+    Unwritable { why: String },
+}
+
+/// Something in a root, taken away.
+///
+/// One field, [`FileMaking`]'s: a path is the whole of what the tree has to
+/// say, and what is at the end of it is the filesystem's business rather than
+/// the request's — a file and a folder go the same way, and a folder takes
+/// everything under it (ADR 0019, *The tree*).
+///
+/// **There is no confirm in here.** The card that asks goes up before the press
+/// is made, in the viewer, the way the app asks about every other thing that
+/// cannot be taken back — so a request that arrives has been asked about, and
+/// one confirm covers a folder's whole contents rather than one per file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileDeleting {
+    pub path: String,
+}
+
+/// What became of taking it away.
+///
+/// [`FileRenamed`]'s answers said about something that is about to stop being
+/// there, less the one about a name: nothing is named here, so nothing can be
+/// taken and nothing can be spelled as a path. What is left is the bound, the
+/// root's own flag, and the one that is a root's alone — a Worktree is not
+/// something a file tree deletes, whatever the tree would be left drawing.
+///
+/// **It lands or it does not**, so the word that says it landed carries
+/// nothing: the row goes from the tree, the folder above it is read again, and
+/// every open tab of that path is a tab this side already knows about. Where
+/// [`FileRenamed::Renamed`] has a path to answer with, this has the path it was
+/// asked by.
+///
+/// Each refusal is a sentence in front of the human rather than a status code,
+/// the way every other answer of this API is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileDeleted {
+    /// It is off the disk, and a folder's contents went with it.
+    Deleted,
+
+    /// It is a root, which is a Worktree rather than something in one.
+    ///
+    /// [`FileRenamed::IsRoot`]'s refusal, and a deletion's is the harder of the
+    /// two: a Worktree deleted is the session's own ground taken out from under
+    /// it, and what a Worktree is unmade by is the Conversation that made it.
+    /// The tree offers no Delete row on a root, so this is the endpoint refusing
+    /// on its own account.
+    IsRoot,
+
+    /// The root it is in takes no writes: a read-only companion, checked out
+    /// detached and there to be read.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch.
+    UnderGit,
+
+    /// The Worktree it is in is no longer on disk.
+    RootGone,
+
+    /// It is not there: deleted already, renamed, or committed away by a
+    /// checkout in a terminal beside the tree.
+    ///
+    /// Which is the one refusal a human may well want to read as the thing
+    /// having happened — it is gone either way — and is still worth telling
+    /// apart: a row the tree drew over something that was not there is a tree
+    /// that has been stale since before the press.
+    Missing,
+
+    /// The server could not take it away, and this is why — permissions, a file
+    /// held open on Windows, or a folder that grew a file between the walk and
+    /// the removal.
+    Unwritable { why: String },
+}
+
+/// Every root's files, which is what the quick-open palette matches over.
+///
+/// One ask answers the whole Conversation — a list per root, under the root it
+/// belongs to — because what the palette offers is every file the human could
+/// open and two roots can hold the same path (ADR 0019, *The tree*). The order
+/// is [`FileRootsView`]'s: the Conversation's own first, then each companion's.
+///
+/// **Read afresh every time the palette opens.** There is no watcher until the
+/// stage after this one, and a list read once would go stale the first time the
+/// agent wrote anything — a palette offering a file that has gone, and never
+/// offering one that has arrived.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileListsView {
+    pub roots: Vec<FileList>,
+}
+
+/// One root's, which is git's own list of what is in it.
+///
+/// **What git tracks, plus what it does not track and does not ignore** — the
+/// same account of what a repository holds that the folder listing takes its
+/// ignores from, asked here as the whole list rather than one folder at a time.
+/// A root git will not answer about — no git on the machine, a Worktree that has
+/// gone, a directory that is not a repository — has no files here at all, which
+/// is that reading's own rule read the other way up: git's answer *is* the
+/// list, so no answer is no list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileList {
+    /// The Repo's name, which is what a row of the palette says it is in: a
+    /// path alone would not say which checkout it was a path in.
+    pub repo: String,
+
+    /// And the root itself, which is what the part of a path under it is cut
+    /// off the front of — the tree's own reading of a row's name, made on a
+    /// palette row instead.
+    pub path: String,
+
+    /// The files, each spelled in full the way the root is.
+    ///
+    /// In full rather than as the part under the root, so that a file opened
+    /// from here is the same path — the same string — the tree would have
+    /// opened: a Worktree on Windows is spelled with a `\`, and a path the page
+    /// joined with a `/` would be a second name for one file, which is two
+    /// buffers and two tabs (see [`FolderEntry::path`], which is the same join
+    /// made for the same reason).
+    pub files: Vec<String>,
+
+    /// And whether the list was cut short of everything this root holds.
+    ///
+    /// A monorepo answers with a few hundred thousand paths and none of them
+    /// would be read on a page, so a root is capped — and a root that was cut
+    /// says so, because a palette quietly matching over half a checkout is a
+    /// palette that says a file is not there.
+    pub cut: bool,
+}
+
+/// What git says about every root of the Conversation, folded into the marks
+/// the tree draws.
+///
+/// One ask answers the whole Conversation, a reading per root under the root it
+/// belongs to — [`FileListsView`]'s shape, for its reason: the tree draws every
+/// root at once, and two roots can hold the same path (ADR 0019, *The tree*).
+///
+/// **Its own reading rather than a field on a folder listing**, which is what a
+/// commit is the argument for: a commit made in a terminal clears every mark in
+/// the Worktree without touching a file, so nothing about any folder has moved
+/// and every mark has changed. Read again on a `files` Nudge and on a `commit`,
+/// which is the one thing on this wire that two kinds both stand for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileStatusView {
+    pub roots: Vec<FileStatus>,
+}
+
+/// One root's, which is git's own account of what has moved in it.
+///
+/// **A root git will not answer about is marked nothing**, the way it is listed
+/// nothing by [`FileList`]: git's answer *is* the marks, so no answer is no
+/// marks — and a tree whose rows are drawn unmarked is a tree, where one that
+/// refused to draw would be a checkout the human cannot read because the
+/// machine has no git on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileStatus {
+    /// The Repo's name, which is what the root's own row is called — carried
+    /// for the palette's reason, a reading per root being a reading of
+    /// something the human knows by the repository it is a checkout of.
+    pub repo: String,
+
+    /// And the root itself, spelled the way the roots listing spells it.
+    pub path: String,
+
+    /// What is marked in it, each path spelled in full the way the root is —
+    /// the join the folder listing makes, so that a mark and the row it is
+    /// about are the same string (see [`FolderEntry::path`]).
+    ///
+    /// **Folders are in here too.** A folder carries the strongest mark of
+    /// anything under it, folded up from each marked file to the root itself,
+    /// so that a change deep in a tree shows on the row above it before
+    /// anybody expands one — and so that the tree can draw a row by looking its
+    /// path up rather than by scanning every mark for one under it.
+    ///
+    /// By path, which is the order a `BTreeMap` folded them in rather than
+    /// anything the tree reads: a row is drawn from its own path.
+    pub marks: Vec<FileMark>,
+}
+
+/// One marked path, and what the mark is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileMark {
+    pub path: String,
+    pub mark: Marked,
+}
+
+/// The two marks a tree has any use for.
+///
+/// **Two rather than git's own dozen.** What a row of a tree can say is that
+/// something here is not what was committed, and the one distinction worth
+/// drawing inside that is whether git has ever seen the file at all: a modified
+/// file is an edit to read, and an untracked one may be something that should
+/// never have been written. Staged and unstaged are the same news to a tree —
+/// the file is not what the commit says — and which of them it is is the Diff's
+/// to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Marked {
+    /// Git has never seen it: a file written beside the work rather than a
+    /// change to it.
+    ///
+    /// First of the two, which is what makes the derived order the strength
+    /// order — see [`FileStatus::marks`], where the fold is.
+    Untracked,
+
+    /// Tracked, and not what the commit says — staged or not, which is the
+    /// Diff's distinction rather than the tree's.
+    ///
+    /// **The stronger of the two**, and so what a folder holding one of each
+    /// carries. The mark is there so that what changed is visible before a diff
+    /// is, and an untracked file is already visible by being a row that was not
+    /// there before; a change inside a tracked file is the one that cannot be
+    /// seen without it.
+    Changed,
 }

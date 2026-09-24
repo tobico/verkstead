@@ -41,6 +41,9 @@ import marks from "../src/workbench/Mark.module.css";
 import outputPane from "../src/workbench/Output.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
+// And the tree of the Code pane, whose roots and marks are what a `files` Nudge
+// reads back.
+import tree from "../src/workbench/Tree.module.css";
 // The panes themselves, for the one an Event is opened into.
 import shell from "../src/Panes.module.css";
 import { drawn } from "./bench";
@@ -52,8 +55,11 @@ import {
   serving,
   whenever,
 } from "./serving";
+import { Streaming, stream, streaming } from "./streaming";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
+import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
+import codeStatus from "./fixtures/code-status.json" with { type: "json" };
 import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import drafting from "./fixtures/conversation.json" with { type: "json" };
@@ -69,6 +75,12 @@ import answering from "./fixtures/set-answering.json" with { type: "json" };
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
+
+/// And the editor, for the one test below that opens Code: what is asked there
+/// is which reads a `files` Nudge causes, never what Monaco drew — so nothing
+/// here mounts twenty-three megabytes of it in a jsdom with no layout. See
+/// `tests/editing.ts`, which `workbench.test.tsx` stands the same seam in.
+vi.mock("../src/workbench/editing", () => import("./editing"));
 
 /// The Conversation the human is looking at, with a session's Question Sets on
 /// its Timeline — which is where a Set arrives now that there is no list of
@@ -182,65 +194,6 @@ const SET_ARRIVED: Nudge = {
   conversation: CONVERSATION.id,
 };
 
-/// A stand-in for the browser's `EventSource`, which jsdom has none of — and
-/// which a test would want its own of anyway, having no other way to put a
-/// Nudge on the wire or to sever the connection carrying it.
-class Streaming {
-  /// Every stream the app has opened, newest last.
-  static opened: Streaming[] = [];
-
-  private readonly listeners = new Map<string, Array<(event: Event) => void>>();
-  closed = false;
-
-  constructor(readonly url: string) {
-    Streaming.opened.push(this);
-  }
-
-  addEventListener(name: string, listener: (event: Event) => void): void {
-    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  /// What the browser does when the connection is established — on the first
-  /// one and on every reconnect after it, which is the whole of how a page
-  /// finds out it was away.
-  opens(): void {
-    this.fire("open");
-  }
-
-  /// One Nudge, as the server writes it: a named event whose data says what
-  /// moved. `said` is passed through untouched, so a test may put something
-  /// down the wire that no page could read.
-  nudges(said: unknown = SET_ARRIVED): void {
-    const data = typeof said === "string" ? said : JSON.stringify(said);
-
-    for (const listener of this.listeners.get("nudge") ?? []) {
-      listener(new MessageEvent("nudge", { data }));
-    }
-  }
-
-  private fire(name: string): void {
-    for (const listener of this.listeners.get(name) ?? []) {
-      listener(new Event(name));
-    }
-  }
-}
-
-/// The stream the app opened, newest first — which is the one it is listening
-/// on. There is one at a time and not one per app: the connection is given back
-/// whenever the page is hidden and taken again when it is looked at, so a page
-/// that has been away has opened more than one over its life.
-function stream(): Streaming {
-  const opened = Streaming.opened.at(-1);
-  if (!opened) {
-    throw new Error("the app opened no stream");
-  }
-  return opened;
-}
-
 /// A stand-in for `navigator.serviceWorker`, the page's end of the relay, which
 /// jsdom has none of either.
 class Container {
@@ -319,8 +272,7 @@ function away(state: "visible" | "hidden"): void {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Streaming.opened = [];
-  vi.stubGlobal("EventSource", Streaming);
+  streaming();
 });
 
 afterEach(() => {
@@ -353,7 +305,7 @@ describe("the Nudge stream", () => {
     await waitFor(() => screen.getByText(ALREADY_THERE));
     stream().opens();
 
-    stream().nudges();
+    stream().nudges(SET_ARRIVED);
 
     await waitFor(() => screen.getByText(ARRIVAL.title));
     // The clock never moved and nothing here runs on one: the second read is
@@ -532,6 +484,12 @@ const ABOUT: Record<string, readonly string[]> = {
   transcript: [],
   screen: [OPENED],
   commit: [OPENED],
+  // The one kind that is only ever about a pane that happens to be open: a file
+  // written in a worktree moves no record at all — no Event, no Timeline row,
+  // nothing in the sidebar — so none of the five moves for it, and neither does
+  // the conversation itself. What it does move is the Code pane's tree, asked
+  // about where that is drawn in the test after this sweep.
+  files: [],
   set: [OPENED, SIDEBAR],
   liveness: [OPENED],
   conversation: [OPENED, SIDEBAR],
@@ -614,6 +572,74 @@ describe("what a Nudge is about", () => {
         expect(askedFor(fetching, path), path).toBe(before[at]! + 1);
       }),
     );
+  });
+
+  /// The worktrees moving, asked about where the pane that follows them is
+  /// drawn: Code, whose tree stands on the roots this kind reads back
+  /// (ADR 0019, *Following the disk*).
+  ///
+  /// Its own test rather than a row of the sweep, for the two above's reason:
+  /// the sweep opens a conversation and stops at its timeline, and nothing
+  /// there is drawn over a worktree's files.
+  ///
+  /// The tree's roots here — a root that appeared or went — and the marks its
+  /// rows carry, which are the two reads of this kind a query key names. What is
+  /// *inside* a root is the pane's own subscription beside that table rather
+  /// than a row of it, so where those re-reads are asked about is the tree's own
+  /// tests — see `workbench.test.tsx`, *and the disk moving under it*.
+  it("reads the Code pane's roots and marks back where its tree is drawing them", async () => {
+    const roots = `/api/ui/conversations/${CONVERSATION.id}/files/roots`;
+    const status = `/api/ui/conversations/${CONVERSATION.id}/files/status`;
+
+    // The pane holds a socket open for as long as it is drawn, which is what
+    // runs the watcher this Nudge comes from — and jsdom would dial a real one.
+    const opened: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          opened.push(url);
+        }
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        close(): void {}
+      },
+    );
+
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}/code`);
+    const fetching = serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(`${OPENED}/terminals`, json({ live: [] })),
+      whenever(roots, json(codeRoots)),
+      whenever(status, json(codeStatus)),
+    );
+    const { container } = render(() => <App />);
+
+    // Drawn once the tree has its roots, which is the reading this is about.
+    await waitFor(() => {
+      const drawn = container.querySelectorAll(`.${tree.repo}`);
+      if (drawn.length !== codeRoots.roots.length) {
+        throw new Error("the tree has not drawn its roots");
+      }
+    });
+    stream().opens();
+    const before = [roots, status].map((path) => askedFor(fetching, path));
+
+    stream().nudges({ kind: "files", conversation: CONVERSATION.id });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() =>
+      [roots, status].forEach((path, at) => {
+        expect(askedFor(fetching, path), path).toBe(before[at]! + 1);
+      }),
+    );
+
+    // And the pane really did say it was drawn, which is the other half of the
+    // same arrangement: a Nudge of this kind only ever arrives because of it.
+    expect(
+      opened.some((url) => url.endsWith(`${OPENED}/files/attach`)),
+    ).toBe(true);
   });
 
   /// The Agent Profiles, asked about where one is drawn: a draft's setup, whose
@@ -810,7 +836,7 @@ describe("the connection the stream holds", () => {
     // And it is a stream that hears Nudges, rather than one nothing is listening
     // on: what arrives down this one is drawn like anything else.
     stream().opens();
-    stream().nudges();
+    stream().nudges(SET_ARRIVED);
     await waitFor(() => screen.getByText(ARRIVAL.title));
   });
 

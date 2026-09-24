@@ -36,8 +36,16 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileDeleted,
+  FileDeleting,
+  FileListsView,
+  FileMade,
+  FileMaking,
   FileReading,
+  FileRenamed,
+  FileRenaming,
   FileRootsView,
+  FileStatusView,
   FileWrite,
   FileWritten,
   FolderListing,
@@ -576,11 +584,29 @@ export function listFileRoots(id: number): Promise<FileRootsView> {
   return get<FileRootsView>(`/api/ui/conversations/${id}/files/roots`);
 }
 
+/// And where a Code pane says it is drawn: a socket it holds open for as long
+/// as it is, which is what runs the server's watcher over those worktrees
+/// (ADR 0019, *Following the disk*).
+///
+/// Nothing travels either way. What the pane hears about the disk is a `files`
+/// Nudge down the stream every other change comes down; what this is for is
+/// being *open*, the way a terminal tab's attach is — it dies with the tab
+/// whatever becomes of the browser, so a laptop shut mid-edit stops the watcher
+/// without anybody having to notice.
+export function filesSocket(id: number): string {
+  return socketAt(`/api/ui/conversations/${id}/files/attach`);
+}
+
 /// And what one folder of one of them holds.
 ///
 /// One folder per ask and never a walk — the shape a path field browses with,
 /// and why the tree asks again for every level somebody expands. Git-ignored
 /// paths and `.git` are not in the answer.
+///
+/// **And why a `files` Nudge is cheap to follow.** The tree re-reads the
+/// folders it has expanded and nothing else, which is one of these apiece — a
+/// listing rather than a walk, and none at all for the folders nobody has
+/// opened (ADR 0019, *Following the disk*).
 ///
 /// Every refusal is in the body rather than in the status: a path outside every
 /// root, a path under `.git`, a worktree that has gone and a folder that has are
@@ -599,6 +625,13 @@ export function listFolder(id: number, path: string): Promise<FolderListing> {
 /// a binary it will not send, or a file over the size cap — and text carries a
 /// version, which is a hash of the bytes and is what a write names itself as
 /// being over (ADR 0019).
+///
+/// **And what the tabs follow the disk with.** The pane reads every open file
+/// again on a `files` Nudge and compares that version: where it matches — which
+/// is nearly every file on nearly every Nudge — the tab is left exactly as it
+/// is, and where it differs a clean buffer takes the new text and a dirty one
+/// raises the bar (ADR 0019, *Following the disk*). One of these per open file
+/// and none for anything else.
 ///
 /// Refused in the body like the folder beside it: a path outside every root, a
 /// path under `.git`, a worktree that has gone and a file that has are each
@@ -641,6 +674,122 @@ export function writeFile(
     version,
     text,
   } satisfies FileWrite);
+}
+
+/// And an empty file made under a folder of one of those roots, which is what a
+/// name typed into a row's own field asks for.
+///
+/// The path in full and nothing else: what is being made is a row of the tree,
+/// so what the request says is where that row goes (ADR 0019, *The tree*). The
+/// file is empty, and the text that goes into it is a save through the endpoint
+/// above.
+///
+/// Refused in the body like everything else here, with one refusal of its own —
+/// a name already taken — and each of them is a sentence drawn beside the field
+/// with what was typed still in it.
+export function makeFile(id: number, path: string): Promise<FileMade> {
+  return post<FileMade>(`/api/ui/conversations/${id}/files/file/new`, {
+    path,
+  } satisfies FileMaking);
+}
+
+/// And a folder made there, which is the same request about the other kind of
+/// row.
+///
+/// Its own endpoint rather than a flag on the one above, because a file and a
+/// folder are two different things to make: what a new file does afterwards is
+/// open as a tab, and a new folder opens nothing.
+export function makeFolder(id: number, path: string): Promise<FileMade> {
+  return post<FileMade>(`/api/ui/conversations/${id}/files/folder/new`, {
+    path,
+  } satisfies FileMaking);
+}
+
+/// And one of them renamed: whatever is at a path, given a new name in the
+/// folder it is already in.
+///
+/// **A name rather than a path**, which is the whole of why a rename cannot
+/// cross two roots: two roots are two repositories, and a file taken out of one
+/// checkout and put in another is not something this pane has a way to ask for
+/// (ADR 0019, *The tree*). The field is drawn over the row, what is typed there
+/// is a name, and the server joins it onto the folder the row is already in.
+///
+/// What comes back is where it now is, which is what every open tab of that path
+/// follows — a folder renamed carrying everything under it.
+///
+/// Refused in the body like everything else here, with one refusal of its own
+/// beyond the making's: a root, which is a Worktree rather than anything in one.
+export function renamePath(
+  id: number,
+  path: string,
+  name: string,
+): Promise<FileRenamed> {
+  return post<FileRenamed>(`/api/ui/conversations/${id}/files/rename`, {
+    path,
+    name,
+  } satisfies FileRenaming);
+}
+
+/// And one of them taken away: whatever is at a path, a folder with everything
+/// under it.
+///
+/// **The confirm is drawn before this is called**, which is the one thing about
+/// this endpoint worth saying twice: a deletion cannot be taken back, so the
+/// card the app puts up for a busy shell and a dirty tab goes up over the row
+/// first, and one confirm covers a folder's whole contents (ADR 0019, *The
+/// tree*).
+///
+/// What comes back says it landed or says why it did not, and either way the
+/// folder above the row is read again by the press itself: the row goes the
+/// moment the server says it has, rather than when the Nudge the deletion
+/// raises comes back round.
+/// The open tab of a file that has gone stays, read-only, saying so: see
+/// `Code.tsx`, which is where a tab keeps its text after the file under it goes.
+export function deletePath(id: number, path: string): Promise<FileDeleted> {
+  return post<FileDeleted>(`/api/ui/conversations/${id}/files/delete`, {
+    path,
+  } satisfies FileDeleting);
+}
+
+/// And every root's files at once, which is what the quick-open palette matches
+/// over.
+///
+/// Git's own list per root — what it tracks, plus what it does not track and
+/// does not ignore — rather than a walk, and capped per root, a root that was
+/// cut short saying so in the answer (ADR 0019, *The tree*).
+///
+/// **Read afresh every time the palette opens**, which is what makes the list
+/// worth reading at all: there is no watcher until the stage after this one,
+/// and a list read once would go stale the first time the agent wrote
+/// anything.
+///
+/// Nothing here is refused: what it answers is every path there is to name, so
+/// there is no path of anybody's to measure against the roots. A Conversation
+/// with no Worktrees answers with no roots, and a root git will not answer
+/// about answers with no files.
+export function listFiles(id: number): Promise<FileListsView> {
+  return get<FileListsView>(`/api/ui/conversations/${id}/files/list`);
+}
+
+/// And what git says about every one of those roots, folded into the marks the
+/// tree draws on its rows.
+///
+/// One status read per root rather than a call per row, answered for the whole
+/// conversation at once — and folded, so that a folder wears the strongest mark
+/// of anything under it and the tree draws a row by looking its own path up
+/// (ADR 0019, *The tree*).
+///
+/// **Read again on a `files` Nudge and on a `commit`**, which is the one reading
+/// on this wire that two kinds both stand for: a commit made in a terminal
+/// beside the tree clears every mark in the worktree without touching a file, so
+/// nothing about any folder has moved and every mark has changed.
+///
+/// Nothing here is refused, for the list's reason: it is about no path anybody
+/// named. A conversation with no worktrees answers with no roots, and a root git
+/// will not answer about answers with no marks — which is a tree whose rows are
+/// drawn unmarked rather than a tree that will not draw.
+export function readFileStatus(id: number): Promise<FileStatusView> {
+  return get<FileStatusView>(`/api/ui/conversations/${id}/files/status`);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

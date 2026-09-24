@@ -1281,7 +1281,11 @@ whole of unsplitting; the same file in two groups is one buffer seen twice.
 Saving is explicit: Ctrl+S, and a write over a file that has moved on disk
 since it was read is refused until the human chooses — a clean editor takes
 the disk's text on its own when the Worktree moves, a dirty one keeps theirs
-and offers **Reload** or **Keep mine**. The Worktree moving reaches the pane
+and offers **Reload** or **Keep mine**. Four keystrokes hang beside it, being
+the ones a browser leaves to a page: Ctrl+PageDown and Ctrl+PageUp between the
+active group's tabs, Ctrl+\ to split it beside itself, Ctrl+` for a Terminal
+in it — Ctrl+W and Ctrl+Tab are the window's and are not taken, and neither
+is any key a terminal grid already had. The Worktree moving reaches the pane
 as a `files` Nudge from a watcher the server runs while a Code pane is
 attached. What is open — the groups, the tabs, the unsaved text — is the
 device's, kept per Conversation in the browser and back after a reload; so is

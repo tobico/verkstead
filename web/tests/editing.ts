@@ -8,9 +8,12 @@
 //! theme, read-only or not, and where the typing went — and all of that is
 //! askable of this.
 //!
-//! So the box the text is really in here is a `textarea`. It is not what Monaco
-//! draws and is not meant to be: it is somewhere for a test to read a value off
-//! and fire an input at, standing where the real editor's own view would be.
+//! So what stands where the real editor's own view would be is a `textarea`:
+//! somewhere for a test to read a value off and fire an input at. It is not
+//! what Monaco draws and is not meant to be — and it is not where the text is
+//! either, any more than it is in a real editor. The text is in the model above
+//! the pane, and the box is a view of it: typing into the box writes the model,
+//! and a model written from anywhere else shows in the box.
 //!
 //! Installed by a test file with
 //!
@@ -30,20 +33,70 @@ export type Opening = {
   readOnly?: boolean;
   automaticLayout?: boolean;
   model?: Model;
+} & Drawing;
+
+/// The three settings the pane's own menu carries, as Monaco takes them —
+/// which is what a test about them reads back.
+///
+/// Apart from the rest of an opening because they are also what `updateOptions`
+/// is handed: they are the pane's rather than a tab's, and a change to one is
+/// told to every editor already open.
+export type Drawing = {
+  wordWrap?: string;
+  fontSize?: number;
+  minimap?: { enabled?: boolean };
 };
 
-/// A buffer, which is the path it was made at and the text that was in it.
+/// A buffer, which is the path it was made at and the text that is in it.
 ///
 /// The path is the whole of how a language is chosen — see `Editor.tsx` — so it
 /// is what a test about colouring asks after.
+///
+/// Made above the pane rather than by an editor — see `keeping.ts` — and this
+/// stands in for the real one closely enough to say so: the text really is
+/// here, an editor drawn over it is a view of it, and every change to it is
+/// told to whoever asked to hear.
 export type Model = {
   path: string;
-  text: string;
-  /// Whether the tab it was made for has gone. Monaco registers a buffer
-  /// against the file's own address and refuses a second one there, so a tab
-  /// that did not dispose its own would be a file that could never be reopened.
+  /// The text as it stands, which is what an editor over it is showing.
+  readonly text: string;
+  /// Whether it has been disposed. Monaco registers a buffer against the file's
+  /// own address and refuses a second one there, so a file whose last view
+  /// closed without disposing its own would be one that could never be
+  /// reopened.
   disposed: boolean;
+  getValue(): string;
+  setValue(text: string): void;
+  /// Every edit written into it from outside an editor, oldest first.
+  ///
+  /// What a test asks to know *how* the pane wrote a buffer rather than only
+  /// what the text became: an edit over the part that moved is a caret and an
+  /// undo stack that survive, and one over the whole file is neither.
+  readonly written: Array<{ range: Range; text: string }>;
+  /// Where in the text an offset falls, in Monaco's own one-based line and
+  /// column — which is how a range is spelled to [`pushEditOperations`].
+  getPositionAt(offset: number): Position;
+  /// And one edit over a range of it, which is how the pane writes a buffer
+  /// from outside an editor: only the part that moved goes in, so the caret and
+  /// the undo stack of every view survive it. See `written` in `keeping.ts`.
+  pushEditOperations(
+    before: null,
+    edits: Array<{ range: Range; text: string }>,
+    computing: () => null,
+  ): null;
+  onDidChangeContent(said: () => void): { dispose(): void };
   dispose(): void;
+};
+
+/// A place in a buffer, as Monaco counts one: both from one.
+export type Position = { lineNumber: number; column: number };
+
+/// And a stretch between two of them, which is what an edit is over.
+export type Range = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
 };
 
 /// One editor the pane has opened.
@@ -52,6 +105,11 @@ export type Editor = {
   model: Model;
   /// What it was opened with.
   opening: Opening;
+  /// And how it is drawn *now*: what it was opened with, and every change the
+  /// pane has told it about since. The three settings on the pane's menu are
+  /// the pane's rather than a tab's, so what a test about one asks is what the
+  /// editor is set to at the moment rather than what it was made with.
+  drawn: Drawing;
   /// Where the text really is, for a test to read and type into.
   typing: HTMLTextAreaElement;
   /// And whether the tab it was in has gone.
@@ -97,12 +155,74 @@ export function theEditor(): Editor {
 const monaco = {
   editor: {
     createModel(text: string, _language: string | undefined, at: Uri): Model {
+      let held = text;
+      const watching = new Set<() => void>();
+
+      /// Put text in and tell whoever is listening, which is what every write
+      /// of this buffer comes down to.
+      const write = (next: string): void => {
+        held = next;
+
+        for (const said of [...watching]) {
+          said();
+        }
+      };
+
+      /// How far into the text a line and a column is, both counted from one
+      /// the way Monaco counts them.
+      const offsetOf = (line: number, column: number): number => {
+        const lines = held.split("\n");
+        let at = 0;
+
+        for (let before = 0; before < line - 1 && before < lines.length; before += 1) {
+          at += lines[before]!.length + 1;
+        }
+
+        return at + column - 1;
+      };
+
       const model: Model = {
         path: at.path,
-        text,
+        get text() {
+          return held;
+        },
         disposed: false,
+        written: [],
+        getValue: () => held,
+        setValue: write,
+        getPositionAt: (offset: number) => {
+          const before = held.slice(0, offset).split("\n");
+
+          return {
+            lineNumber: before.length,
+            column: before[before.length - 1]!.length + 1,
+          };
+        },
+        // Applied in order, which is one edit in every call the pane makes: it
+        // writes the stretch between what the two texts share at either end.
+        pushEditOperations: (_before, edits) => {
+          model.written.push(...edits);
+
+          for (const edit of edits) {
+            const from = offsetOf(
+              edit.range.startLineNumber,
+              edit.range.startColumn,
+            );
+            const to = offsetOf(edit.range.endLineNumber, edit.range.endColumn);
+
+            write(held.slice(0, from) + edit.text + held.slice(to));
+          }
+
+          return null;
+        },
+        onDidChangeContent: (said: () => void) => {
+          watching.add(said);
+
+          return { dispose: () => watching.delete(said) };
+        },
         dispose: () => {
           model.disposed = true;
+          watching.clear();
         },
       };
 
@@ -115,34 +235,65 @@ const monaco = {
 
       const typing = at.ownerDocument.createElement("textarea");
 
-      typing.value = model.text;
+      typing.value = model.getValue();
       typing.readOnly = opening.readOnly === true;
 
       if (opening.ariaLabel !== undefined) {
         typing.setAttribute("aria-label", opening.ariaLabel);
       }
 
+      // Typing into the box is typing into the buffer, which is what it is in
+      // the real editor: an editor is a view *of* a model, and everything that
+      // follows the text — the dot, Ctrl+S, the second view of the same file —
+      // follows it from there.
+      typing.addEventListener("input", () => {
+        if (model.getValue() !== typing.value) {
+          model.setValue(typing.value);
+        }
+      });
+
+      // And a buffer written from outside any editor — Reload — shows here, the
+      // way it shows in an editor Monaco is drawing.
+      const watching = model.onDidChangeContent(() => {
+        if (typing.value !== model.getValue()) {
+          typing.value = model.getValue();
+        }
+      });
+
       at.append(typing);
 
-      const made: Editor = { model, opening, typing, disposed: false };
+      const made: Editor = {
+        model,
+        opening,
+        // Whatever it was opened with, to be moved by every change since — the
+        // way Monaco merges what `updateOptions` is handed into what it already
+        // had.
+        drawn: {
+          wordWrap: opening.wordWrap,
+          fontSize: opening.fontSize,
+          minimap: opening.minimap,
+        },
+        typing,
+        disposed: false,
+      };
 
       opened.push(made);
 
       return {
-        getValue: () => typing.value,
-        setValue: (text: string) => {
-          typing.value = text;
-        },
-        onDidChangeModelContent: (said: () => void) => {
-          typing.addEventListener("input", said);
-        },
-        updateOptions: (options: { readOnly?: boolean }) => {
+        updateOptions: (options: { readOnly?: boolean } & Drawing) => {
           if (options.readOnly !== undefined) {
             typing.readOnly = options.readOnly;
+          }
+
+          for (const [named, value] of Object.entries(options)) {
+            if (named !== "readOnly" && value !== undefined) {
+              Object.assign(made.drawn, { [named]: value });
+            }
           }
         },
         dispose: () => {
           made.disposed = true;
+          watching.dispose();
           typing.remove();
         },
       };
@@ -162,12 +313,10 @@ const monaco = {
 /// matters here is that the path arrives.
 type Uri = { path: string };
 
-/// And one editor, as much of it as the pane calls.
+/// And one editor, as much of it as the pane calls — which is two things, an
+/// editor here being a view over a buffer rather than somewhere text is kept.
 type Standalone = {
-  getValue(): string;
-  setValue(text: string): void;
-  onDidChangeModelContent(said: () => void): void;
-  updateOptions(options: { readOnly?: boolean }): void;
+  updateOptions(options: { readOnly?: boolean } & Drawing): void;
   dispose(): void;
 };
 

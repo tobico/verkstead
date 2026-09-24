@@ -2,9 +2,9 @@
 
 ## Goal
 
-A row in the tree has a menu — right-click, and long press where there is no
-pointer — with new file, new folder, rename and delete, each done by the server
-and reflected in the tree and in any tab the path is open in. Ctrl+P opens a
+A row in the tree has a menu — a right-click, and a long press on a folder row
+— with new file, new folder, rename and delete, each done by the server and
+reflected in the tree and in any tab the path is open in. Ctrl+P opens a
 quick-open field that matches file names across every root and opens the pick
 into the active group. The pane's menu carries word wrap, font size and
 minimap, remembered per device and applied to every editor.
@@ -20,8 +20,14 @@ minimap, remembered per device and applied to every editor.
   Rename is a move within a root and never across two — two roots are two
   repositories.
 - **The menu is the terminal tab's context menu again** — the one `ContextMenu`
-  the app has, opened by both hands, with which row it is about held by the
-  tree rather than by a menu per row.
+  the app has, with which row it is about held by the tree rather than by a
+  menu per row. **Both hands on a folder row, the mouse's alone on a file
+  row**, settled when this stage was planned: stage 02 landed first and made a
+  long press on a *file* row the way it is dragged into a group, so that
+  gesture is spoken for there — the way a card in the sidebar's is — and
+  nothing is picked up off a folder row, so its long press drops the menu. A
+  touch screen reaches everything a folder row offers, and only a file row's
+  own rename and delete are out of reach.
 - **A name is typed in place**, as an inline field on a new row or over the
   renamed one, rather than in a modal: what is being named is a row in the
   tree, and the tree is where it is seen.

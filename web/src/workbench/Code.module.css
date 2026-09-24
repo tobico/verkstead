@@ -1,12 +1,19 @@
-/* The pane under its header: the tree down the side, and the group of tabs
+/* The pane under its header: the tree down the side, and the groups of tabs
    beside it.
 
    A row that is the pane's own height — it wears the frame's `paneScreen`, so
    `Panes.module.css` gives it the room the header leaves and nothing scrolls
-   behind it — with the tree keeping its width and the group taking the rest.
+   behind it — with the tree keeping its width and the groups taking the rest.
    `min-height: 0` on both halves for the reason a column of terminals always
    needs it: a flex item's floor is its content, and a grid that would not
    shrink is a pane that grows past the window.
+
+   And it *takes* that room rather than being left it, which is the `flex: 1`:
+   the pane is a flex column of a settled height, and a row in one grows only
+   where it is told to. What it holds is a tree that scrolls and groups that
+   are placed inside the room they are given — neither of them a column of
+   prose with a height of its own to hand back — so the height has to come down
+   from the pane rather than up from what is open.
 
    On a phone they stack. Sixteen rems of names beside a terminal on a screen
    twenty-three wide is neither of them, so the tree goes above the group with a
@@ -16,16 +23,217 @@
    with the height it is given is its own, in `Tree.module.css`. */
 .body {
   display: flex;
+  flex: 1;
   gap: 0.75rem;
   min-height: 0;
 }
 
-.group {
+/* Everything beside the tree: the line saying the register would not read, and
+   under it the layer the groups are drawn in. */
+.groups {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 0.5rem;
   min-width: 0;
   min-height: 0;
+}
+
+/* The layer itself, which every group of the layout tree is placed inside of —
+   see `layout.ts`. The arithmetic a nest of boxes would have done in the
+   browser is done there instead, in percentages, and what is here is the
+   ground those percentages are measured against.
+
+   Placed rather than nested so that a split, a group collapsing or a tab moved
+   between two of them moves boxes about rather than taking a group's contents
+   down and making them again: a terminal's socket and an editor's caret are
+   what that would cost, for a press made in the group beside it. */
+.stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* One group, at the share of the layer the tree gives it: its own bar of tabs,
+   and what the tab showing is holding under it.
+
+   Its own padding rather than a gap between them, there being no flow to put a
+   gap in: two groups meeting have half of it each, and the edge of the layer
+   has the same half again, which is what keeps a bar off the pane's own
+   border. */
+.group {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.2rem;
+  overflow: hidden;
+}
+
+/* The room a group's views stand in, and the drop target with five zones in it:
+   the box a drag over this group's content is measured against, and the ground
+   the band a release would take is drawn on.
+
+   A box of its own around the slot rather than the slot itself, because nothing
+   of the page's may be drawn inside that one — see `.content` below — and the
+   band is something of the page's drawn exactly over it. */
+.room {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Where a group's views go, and the one thing in it that grows: the tab
+   showing, and every other tab of the group drawn and hidden beside it.
+
+   A slot rather than the views themselves, because a view is drawn once for
+   the whole pane and placed into whichever group holds it — see `Code.tsx`.
+   What that keeps is the socket under a terminal's tab and the caret under a
+   file's when the tab is dragged into another group: what moves is this box's
+   contents rather than anything being made again. */
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* And the band a release over this group's content would take: the whole of the
+   room where the hand is in the centre, which is the tab moving into this
+   group, and the half a new group would take where it is over one of the four
+   edges, which is the split it would make there.
+
+   The half rather than the quarter the hand has to be inside to be in that edge
+   at all — `EDGE` in `Code.tsx` — because what the band says is what would
+   happen rather than where the hand is: a quarter drawn where a half is coming
+   would be the page answering with the wrong shape.
+
+   A wash in the accent under an edge in it, which is what this pane paints *the
+   page has heard you* in: the line along a bar and the active group's own
+   border are the same colour. Nothing to the pointer, which is still carrying a
+   tab and is measured against the room under this. */
+.zone {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+}
+
+.zone[data-zone="centre"] {
+  inset: 0;
+}
+
+.zone[data-zone="left"] {
+  inset: 0 50% 0 0;
+}
+
+.zone[data-zone="right"] {
+  inset: 0 0 0 50%;
+}
+
+.zone[data-zone="above"] {
+  inset: 0 0 50% 0;
+}
+
+.zone[data-zone="below"] {
+  inset: 50% 0 0 0;
+}
+
+/* And one view inside it, which is nothing to the layout: what it wraps is
+   already what the column holds — an editor that fills the room, a grid that
+   fills it, a line that does not — and a box of its own between the two would
+   be a second thing to teach how tall it is. */
+.view {
+  display: contents;
+}
+
+/* And which of them a file pressed in the tree will open in, said in the one
+   word that says it — the active group is read off `aria-current` the way the
+   tab showing is read off `aria-pressed`. The bar's own border in the accent
+   rather than a wash over the group: what it marks is where the next thing
+   opened will land, and a fill over everything in it would say instead that all
+   of it is pressed. */
+.group[aria-current="true"] .tabs {
+  border-color: var(--accent);
+}
+
+/* The line between two groups, and the handle that moves it — the frame's own
+   divider again (`Panes.module.css`), turned both ways: a `beside` split's
+   border is a column down the middle of the room it divides, and a `below`
+   one's is a row across it.
+
+   It stands in the layer with the groups rather than between them, there being
+   no flow to put it in: the page says where it goes in the same percentages
+   the groups are placed at, and what is written here is how thick it is and
+   which way round. Drawn after them in the document, so it takes the pointer
+   where the two overlap.
+
+   `touch-action` because a finger dragging this is dragging this: left to
+   itself the browser would take the gesture for a scroll of what is under it
+   and the divider would never see the second event. */
+.divider {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.divider[data-way="beside"] {
+  width: 0.5rem;
+  margin-left: -0.25rem;
+  cursor: col-resize;
+}
+
+.divider[data-way="below"] {
+  height: 0.5rem;
+  margin-top: -0.25rem;
+  cursor: row-resize;
+}
+
+/* The line itself, down or across the middle of the half-rem that is only there
+   to be easier to hit than a pixel. It is the border as well as the handle, as
+   the frame's is: the groups themselves carry no edge between them, two lines a
+   pixel apart with one of them moving being the sort of thing nobody sees and
+   everybody notices. */
+.divider::before {
+  content: "";
+  position: absolute;
+  background: var(--edge);
+}
+
+.divider[data-way="beside"]::before {
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.divider[data-way="below"]::before {
+  inset-inline: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+/* Under the keyboard's focus the line says it is a thing that moves. What
+   lights up is the line, the half-rem around it being only a target. */
+.divider:focus-visible::before {
+  background: var(--accent);
+}
+
+.divider[data-way="beside"]:focus-visible::before {
+  width: 2px;
+}
+
+.divider[data-way="below"]:focus-visible::before {
+  height: 2px;
+}
+
+.divider:focus-visible {
+  outline: none;
 }
 
 @media (max-width: 40rem) {
@@ -67,6 +275,7 @@
    VS Code's separator, which is what tells abutting tabs apart when neither is
    the one showing. */
 .tabFrame {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -75,6 +284,39 @@
 
 .tabFrame:first-child {
   border-left: 0;
+}
+
+/* The tab in the hand, taken back while it is being carried. What says where it
+   is going is the line below; a tab that looked untouched while that line
+   travelled along the bar would be two answers to the one gesture. */
+.tabFrame.lifted {
+  opacity: 0.45;
+}
+
+/* And that line: where the tab in the hand would land if it were let go now.
+
+   Drawn on the tab it would land beside — in front of that one, or after the
+   last of them where it would land past every one — rather than as something
+   standing between two tabs: a line with a width of its own would move the bar
+   under the very hand it is answering.
+
+   In the accent, which is what this pane paints *the page has heard you* in:
+   the active group's bar takes the same colour. */
+.tabFrame[data-mark="before"]::before,
+.tabFrame[data-mark="after"]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.tabFrame[data-mark="before"]::before {
+  left: -1px;
+}
+
+.tabFrame[data-mark="after"]::after {
+  right: -1px;
 }
 
 /* And the one showing, in the paper the pane's content is drawn on: VS Code's
@@ -179,12 +421,28 @@
    what is being said is smaller than what `IconButton.module.css` says about
    every one of these, and a rule of one class against a rule of one class is
    settled by which sheet the bundler happened to put second. */
-.tabs .plus {
+.tabs .plus,
+.tabs .divide {
   flex: none;
   align-self: center;
   margin: 0 0.15rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
+}
+
+/* The split, beside it: this group again beside itself, with the tab that was
+   showing in both. The same size and the same quiet as the plus — they are the
+   two things at the end of a bar, and neither of them is louder than a tab. */
+.tabs .divide {
+  margin-right: 0;
+}
+
+/* And what a right-click on a tab drops: the two ways to split the group it is
+   in. The chrome is the shared menu's — `Menu.module.css` draws the card, the
+   backdrop and every row of it — so what is said here is the width of the drop,
+   which is a card of two short rows rather than the sidebar's sentences. */
+.tabActions > [role="menu"] {
+  width: 11rem;
 }
 
 /* What the group draws while it holds nothing: the hint, and the press that
@@ -252,6 +510,27 @@
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
+}
+
+/* What a file's tab holds, which is the bar over a refused save and then the
+   editor, the picture or the line saying why there is neither — see `Opened` in
+   `Code.tsx`. A column of the group's own height, so that the editor under it
+   takes the room the way a terminal's grid does.
+
+   Drawn whether or not its tab is the one showing, and hidden when it is not:
+   an editor taken down and made again is a caret and an undo stack the human
+   cannot come back to. `hidden` needs saying twice here for the reason
+   `Attached.module.css` says it twice — the browser's own sheet makes it
+   `display: none`, and a `display: flex` from a page beats it. */
+.opened {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.opened[hidden] {
+  display: none;
 }
 
 /* A file's tab holds the editor, and what that is drawn in is its own —
@@ -337,6 +616,24 @@
   gap: 0.5rem;
 }
 
+/* And the line a tab whose file has gone draws over its text: the same bar in
+   the same place, without the presses — there is nothing to choose between, the
+   file being gone either way, so what stands here is the sentence alone.
+
+   Above the editor rather than in place of it, which is the whole of the point:
+   the file is gone and the text is not, and what is under this line is now the
+   only copy of it. */
+.gone {
+  flex: none;
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
 /* The maximise toggle, at the end of the pane's header: the press that hides
    the sidebar and the Timeline so that the editor has the window, and the one
    that brings them back.
@@ -372,4 +669,54 @@
   .maximise:hover {
     color: var(--ink);
   }
+}
+
+/* The pane's own ⋯, beside the maximise toggle: what is about the pane rather
+   than about anything open in it, which is the three settings every editor is
+   drawn with (ADR 0019, *Monaco, whole*).
+
+   The mark itself and the paint under it are the menu component's, so this one
+   and the sidebar's read as the same button — what is said here is where it
+   stands in the header and how wide what it drops is. Narrow: three short rows
+   and a level of font sizes. */
+.paneActions {
+  flex: none;
+}
+
+.paneActions > [role="menu"] {
+  width: 11rem;
+}
+
+/* A settings row: the words at one end and the tick that says which way it is
+   set at the other, which is the nested row's own shape and for the same
+   reason — what is at the far end is the state of the row rather than another
+   thing to press.
+
+   Written through the menu it is in rather than as `.setting` alone, because
+   the rule it is turning round — the column every row of every menu is laid
+   out as, in `Menu.module.css` — carries an element on the end of it and so
+   outweighs a bare class. */
+.paneActions [role="menu"] .setting {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* The tick, which is the one part of these rows that is not the row paint the
+   menu already draws: in the accent, because it is the answer to what the press
+   asked rather than more of the label. */
+.paneActions [role="menu"] .setting > span {
+  color: var(--accent);
+}
+
+/* And each of the three named, so each can be found. They take nothing else of
+   their own — a setting is a setting however it is spelled. */
+.wrap {
+}
+
+.minimap {
+}
+
+.size {
 }

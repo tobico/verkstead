@@ -37,9 +37,10 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileReading, FileRootsView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileListsView, FileMade,
+    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite,
+    FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
     NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
     ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
     RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
@@ -237,7 +238,33 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // scoped, the roots being that Conversation's checkouts and nothing
         // else's — see [`crate::files`].
         .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
+        // And the one that reads nothing at all: the socket a Code pane holds
+        // open for as long as it is drawn, which is how it says it is attached
+        // — and what runs the watcher behind the `files` Nudge while one is
+        // (ADR 0019, *Following the disk*) — see [`crate::watchers`].
+        //
+        // Beside the files it is about rather than beside the terminals' own
+        // attach, though it is the same gesture: what it turns on is the tree
+        // and the editors following the disk, and the terminals are the other
+        // half of this pane.
+        .route(
+            "/api/ui/conversations/{id}/files/attach",
+            get(crate::watchers::attach),
+        )
         .route("/api/ui/conversations/{id}/files/folder", get(folder))
+        // And the one that answers about no folder in particular: every root's
+        // files at once, which is what the quick-open palette matches over — see
+        // [`file_list`]. Git's own list per root rather than a walk, read afresh
+        // every time that palette opens, a list kept between openings going
+        // stale the first time the agent writes anything.
+        .route("/api/ui/conversations/{id}/files/list", get(file_list))
+        // And the one that answers about no folder in particular either: what
+        // git says about every root at once, folded into the marks the tree
+        // draws on its rows — see [`file_status`]. One status read per root, and
+        // read again on a `commit` as well as on a `files` Nudge, a commit being
+        // the one thing that clears every mark in a Worktree without touching a
+        // file (ADR 0019, *The tree*).
+        .route("/api/ui/conversations/{id}/files/status", get(file_status))
         // And one file of one of those folders, opened: what it holds, what
         // kind of thing that turned out to be, and the version a write names
         // itself as being over — see [`file`]. Asked for by path like the
@@ -262,6 +289,34 @@ pub(crate) fn routes() -> axum::Router<AppState> {
                 .post(write_file)
                 .layer(DefaultBodyLimit::max(crate::files::MAX_WRITE_BYTES)),
         )
+        // And the two a row's own menu makes: an empty file, and a folder — see
+        // [`new_file`] and [`new_folder`]. One route each rather than one
+        // carrying a flag, because a file and a folder are two different things
+        // to make and a body saying which would be a kind of thing in a field;
+        // `repos/new` is the shape, under the thing being made.
+        //
+        // No body limit of their own: what goes up is a path, which is what the
+        // router's own default is already the right size for.
+        .route("/api/ui/conversations/{id}/files/file/new", post(new_file))
+        .route(
+            "/api/ui/conversations/{id}/files/folder/new",
+            post(new_folder),
+        )
+        // And the one that moves a row rather than making one: whatever is at a
+        // path, given a new name in the folder it is already in — see
+        // [`rename_path`]. One route for both kinds, unlike the two above,
+        // because a rename is one thing to do and what is at the path is the
+        // filesystem's business rather than the request's.
+        //
+        // A name rather than a path in the body, which is what keeps the move
+        // inside the root it started in: two roots are two repositories.
+        .route("/api/ui/conversations/{id}/files/rename", post(rename_path))
+        // And the one that takes a row away rather than moving it: whatever is
+        // at a path, a folder with everything under it — see [`delete_path`].
+        // One route for both kinds for the rename's reason, and the confirm in
+        // front of it is the viewer's, the way the app asks about anything that
+        // cannot be taken back.
+        .route("/api/ui/conversations/{id}/files/delete", post(delete_path))
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -2990,6 +3045,104 @@ async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> Ht
     .into_response()
 }
 
+/// `GET /api/ui/conversations/{id}/files/list` — every root's files, which is
+/// what the quick-open palette matches over.
+///
+/// One ask for the whole Conversation, a list under each root it belongs to:
+/// the palette offers every file the human could open, and two roots can hold
+/// the same path, so which root a row is in is part of the row (ADR 0019, *The
+/// tree*).
+///
+/// Git's own list rather than a walk — what it tracks, plus what it does not
+/// track and does not ignore — and capped per root, a root that was cut short
+/// saying so: see [`crate::files::list`]. Read afresh every time the palette
+/// opens, a list kept between openings going stale the first time the agent
+/// writes anything — and a palette is up for seconds, so nothing follows it the
+/// way the tree follows the disk.
+///
+/// **No refusals.** Nothing here is about a path somebody named, so there is no
+/// bound to measure and nothing to say no to: a Conversation with no Worktrees
+/// answers with no roots, and a root git will not answer about answers with no
+/// files.
+async fn file_list(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as the roots beside it: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees to list.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileListsView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileListsView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: git is a process, and one per root.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::list(&crate::files::roots(&conversation))
+    })
+    .await;
+
+    match read {
+        Ok(lists) => Json(lists).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "listing a Conversation's files failed");
+            unavailable("this conversation's files could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/files/status` — what git says about every
+/// root of the Conversation, folded into the marks the tree draws.
+///
+/// One ask for the whole Conversation, a reading per root, which is the shape
+/// [`file_list`] beside it answers in and for its reason: the tree draws every
+/// root at once, and a mark is drawn on a row rather than fetched for one.
+///
+/// Read again on a `files` Nudge and on a `commit` — the one thing on this wire
+/// that two kinds both stand for. A commit made in a terminal beside the tree
+/// clears every mark in the Worktree without touching a file, which is exactly
+/// what a reading of the *folders* cannot notice (ADR 0019, *The tree*).
+///
+/// **No refusals**, for [`file_list`]'s reason: nothing here is about a path
+/// somebody named, so there is no bound to measure. A Conversation with no
+/// Worktrees answers with no roots, and a root git will not answer about answers
+/// with no marks — which is a tree of rows drawn unmarked rather than a tree
+/// that will not draw.
+async fn file_status(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as the lists beside it: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees to mark.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileStatusView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileStatusView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: git is a process, and one per root.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::status(&crate::files::roots(&conversation))
+    })
+    .await;
+
+    match read {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's file marks failed");
+            unavailable("this conversation's files could not be read")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/files/folder?path=<path>` — what one folder
 /// of one of those roots holds.
 ///
@@ -3166,6 +3319,199 @@ async fn write_file(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "writing a file of a Worktree failed");
             unavailable("the file could not be written")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/file/new` — an empty file made under a
+/// folder of one of those roots.
+///
+/// The path in the body and nothing else: what is being made is a row of the
+/// tree, so what the request says is where the row goes (ADR 0019, *The tree*).
+/// The file is empty, and the text that goes into it afterwards is a save
+/// through the endpoint above.
+///
+/// Refused in the body like everything else here, and with one refusal of its
+/// own: a name already taken. A read-only root refuses on its own account, the
+/// tree having drawn neither row under one — see
+/// [`verkstead_render::FileMade`].
+async fn new_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileMaking>,
+) -> HttpResponse {
+    made(&state, id, asking, crate::files::Making::File).await
+}
+
+/// `POST /api/ui/conversations/{id}/files/folder/new` — and a folder made there.
+///
+/// [`new_file`]'s request and [`new_file`]'s refusals, about the other kind of
+/// row: one `create_dir` rather than a file, and nothing opens afterwards, there
+/// being nothing in a new folder to open.
+async fn new_folder(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileMaking>,
+) -> HttpResponse {
+    made(&state, id, asking, crate::files::Making::Folder).await
+}
+
+/// The making itself, whichever of the two was asked for.
+///
+/// Written once for both, because everything a request does with the record is
+/// the same: the roots are this Conversation's checkouts, and the kind of thing
+/// being made is the last argument of one call.
+async fn made(
+    state: &AppState,
+    id: String,
+    asking: FileMaking,
+    making: crate::files::Making,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileMade::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileMade::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a directory is resolved and an entry is made in it.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::make(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            making,
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "making a file in a Worktree failed");
+            unavailable("it could not be made")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/rename` — whatever is at a path, given
+/// a new name in the folder it is already in.
+///
+/// The path and a *name* in the body, and the name is the whole of the bound:
+/// two roots are two repositories, and a rename that crossed them would be a
+/// file taken out of one checkout and put in another (ADR 0019, *The tree*). So
+/// the viewer has no way to ask for one — the field is drawn over the row, and
+/// what is typed into it is joined onto the folder that row is already in.
+///
+/// Refused in the body like everything else here, with one refusal of its own
+/// beyond the making's: a root, which is a Worktree rather than anything in one
+/// and has no name here to change. What comes back is where it now is, which is
+/// what every open tab of that path follows.
+///
+/// **Not a record**, for the reason nothing else in `files` is: it is the
+/// human's own hand in their own checkout, and what records it is the commit
+/// they make afterwards.
+async fn rename_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileRenaming>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileRenamed::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileRenamed::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a path is resolved and one entry is moved.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::rename(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            &asking.name,
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "renaming a file of a Worktree failed");
+            unavailable("it could not be renamed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/delete` — whatever is at a path, taken
+/// off the disk, a folder with everything under it.
+///
+/// The path in the body and nothing else, which is [`new_file`]'s request said
+/// about something that is there: what is at the end of it is the filesystem's
+/// business rather than the request's, so one route takes both kinds the way the
+/// rename above does.
+///
+/// **The confirm is the viewer's, in front of the press** — the card the app
+/// puts up for whatever cannot be taken back, the one a busy shell and a dirty
+/// tab already raise. So a request arriving here has been asked about, and one
+/// confirm covers a folder's whole contents rather than one per file (ADR 0019,
+/// *The tree*).
+///
+/// Refused in the body like everything else here, with the rename's own refusal
+/// among them: a root, which is a Worktree rather than anything in one — and a
+/// Worktree deleted is the ground taken out from under a session standing in it.
+///
+/// **Not a record**, for the reason nothing else in `files` is: it is the
+/// human's own hand in their own checkout.
+async fn delete_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileDeleting>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileDeleted::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileDeleted::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a path is resolved, and a tree is walked where what is
+    // there is a folder.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::delete(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "deleting a file of a Worktree failed");
+            unavailable("it could not be deleted")
         }
     }
 }
@@ -5238,7 +5584,7 @@ fn no_such_set(id: &str) -> HttpResponse {
 
 /// There is no such Conversation to read. Worded like the Set's, and for the
 /// same reason: what was asked for is what a typed URL held.
-fn no_such_conversation(id: &str) -> HttpResponse {
+pub(crate) fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Conversation {id}")),
@@ -5345,7 +5691,7 @@ fn no_such_pull_request() -> HttpResponse {
     )
 }
 
-fn unavailable(message: &str) -> HttpResponse {
+pub(crate) fn unavailable(message: &str) -> HttpResponse {
     refused(StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(message))
 }
 

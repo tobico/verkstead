@@ -79,6 +79,15 @@
   }
 }
 
+/* The row in the hand, taken back while it is being carried out of the tree.
+   What says where it would land is the line along a bar, or the band over a
+   group's content, which the pane beside this draws — a row that looked
+   untouched while one of those travelled would be two answers to the one
+   gesture. The tab in a hand is drawn the same way, in `Code.module.css`. */
+.file.lifted {
+  opacity: 0.45;
+}
+
 /* The caret, a shade quieter than the name beside it and sized to the row: what
    it says is which way this folder is, which is worth a glance rather than a
    read. Its own width so that the names line up whichever way it points. */
@@ -100,6 +109,38 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* And the mark git's account of a row came to: a letter at the end of it, in the
+   colour the name beside it takes — see `Tree.tsx`, where the two letters and
+   the words they are read aloud as are.
+
+   Pushed to the right edge, so the marks make a column to run an eye down rather
+   than a jog after every name. Monospace, because what it is is one letter and a
+   column of them in the face the names are set in would not line up with itself.
+
+   A letter *and* a colour, because the two colours are a green and an ember, and
+   an eye that cannot tell those hues apart would read the pair as one mark — see
+   `--modified` in `styles/base.css`, where both are named. */
+.mark {
+  flex: none;
+  margin-left: auto;
+  padding-left: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75em;
+  font-weight: 600;
+}
+
+/* A file git sees as changed, and every folder over it: its own colour rather
+   than the Diff's red, red meaning *deleted* in this app. */
+.changed {
+  color: var(--modified);
+}
+
+/* And one git has never seen, which is an addition and takes what the app
+   already means an addition by. */
+.untracked {
+  color: var(--added);
 }
 
 /* A root says the repository it is a checkout of, which is what the human knows
@@ -129,4 +170,132 @@
   padding: 0.2rem 0.5rem;
   font-size: 0.8rem;
   color: var(--ink-soft);
+}
+
+/* The field a row is named in: the field itself, and the sentence a refusal came
+   back with under it. For a making it is where the row it becomes will be drawn,
+   indented one level in from the folder it is going into; for a rename it stands
+   where the row itself does — see `Tree.tsx`, which is where either indent is
+   worked out, the indent being a style on the row. */
+.naming {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.1rem 0.5rem 0.2rem;
+}
+
+/* The field itself, drawn as the row it stands in rather than as a form control:
+   the same size and the same quiet fill the names around it have, with an edge
+   to say it takes typing. Full width of what is left of the tree, a name being
+   as long as a name is. */
+.field {
+  width: 100%;
+  min-width: 0;
+  padding: 0.1rem 0.3rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.3rem;
+}
+
+.field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* And why the last name was refused, which stays under the field with what was
+   typed still in it: a correction rather than a retype. The colour is the app's
+   own for a refusal, which the component brings; what is written here is the size
+   of it, a sentence in a tree being read at the size the rows are. It wraps,
+   because a sentence is read where a name is scanned. */
+.refused {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+/* And the menu a right-click on a row drops: the two things that can be made in
+   a folder, and the rename and delete every row but a root offers. Sized like
+   the tab bar's own beside it, one dropdown holding a few short rows. */
+.rowActions > [role="menu"] {
+  width: 10rem;
+}
+
+/* Its rows, which are painted by the menu's own sheet and take nothing of their
+   own — a row that makes something, moves it or takes it away is an ordinary
+   row. Named here so each can be found. */
+.newFile {
+}
+
+.newFolder {
+}
+
+.rename {
+}
+
+.delete {
+}
+
+/* And the card Delete puts up before anything goes: the question, the sentence
+   naming the row and saying how much of it is about to go, and the two ways out
+   of it.
+
+   The pane's own confirm card again, and deliberately the same shape —
+   `Actions.module.css` says the whole of why it is built this way, and this is
+   the same question asked about a row of the tree instead of a run. Drawn over
+   the page through the same `Modal`, so what is here is the four things inside
+   the card it draws. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own — said over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled in the accent. The way back beside
+   it is a secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* And the sentence a refused delete came back with, over the row of presses so
+   that it is read before either is pressed again. The colour is the app's own
+   for a refusal, which the component brings; the size is the card's. */
+.confirming .refused {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
 }

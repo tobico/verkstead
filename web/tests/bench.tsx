@@ -223,9 +223,13 @@ export function drawn<T extends Element>(
   });
 }
 
-/// The page reading everything it is showing again, exactly as a Nudge makes it:
-/// `invalidateQueries()` with nothing named is the whole of what `lookAgain` in
-/// `src/nudge.ts` does with one.
+/// The page reading everything it is showing again, exactly as a Nudge makes
+/// it: `invalidateQueries()` with nothing named is what `lookAgain` in
+/// `src/nudge.ts` does to the cache with one.
+///
+/// The cache and nothing beside it. A pane that follows the disk for itself
+/// subscribes to the stream rather than to a query key (see `whenFilesMove`),
+/// and a test about one of those drives the stream — see `tests/streaming.ts`.
 ///
 /// Awaited to the end of the reads it caused, so what a test looks at afterwards
 /// is the page the second read left behind rather than the page mid-flight.

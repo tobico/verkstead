@@ -31,6 +31,14 @@ getrandom.workspace = true
 # each platform and the answer is one string — `set` is off, nothing here
 # renames anything.
 hostname = { version = "0.4", default-features = false }
+# The watcher behind the `files` Nudge: the Worktrees a Code pane is drawn over,
+# followed while it is attached (ADR 0019) — see `src/watchers.rs`. Each
+# platform's own mechanism rather than a poll, which is the whole reason for a
+# crate here: inotify on Linux, FSEvents on macOS, `ReadDirectoryChangesW` on
+# Windows, and one API over the three. Default features, which is that set —
+# the optional ones are channel implementations this has no use for, the events
+# being bridged onto tokio's own.
+notify = "8"
 # The request `web-push-native` builds is an `http::Request`, and this is the
 # crate that type comes from — shared with reqwest and axum, so it is the same
 # request all the way out.

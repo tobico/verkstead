@@ -1947,6 +1947,138 @@ export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * What became of taking it away.
+ *
+ * [`FileRenamed`]'s answers said about something that is about to stop being
+ * there, less the one about a name: nothing is named here, so nothing can be
+ * taken and nothing can be spelled as a path. What is left is the bound, the
+ * root's own flag, and the one that is a root's alone — a Worktree is not
+ * something a file tree deletes, whatever the tree would be left drawing.
+ *
+ * **It lands or it does not**, so the word that says it landed carries
+ * nothing: the row goes from the tree, the folder above it is read again, and
+ * every open tab of that path is a tab this side already knows about. Where
+ * [`FileRenamed::Renamed`] has a path to answer with, this has the path it was
+ * asked by.
+ *
+ * Each refusal is a sentence in front of the human rather than a status code,
+ * the way every other answer of this API is.
+ */
+export type FileDeleted = "Deleted" | "IsRoot" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | { "Unwritable": { why: string, } };
+
+/**
+ * Something in a root, taken away.
+ *
+ * One field, [`FileMaking`]'s: a path is the whole of what the tree has to
+ * say, and what is at the end of it is the filesystem's business rather than
+ * the request's — a file and a folder go the same way, and a folder takes
+ * everything under it (ADR 0019, *The tree*).
+ *
+ * **There is no confirm in here.** The card that asks goes up before the press
+ * is made, in the viewer, the way the app asks about every other thing that
+ * cannot be taken back — so a request that arrives has been asked about, and
+ * one confirm covers a folder's whole contents rather than one per file.
+ */
+export type FileDeleting = { path: string, };
+
+/**
+ * One root's, which is git's own list of what is in it.
+ *
+ * **What git tracks, plus what it does not track and does not ignore** — the
+ * same account of what a repository holds that the folder listing takes its
+ * ignores from, asked here as the whole list rather than one folder at a time.
+ * A root git will not answer about — no git on the machine, a Worktree that has
+ * gone, a directory that is not a repository — has no files here at all, which
+ * is that reading's own rule read the other way up: git's answer *is* the
+ * list, so no answer is no list.
+ */
+export type FileList = { 
+/**
+ * The Repo's name, which is what a row of the palette says it is in: a
+ * path alone would not say which checkout it was a path in.
+ */
+repo: string, 
+/**
+ * And the root itself, which is what the part of a path under it is cut
+ * off the front of — the tree's own reading of a row's name, made on a
+ * palette row instead.
+ */
+path: string, 
+/**
+ * The files, each spelled in full the way the root is.
+ *
+ * In full rather than as the part under the root, so that a file opened
+ * from here is the same path — the same string — the tree would have
+ * opened: a Worktree on Windows is spelled with a `\`, and a path the page
+ * joined with a `/` would be a second name for one file, which is two
+ * buffers and two tabs (see [`FolderEntry::path`], which is the same join
+ * made for the same reason).
+ */
+files: Array<string>, 
+/**
+ * And whether the list was cut short of everything this root holds.
+ *
+ * A monorepo answers with a few hundred thousand paths and none of them
+ * would be read on a page, so a root is capped — and a root that was cut
+ * says so, because a palette quietly matching over half a checkout is a
+ * palette that says a file is not there.
+ */
+cut: boolean, };
+
+/**
+ * Every root's files, which is what the quick-open palette matches over.
+ *
+ * One ask answers the whole Conversation — a list per root, under the root it
+ * belongs to — because what the palette offers is every file the human could
+ * open and two roots can hold the same path (ADR 0019, *The tree*). The order
+ * is [`FileRootsView`]'s: the Conversation's own first, then each companion's.
+ *
+ * **Read afresh every time the palette opens.** There is no watcher until the
+ * stage after this one, and a list read once would go stale the first time the
+ * agent wrote anything — a palette offering a file that has gone, and never
+ * offering one that has arrived.
+ */
+export type FileListsView = { roots: Array<FileList>, };
+
+/**
+ * What became of making one.
+ *
+ * **A new file is empty and a new folder holds nothing** — there is no
+ * template and no content in the request, because what is being made is a row
+ * in the tree. A file made this way opens as a tab the human then types into
+ * and saves through [`FileWrite`], which is where content has always come
+ * from.
+ *
+ * The refusals are [`FileWritten`]'s said about a path that is not there yet,
+ * with one of their own: a name that is already taken. Each of them is a
+ * sentence drawn beside the field the name was typed into rather than a status
+ * code, the way every other answer of this API is
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The tree*).
+ */
+export type FileMade = { "Made": { path: string, } } | "Taken" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unwritable": { why: string, } };
+
+/**
+ * A file or a folder to be made, named in full.
+ *
+ * One field, because a path is the one thing the tree has to say: a row of it
+ * holds the folder it was listed from, and what a human types into the field
+ * under that row is a name joined onto it — which is exactly how
+ * [`FolderEntry::path`] is built, and is why every other endpoint here is
+ * asked by path as well.
+ *
+ * What is at the end of that path is what is made, and the folder above it is
+ * the one it is made in: so a Worktree that has gone, a folder that has gone
+ * and a root that takes no writes are all answers about the path's *parent*,
+ * and [`FileMade::Taken`] is the one about its last segment.
+ */
+export type FileMaking = { path: string, };
+
+/**
+ * One marked path, and what the mark is.
+ */
+export type FileMark = { path: string, mark: Marked, };
+
+/**
  * What one file of one of those roots is, read — or the named reason it is
  * not drawn.
  *
@@ -2011,6 +2143,49 @@ media_type: string,
 base64: string, } } | "Binary" | "TooLarge" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unreadable": { why: string, } };
 
 /**
+ * What became of renaming it.
+ *
+ * [`FileMade`]'s answers said about a move rather than a making — a name
+ * already taken, a root that takes no writes, a path outside every root, a path
+ * under `.git`, a Worktree that has gone, a path that has — with the one that
+ * is a rename's alone: a root itself, which is a Worktree rather than anything
+ * in one and has no name here to change. What the human knows a root by is the
+ * Repo it is a checkout of, and that is the registry's business rather than the
+ * tree's.
+ *
+ * Each of them is a sentence drawn beside the field the name was typed into
+ * rather than a status code, the way every other answer of this API is.
+ */
+export type FileRenamed = { "Renamed": { path: string, } } | "Taken" | "IsRoot" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | { "Unwritable": { why: string, } };
+
+/**
+ * Something in a root, renamed: what it is now, and what it is to be called.
+ *
+ * **A name rather than a path**, which is the whole of why a rename cannot
+ * cross two roots ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The
+ * tree*). Two roots are two repositories, and a file taken out of one checkout
+ * and put in another is not something the pane has any way to ask for: the
+ * field is drawn over the row, it holds a name, and what the server does with
+ * it is join it onto the folder the row is already in.
+ *
+ * So this is [`FileMaking`] split in two. The making carries one path because
+ * what it names is not there yet and the name is the last segment of it; this
+ * carries the path of something that *is* there and the name it is to have,
+ * and a `name` with a separator in it is a path rather than a name — see
+ * [`FileRenamed::Outside`].
+ */
+export type FileRenaming = { 
+/**
+ * What is being renamed, as the tree has it.
+ */
+path: string, 
+/**
+ * And what it is to be called: one segment, which is what was typed into
+ * the field drawn over the row.
+ */
+name: string, };
+
+/**
  * One of them: which repository it is a checkout of, where it is, and what may
  * be done in it.
  */
@@ -2054,6 +2229,58 @@ writable: boolean, };
  * is a tree with nothing in it rather than anything to report.
  */
 export type FileRootsView = { roots: Array<FileRoot>, };
+
+/**
+ * One root's, which is git's own account of what has moved in it.
+ *
+ * **A root git will not answer about is marked nothing**, the way it is listed
+ * nothing by [`FileList`]: git's answer *is* the marks, so no answer is no
+ * marks — and a tree whose rows are drawn unmarked is a tree, where one that
+ * refused to draw would be a checkout the human cannot read because the
+ * machine has no git on it.
+ */
+export type FileStatus = { 
+/**
+ * The Repo's name, which is what the root's own row is called — carried
+ * for the palette's reason, a reading per root being a reading of
+ * something the human knows by the repository it is a checkout of.
+ */
+repo: string, 
+/**
+ * And the root itself, spelled the way the roots listing spells it.
+ */
+path: string, 
+/**
+ * What is marked in it, each path spelled in full the way the root is —
+ * the join the folder listing makes, so that a mark and the row it is
+ * about are the same string (see [`FolderEntry::path`]).
+ *
+ * **Folders are in here too.** A folder carries the strongest mark of
+ * anything under it, folded up from each marked file to the root itself,
+ * so that a change deep in a tree shows on the row above it before
+ * anybody expands one — and so that the tree can draw a row by looking its
+ * path up rather than by scanning every mark for one under it.
+ *
+ * By path, which is the order a `BTreeMap` folded them in rather than
+ * anything the tree reads: a row is drawn from its own path.
+ */
+marks: Array<FileMark>, };
+
+/**
+ * What git says about every root of the Conversation, folded into the marks
+ * the tree draws.
+ *
+ * One ask answers the whole Conversation, a reading per root under the root it
+ * belongs to — [`FileListsView`]'s shape, for its reason: the tree draws every
+ * root at once, and two roots can hold the same path (ADR 0019, *The tree*).
+ *
+ * **Its own reading rather than a field on a folder listing**, which is what a
+ * commit is the argument for: a commit made in a terminal clears every mark in
+ * the Worktree without touching a file, so nothing about any folder has moved
+ * and every mark has changed. Read again on a `files` Nudge and on a `commit`,
+ * which is the one thing on this wire that two kinds both stand for.
+ */
+export type FileStatusView = { roots: Array<FileStatus>, };
 
 /**
  * A file as the human has it, written back over the version it was read at.
@@ -2283,6 +2510,19 @@ at: string,
 html: string, };
 
 /**
+ * The two marks a tree has any use for.
+ *
+ * **Two rather than git's own dozen.** What a row of a tree can say is that
+ * something here is not what was committed, and the one distinction worth
+ * drawing inside that is whether git has ever seen the file at all: a modified
+ * file is an edit to read, and an untracked one may be something that should
+ * never have been written. Staged and unstaged are the same news to a tree —
+ * the file is not what the commit says — and which of them it is is the Diff's
+ * to say.
+ */
+export type Marked = "Untracked" | "Changed";
+
+/**
  * And whether it merges into its base.
  *
  * The store's own word again, and two rather than GitHub's three for the reason
@@ -2413,7 +2653,7 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.

@@ -1,6 +1,9 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
 //! real Conversation: which roots there are, what one folder of one of them
-//! holds, what one file of one of those is — and that file saved back.
+//! holds, what one file of one of those is — that file saved back, one of them
+//! renamed, one taken away — every root's files at once, which is what the
+//! quick-open palette matches over, and git's account of the lot of them, which
+//! is what the tree draws its marks from.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -28,7 +31,9 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    FileReading, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderEntry,
+    FolderListing, Marked,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -730,4 +735,890 @@ async fn a_file_at_the_top_of_what_code_opens_is_still_one_it_saves() {
     };
 
     assert_eq!(std::fs::read_to_string(&at).unwrap(), big);
+}
+
+/// One made out of a row's own menu: an empty file or a folder, at a path under
+/// a folder of one of the roots.
+async fn make(app: &Router, conversation: i64, at: &Path, kind: &str) -> FileMade {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/ui/conversations/{conversation}/files/{kind}/new"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileMaking {
+                        path: at.display().to_string(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the making failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the making answered {body}: {error}"))
+}
+
+/// A new file lands in the Worktree, empty, and is a row of its folder the next
+/// time the tree reads it — which is the whole of what the menu's first row
+/// does. A new folder is the same about a directory.
+#[tokio::test]
+async fn a_new_file_and_a_new_folder_land_in_the_worktree() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    let made = make(&app, conversation, &worktree.join("crates"), "folder").await;
+    assert_eq!(
+        made,
+        FileMade::Made {
+            path: worktree.join("crates").display().to_string()
+        }
+    );
+
+    // Asked for the way the viewer asks — the folder spelled the way the root
+    // is, with a `/` before the name, that being the one separator the page
+    // contributes — and answered back joined the way this platform joins, which
+    // is the spelling the next listing of that folder draws the row under.
+    let asked = format!("{}/lib.rs", worktree.join("crates").display());
+    let file = worktree.join("crates").join("lib.rs");
+
+    assert_eq!(
+        make(&app, conversation, Path::new(&asked), "file").await,
+        FileMade::Made {
+            path: file.display().to_string()
+        }
+    );
+
+    // Empty, which is what a new file is: the text that goes in it is a save
+    // through the endpoint the tab it opens in uses.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+
+    // And both are rows of the tree the moment it reads their folders again.
+    assert!(names(folder(&app, conversation, &worktree).await).contains(&"crates".to_owned()));
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("crates")).await),
+        ["lib.rs"]
+    );
+}
+
+/// A name already in the folder is refused with nothing written, whichever kind
+/// of thing is standing there.
+#[tokio::test]
+async fn a_name_already_taken_is_refused_with_nothing_written() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    assert_eq!(
+        make(&app, conversation, &worktree.join("README.md"), "file").await,
+        FileMade::Taken
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+
+    std::fs::create_dir(worktree.join("src")).unwrap();
+    assert_eq!(
+        make(&app, conversation, &worktree.join("src"), "folder").await,
+        FileMade::Taken
+    );
+}
+
+/// A read-only companion takes neither, on the endpoint's own account: the tree
+/// draws neither row under one, and the root's flag is read here again whatever
+/// a request claims.
+#[tokio::test]
+async fn a_read_only_companion_takes_neither() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, _, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    // The read-write companion is a root like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        make(&app, conversation, &companions[0].join("mine.rs"), "file").await,
+        FileMade::Made {
+            path: companions[0].join("mine.rs").display().to_string()
+        }
+    );
+
+    assert_eq!(
+        make(&app, conversation, &companions[1].join("mine.rs"), "file").await,
+        FileMade::ReadOnly
+    );
+    assert_eq!(
+        make(&app, conversation, &companions[1].join("mine"), "folder").await,
+        FileMade::ReadOnly
+    );
+    assert!(!companions[1].join("mine.rs").exists());
+    assert!(!companions[1].join("mine").exists());
+}
+
+/// And a making is bounded by exactly the roots a read is: a Conversation's own
+/// checkouts and no more, whatever path a request names.
+#[tokio::test]
+async fn a_making_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        make(&app, conversation, &elsewhere.join("mine.rs"), "file").await,
+        FileMade::Outside
+    );
+    assert_eq!(
+        make(&app, conversation, &worktree.join("../mine.rs"), "file").await,
+        FileMade::Outside
+    );
+    assert_eq!(
+        make(&app, conversation, &worktree.join(".git/hooks"), "folder").await,
+        FileMade::UnderGit
+    );
+    assert_eq!(
+        make(
+            &app,
+            conversation,
+            &worktree.join("nowhere/mine.rs"),
+            "file"
+        )
+        .await,
+        FileMade::Missing
+    );
+    assert!(!elsewhere.join("mine.rs").exists());
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileMade = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/file/new")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileMaking {
+                            path: worktree.join("mine.rs").display().to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileMade::Outside);
+    assert!(!worktree.join("mine.rs").exists());
+}
+
+/// One renamed out of that same menu: whatever is at a path, given a new name in
+/// the folder it is already in.
+async fn rename(app: &Router, conversation: i64, at: &Path, name: &str) -> FileRenamed {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{conversation}/files/rename"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileRenaming {
+                        path: at.display().to_string(),
+                        name: name.to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the rename failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the rename answered {body}: {error}"))
+}
+
+/// A file renamed moves where it stands, keeping what is in it, and is the row
+/// the folder draws the next time the tree reads it — which is the whole of what
+/// the menu's third row does. A folder renamed carries everything under it.
+#[tokio::test]
+async fn a_rename_moves_it_within_the_folder_it_is_in() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src/inner")).unwrap();
+    std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("src/inner/deep.rs"),
+            "shallow.rs"
+        )
+        .await,
+        FileRenamed::Renamed {
+            path: worktree
+                .join("src/inner")
+                .join("shallow.rs")
+                .display()
+                .to_string()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("src/inner/shallow.rs")).unwrap(),
+        "deep\n"
+    );
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src/inner")).await),
+        ["shallow.rs"]
+    );
+
+    // And a folder, which moves with everything under it — the tabs of every
+    // file inside one follow it, which is what the pane does with this answer.
+    assert_eq!(
+        rename(&app, conversation, &worktree.join("src"), "crates").await,
+        FileRenamed::Renamed {
+            path: worktree.join("crates").display().to_string()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("crates/inner/shallow.rs")).unwrap(),
+        "deep\n"
+    );
+    assert!(!worktree.join("src").exists());
+}
+
+/// And what moves is the entry the tree drew rather than what it points at: a
+/// row that is a link is a name to move, and the file at the end of it is
+/// somebody else's — which is the deletion's own reading said about a move.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_rename_moves_the_link_rather_than_what_it_points_at() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src")).unwrap();
+    std::fs::write(worktree.join("src/real.rs"), "real\n").unwrap();
+    std::os::unix::fs::symlink(worktree.join("src/real.rs"), worktree.join("link.rs")).unwrap();
+
+    // The row is `link.rs`, in the root rather than in `src` — so the answer is
+    // a path in the root, and it is the path that now has something at it.
+    assert_eq!(
+        rename(&app, conversation, &worktree.join("link.rs"), "moved.rs").await,
+        FileRenamed::Renamed {
+            path: worktree.join("moved.rs").display().to_string()
+        }
+    );
+    assert!(
+        std::fs::symlink_metadata(worktree.join("moved.rs"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert!(!worktree.join("link.rs").exists());
+
+    // And the file at the end of it is exactly where it was, under the name it
+    // had: nothing about a link's row is about what it points at.
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("src/real.rs")).unwrap(),
+        "real\n"
+    );
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src")).await),
+        ["real.rs"]
+    );
+}
+
+/// A root cannot be renamed, whichever root it is: it is a Worktree rather than
+/// something in one, and what the human knows it by is the Repo it is a checkout
+/// of. The tree offers no Rename row on one, so this is the endpoint refusing on
+/// its own account.
+#[tokio::test]
+async fn a_root_is_refused_and_a_read_only_one_renames_nothing() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        rename(&app, conversation, &worktree, "elsewhere").await,
+        FileRenamed::IsRoot
+    );
+    assert_eq!(
+        rename(&app, conversation, &companions[1], "elsewhere").await,
+        FileRenamed::IsRoot
+    );
+    assert!(worktree.is_dir());
+
+    // The read-write companion renames like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &companions[0].join("README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::Renamed {
+            path: companions[0].join("NOTES.md").display().to_string()
+        }
+    );
+
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &companions[1].join("README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::ReadOnly
+    );
+    assert!(companions[1].join("README.md").exists());
+    assert!(!companions[1].join("NOTES.md").exists());
+}
+
+/// And a rename is bounded by exactly the roots a read is, with the *name*
+/// bounded beside the path: two roots are two repositories, and the one thing
+/// that could carry a row from one into another is a name that is really a path.
+#[tokio::test]
+async fn a_rename_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        rename(&app, conversation, &elsewhere.join("README.md"), "NOTES.md").await,
+        FileRenamed::Outside
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("../README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::Outside
+    );
+
+    // A name that names somewhere else — which is the only shape a request to
+    // cross two roots could have, and is not a name.
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("README.md"),
+            &elsewhere.join("README.md").display().to_string()
+        )
+        .await,
+        FileRenamed::Outside
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("README.md"),
+            "../taken.md"
+        )
+        .await,
+        FileRenamed::Outside
+    );
+
+    assert_eq!(
+        rename(&app, conversation, &worktree.join(".git/config"), "conf").await,
+        FileRenamed::UnderGit
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("nowhere.md"),
+            "somewhere.md"
+        )
+        .await,
+        FileRenamed::Missing
+    );
+    assert_eq!(
+        std::fs::read_to_string(elsewhere.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileRenamed = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/rename")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileRenaming {
+                            path: worktree.join("README.md").display().to_string(),
+                            name: "NOTES.md".to_owned(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileRenamed::Outside);
+    assert!(worktree.join("README.md").exists());
+}
+
+/// And one taken away out of that same menu: whatever is at a path, a folder
+/// with everything under it.
+async fn remove(app: &Router, conversation: i64, at: &Path) -> FileDeleted {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{conversation}/files/delete"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileDeleting {
+                        path: at.display().to_string(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the delete failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the delete answered {body}: {error}"))
+}
+
+/// A folder deleted goes with everything under it, in one press and one call —
+/// and its row is off the listing the next time the tree reads the folder above
+/// it, which is the whole of what the menu's fourth row does.
+#[tokio::test]
+async fn a_delete_takes_a_folder_and_everything_under_it() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src/inner")).unwrap();
+    std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+    std::fs::write(worktree.join("src/lib.rs"), "fn main() {}\n").unwrap();
+
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("src/lib.rs")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!worktree.join("src/lib.rs").exists());
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src")).await),
+        ["inner"]
+    );
+
+    // And the folder above it, which takes what is left under it: one confirm
+    // in front of the press, and one call behind it.
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("src")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!worktree.join("src").exists());
+    assert_eq!(
+        names(folder(&app, conversation, &worktree).await),
+        [".gitignore", "README.md"]
+    );
+}
+
+/// A root cannot be deleted, whichever root it is: a Worktree is the ground a
+/// session stands in rather than something in one. The tree offers no Delete row
+/// on a root, so this is the endpoint refusing on its own account.
+#[tokio::test]
+async fn a_root_is_refused_and_a_read_only_one_loses_nothing() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        remove(&app, conversation, &worktree).await,
+        FileDeleted::IsRoot
+    );
+    assert_eq!(
+        remove(&app, conversation, &companions[1]).await,
+        FileDeleted::IsRoot
+    );
+    assert!(worktree.is_dir());
+    assert!(companions[1].is_dir());
+
+    // The read-write companion deletes like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        remove(&app, conversation, &companions[0].join("README.md")).await,
+        FileDeleted::Deleted
+    );
+    assert!(!companions[0].join("README.md").exists());
+
+    assert_eq!(
+        remove(&app, conversation, &companions[1].join("README.md")).await,
+        FileDeleted::ReadOnly
+    );
+    assert!(companions[1].join("README.md").exists());
+}
+
+/// And a deletion is bounded by exactly the roots a read is: this Conversation's
+/// checkouts and nothing else on the machine.
+#[tokio::test]
+async fn a_delete_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        remove(&app, conversation, &elsewhere.join("README.md")).await,
+        FileDeleted::Outside
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("../README.md")).await,
+        FileDeleted::Outside
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join(".git/config")).await,
+        FileDeleted::UnderGit
+    );
+    assert_eq!(
+        remove(&app, conversation, &worktree.join("nowhere.md")).await,
+        FileDeleted::Missing
+    );
+    assert_eq!(
+        std::fs::read_to_string(elsewhere.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+    assert!(worktree.join(".git").exists());
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileDeleted = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/delete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileDeleting {
+                            path: worktree.join("README.md").display().to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileDeleted::Outside);
+    assert!(worktree.join("README.md").exists());
+}
+
+/// Quick open is answered for the whole Conversation at once: a list per root,
+/// in the roots' own order, each naming the Repo it is a checkout of — two
+/// roots being able to hold the same path, and a palette row having to say
+/// which of them it is offering.
+#[tokio::test]
+async fn the_file_lists_are_every_root_of_the_conversation_in_order() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // A checkout somebody has been building in: a tracked file, an untracked
+    // one that is not ignored, and the build directory the `.gitignore` keeps
+    // out of it.
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+    std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+
+    let view: FileListsView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/list"),
+    )
+    .await;
+
+    assert_eq!(
+        view.roots
+            .iter()
+            .map(|list| (list.repo.as_str(), list.path.as_str(), list.cut))
+            .collect::<Vec<_>>(),
+        vec![
+            ("verkstead", worktree.to_str().unwrap(), false),
+            ("askance", companions[0].to_str().unwrap(), false),
+        ]
+    );
+
+    // Spelled in full the way the root is, which is what a tab is opened by:
+    // the same string the tree would have handed over for the same file. A
+    // segment at a time here for that reason — git's own separator is not every
+    // platform's, and a path spelled its way is one the tree never drew.
+    let mut own = view.roots[0].files.clone();
+    own.sort();
+
+    assert_eq!(
+        own,
+        [
+            worktree.join(".gitignore").display().to_string(),
+            worktree.join("README.md").display().to_string(),
+            worktree
+                .join("crates")
+                .join("server")
+                .join("lib.rs")
+                .display()
+                .to_string(),
+        ]
+    );
+
+    // And the read-only companion is listed like any other root: it is a
+    // checkout to read, and quick open opens files rather than writing them.
+    let mut alongside = view.roots[1].files.clone();
+    alongside.sort();
+
+    assert_eq!(
+        alongside,
+        [
+            companions[0].join(".gitignore").display().to_string(),
+            companions[0].join("README.md").display().to_string(),
+        ]
+    );
+}
+
+/// And a Conversation with nothing checked out has nothing to search, which is
+/// a palette saying so rather than anything to report.
+#[tokio::test]
+async fn a_conversation_with_no_worktree_lists_no_files() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let view: FileListsView = get(
+        &app,
+        &format!("/api/ui/conversations/{drafting}/files/list"),
+    )
+    .await;
+
+    assert!(view.roots.is_empty(), "{:?}", view.roots);
+
+    // And a Conversation nothing at all knows about, which is the same nothing.
+    let none: FileListsView = get(&app, "/api/ui/conversations/404/files/list").await;
+    assert!(none.roots.is_empty(), "{:?}", none.roots);
+}
+
+/// The marks are answered for the whole Conversation at once too — a reading per
+/// root, in the roots' own order — and folded, so that a folder wears the
+/// strongest mark of anything under it.
+///
+/// Over real checkouts, because the whole of this reading is what git says about
+/// one: a hand-written list of marks would be a test of the fold and of nothing
+/// else.
+#[tokio::test]
+async fn the_marks_are_every_root_of_the_conversation_folded_up() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // A checkout somebody has been working in: a tracked file edited, a new one
+    // written deep in folders that were not there before, and the build
+    // directory the `.gitignore` keeps out of the tree.
+    std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+    std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+
+    let view: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+
+    assert_eq!(
+        view.roots
+            .iter()
+            .map(|root| (root.repo.as_str(), root.path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("verkstead", worktree.to_str().unwrap()),
+            ("askance", companions[0].to_str().unwrap()),
+        ]
+    );
+
+    // Spelled in full the way the root is, which is what a row of the tree is
+    // drawn by — and every folder over a marked file is in the answer, the root
+    // itself included, wearing the stronger of the two where it holds both.
+    assert_eq!(
+        view.roots[0]
+            .marks
+            .iter()
+            .map(|mark| (mark.path.as_str(), mark.mark))
+            .collect::<Vec<_>>(),
+        vec![
+            (worktree.to_str().unwrap(), Marked::Changed),
+            (
+                worktree.join("README.md").to_str().unwrap(),
+                Marked::Changed
+            ),
+            (worktree.join("crates").to_str().unwrap(), Marked::Untracked),
+            (
+                worktree.join("crates").join("server").to_str().unwrap(),
+                Marked::Untracked
+            ),
+            (
+                worktree
+                    .join("crates")
+                    .join("server")
+                    .join("lib.rs")
+                    .to_str()
+                    .unwrap(),
+                Marked::Untracked
+            ),
+        ]
+    );
+
+    // And the companion beside it has moved in no way at all, which is a root
+    // answered about with nothing marked rather than a root left out.
+    assert!(view.roots[1].marks.is_empty(), "{:?}", view.roots[1].marks);
+}
+
+/// And a commit made beside the tree clears them, with nothing in the tree
+/// having been written — which is why the marks are their own reading.
+#[tokio::test]
+async fn a_commit_clears_the_marks_with_no_folder_having_moved() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+
+    let marked: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+    assert!(!marked.roots[0].marks.is_empty());
+
+    let before = folder(&app, conversation, &worktree).await;
+
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work"]);
+
+    let cleared: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+
+    assert!(
+        cleared.roots[0].marks.is_empty(),
+        "{:?}",
+        cleared.roots[0].marks
+    );
+    assert_eq!(folder(&app, conversation, &worktree).await, before);
+}
+
+/// And a Conversation with nothing checked out has nothing to mark, which is
+/// the palette's answer said about the marks.
+#[tokio::test]
+async fn a_conversation_with_no_worktree_marks_nothing() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let view: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{drafting}/files/status"),
+    )
+    .await;
+
+    assert!(view.roots.is_empty(), "{:?}", view.roots);
+
+    // And a Conversation nothing at all knows about, which is the same nothing.
+    let none: FileStatusView = get(&app, "/api/ui/conversations/404/files/status").await;
+    assert!(none.roots.is_empty(), "{:?}", none.roots);
 }

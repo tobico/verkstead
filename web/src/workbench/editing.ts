@@ -34,24 +34,40 @@ export type Uri = Package.Uri;
 /// service reads the same path as the name of the file it is compiling. Which
 /// is why there is no table of extensions anywhere here — the package has one,
 /// and it is the same one VS Code has.
+///
+/// **Held above the pane rather than inside an editor** — see `./keeping`. A
+/// model is registered at the file's own address and Monaco refuses a second
+/// one there, so it is the one thing there can only ever be one of per file:
+/// which is exactly what makes the same file open in two groups two views over
+/// one text, one undo stack and one dot (ADR 0019, *Tabs and groups*).
 export type Model = Package.editor.ITextModel;
 
 /// One editor, as much of it as this pane uses.
+///
+/// Two calls, because an editor here is a *view*: what it shows is the model it
+/// was opened over, and everything that reads or writes the text reads or
+/// writes that — so there is nothing here to take a value out of and nothing to
+/// put one back in with. See [`Model`].
 export type Standalone = Pick<
   Package.editor.IStandaloneCodeEditor,
-  | "getValue"
-  | "setValue"
-  | "onDidChangeModelContent"
-  | "updateOptions"
-  | "dispose"
+  "updateOptions" | "dispose"
 >;
 
 /// What an editor is opened with — the buffer, what it is read aloud as, the
-/// theme, whether it takes typing, and whether it follows the element it is in.
+/// theme, whether it takes typing, whether it follows the element it is in, and
+/// the three settings the pane's own menu carries.
 ///
-/// VS Code's defaults but for those: word wrap, the font size and the minimap
-/// are stage 03 of the roadmap, and are its defaults until then.
+/// VS Code's defaults but for those.
 export type Opening = Package.editor.IStandaloneEditorConstructionOptions;
+
+/// And those three on their own: word wrap, the font size and the minimap, as
+/// the words Monaco takes them in.
+///
+/// A type rather than three arguments, because they are set twice — once as an
+/// editor is opened and again each time the menu moves one — and the two have
+/// to be the same three words or an editor would open drawn one way and be
+/// redrawn another. See `device.ts`, where what this is made out of is kept.
+export type Drawing = Pick<Opening, "wordWrap" | "fontSize" | "minimap">;
 
 /// And the package, as the three calls this pane makes of it.
 export type Monaco = {

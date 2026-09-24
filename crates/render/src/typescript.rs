@@ -22,18 +22,19 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileReading,
-    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
-    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -236,6 +237,18 @@ fn the_viewers_types_are_written_from_these() {
     FileRootsView::export_all(&config).unwrap();
     FolderListing::export_all(&config).unwrap();
 
+    // And every root's files at once, which is what the quick-open palette
+    // matches over: git's own list of what each root holds, read afresh every
+    // time the palette opens and capped per root (ADR 0019, *The tree*). The
+    // lists write the root each of them belongs to with them.
+    FileListsView::export_all(&config).unwrap();
+
+    // And git's account of every one of those roots, folded into the marks the
+    // tree draws on its rows: one status read per root, a folder wearing the
+    // strongest mark of anything under it (ADR 0019, *The tree*). The marks and
+    // the two words a mark can be are written with it.
+    FileStatusView::export_all(&config).unwrap();
+
     // And one file of one of those folders, opened: what kind of thing it
     // turned out to be, the version a write will name itself as being over, and
     // the same refusals said about a file (ADR 0019, *Versioned reads, and a
@@ -248,6 +261,29 @@ fn the_viewers_types_are_written_from_these() {
     // bar in front of the human.
     FileWrite::export_all(&config).unwrap();
     FileWritten::export_all(&config).unwrap();
+
+    // And one made out of a row's own menu: an empty file or a folder, named in
+    // full under a folder of a root (ADR 0019, *The tree*). The write's
+    // refusals said about a path that is not there yet, with the one that is a
+    // making's alone — a name already taken.
+    FileMaking::export_all(&config).unwrap();
+    FileMade::export_all(&config).unwrap();
+
+    // And one renamed out of that same menu: the path it is at and the name it
+    // is to have — a name rather than a path, which is what keeps the move
+    // inside the root it started in. The making's refusals said about something
+    // that is there, with the one that is a rename's alone — a root, which is a
+    // Worktree rather than anything in one.
+    FileRenaming::export_all(&config).unwrap();
+    FileRenamed::export_all(&config).unwrap();
+
+    // And one taken away out of it: the path and no more, a folder going with
+    // everything under it. The rename's refusals less the one about a name,
+    // there being no name in the request — and the confirm in front of the
+    // press is the viewer's, the way the app asks about anything that cannot
+    // be taken back.
+    FileDeleting::export_all(&config).unwrap();
+    FileDeleted::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

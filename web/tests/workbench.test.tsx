@@ -40,14 +40,21 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileDeleted,
+  FileListsView,
+  FileMade,
   FileReading,
+  FileRenamed,
   FileRoot,
   FileRootsView,
+  FileStatusView,
   FileWritten,
+  FolderEntry,
   FolderListing,
   GrillingStarted,
   Merging,
   NoticeEvent,
+  Nudge,
   PendingSteerView,
   PairingView,
   ProfileEntry,
@@ -188,6 +195,7 @@ import {
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
   FILE_REFUSAL,
+  GONE,
   MOVED,
   NOTHING_OPEN,
   TERMINAL_REFUSAL,
@@ -195,6 +203,10 @@ import {
 } from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
 import codePane from "../src/workbench/Code.module.css";
+// And the least a group may be left with, which is what a border dragged too
+// far stops at — a length rather than a share, so a test asking about one has
+// to say how large the layer it is measured in stands.
+import { FLOORS } from "../src/workbench/layout";
 // And the editor a file opens in, which is Monaco — stood in for below. The
 // module that imports the package is read as text as well as mocked away: what
 // it imports is the decision ADR 0019 made, and nothing mounted could assert it.
@@ -202,8 +214,23 @@ import { DARK, LIGHT, NO_EDITOR } from "../src/workbench/Editor";
 import editorPane from "../src/workbench/Editor.module.css";
 import monacoModule from "../src/workbench/monaco.ts?raw";
 // And the tree down its side, over every worktree the conversation has.
-import { FOLDER_REFUSAL, NO_ROOTS } from "../src/workbench/Tree";
+import {
+  DELETED_REFUSAL,
+  FOLDER_REFUSAL,
+  MADE_REFUSAL,
+  MARKS as ROW_MARKS,
+  NO_ROOTS,
+  RENAMED_REFUSAL,
+  deletedRefusal,
+  madeRefusal,
+  renamedRefusal,
+} from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
+import treePaneCss from "../src/workbench/Tree.module.css?raw";
+// And the quick-open palette Ctrl+P drops over it, whose two sentences are read
+// off the component that words them.
+import { NOTHING_TO_SEARCH, onlyPartOf } from "../src/workbench/Quick";
+import quickPane from "../src/workbench/Quick.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -308,11 +335,18 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+// And the Nudge stream, for the one pane that follows it rather than the cache:
+// the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
+// those listings are held above the pane rather than in a query — see
+// `whenFilesMove` in `src/nudge.ts`.
+import { listenForNudges } from "../src/nudge";
+import { stream, streaming } from "./streaming";
 // The stand-in for Monaco, and what it wrote down about what the pane did with
 // it. The same module `vi.mock` above put in place of the seam, imported the
 // ordinary way — so this is that instance and not a second one.
 import {
   loading,
+  opened as editors,
   refusing,
   reset as resetEditing,
   theEditor,
@@ -342,6 +376,8 @@ import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
+import codeFiles from "./fixtures/code-files.json" with { type: "json" };
+import codeStatus from "./fixtures/code-status.json" with { type: "json" };
 import codeFile from "./fixtures/code-file.json" with { type: "json" };
 import codeImage from "./fixtures/code-image.json" with { type: "json" };
 import codeWritten from "./fixtures/code-written.json" with { type: "json" };
@@ -5900,10 +5936,25 @@ class Attached {
   }
 }
 
+/// What the Code pane's own attachment is dialled at: the socket it holds open
+/// for as long as it is drawn, which is what runs the server's watcher over the
+/// worktrees it is showing (ADR 0019, *Following the disk*).
+///
+/// Nothing is drawn or said about it, so no test below is about it save the one
+/// that is — and it is a socket, so every count of them has to leave it out.
+const FILES_ATTACH = "/files/attach";
+
+/// Every socket opened onto a *screen* — a session's or a terminal's — which is
+/// what the counts here are about. The pane's own attachment is not one of
+/// them: it carries nothing and stands for no tab.
+function screens(): Attached[] {
+  return Attached.opened.filter((one) => !one.url.endsWith(FILES_ATTACH));
+}
+
 /// Wait for the page to have attached, and hand back the socket it opened.
 function attached(): Promise<Attached> {
   return waitFor(() => {
-    const socket = Attached.opened[0];
+    const socket = screens()[0];
     if (!socket) {
       throw new Error("nothing has attached to a screen");
     }
@@ -12732,7 +12783,13 @@ describe("a commit on the timeline", () => {
 
     // And both tokens follow the scheme, which is the whole of what the change
     // buys: the hardcoded red never did.
-    expect(base).toContain("--added: #2f7d4f;");
+    //
+    // The green is a step deeper than the one the Diff was first drawn in,
+    // because Code's tree now marks an untracked file in it and the tree is
+    // drawn on `--code-wash` — the darkest ground anything in the app is read
+    // on, where the first green came in under the 4.5:1 the palette holds
+    // itself to. Every surface the Diff uses it on is lighter than that one.
+    expect(base).toContain("--added: #2a7248;");
     expect(base).toContain("--removed: #b3382c;");
     expect(base).toContain("--added: #79c48f;");
     expect(base).toContain("--removed: #e0857a;");
@@ -17820,6 +17877,29 @@ const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
 /// own and each companion's, which is what bounds the files API (ADR 0019).
 const ROOTS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/roots`;
 
+/// And where every one of their files is listed at once, which is what the
+/// quick-open palette matches over (ADR 0019, *The tree*).
+const FILES_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/list`;
+
+/// And where git's account of all of them is read, which is what the tree draws
+/// its marks from — one reading for the pane rather than a call per row.
+const STATUS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/status`;
+
+/// That account with nothing moved in either root, which is what every test but
+/// the marks' own is served.
+///
+/// A checkout nobody has written in is an ordinary state and it is the quiet
+/// one: a test about the tabs, the menus or a rename should no more have to
+/// read around a column of letters than it should have to say what the sidebar
+/// asked for. The tests that *are* about the marks answer this path with the
+/// fixture instead.
+const NOTHING_MOVED: FileStatusView = {
+  roots: (codeStatus as FileStatusView).roots.map((root) => ({
+    ...root,
+    marks: [],
+  })),
+};
+
 /// And where one folder of one of them is read, which is what expanding a row
 /// asks for.
 function folderOf(path: string): string {
@@ -17863,6 +17943,11 @@ function idle(live: number[]): TerminalsView {
 /// The roots come with it, every opening of the pane reading them: the tree is
 /// half of Code, and a test about its tabs should no more have to say what the
 /// tree asked for than it has to say what the sidebar did.
+///
+/// And git's account of them, for the same reason: the tree reads it the moment
+/// it is drawn, whatever the test is about. With nothing moved — see
+/// [`NOTHING_MOVED`], where the quiet default is — so that the tests about the
+/// marks are the ones that say what git found.
 function withTerminals(
   live: number[],
   ...answers: Parameters<typeof serving>
@@ -17874,6 +17959,7 @@ function withTerminals(
     {},
     whenever(TERMINALS_OF_IT, json(idle(live))),
     whenever(ROOTS_OF_IT, json(codeRoots)),
+    whenever(STATUS_OF_IT, json(NOTHING_MOVED)),
     ...answers,
   );
 }
@@ -17979,6 +18065,128 @@ describe("the way into the code pane", () => {
   });
 });
 
+describe("the code pane saying it is drawn", () => {
+  /// The whole of how the disk is followed: the server watches a conversation's
+  /// worktrees while a Code pane is attached to it and not otherwise, and what
+  /// says one is, is a socket held open for as long as the pane stands
+  /// (ADR 0019, *Following the disk*).
+  ///
+  /// Held open rather than asked for and renewed, the way a terminal tab holds
+  /// its attach — so it dies with the tab whatever becomes of the browser.
+  function pane(): Attached[] {
+    return Attached.opened.filter((one) => one.url.endsWith(FILES_ATTACH));
+  }
+
+  it("holds a socket open on the conversation for as long as it is drawn", async () => {
+    withTerminals([]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+
+    const attached = await waitFor(() => {
+      const [one] = pane();
+      if (!one) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return one;
+    });
+
+    expect(attached.url.startsWith("ws://")).toBe(true);
+    expect(
+      attached.url.endsWith(
+        `/api/ui/conversations/${GRILLING.id}/files/attach`,
+      ),
+    ).toBe(true);
+
+    // And nothing goes up it: what the pane hears about the disk is a Nudge
+    // down the stream every other change comes down, and this is open rather
+    // than spoken through.
+    expect(attached.sent).toEqual([]);
+    expect(attached.closed).toBe(false);
+  });
+
+  /// And it lets it go on the way out, which is what stops the watcher. A pane
+  /// swapped for an Event is this too — the server waits a moment for the pane
+  /// to come back before it stops anything, so a swap costs no watcher.
+  it("lets the socket go when the pane is taken down", async () => {
+    withTerminals([]);
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    const [attached] = await waitFor(() => {
+      const open = pane();
+      if (open.length === 0) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return open;
+    });
+
+    unmount();
+
+    await waitFor(() => expect(attached!.closed).toBe(true));
+  });
+
+  /// And it dials again where the socket closed under a pane that is still
+  /// drawn, which is a server restarted under it or a connection that dropped
+  /// rather than a detach.
+  ///
+  /// The one failure here that says nothing: the socket carries no messages, so
+  /// a page that took the closing for the pane going would draw a tree that
+  /// never followed the disk again, with nothing missing to notice.
+  it("dials again where the socket closed under a pane still drawn", async () => {
+    withTerminals([]);
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+
+    const first = await waitFor(() => {
+      const [one] = pane();
+      if (!one) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return one;
+    });
+
+    // The server going away under it, which is what an update is.
+    first.ends();
+
+    const second = await waitFor(
+      () => {
+        const open = pane();
+        if (open.length < 2) {
+          throw new Error("the pane has not attached again");
+        }
+        return open[1]!;
+      },
+      { timeout: 3000 },
+    );
+
+    expect(second.url).toBe(first.url);
+    expect(second.closed).toBe(false);
+
+    // And the pane going is not dialled again: the same event, and nothing left
+    // to attach for.
+    unmount();
+    await waitFor(() => expect(second.closed).toBe(true));
+
+    second.ends();
+    await new Promise((settle) => setTimeout(settle, 600));
+
+    expect(pane()).toHaveLength(2);
+  });
+
+  /// And a pane that never opened says nothing: the watcher is on demand, and a
+  /// conversation nobody has opened Code on costs the server no watch.
+  it("says nothing at all where the pane was never opened", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${shell.middlePane} .${timeline.agentOutput}`);
+
+    expect(pane()).toHaveLength(0);
+  });
+});
+
 describe("a conversation's terminal in the code pane", () => {
   /// The server holds the shell, so the pane is the way back to it rather than
   /// where it lives: a reload attaches to what is already running instead of
@@ -18045,7 +18253,7 @@ describe("a conversation's terminal in the code pane", () => {
           String(path) === TERMINALS_OF_IT && init?.method === "POST",
       ),
     ).toHaveLength(0);
-    expect(Attached.opened).toHaveLength(0);
+    expect(screens()).toHaveLength(0);
 
     // And the press in the empty state is what opens one.
     fireEvent.click(nothing.querySelector("button")!);
@@ -18255,7 +18463,7 @@ describe("a conversation's terminal in the code pane", () => {
       ).toHaveLength(1),
     );
 
-    expect(Attached.opened).toHaveLength(0);
+    expect(screens()).toHaveLength(0);
   });
 
   /// And every other refusal has a sentence of its own, because each is a
@@ -18371,7 +18579,7 @@ describe("the code pane's tabs", () => {
       ["true", "false", "false"],
     );
 
-    await waitFor(() => expect(Attached.opened).toHaveLength(3));
+    await waitFor(() => expect(screens()).toHaveLength(3));
     expect(windows(container).map((window) => window.hidden)).toEqual([
       false,
       true,
@@ -18416,17 +18624,46 @@ describe("the code pane's tabs", () => {
     }
   });
 
-  /// And nothing comes down on a right-click any more. Close was on a menu
-  /// because a × beside a small label is easy to hit by accident; the × is what
-  /// VS Code's bar has, and a busy shell asking first is what carries that
-  /// worry now. What the gesture is freed for is dragging a tab.
-  it("leaves a right-click on a tab to the browser", async () => {
+  /// Close is not on the menu any more — it is the × on the tab, and a busy
+  /// shell asking first is what carries the worry that put it on a menu in ADR
+  /// 0013. What a right-click offers instead is the two splits, this being one
+  /// of the two ways to make one that are not a drag (ADR 0019, *Tabs and
+  /// groups*).
+  it("offers the two splits on a right-click on a tab", async () => {
     withTerminals([1]);
     const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(1));
 
-    // Not prevented, which is the whole of what this pane now does about it.
+    // Nothing is down until it is asked for.
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeNull();
+
+    // The browser's own menu is taken off the press, which is what says this
+    // one is the answer to it.
+    expect(
+      fireEvent.contextMenu(tabs(container)[0]!, {
+        clientX: 120,
+        clientY: 40,
+      }),
+    ).toBe(false);
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+
+    expect(
+      [...menu.querySelectorAll("button")].map((row) => row.textContent),
+    ).toEqual(["Split right", "Split down"]);
+  });
+
+  /// And a long press is left alone: a phone fires the same event from one, and
+  /// that gesture is what a tab is picked up with.
+  it("opens nothing from a phone's long press on a tab", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    fireEvent.pointerDown(tabs(container)[0]!, { pointerType: "touch" });
+
     expect(
       fireEvent.contextMenu(tabs(container)[0]!, {
         clientX: 120,
@@ -18810,7 +19047,7 @@ describe("the code pane's tabs", () => {
 
       // And nothing asked for another.
       expect(asked(fetching)).toBe(1);
-      expect(Attached.opened).toHaveLength(1);
+      expect(screens()).toHaveLength(1);
 
       // New terminal is a press, and it replaces the tab that was only there to
       // say why.
@@ -18852,7 +19089,7 @@ describe("the code pane's tabs", () => {
       );
 
       expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Terminal"]);
-      expect(Attached.opened).toHaveLength(0);
+      expect(screens()).toHaveLength(0);
       expect(asked(fetching)).toBe(1);
 
       // And New terminal asks again, which is the one thing that does: the
@@ -19553,6 +19790,1490 @@ describe("the code pane's file tree", () => {
       ),
     );
   });
+
+  /// And the disk moving under it, which is what the tree follows: a watcher on
+  /// the server says the conversation's worktrees moved, and every folder this
+  /// tree has open is read again (ADR 0019, *Following the disk*).
+  describe("and the disk moving under it", () => {
+    /// The page listening on the Nudge stream, which the bench does not wire:
+    /// `mount` renders the workbench under a client of its own rather than
+    /// `App`, and the stream is held at the app's root — see `App.tsx`.
+    ///
+    /// Stood up here because a `files` Nudge is the only thing that makes this
+    /// tree read anything nobody pressed. What it re-reads is held above the
+    /// pane with the tabs rather than in a query, so there is no invalidation
+    /// that could stand in for one.
+    let stop: (() => void) | undefined;
+
+    afterEach(() => {
+      stop?.();
+      stop = undefined;
+    });
+
+    /// The watcher saying those worktrees moved, which carries a conversation
+    /// and nothing else (ADR-0009): what moved is not in it, and the page reads
+    /// again to find out.
+    function moved(): void {
+      stream().nudges({
+        kind: "files",
+        conversation: GRILLING.id,
+      } satisfies Nudge);
+    }
+
+    /// One folder of a worktree as the endpoint answers it, holding whatever
+    /// the test says it is holding at the moment it is asked — which is what a
+    /// `mkdir` in a terminal tab moves. A name ending in a separator is a
+    /// folder, the way `ls -F` marks one; `null` is the folder itself gone.
+    function listing(path: string, holding: () => string[] | null): Answer {
+      return whenever(folderOf(path), () => {
+        const held = holding();
+
+        if (held === null) {
+          return json("Missing" satisfies FolderListing)();
+        }
+
+        return json({
+          Listed: {
+            path,
+            entries: held.map((name) => ({
+              name: name.replace(/\/$/, ""),
+              path: `${path}/${name.replace(/\/$/, "")}`,
+              folder: name.endsWith("/"),
+            })),
+          },
+        } satisfies FolderListing)();
+      });
+    }
+
+    /// The pane with the conversation's own root expanded and the page
+    /// listening, which is where every test below starts: a tree with nothing
+    /// open has nothing to follow.
+    async function watching(...answers: Parameters<typeof serving>) {
+      streaming();
+      const fetching = withTerminals([], ...answers);
+      const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(mounted.container)).toHaveLength(2));
+      fireEvent.click(row(mounted.container, OWN_ROOT.repo));
+      await waitFor(() =>
+        expect(named(mounted.container)).toContain("Cargo.toml"),
+      );
+
+      stop = listenForNudges(mounted.client);
+      stream().opens();
+
+      return { ...mounted, fetching };
+    }
+
+    /// A folder made in a terminal tab is a row of the tree without anybody
+    /// pressing anything, and one taken away is a row that goes.
+    it("draws a folder made under an expanded one, and drops one removed", async () => {
+      let holding = ["crates/", "Cargo.toml"];
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+      );
+
+      expect(named(container)).not.toContain("docs");
+
+      // `mkdir docs`, and the watcher saying the worktree moved.
+      holding = ["crates/", "docs/", "Cargo.toml"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("docs"));
+      // Where it belongs, which is where the listing puts it rather than at the
+      // end of what was already drawn.
+      expect(named(container)).toEqual([
+        OWN_ROOT.repo,
+        "crates",
+        "docs",
+        "Cargo.toml",
+        `${COMPANION_ROOT.repo}read-only`,
+      ]);
+
+      // And `rm -r docs`, which takes the row away again.
+      holding = ["crates/", "Cargo.toml"];
+      moved();
+
+      await waitFor(() => expect(named(container)).not.toContain("docs"));
+    });
+
+    /// And an expanded folder that has gone takes its rows with it, and is not
+    /// drawn as expanded again when something is made at its name.
+    it("stops drawing an expanded folder that has gone", async () => {
+      const crates = `${OWN_ROOT.path}/crates`;
+      let holding: string[] = ["crates/", "Cargo.toml"];
+      let inside: string[] | null = ["server/"];
+
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+        listing(crates, () => inside),
+      );
+
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(named(container)).toContain("server"));
+
+      // `rm -r crates`: it is off the listing above it, and the folder itself
+      // answers that it is no longer there.
+      holding = ["Cargo.toml"];
+      inside = null;
+      moved();
+
+      await waitFor(() => expect(named(container)).not.toContain("crates"));
+      expect(named(container)).not.toContain("server");
+
+      // And `mkdir crates` again is a folder nobody has opened: the tree forgot
+      // what the old one held, so the row comes back shut rather than drawn
+      // around rows read before it went.
+      holding = ["crates/", "Cargo.toml"];
+      inside = ["client/"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("crates"));
+      expect(row(container, "crates").getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+      expect(named(container)).not.toContain("server");
+      expect(named(container)).not.toContain("client");
+    });
+
+    /// One read per expanded folder and none for the rest, which is the whole
+    /// reason the tree reads one folder at a time: a Nudge says the worktrees
+    /// moved and nothing about where, and what a folder nobody has opened holds
+    /// is not drawn.
+    it("costs one read per expanded folder, and none for the shut ones", async () => {
+      const crates = `${OWN_ROOT.path}/crates`;
+      const web = `${OWN_ROOT.path}/web`;
+
+      const { container, fetching } = await watching(
+        listing(OWN_ROOT.path, () => ["crates/", "web/", "Cargo.toml"]),
+        listing(crates, () => ["server/"]),
+        listing(web, () => ["src/"]),
+      );
+
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(named(container)).toContain("server"));
+
+      const open = [OWN_ROOT.path, crates];
+      const before = open.map((path) => askedFor(fetching, folderOf(path)));
+      expect(askedFor(fetching, folderOf(web))).toBe(0);
+
+      moved();
+
+      await waitFor(() =>
+        open.forEach((path, at) => {
+          expect(askedFor(fetching, folderOf(path)), path).toBe(
+            before[at]! + 1,
+          );
+        }),
+      );
+
+      // And the folder nobody opened is still unread: it is not drawn, so there
+      // is nothing about it to be wrong.
+      expect(askedFor(fetching, folderOf(web))).toBe(0);
+    });
+
+    /// And what the human is in the middle of is left exactly where it is,
+    /// whichever of the two it is: a Nudge is news about the disk rather than a
+    /// press.
+    it("leaves a menu standing and a name half typed where they are", async () => {
+      let holding = ["crates/", "Cargo.toml"];
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => holding),
+      );
+
+      fireEvent.contextMenu(row(container, OWN_ROOT.repo), {
+        clientX: 120,
+        clientY: 200,
+      });
+
+      const drop = (): HTMLElement | null =>
+        container.querySelector<HTMLElement>(
+          `.${shell.detailsPane} .${treePane.rowActions} > .${dropdown.drop}`,
+        );
+
+      const making = await drawn<HTMLButtonElement>(
+        container,
+        `.${shell.detailsPane} .${treePane.newFile}`,
+      );
+
+      // The agent writes into the folder the menu is open over, which moves the
+      // rows under it and not the menu.
+      holding = ["crates/", "Cargo.toml", "LICENSE"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("LICENSE"));
+      expect(drop()).not.toBeNull();
+
+      fireEvent.click(making);
+
+      const field = await drawn<HTMLInputElement>(
+        container,
+        `.${shell.detailsPane} .${treePane.field}`,
+      );
+      fireEvent.input(field, { target: { value: "notes." } });
+
+      // And the agent writes something else into the same folder while they are
+      // still typing the name.
+      holding = ["crates/", "Cargo.toml", "README.md"];
+      moved();
+
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      const still = container.querySelector<HTMLInputElement>(
+        `.${shell.detailsPane} .${treePane.field}`,
+      );
+
+      expect(still).not.toBeNull();
+      expect(still!.value).toBe("notes.");
+    });
+  });
+
+  /// And git's account of the rows, which is what the marks are: a file it sees
+  /// as changed, one it has never seen, and a folder wearing the strongest mark
+  /// of anything under it (ADR 0019, *The tree*).
+  describe("and the marks its rows carry", () => {
+    /// The page listening on the Nudge stream, which the bench does not wire —
+    /// the describe above says why it is stood up here.
+    ///
+    /// The marks are a *query*, unlike the folder listings, so what re-reads
+    /// them is the table in `nudge.ts` rather than the pane's subscription —
+    /// which is the half of this worth mounting the stream for.
+    let stop: (() => void) | undefined;
+
+    afterEach(() => {
+      stop?.();
+      stop = undefined;
+    });
+
+    /// The mark drawn on the row called `name`, or `null` where it has none:
+    /// the letter, what it is read aloud as, and whether the name beside it took
+    /// the same colour.
+    function markOn(
+      container: ParentNode,
+      name: string,
+    ): { letter: string; says: string | null; named: boolean } | null {
+      const label = rows(container).find((one) => one.textContent === name);
+
+      if (!label) {
+        throw new Error(
+          `no row called ${name}; the tree has ${named(container).join(", ")}`,
+        );
+      }
+
+      const mark = label.parentElement!.querySelector(`.${treePane.mark}`);
+
+      if (!mark) {
+        return null;
+      }
+
+      // Whichever of the two it is, the name is drawn in the mark's own colour:
+      // a row says what it is by more than the letter at the end of it.
+      const paint = mark.className.replace(treePane.mark!, "").trim();
+
+      return {
+        letter: mark.textContent ?? "",
+        says: mark.getAttribute("aria-label"),
+        named: label.className.includes(paint),
+      };
+    }
+
+    /// A changed file and an untracked one are told apart by the letter, by the
+    /// word each is read aloud as, and by the colour the name takes.
+    it("marks a changed file and an untracked one, each as what it is", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(codeStatus)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      expect(markOn(container, "README.md")).toEqual({
+        letter: ROW_MARKS.Changed.letter,
+        says: ROW_MARKS.Changed.says,
+        named: true,
+      });
+
+      expect(markOn(container, "Cargo.toml")).toEqual({
+        letter: ROW_MARKS.Untracked.letter,
+        says: ROW_MARKS.Untracked.says,
+        named: true,
+      });
+
+      // Two marks that are told apart, which is the whole of what a pair of
+      // them is for: a different letter, a different word, a different colour.
+      expect(ROW_MARKS.Changed.letter).not.toBe(ROW_MARKS.Untracked.letter);
+      expect(ROW_MARKS.Changed.says).not.toBe(ROW_MARKS.Untracked.says);
+      expect(ROW_MARKS.Changed.paint).not.toBe(ROW_MARKS.Untracked.paint);
+    });
+
+    /// And a folder wears the strongest mark of anything under it, as far up as
+    /// the root — so a change deep in a tree shows on the row above it before
+    /// anybody expands one.
+    it("marks a folder with the strongest mark of anything under it", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(codeStatus)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      // The root, before anything under it has been read at all: what it says
+      // is that something in this checkout has moved, and the strongest of what
+      // is under it is a tracked file that changed.
+      expect(markOn(container, OWN_ROOT.repo)?.letter).toBe(
+        ROW_MARKS.Changed.letter,
+      );
+
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("crates"));
+
+      // A folder holding nothing but an untracked file deep inside it, marked
+      // as that — the fold, made by the server, drawn on a row nobody expanded.
+      expect(markOn(container, "crates")?.letter).toBe(
+        ROW_MARKS.Untracked.letter,
+      );
+
+      // And a folder nothing has moved in wears nothing, which is what makes
+      // the rest worth reading.
+      expect(markOn(container, "web")).toBeNull();
+      expect(markOn(container, ".gitignore")).toBeNull();
+    });
+
+    /// And the colours they are drawn in are the app's own tokens, which is what
+    /// makes them follow the scheme: an untracked file is an addition and takes
+    /// the Diff's green, and a changed one takes a name of its own — red means
+    /// *deleted* in this app, the way `--stopped` was given a name rather than
+    /// borrowing that red.
+    ///
+    /// The stylesheet's, jsdom laying nothing out and computing no variable.
+    /// Both schemes name the new token, which is the whole of what a token buys
+    /// over a hex: the palette holds itself to 4.5:1 on the paper a thing is
+    /// read on, and the tree is read on the darkest of them.
+    it("draws the two marks in tokens that follow the scheme", () => {
+      expect(treePaneCss).toContain("color: var(--modified);");
+      expect(treePaneCss).toContain("color: var(--added);");
+      expect(treePaneCss).not.toContain("var(--removed)");
+
+      // Named in both, which is what says the dark scheme was not left to read
+      // the light one's ember.
+      expect(base.match(/--modified: #[0-9a-f]{6};/g)).toHaveLength(2);
+    });
+
+    /// A root git will not answer about draws its rows unmarked rather than
+    /// failing to draw them: no git on the machine, or a checkout that is no
+    /// repository.
+    it("draws the rows unmarked where git answered nothing", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(NOTHING_MOVED)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      expect(markOn(container, OWN_ROOT.repo)).toBeNull();
+      expect(markOn(container, "README.md")).toBeNull();
+      expect(
+        container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.mark}`,
+        ).length,
+      ).toBe(0);
+    });
+
+    /// And they are read again on both kinds of Nudge: a `files`, which is the
+    /// disk moving under the tree, and a `commit`, which clears every mark in
+    /// the worktree without touching a file — the one reading in the app that
+    /// two kinds both stand for.
+    it.each([["files"], ["commit"]] as const)(
+      "reads the marks back on a %s Nudge",
+      async (kind) => {
+        streaming();
+
+        let marks: FileStatusView = codeStatus as FileStatusView;
+        const fetching = withTerminals(
+          [],
+          whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+          whenever(STATUS_OF_IT, () => json(marks)()),
+        );
+        const { container, client } = mount(
+          `/conversations/${GRILLING.id}/code`,
+        );
+
+        await waitFor(() => expect(rows(container)).toHaveLength(2));
+        fireEvent.click(row(container, OWN_ROOT.repo));
+        await waitFor(() => expect(named(container)).toContain("README.md"));
+        expect(markOn(container, "README.md")).not.toBeNull();
+
+        stop = listenForNudges(client);
+        stream().opens();
+
+        const before = askedFor(fetching, STATUS_OF_IT);
+
+        // The commit made in a terminal tab, which is every mark in the
+        // worktree gone with no folder having moved.
+        marks = NOTHING_MOVED;
+        stream().nudges({ kind, conversation: GRILLING.id } as Nudge);
+
+        await waitFor(() =>
+          expect(askedFor(fetching, STATUS_OF_IT)).toBe(before + 1),
+        );
+        await waitFor(() =>
+          expect(markOn(container, "README.md")).toBeNull(),
+        );
+
+        // And the rows are all still there: nothing about the tree moved, which
+        // is exactly why the marks are their own reading.
+        expect(named(container)).toContain("README.md");
+      },
+    );
+  });
+});
+
+/// What a right-click on a row of that tree drops, and the first two things on
+/// it: a new file and a new folder, each named in a field on a row of its own
+/// (ADR 0019, *The tree*).
+describe("what a right-click on a row of the code pane's tree offers", () => {
+  /// Where a file and a folder are made under a folder of one of the roots.
+  const NEW_FILE = `/api/ui/conversations/${GRILLING.id}/files/file/new`;
+  const NEW_FOLDER = `/api/ui/conversations/${GRILLING.id}/files/folder/new`;
+
+  /// And where one of them is renamed, which is one route for both kinds: a
+  /// rename is one thing to do, and what is at the path is the filesystem's
+  /// business rather than the request's.
+  const RENAMING = `/api/ui/conversations/${GRILLING.id}/files/rename`;
+
+  /// And where one is taken away, which is one route for both kinds for the
+  /// rename's reason: a delete is one thing to do, and a folder goes with
+  /// everything under it.
+  const DELETING = `/api/ui/conversations/${GRILLING.id}/files/delete`;
+
+  /// The folder rows of the tree, roots among them: both are folders, and a root
+  /// is the one of them that is not a path segment.
+  function folders(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.folder}`,
+      ),
+    ];
+  }
+
+  /// And the file rows, which offer neither of the two.
+  function files(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ];
+  }
+
+  /// What the tree is drawing, in the order it drew it — which is what says the
+  /// new row landed where it belongs.
+  function named(container: ParentNode): string[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+      ),
+    ].map((row) => row.textContent ?? "");
+  }
+
+  /// One row, found by what it is called — which is how a human finds one, and
+  /// is not the position it happens to be drawn at.
+  function row(
+    container: ParentNode,
+    name: string,
+    among = folders,
+  ): HTMLButtonElement {
+    const found = among(container).find((one) =>
+      one.textContent?.startsWith(name),
+    );
+
+    if (!found) {
+      throw new Error(
+        `no row called ${name}; the tree has ${named(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// Right-click a row, and say whether the browser's own menu was taken off the
+  /// press.
+  function rightClick(on: HTMLElement, x = 120, y = 200): boolean {
+    return !fireEvent.contextMenu(on, { clientX: x, clientY: y });
+  }
+
+  /// What it drops, or nothing where nothing was right-clicked.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.detailsPane} .${treePane.rowActions} > .${dropdown.drop}`,
+    );
+  }
+
+  /// And what its rows read as.
+  function offered(container: ParentNode): string[] {
+    return [...(drop(container)?.querySelectorAll("button") ?? [])].map(
+      (one) => one.textContent ?? "",
+    );
+  }
+
+  /// The field a name is typed into, by the label a screen reader finds it by.
+  function field(container: ParentNode): HTMLInputElement | null {
+    return container.querySelector<HTMLInputElement>(
+      `.${shell.detailsPane} .${treePane.field}`,
+    );
+  }
+
+  /// And the sentence a refusal drew beside it.
+  function refused(container: ParentNode): string | null {
+    return (
+      container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.refused}`,
+      )?.textContent ?? null
+    );
+  }
+
+  /// The card a Delete puts up, or nothing where nothing is being asked about.
+  /// On the body, a `dialog` being drawn in the top layer.
+  function card(): HTMLDialogElement | null {
+    return document.body.querySelector<HTMLDialogElement>(
+      `dialog.${treePane.confirming}`,
+    );
+  }
+
+  function carded(): Promise<HTMLDialogElement> {
+    return waitFor(() => {
+      const up = card();
+
+      if (!up) {
+        throw new Error("nothing is being asked about");
+      }
+
+      return up;
+    });
+  }
+
+  /// And one of its two presses, by what it says — which is how a human finds
+  /// one.
+  function confirms(asking: ParentNode, says: string): HTMLButtonElement {
+    const found = [...asking.querySelectorAll<HTMLButtonElement>("button")].find(
+      (one) => one.textContent === says,
+    );
+
+    if (!found) {
+      throw new Error(`the card has no ${says}`);
+    }
+
+    return found;
+  }
+
+  /// Every request that went out to one of these routes, as the bodies they
+  /// were sent with.
+  function asked(
+    fetching: ReturnType<typeof serving>,
+    route: string,
+  ): Array<{ path: string }> {
+    return fetching.mock.calls
+      .filter(([path, init]) => String(path) === route && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { path: string });
+  }
+
+  /// The tabs of the group, which is where a new file opens.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.tab}`,
+      ),
+    ];
+  }
+
+  /// The workbench with the conversation's own root expanded, which is what a
+  /// row's menu is opened over: nothing is read until a row is pressed.
+  async function expanded(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals([], ...answers);
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(folders(mounted.container)).toHaveLength(2));
+    fireEvent.click(row(mounted.container, OWN_ROOT.repo));
+    await waitFor(() =>
+      expect(named(mounted.container)).toContain("Cargo.toml"),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// A root offers the two things that can be made in it and neither of the two
+  /// that act on it: a root is a worktree rather than anything in one. Nothing is
+  /// dropped until a row is right-clicked.
+  it("offers New file and New folder on a root, and no Rename or Delete", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    expect(drop(container)).toBeNull();
+
+    // And the browser's own menu is taken off the press: what the hand is asking
+    // for is this card.
+    expect(rightClick(row(container, OWN_ROOT.repo))).toBe(true);
+
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).toEqual(["New file", "New folder"]);
+
+    // A folder under the root makes the same two and renames besides: it is a
+    // folder row like the root, and unlike the root it is something in a
+    // worktree.
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    rightClick(row(container, "crates"));
+    await waitFor(() =>
+      expect(offered(container)).toEqual([
+        "New file",
+        "New folder",
+        "Rename",
+        "Delete",
+      ]),
+    );
+  });
+
+  /// And a file row offers those two alone: there is nowhere in a file to make
+  /// anything.
+  it("offers Rename and Delete alone on a file row", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    expect(rightClick(row(container, "Cargo.toml", files))).toBe(true);
+
+    await waitFor(() =>
+      expect(offered(container)).toEqual(["Rename", "Delete"]),
+    );
+    expect(field(container)).toBeNull();
+  });
+
+  /// A read-only root offers neither anywhere under it — the root's own flag,
+  /// which the roots listing already carries, so the rows are not drawn rather
+  /// than drawn to be refused.
+  it("offers neither anywhere under a read-only root", async () => {
+    const inside = `${COMPANION_ROOT.path}/src`;
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        folderOf(COMPANION_ROOT.path),
+        json({
+          Listed: {
+            path: COMPANION_ROOT.path,
+            entries: [{ name: "src", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+    );
+
+    expect(rightClick(row(container, COMPANION_ROOT.repo))).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    // And a folder inside it, which is the same root read one level down.
+    fireEvent.click(row(container, COMPANION_ROOT.repo));
+    await waitFor(() => expect(named(container)).toContain("src"));
+
+    expect(rightClick(row(container, "src"))).toBe(false);
+    expect(drop(container)).toBeNull();
+  });
+
+  /// And which root a row is in is measured on the separator after the path,
+  /// not on the string alone: a colliding checkout is named
+  /// `<repo>-<branch>-<id>`, so a companion's worktree can start with the whole
+  /// of the conversation's own and still be a different root — with a different
+  /// answer about what may be written in it.
+  it("reads a row against its own root, not one whose path it merely extends", async () => {
+    const extending = {
+      own: false,
+      path: `${OWN_ROOT.path}-57`,
+      repo: "askance",
+      writable: false,
+    };
+
+    const { container } = await expanded(
+      whenever(
+        ROOTS_OF_IT,
+        json({ roots: [OWN_ROOT, extending] } satisfies FileRootsView),
+      ),
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    // The conversation's own root is writable and drops its two rows, which is
+    // what says the reading did not simply stop finding anything.
+    expect(rightClick(row(container, OWN_ROOT.repo))).toBe(true);
+    await waitFor(() => expect(offered(container)).toEqual(["New file", "New folder"]));
+
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    // And the companion beside it is read-only, though its path begins with
+    // every character of the one above.
+    expect(rightClick(row(container, extending.repo))).toBe(false);
+    expect(drop(container)).toBeNull();
+  });
+
+  /// A file row's menu is the mouse's alone: a phone has no right-click and
+  /// fires the same event from a long press, which is the gesture that file row
+  /// is dragged into a group with (ADR 0019, *Tabs and groups*).
+  it("drops nothing where a file row's press began under a finger", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const pressed = row(container, "Cargo.toml", files);
+    fireEvent.pointerDown(pressed, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(pressed)).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    // And a mouse on the same row still drops it: what is read is the hand, not
+    // the row.
+    fireEvent.pointerDown(pressed, { pointerType: "mouse", button: 0 });
+    expect(rightClick(pressed)).toBe(true);
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+  });
+
+  /// And a folder row's is not: nothing is picked up off one, so the long press
+  /// is free and drops the menu the way a right-click does — which is the whole
+  /// of what a touch screen reaches here.
+  it("drops a folder row's menu under a finger, makings and all", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    // The root, which is a folder row with nothing above it.
+    const root = row(container, OWN_ROOT.repo);
+    fireEvent.pointerDown(root, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(root)).toBe(true);
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).toEqual(["New file", "New folder"]);
+
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    // And a folder inside it, which is the same press over a row that renames
+    // and deletes as well.
+    const inside = row(container, "crates");
+    fireEvent.pointerDown(inside, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(inside)).toBe(true);
+    await waitFor(() =>
+      expect(offered(container)).toEqual([
+        "New file",
+        "New folder",
+        "Rename",
+        "Delete",
+      ]),
+    );
+  });
+
+  /// New file: the row expands, a field appears under it, and what is typed there
+  /// and entered is made — after which the folder is read again and the file opens
+  /// as a tab in the active group.
+  it("makes a file from a name typed into the row, and opens it", async () => {
+    const at = `${OWN_ROOT.path}/notes.md`;
+
+    // What the folder holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a making re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        NEW_FILE,
+        json({ Made: { path: at } } satisfies FileMade),
+        "POST",
+      ),
+      whenever(
+        fileOf(at),
+        json({
+          Text: { path: at, version: "0".repeat(64), text: "", writable: true },
+        } satisfies FileReading),
+      ),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    // The menu goes, and a row carrying nothing but a field stands in its place —
+    // with the keyboard already in it, a row that waited to be pressed being two
+    // presses for one gesture.
+    await waitFor(() => expect(field(container)).toBeTruthy());
+    expect(drop(container)).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(field(container)));
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: [
+          ...(codeFolder as Extract<FolderListing, { Listed: unknown }>).Listed
+            .entries,
+          { name: "notes.md", path: at, folder: false },
+        ],
+      },
+    };
+
+    fireEvent.input(field(container)!, { target: { value: "notes.md" } });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    // The path is the folder the row was pressed on with the name joined onto it,
+    // which is how every other path the tree holds is built.
+    await waitFor(() => expect(sent(fetching, NEW_FILE)).toEqual({ path: at }));
+
+    // The field goes, the folder is read again, and the row is in it.
+    await waitFor(() => expect(named(container)).toContain("notes.md"));
+    expect(field(container)).toBeNull();
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+
+    // And it opens as a tab in the active group, the way a file pressed in the
+    // tree does.
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(tabs(container)[0]!.textContent).toBe("notes.md");
+  });
+
+  /// A new folder is made the same way and opens nothing: there is nothing in it
+  /// to open.
+  it("makes a folder from a name typed into the row, and opens nothing", async () => {
+    const at = `${OWN_ROOT.path}/docs`;
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        NEW_FOLDER,
+        json({ Made: { path: at } } satisfies FileMade),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFolder}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "docs" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(sent(fetching, NEW_FOLDER)).toEqual({ path: at }),
+    );
+    await waitFor(() => expect(field(container)).toBeNull());
+
+    // Nothing was read and nothing opened: a folder is a row to expand.
+    expect(askedFor(fetching, fileOf(at))).toBe(0);
+    expect(tabs(container)).toHaveLength(0);
+  });
+
+  /// A name already taken is refused with the server's own sentence beside the
+  /// field, and the field keeps what was typed: a correction rather than a
+  /// retype.
+  it("draws the sentence a refused name came back with, keeping what was typed", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(NEW_FILE, json("Taken" satisfies FileMade), "POST"),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "Cargo.toml" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() => expect(refused(container)).toBe(MADE_REFUSAL.Taken));
+
+    // The row is still there with what was typed in it, and nothing was drawn as
+    // having landed: the folder was not read again and no tab opened.
+    expect(field(container)!.value).toBe("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    expect(tabs(container)).toHaveLength(0);
+  });
+
+  /// And each refusal is its own sentence rather than one "could not be made",
+  /// because only the human can tell which of them they are looking at.
+  it("words every refusal of a making as the thing it is", () => {
+    expect(new Set(Object.values(MADE_REFUSAL)).size).toBe(
+      Object.keys(MADE_REFUSAL).length,
+    );
+
+    expect(MADE_REFUSAL.Taken).toContain("already");
+    expect(MADE_REFUSAL.ReadOnly).toContain("worktree");
+    expect(MADE_REFUSAL.Outside).toContain("worktrees");
+    expect(MADE_REFUSAL.UnderGit).toContain(".git");
+
+    // And the one the server words itself, being the only one this side could not
+    // have worked out.
+    expect(madeRefusal({ Unwritable: { why: "no room on the disk" } })).toBe(
+      "no room on the disk",
+    );
+    expect(madeRefusal({ Made: { path: "/anywhere" } })).toBeNull();
+  });
+
+  /// Escape leaves the tree exactly as it was: the row goes, nothing is asked
+  /// for, and what was typed goes with it.
+  it("leaves the tree as it was when Escape is pressed while naming", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const was = named(container);
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "half-typed" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Escape" });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(named(container)).toEqual(was);
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+
+    // And nothing is left behind: the next field opens empty rather than holding
+    // what was abandoned.
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    expect(
+      (await drawn<HTMLInputElement>(container, `.${treePane.field}`)).value,
+    ).toBe("");
+  });
+
+  /// And Enter over an empty field is a press that waits: there is nothing for
+  /// the server to refuse that the field has not already said by being empty.
+  it("asks for nothing when Enter is pressed with nothing typed", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.keyDown(await drawn(container, `.${treePane.field}`), {
+      key: "Enter",
+    });
+
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+    expect(field(container)).toBeTruthy();
+  });
+
+  /// And a name that is really a path is refused here rather than sent: the
+  /// request is the folder with what was typed joined onto it, so a separator
+  /// would make the row under another folder — one this press is not about and
+  /// does not read again. The rename's own sentence, the mistake being one
+  /// mistake.
+  it("refuses a name with a path in it, rather than making the row elsewhere", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    for (const typed of ["crates/notes.md", "crates\\notes.md", ".."]) {
+      fireEvent.input(await drawn(container, `.${treePane.field}`), {
+        target: { value: typed },
+      });
+      fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(refused(container)).toBe("That is a path rather than a name."),
+      );
+    }
+
+    // Nothing went out, and the field is still standing with what was typed in
+    // it: the next Enter is a correction rather than a retype.
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+    expect(field(container)?.value).toBe("..");
+  });
+
+  /// Rename: the field is drawn over the row it is about, holding the name it
+  /// has now, and Enter moves it — after which the folder is read again and the
+  /// tree draws the row under its new name.
+  it("renames a row from a name typed over it", async () => {
+    const at = `${OWN_ROOT.path}/Cargo.toml`;
+    const to = `${OWN_ROOT.path}/Makefile.toml`;
+
+    // What the folder holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a rename re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        RENAMING,
+        json({ Renamed: { path: to } } satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    // The field stands where the row does, holding the name it has now and with
+    // the keyboard in it: a rename is typed over rather than backspaced out.
+    const typing = await drawn<HTMLInputElement>(
+      container,
+      `.${treePane.field}`,
+    );
+    expect(typing.value).toBe("Cargo.toml");
+    await waitFor(() => expect(document.activeElement).toBe(typing));
+
+    // And the row it is over is not drawn beside it: the field *is* the row.
+    expect(named(container)).not.toContain("Cargo.toml");
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.map((entry) =>
+          entry.name === "Cargo.toml"
+            ? { name: "Makefile.toml", path: to, folder: false }
+            : entry,
+        ),
+      },
+    };
+
+    fireEvent.input(typing, { target: { value: "Makefile.toml" } });
+    fireEvent.keyDown(typing, { key: "Enter" });
+
+    // A name and not a path, which is the whole of why a rename cannot cross
+    // two roots: the server joins it back onto the folder the row is in.
+    await waitFor(() =>
+      expect(sent(fetching, RENAMING)).toEqual({
+        path: at,
+        name: "Makefile.toml",
+      }),
+    );
+
+    await waitFor(() => expect(named(container)).toContain("Makefile.toml"));
+    expect(field(container)).toBeNull();
+    expect(named(container)).not.toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// A folder renamed carries what is under it: the folders of the tree open
+  /// beneath it, and the tab of every file open out of one of them. The tree
+  /// redraws under the new name, the folder above it being read again.
+  it("carries the open folders and the tabs under a renamed folder", async () => {
+    const crates = `${OWN_ROOT.path}/crates`;
+    const inside = `${crates}/server`;
+    const deep = `${inside}/server.rs`;
+    const moved = `${OWN_ROOT.path}/packages`;
+
+    // What the root holds afterwards, which is the reading it is asked for
+    // again: the folder above the renamed row is what a rename re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        folderOf(crates),
+        json({
+          Listed: {
+            path: crates,
+            entries: [{ name: "server", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(
+        folderOf(inside),
+        json({
+          Listed: {
+            path: inside,
+            entries: [{ name: "server.rs", path: deep, folder: false }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(
+        fileOf(deep),
+        json({
+          Text: {
+            path: deep,
+            version: "0".repeat(64),
+            text: "fn main() {}\n",
+            writable: true,
+          },
+        } satisfies FileReading),
+      ),
+      whenever(
+        RENAMING,
+        json({ Renamed: { path: moved } } satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    // Two folders down, with a file open out of the bottom one: the walk a
+    // rename has to carry.
+    fireEvent.click(row(container, "crates"));
+    await waitFor(() => expect(named(container)).toContain("server"));
+
+    fireEvent.click(row(container, "server"));
+    await waitFor(() => expect(named(container)).toContain("server.rs"));
+
+    fireEvent.click(row(container, "server.rs", files));
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.map((entry) =>
+          entry.name === "crates"
+            ? { name: "packages", path: moved, folder: true }
+            : entry,
+        ),
+      },
+    };
+
+    rightClick(row(container, "crates"));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "packages" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    // The tree redraws under the new name, and both folders that were open
+    // beneath it are open still: what each of them last read moved with them.
+    await waitFor(() => expect(named(container)).toContain("packages"));
+    expect(named(container)).not.toContain("crates");
+    expect(named(container)).toContain("server");
+    expect(named(container)).toContain("server.rs");
+
+    // And the tab of the file two levels down is still there, under the same
+    // name: a tab inside a renamed folder follows it.
+    expect(tabs(container)).toHaveLength(1);
+    expect(tabs(container)[0]!.textContent).toBe("server.rs");
+
+    // Which is a row of the tree at its new path — pressing it turns to the tab
+    // it already has rather than opening a second one.
+    fireEvent.click(row(container, "server.rs", files));
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+  });
+
+  /// A root offers neither Rename nor Delete, so the one path this field can
+  /// never name is the one that would move a worktree — and there is no press
+  /// anywhere that would take one away.
+  it("offers no Rename and no Delete on a root", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).not.toContain("Rename");
+    expect(offered(container)).not.toContain("Delete");
+  });
+
+  /// And what goes up is a name rather than a path, so there is no shape a
+  /// request to name a row in another root could have: whatever is typed is
+  /// sent as the name it is, and where it goes is the folder the row is already
+  /// in.
+  it("sends what was typed as a name, never as a path", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        RENAMING,
+        json("Outside" satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    const elsewhere = `${COMPANION_ROOT.path}/Cargo.toml`;
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: elsewhere },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(sent(fetching, RENAMING)).toEqual({
+        path: `${OWN_ROOT.path}/Cargo.toml`,
+        name: elsewhere,
+      }),
+    );
+
+    // And the server's word for it is the sentence beside the field, with what
+    // was typed still in it.
+    await waitFor(() =>
+      expect(refused(container)).toBe(RENAMED_REFUSAL.Outside),
+    );
+    expect(field(container)!.value).toBe(elsewhere);
+  });
+
+  /// A name already taken is refused with the server's own sentence beside the
+  /// field, nothing moves in the tree, and the field keeps what was typed.
+  it("draws the sentence a refused rename came back with, moving nothing", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(RENAMING, json("Taken" satisfies FileRenamed), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "README.md" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() => expect(refused(container)).toBe(RENAMED_REFUSAL.Taken));
+
+    expect(field(container)!.value).toBe("README.md");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    expect(named(container)).not.toContain("Cargo.toml");
+  });
+
+  /// And the name it already has is nothing to ask for: the field goes, and the
+  /// server is never troubled with a move that is not one.
+  it("asks for nothing when Enter is pressed over an untouched name", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.keyDown(await drawn(container, `.${treePane.field}`), {
+      key: "Enter",
+    });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === RENAMING),
+    ).toHaveLength(0);
+
+    // And the row is back where it was, with the name it had.
+    expect(named(container)).toContain("Cargo.toml");
+  });
+
+  /// Escape over a rename leaves the tree exactly as it was: the field goes, the
+  /// row comes back, and nothing was asked for.
+  it("leaves the row as it was when Escape is pressed while renaming", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const was = named(container);
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "half-typed" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Escape" });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(named(container)).toEqual(was);
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === RENAMING),
+    ).toHaveLength(0);
+  });
+
+  /// And each refusal of a rename is its own sentence rather than one "could not
+  /// be renamed", because only the human can tell which of them they are looking
+  /// at.
+  it("words every refusal of a rename as the thing it is", () => {
+    expect(new Set(Object.values(RENAMED_REFUSAL)).size).toBe(
+      Object.keys(RENAMED_REFUSAL).length,
+    );
+
+    expect(RENAMED_REFUSAL.Taken).toContain("already");
+    expect(RENAMED_REFUSAL.IsRoot).toContain("worktree");
+    expect(RENAMED_REFUSAL.Outside).toContain("name");
+    expect(RENAMED_REFUSAL.UnderGit).toContain(".git");
+
+    // And the one the server words itself, being the only one this side could
+    // not have worked out.
+    expect(renamedRefusal({ Unwritable: { why: "it is read-only" } })).toBe(
+      "it is read-only",
+    );
+    expect(renamedRefusal({ Renamed: { path: "/anywhere" } })).toBeNull();
+  });
+
+  /// Delete: the card goes up over the row, and only the press inside it takes
+  /// anything away — one confirm for a folder, which goes with everything under
+  /// it (ADR 0019, *The tree*).
+  it("takes a folder away with everything under it, after one confirm", async () => {
+    const crates = `${OWN_ROOT.path}/crates`;
+    const inside = `${crates}/server`;
+
+    // What the root holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a delete re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        folderOf(crates),
+        json({
+          Listed: {
+            path: crates,
+            entries: [{ name: "server", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST"),
+    );
+
+    // A folder with something drawn under it, which is what one confirm has to
+    // cover.
+    fireEvent.click(row(container, "crates"));
+    await waitFor(() => expect(named(container)).toContain("server"));
+
+    rightClick(row(container, "crates"));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    // The card names the row and says how much of it is about to go — and
+    // nothing has been asked of the server yet: the press is still ahead of it.
+    const asking = await carded();
+    expect(asking.textContent).toContain("Delete this folder?");
+    expect(asking.textContent).toContain("everything in it goes with it");
+    expect(asked(fetching, DELETING)).toHaveLength(0);
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.filter((entry) => entry.name !== "crates"),
+      },
+    };
+
+    fireEvent.click(confirms(asking, "Delete crates"));
+
+    // One call, for the whole of it: the path and no more.
+    await waitFor(() => expect(asked(fetching, DELETING)).toEqual([{ path: crates }]));
+
+    // And the row is gone with everything that was drawn under it, the folder
+    // above it having been read again.
+    await waitFor(() => expect(named(container)).not.toContain("crates"));
+    expect(named(container)).not.toContain("server");
+    expect(card()).toBeNull();
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// And every way out of that card but the one press leaves the row exactly
+  /// where it is: a delete cannot be taken back, so nothing is taken until the
+  /// human has said so.
+  it("asks before it takes anything, and a way out leaves the row", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    const asking = await carded();
+    expect(asking.textContent).toContain("Delete this file?");
+    expect(asking.textContent).not.toContain("everything in it");
+
+    fireEvent.click(confirms(asking, "Keep it"));
+
+    await waitFor(() => expect(card()).toBeNull());
+    expect(asked(fetching, DELETING)).toHaveLength(0);
+    expect(named(container)).toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// A refusal comes back into the card the press was made in, with the card
+  /// still up and the row still where it was.
+  it("draws the sentence a refused delete came back with, taking nothing", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(DELETING, json("Missing" satisfies FileDeleted), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.delete}`),
+    );
+
+    fireEvent.click(confirms(await carded(), "Delete Cargo.toml"));
+
+    await waitFor(() =>
+      expect(card()?.textContent).toContain(DELETED_REFUSAL.Missing),
+    );
+
+    expect(named(container)).toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// And each refusal of a delete is its own sentence rather than one "could
+  /// not be deleted", because only the human can tell which of them they are
+  /// looking at.
+  it("words every refusal of a delete as the thing it is", () => {
+    expect(new Set(Object.values(DELETED_REFUSAL)).size).toBe(
+      Object.keys(DELETED_REFUSAL).length,
+    );
+
+    expect(DELETED_REFUSAL.IsRoot).toContain("worktree");
+    expect(DELETED_REFUSAL.UnderGit).toContain(".git");
+    expect(DELETED_REFUSAL.Missing).toContain("no longer");
+
+    // And the one the server words itself, being the only one this side could
+    // not have worked out.
+    expect(deletedRefusal({ Unwritable: { why: "it is read-only" } })).toBe(
+      "it is read-only",
+    );
+    expect(deletedRefusal("Deleted")).toBeNull();
+  });
 });
 
 /// What a file pressed in that tree opens as: a tab of the group beside it,
@@ -19622,6 +21343,17 @@ describe("a file opened out of the code pane's tree", () => {
   function said(container: ParentNode): string | null | undefined {
     return container.querySelector(`.${shell.detailsPane} .${notices.error}`)
       ?.textContent;
+  }
+
+  /// What a file's tab is holding, which is drawn whether or not the tab is the
+  /// one showing and hidden when it is not — the editor under it is what keeps
+  /// the caret and the undo stack across a turn away and back.
+  function content(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.opened}`,
+      ),
+    ];
   }
 
   /// The workbench with one root of the tree expanded, which is how a file is
@@ -19918,6 +21650,51 @@ describe("a file opened out of the code pane's tree", () => {
     expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
   });
 
+  /// And a tab turned away from keeps its editor, which is the one thing a
+  /// human can see about the buffer having moved above the pane: the caret and
+  /// the undo stack are where they were left, because nothing was made afresh.
+  ///
+  /// The tab is hidden rather than taken down, the way a terminal's grid is.
+  /// What is read back here is the caret — the box the stand-in puts where the
+  /// real editor's view would be is the same box, and its selection is the same
+  /// selection — and the editor object itself, which the pane opened once.
+  it("keeps the editor of a tab turned away from, caret and all", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
+    made.typing.setSelectionRange(4, 4);
+
+    // Away to the terminal beside it. The file's tab is still drawn — hidden,
+    // which is the browser's own word for it and what a screen reader reads.
+    fireEvent.click(tabs(container)[0]!);
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["true", "false"]),
+    );
+
+    expect(content(container)).toHaveLength(1);
+    expect(content(container)[0]!.hidden).toBe(true);
+    expect(made.disposed).toBe(false);
+
+    // And back, to the editor that was there — not a second one over the same
+    // buffer.
+    fireEvent.click(tabs(container)[1]!);
+    await waitFor(() => expect(content(container)[0]!.hidden).toBe(false));
+
+    expect(theEditor()).toBe(made);
+    expect(editors).toHaveLength(1);
+    expect(editor(container)?.selectionStart).toBe(4);
+  });
+
   /// And the × at the end of a file's tab closes it, taking its reading with
   /// it: there is nothing at the server to end, and opening it again is a fresh
   /// reading of the disk the way expanding a folder is.
@@ -19935,14 +21712,28 @@ describe("a file opened out of the code pane's tree", () => {
       "Close Cargo.toml",
     );
 
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
     fireEvent.click(crosses(container)[1]!);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(1));
     expect(editor(container)).toBeNull();
 
+    // And the buffer with it, which is a disposal rather than a forgetting: the
+    // model is registered at the file's own address in Monaco's own register,
+    // and one left there is a file that could never be opened again.
+    expect(made.model.disposed).toBe(true);
+
     press(container, "Cargo.toml");
 
     await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+
+    // A fresh read, and a fresh buffer over it.
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(theEditor().model).not.toBe(made.model);
+    expect(theEditor().model.disposed).toBe(false);
   });
 
   /// The editor is a chunk of its own, fetched because Code was opened and for
@@ -20532,6 +22323,625 @@ describe("a file opened out of the code pane's tree", () => {
       await waitFor(() => expect(tabs(container)).toHaveLength(1));
       expect(card()).toBeNull();
     });
+
+    /// And what a rename in the tree does to the tab standing over that file,
+    /// which is most of what a rename is: an open tab follows its file (ADR
+    /// 0019, *The tree*).
+    describe("and the file renamed out of the tree while it is open", () => {
+      /// Where a row of the tree is renamed: the path it is at and the name it
+      /// is to have, which is what keeps the move inside the root it is in.
+      const RENAMING = `/api/ui/conversations/${GRILLING.id}/files/rename`;
+
+      /// Where the fixture's file lands, which is the same folder under another
+      /// name.
+      const MOVED = TEXT.path.replace(/Cargo\.toml$/, "Makefile.toml");
+
+      /// The tree's rows, by what they say — which is what says the tree
+      /// redrew under the new name.
+      function rows(container: ParentNode): string[] {
+        return [
+          ...container.querySelectorAll<HTMLElement>(
+            `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+          ),
+        ].map((one) => one.textContent ?? "");
+      }
+
+      /// Rename the row called `was` to `now`, which is the menu, the field and
+      /// Enter.
+      async function renames(
+        container: ParentNode,
+        was: string,
+        now: string,
+        among = treePane.file,
+      ): Promise<void> {
+        const found = [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${among}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(was));
+
+        if (!found) {
+          throw new Error(`no row called ${was}; the tree has ${rows(container).join(", ")}`);
+        }
+
+        fireEvent.contextMenu(found, { clientX: 20, clientY: 40 });
+
+        const rename = await waitFor(() => {
+          const one = container.querySelector<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.rename}`,
+          );
+
+          if (!one) {
+            throw new Error("the menu has no Rename");
+          }
+
+          return one;
+        });
+
+        fireEvent.click(rename);
+
+        const typing = await waitFor(() => {
+          const one = container.querySelector<HTMLInputElement>(
+            `.${shell.detailsPane} .${treePane.field}`,
+          );
+
+          if (!one) {
+            throw new Error("nothing is being named");
+          }
+
+          return one;
+        });
+
+        fireEvent.input(typing, { target: { value: now } });
+        fireEvent.keyDown(typing, { key: "Enter" });
+      }
+
+      /// What the rename endpoint answers with: the path it moved to.
+      function moves(to: string): Answer {
+        return whenever(
+          RENAMING,
+          json({ Renamed: { path: to } } satisfies FileRenamed),
+          "POST",
+        );
+      }
+
+      /// The tab is retitled, the text nobody saved is still in it and still
+      /// dirty, and the next Ctrl+S writes to the new path over the version the
+      /// rename left behind.
+      it("retitles the tab, keeps its unsaved text, and saves to the new path", async () => {
+        const { container, fetching } = await opened(
+          saves(WRITTEN),
+          moves(MOVED),
+        );
+
+        await types(container, "mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        await renames(container, "Cargo.toml", "Makefile.toml");
+
+        // The tab says the new name, and the tree redrew under it — the folder
+        // is read again, there being no watcher until stage 04.
+        await waitFor(() =>
+          expect(
+            tabs(container).map((one) => one.textContent),
+          ).toContain("Makefile.toml"),
+        );
+        expect(
+          tabs(container).map((one) => one.textContent),
+        ).not.toContain("Cargo.toml");
+
+        // The text is still there and the tab is still dirty: what carried over
+        // is the text and the reading both, so the comparison between them is
+        // the one it was.
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        // And the next Ctrl+S is a write to the new path, over the version the
+        // read of the old one handed over — which is the version the file still
+        // has, a rename having moved it rather than rewritten it.
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        expect(saved(fetching)[0]).toEqual({
+          path: MOVED,
+          version: TEXT.version,
+          text: "mine\n",
+        });
+
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+      });
+    });
+
+    /// And what a delete in the tree does to the tab standing over that file,
+    /// which is the other half of a tab following its file: the tab **stays**
+    /// (ADR 0019, *The tree*).
+    describe("and the file deleted out of the tree while it is open", () => {
+      /// Where a row of the tree is taken away: the path, and a folder goes
+      /// with everything under it.
+      const DELETING = `/api/ui/conversations/${GRILLING.id}/files/delete`;
+
+      /// What the delete endpoint answers with.
+      function removes(): Answer {
+        return whenever(DELETING, json("Deleted" satisfies FileDeleted), "POST");
+      }
+
+      /// The line a tab whose file has gone draws over its text.
+      function gone(container: ParentNode): string | null | undefined {
+        return container.querySelector(`.${shell.detailsPane} .${codePane.gone}`)
+          ?.textContent;
+      }
+
+      /// Delete the row called `was`, which is the menu, the card, and the
+      /// press inside it.
+      async function deletes(container: ParentNode, was: string): Promise<void> {
+        const found = [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.file}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(was));
+
+        if (!found) {
+          throw new Error(`no file row called ${was}`);
+        }
+
+        fireEvent.contextMenu(found, { clientX: 20, clientY: 40 });
+
+        fireEvent.click(
+          await waitFor(() => {
+            const one = container.querySelector<HTMLButtonElement>(
+              `.${shell.detailsPane} .${treePane.delete}`,
+            );
+
+            if (!one) {
+              throw new Error("the menu has no Delete");
+            }
+
+            return one;
+          }),
+        );
+
+        const asking = await waitFor(() => {
+          const up = document.body.querySelector<HTMLDialogElement>(
+            `dialog.${treePane.confirming}`,
+          );
+
+          if (!up) {
+            throw new Error("nothing is being asked about");
+          }
+
+          return up;
+        });
+
+        fireEvent.click(
+          [...asking.querySelectorAll<HTMLButtonElement>("button")].find(
+            (one) => one.textContent === `Delete ${was}`,
+          )!,
+        );
+      }
+
+      /// The tab stays with its text in it, read-only and saying the file is
+      /// gone — and Ctrl+S writes nothing, there being nothing to write over.
+      it("keeps the tab read-only over its text, and saves nothing", async () => {
+        const { container, fetching } = await opened(
+          saves(WRITTEN),
+          removes(),
+        );
+
+        await types(container, "mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        await deletes(container, "Cargo.toml");
+
+        // The tab is still in the bar under the same name: a tab that vanished
+        // would take the text with it.
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+
+        // With the text still in it, and nothing to type over it with.
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
+
+        // And the dot is still on it: every word of what is there is text the
+        // disk has not got, which is what makes the × ask before it goes.
+        expect(dots(container)).toHaveLength(1);
+
+        // Ctrl+S writes nothing: there is nothing on the disk to write over.
+        ctrlS(container);
+        await lands();
+        expect(saved(fetching)).toHaveLength(0);
+      });
+
+      /// And the × is the one thing that closes it, and it asks first: what is
+      /// in the tab is the only copy of that text there is.
+      it("asks before the cross throws the text away", async () => {
+        const { container } = await opened(removes());
+
+        await types(container, "mine\n");
+        await deletes(container, "Cargo.toml");
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+
+        fireEvent.click(crosses(container).at(-1)!);
+
+        expect((await carded()).textContent).toContain("Cargo.toml");
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+      });
+
+      /// And a reload comes back to that tab, still saying so, with the text
+      /// still in it — which is what makes *copy it out later* a promise: the
+      /// device writes down the text of every open file the disk has not got,
+      /// and a file that is gone is the whole of one.
+      it("comes back to that tab after a reload, text and all", async () => {
+        const first = await opened(reads(codeFile as FileReading, "Missing"), removes());
+
+        await types(first.container, "mine\n");
+        await deletes(first.container, "Cargo.toml");
+        await waitFor(() =>
+          expect(
+            first.container.querySelector(
+              `.${shell.detailsPane} .${codePane.gone}`,
+            )?.textContent,
+          ).toBe(GONE),
+        );
+
+        // Which is on the device by now: the text of a file the disk has not
+        // got, which is what a file that is gone is all of.
+        expect(
+          JSON.parse(
+            localStorage.getItem(`verkstead.code-unsaved.${GRILLING.id}`)!,
+          ) as Record<string, string>,
+        ).toEqual({ [TEXT.path]: "mine\n" });
+
+        // The page goes and comes back: the read finds the file missing, and
+        // the text the device kept goes into the tab rather than a line saying
+        // the file could not be read.
+        cleanup();
+
+        const { container } = await expanded(
+          OWN_ROOT,
+          codeFolder as FolderListing,
+          reads("Missing"),
+        );
+
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+        expect(tabs(container).map((one) => one.textContent)).toContain(
+          "Cargo.toml",
+        );
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
+      });
+    });
+
+    /// And the disk moving under the tab without anybody pressing anything,
+    /// which is what the watcher is for: a `files` Nudge says this
+    /// conversation's worktrees moved, and every open file is read again (ADR
+    /// 0019, *Following the disk*).
+    ///
+    /// The bar above is most of what this is about — it is drawn the moment the
+    /// disk moves rather than at the next Ctrl+S — which is why these sit
+    /// inside the saving tests rather than beside them.
+    describe("and the disk moving under it", () => {
+      /// The page listening on the Nudge stream, which the bench does not wire:
+      /// `mount` renders the workbench under a client of its own rather than
+      /// `App`, and the stream is held at the app's root — see `App.tsx`.
+      let stop: (() => void) | undefined;
+
+      afterEach(() => {
+        stop?.();
+        stop = undefined;
+      });
+
+      /// The watcher saying those worktrees moved, which carries a conversation
+      /// and nothing else (ADR-0009): what moved is not in it, and the page
+      /// reads again to find out.
+      function moved(): void {
+        stream().nudges({
+          kind: "files",
+          conversation: GRILLING.id,
+        } satisfies Nudge);
+      }
+
+      /// The same file as the agent left it, with the bytes it already had:
+      /// another reading of the file that has not moved, which is what a build
+      /// that rewrote it with what was in it answers with.
+      const AGAIN = codeFile as FileReading;
+
+      /// And the file as the pane itself has just written it — the text that
+      /// went up, at the version the write answered with.
+      const OURS = {
+        Text: {
+          path: TEXT.path,
+          version: WRITTEN.Written.version,
+          text: "mine\n",
+          writable: true,
+        },
+      } satisfies FileReading;
+
+      /// The line a tab whose file has gone draws over its text.
+      function gone(container: ParentNode): string | null | undefined {
+        return container.querySelector(`.${shell.detailsPane} .${codePane.gone}`)
+          ?.textContent;
+      }
+
+      /// The pane with the file open and the page listening, which is where
+      /// every test below starts: a Nudge is read back against what is open,
+      /// and a pane with nothing open has nothing to read.
+      async function watching(...answers: Parameters<typeof serving>) {
+        streaming();
+
+        const mounted = await opened(...answers);
+
+        stop = listenForNudges(mounted.client);
+        stream().opens();
+
+        return mounted;
+      }
+
+      /// An agent's edit to a file nobody has typed into arrives without a
+      /// keypress: the buffer takes the disk's text, and there is nothing to
+      /// ask about.
+      it("takes the disk's text into a clean tab, and draws no bar", async () => {
+        const { container, fetching } = await watching(reads(codeFile, THEIRS));
+
+        const before = editor(container);
+
+        moved();
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+
+        // Nothing was asked of the human and nothing is outstanding: the tab is
+        // clean over the text that is really there.
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+        expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2);
+
+        // And it is the same editor over the same buffer rather than a tab
+        // drawn again, which is what keeps the caret and the undo stack.
+        expect(editor(container)).toBe(before);
+      });
+
+      /// And what went into that buffer is the part that moved rather than the
+      /// file, which is the whole of how a caret survives an edit nobody asked
+      /// for — see `written` in `src/workbench/keeping.ts`.
+      it("writes the part of the buffer that moved, not the whole of it", async () => {
+        const { container } = await watching(reads(codeFile, THEIRS));
+
+        moved();
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+
+        // One edit, over the end of what was there: the line the agent added,
+        // written after the line the human is looking at rather than over it.
+        expect(theEditor().model.written).toHaveLength(1);
+
+        const put = theEditor().model.written[0]!;
+
+        expect(put.text).toBe('members = ["crates/*"]\n');
+        expect(put.range).toEqual({
+          startLineNumber: 2,
+          startColumn: 1,
+          endLineNumber: 2,
+          endColumn: 1,
+        });
+      });
+
+      /// A file rewritten with the bytes it already had is not a change at all:
+      /// the version is a hash of those bytes, so the tab is left exactly as it
+      /// is.
+      it("leaves a tab alone where the file reads at the version it had", async () => {
+        const { container, fetching } = await watching(reads(AGAIN));
+
+        const before = editor(container);
+
+        moved();
+
+        // The file was read — a Nudge says the worktrees moved and nothing
+        // about where — and what came back said what the tab is standing on.
+        await waitFor(() =>
+          expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2),
+        );
+
+        expect(editor(container)).toBe(before);
+        expect(editor(container)!.value).toBe(TEXT.text);
+        expect(theEditor().model.written).toHaveLength(0);
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+      });
+
+      /// And a Nudge that arrives with no file open reads nothing at all: what
+      /// is re-read is what is open, and a pane holding terminals alone holds
+      /// nothing about the disk.
+      it("reads nothing where the pane has no file open", async () => {
+        streaming();
+
+        const mounted = await expanded(
+          OWN_ROOT,
+          codeFolder as FolderListing,
+          reads(codeFile as FileReading),
+        );
+
+        stop = listenForNudges(mounted.client);
+        stream().opens();
+
+        moved();
+
+        // The Nudge landed — the tree beside the tabs read the folder it has
+        // open again — and not one file was asked for: there is no tab over
+        // one.
+        await waitFor(() =>
+          expect(askedFor(mounted.fetching, folderOf(OWN_ROOT.path))).toBe(2),
+        );
+
+        expect(askedFor(mounted.fetching, fileOf(TEXT.path))).toBe(0);
+      });
+
+      /// The same edit under text nobody has saved raises the bar at once,
+      /// rather than at the next Ctrl+S — and the human's text is where they
+      /// left it.
+      it("raises the bar the moment the disk moves under unsaved text", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, THEIRS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+
+        moved();
+
+        const up = await barred(container);
+
+        expect(up.textContent).toContain(MOVED);
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        // And nothing was written to get here: the bar is the watcher's news
+        // rather than a save that was refused.
+        expect(saved(fetching)).toHaveLength(0);
+      });
+
+      /// **Reload** under that bar is the press it always was: the disk's text,
+      /// and the version that goes with it.
+      it("takes the disk's text when Reload is pressed under it", async () => {
+        const { container } = await watching(reads(codeFile, THEIRS));
+
+        await types(container, "mine\n");
+        moved();
+        await barred(container);
+
+        fireEvent.click(await offers(container, "Reload"));
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+      });
+
+      /// And **Keep mine** keeps theirs, over the version the disk now has, so
+      /// that the save after it lands.
+      it("keeps the human's text when Keep mine is pressed under it", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, THEIRS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+        moved();
+        await barred(container);
+
+        fireEvent.click(await offers(container, "Keep mine"));
+
+        await waitFor(() => expect(bar(container)).toBeNull());
+        await lands();
+
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        expect(saved(fetching)[0]).toEqual({
+          path: TEXT.path,
+          version: THEIRS.Text.version,
+          text: "mine\n",
+        });
+      });
+
+      /// A file that has gone keeps its tab, with the text as it was in it —
+      /// the way one deleted out of the tree does, and whether or not the
+      /// human has typed into it. There is nothing to choose between, so there
+      /// is no bar.
+      it("keeps the tab of a file that has gone, text and all", async () => {
+        const { container } = await watching(reads(codeFile, "Missing"));
+
+        await types(container, "mine\n");
+
+        moved();
+
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
+        expect(bar(container)).toBeNull();
+      });
+
+      /// And the pane's own save is not the disk moving under it: the write
+      /// answers with the version it made, so the Nudge it raises finds the
+      /// file reading at the version the tab is already standing on.
+      it("raises no bar over the file the pane has just written", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, OURS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+        await lands();
+
+        // The write moved the worktree, so the watcher says so.
+        moved();
+
+        await waitFor(() =>
+          expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2),
+        );
+        await lands();
+
+        // And what that read found is the version the write answered with,
+        // which is what the tab is already standing on: nothing to draw, and
+        // the human's text where it was.
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+        expect(editor(container)!.value).toBe("mine\n");
+      });
+
+      /// And a file with a save still in flight is not read at all: the write
+      /// is about to answer with the version it made, and a read that crossed
+      /// it would be this pane finding its own text on the disk and putting a
+      /// bar up over the human's typing.
+      it("reads nothing about a file it is in the middle of writing", async () => {
+        /// A save the test lets land when it chooses, which is the one thing a
+        /// fixed answer cannot be: the whole of this is what happens *while* a
+        /// write is out.
+        let land = (): void => {};
+        const writing = new Promise<void>((done) => {
+          land = done;
+        });
+
+        const { container, fetching } = await watching(
+          reads(codeFile, OURS),
+          whenever(SAVING, () => writing.then(json(WRITTEN)), "POST"),
+        );
+
+        await types(container, "mine\n");
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+        // The write has landed on the disk and its answer has not come back
+        // yet, which is exactly when the watcher says the worktree moved.
+        moved();
+        await lands();
+
+        expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+        expect(bar(container)).toBeNull();
+
+        land();
+
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+        expect(bar(container)).toBeNull();
+        expect(editor(container)!.value).toBe("mine\n");
+      });
+    });
   });
 
   /// And what happens to all of it when the pane is swapped for another and
@@ -20621,14 +23031,49 @@ describe("a file opened out of the code pane's tree", () => {
       expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
     });
 
+    /// And what carries the text across the swap is the buffer itself, which is
+    /// above the pane rather than in the editor drawing it.
+    ///
+    /// The editor goes with the pane — it is a view, and the pane it was drawn
+    /// in has been taken down — and the model it was drawn over does not: the
+    /// one that comes back is a second editor over the first buffer, which is
+    /// the same arrangement two groups showing one file are in (ADR 0019, *Tabs
+    /// and groups*).
+    it("keeps the buffer across the swap and draws a new editor over it", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      await types(container, "[workspace]\nmembers = []\n");
+
+      const made = theEditor();
+
+      await away(container, history);
+
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+
+      expect(made.disposed).toBe(true);
+      expect(made.model.disposed).toBe(false);
+      expect(theEditor()).not.toBe(made);
+      expect(theEditor().model).toBe(made.model);
+    });
+
     /// And the tree comes back open where it was left, which is the other
     /// thing the human did with this pane: the walk down to a file.
     ///
-    /// Held above the swap with the tabs and for their reason. A tree back at
-    /// its roots after every Event would be that walk made again, and the
-    /// folder is not read a second time either — a swap is not an expand, and
-    /// what is drawn is the listing that was last read.
-    it("finds the tree's folders still open, and reads none of them again", async () => {
+    /// Held above the swap with the tabs and for their reason — a tree back at
+    /// its roots after every Event would be that walk made again. What is drawn
+    /// the instant it comes back is the listing that was last read, a swap being
+    /// no expand; the read is beside that rather than in front of it, and what it
+    /// is for is the test after this one.
+    it("finds the tree's folders still open, and reads each again", async () => {
       const { container, history, fetching } = await expanded(
         OWN_ROOT,
         codeFolder as FolderListing,
@@ -20641,7 +23086,57 @@ describe("a file opened out of the code pane's tree", () => {
       await away(container, history);
 
       await waitFor(() => expect(files(container)).toHaveLength(opened));
-      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+
+      // One read of the folder that was open and none of anything else: the
+      // folders shut cost nothing, which is the whole reason the tree reads one
+      // folder at a time.
+      await waitFor(() =>
+        expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2),
+      );
+    });
+
+    /// And what moved while the pane was away is in the tree it comes back to.
+    ///
+    /// A tree that was not drawn was subscribed to nothing, and the pane was
+    /// not attached either — so the watcher had stopped, and an agent writing
+    /// while an Event was up raised a Nudge for nobody. Nothing afterwards would
+    /// put it right until the next thing to move in the worktree, so the mount
+    /// itself reads every folder that is open, as though a Nudge had arrived.
+    it("takes what moved while the pane was away into the tree", async () => {
+      let holding = codeFolder as FolderListing;
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        holding,
+        whenever(folderOf(OWN_ROOT.path), () => json(holding)()),
+      );
+
+      const drawn = (): (string | null)[] =>
+        files(container).map((row) => row.textContent);
+
+      expect(drawn()).not.toContain("rustfmt.toml");
+
+      // The agent writing a file while the Event was being read, which reached
+      // nobody: no pane was attached, so nothing was running the watcher behind
+      // the Nudge.
+      holding = {
+        Listed: {
+          path: OWN_ROOT.path,
+          entries: [
+            ...(codeFolder as { Listed: { entries: FolderEntry[] } }).Listed
+              .entries,
+            {
+              name: "rustfmt.toml",
+              path: `${OWN_ROOT.path}/rustfmt.toml`,
+              folder: false,
+            },
+          ],
+        },
+      };
+
+      await away(container, history);
+
+      await waitFor(() => expect(drawn()).toContain("rustfmt.toml"));
     });
 
     /// And a folder shut before the swap stays shut while the one above it
@@ -20831,6 +23326,2512 @@ describe("a file opened out of the code pane's tree", () => {
   });
 });
 
+/// Code's groups: the layout tree the pane is drawn from, and the two ways to
+/// split one that are not a drag.
+///
+/// One group was the whole of the pane. A split puts another beside it or below
+/// it, either half splits again to any depth, and a group whose last tab leaves
+/// is gone — which is the whole of unsplitting, there being no command for it
+/// (ADR 0019, *Tabs and groups*).
+describe("the code pane's groups", () => {
+  /// Where a file of this conversation is written back — the path it was read
+  /// at, posted to.
+  const SAVING = `/api/ui/conversations/${GRILLING.id}/files/file`;
+
+  /// The groups the pane is drawing, in the order the tree puts them in: the
+  /// near half of a split before the far one.
+  function groups(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.group}`,
+      ),
+    ];
+  }
+
+  /// And where one of them stands, which is the whole of what the tree says
+  /// about it: percentages of the layer they are all drawn in.
+  function stood(group: HTMLElement): Record<string, string> {
+    return {
+      left: group.style.left,
+      top: group.style.top,
+      width: group.style.width,
+      height: group.style.height,
+    };
+  }
+
+  /// The tabs of one group, or of the whole pane where it is handed the lot.
+  function tabs(of: ParentNode): HTMLButtonElement[] {
+    return [...of.querySelectorAll<HTMLButtonElement>(`.${codePane.tab}`)];
+  }
+
+  /// What each group is holding, as the names on its tabs — which is the one
+  /// reading that says the layout *and* what is in it.
+  function holding(container: ParentNode): string[][] {
+    return groups(container).map((group) =>
+      tabs(group).map((tab) => tab.textContent ?? ""),
+    );
+  }
+
+  /// The × at the end of each tab of one group.
+  function crosses(of: ParentNode): HTMLButtonElement[] {
+    return [...of.querySelectorAll<HTMLButtonElement>(`.${codePane.close}`)];
+  }
+
+  /// The editors the pane has open, one per view of a file — the `textarea` the
+  /// stand-in puts where Monaco's own view would be. See `tests/editing.ts`.
+  function editors(container: ParentNode): HTMLTextAreaElement[] {
+    return [
+      ...container.querySelectorAll<HTMLTextAreaElement>(
+        `.${shell.detailsPane} .${editorPane.editor} textarea`,
+      ),
+    ];
+  }
+
+  /// And the dots: one per tab holding text the disk has not got.
+  function dots(container: ParentNode): Element[] {
+    return [
+      ...container.querySelectorAll(
+        `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+      ),
+    ];
+  }
+
+  /// One of the fixture folder's files, by name: where the row that opens it
+  /// points.
+  function pathOf(name: string): string {
+    const listed = codeFolder as Extract<FolderListing, { Listed: unknown }>;
+    const found = listed.Listed.entries.find((entry) => entry.name === name);
+
+    if (!found) {
+      throw new Error(`the fixture folder has no ${name}`);
+    }
+
+    return found.path;
+  }
+
+  /// What the server answers a read of one of them with.
+  function reading(name: string, text: string): FileReading {
+    return {
+      Text: { path: pathOf(name), text, version: `${name}-1`, writable: true },
+    };
+  }
+
+  /// Split the group a tab is in, the way the tab's own menu says it.
+  async function split(
+    container: ParentNode,
+    on: HTMLElement,
+    way: "Split right" | "Split down",
+  ): Promise<void> {
+    fireEvent.contextMenu(on, { clientX: 10, clientY: 10 });
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+    const row = [...menu.querySelectorAll("button")].find(
+      (one) => one.textContent === way,
+    );
+
+    if (!row) {
+      throw new Error(`the tab's menu has no ${way}`);
+    }
+
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(container.querySelector(`.${dropdown.drop}`)).toBeNull(),
+    );
+  }
+
+  /// A file row of the tree, pressed — which is how a file is opened.
+  function press(container: ParentNode, name: string): void {
+    const found = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ].find((one) => one.textContent === name);
+
+    if (!found) {
+      throw new Error(`the tree has no file called ${name}`);
+    }
+
+    fireEvent.click(found);
+  }
+
+  /// The pane with the conversation's own root expanded, so its files are rows
+  /// to press, and every one of them answered with text.
+  ///
+  /// No terminals, so what is in a group is only ever what this test put there.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(fileOf(pathOf("Cargo.toml")), json(codeFile)),
+      whenever(
+        fileOf(pathOf("README.md")),
+        json(reading("README.md", "# verkstead\n")),
+      ),
+      whenever(
+        fileOf(pathOf(".gitignore")),
+        json(reading(".gitignore", "/target\n")),
+      ),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(
+      rows.find((row) => row.textContent?.startsWith(OWN_ROOT.repo))!,
+    );
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.file}`,
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// Two splits nest, and each of the three groups is a bar of its own over
+  /// content of its own — a split is a *group* beside a group rather than a
+  /// second view inside one.
+  it("nests two splits, each group drawing its own bar and content", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(groups(container)).toHaveLength(1);
+    expect(stood(groups(container)[0]!)).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "100%",
+      height: "100%",
+    });
+
+    // Beside itself first, which halves the pane down the middle.
+    await split(container, tabs(container)[0]!, "Split right");
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    // And then below the group that split made, which halves that half across
+    // — the second split inside the first, which is what nesting is.
+    await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+
+    await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "50%" },
+      { left: "50%", top: "50%", width: "50%", height: "50%" },
+    ]);
+
+    // The tab the split was made from goes on showing in both, as VS Code's
+    // does — so all three are watching the one shell, each through a window of
+    // its own.
+    expect(holding(container)).toEqual([
+      ["Terminal 1"],
+      ["Terminal 1"],
+      ["Terminal 1"],
+    ]);
+
+    for (const group of groups(container)) {
+      expect(group.querySelectorAll(`.${codePane.tabs}`)).toHaveLength(1);
+      expect(group.querySelectorAll(`.${attachedPane.screen}`)).toHaveLength(1);
+    }
+  });
+
+  /// And the icon at the end of a bar is the other way in, which splits that
+  /// group beside itself — VS Code's own bar button, and the common half of
+  /// what the menu offers in words.
+  it("splits beside from the icon at the end of the bar", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.divide}`,
+      ),
+    );
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "100%" },
+    ]);
+  });
+
+  /// A group whose last tab goes disappears, and its neighbour takes the room.
+  /// That is the whole of unsplitting: there is no command for it, and nothing
+  /// here is asked for one.
+  it("collapses a group whose last tab is closed, and gives the room back", async () => {
+    const { container } = await opened();
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+    await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+    // The nested group's only tab, closed — which collapses the split it stood
+    // in, and the tree is a level shallower for it: the half that was the top
+    // of the far column is the whole of that column again.
+    fireEvent.click(crosses(groups(container)[2]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "100%" },
+    ]);
+
+    // And the last of the far half, which takes the split with it.
+    fireEvent.click(crosses(groups(container)[1]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(1));
+    expect(stood(groups(container)[0]!)).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "100%",
+      height: "100%",
+    });
+
+    // And the file is still open in the half that stayed, over the buffer it
+    // was always over: one view closing is not the file closing.
+    expect(holding(container)).toEqual([["Cargo.toml"]]);
+    expect(editors(container)).toHaveLength(1);
+    expect(theEditor().model.disposed).toBe(false);
+  });
+
+  /// And a tab that is only standing there to say why its shell never started
+  /// is closed out of *every* group holding it, the way a shell that ended is
+  /// and the way **New terminal** replacing one takes it.
+  ///
+  /// A split makes a second view of whatever its group was showing, so that
+  /// sentence can stand in two bars at once — and it is one shell's however
+  /// many views of it were made. A copy left behind would be a tab with its
+  /// sentence taken away, no socket left to close and nothing at the server for
+  /// its × to end: a tab nobody could close at all.
+  it("closes a tab standing on a shell that never started out of every group", async () => {
+    withTerminals(
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 1 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    // The one way into an empty pane, which is the press under the hint.
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.nothing} button`,
+      ),
+    );
+
+    const socket = await waitFor(() => {
+      const one = Attached.opened.find((each) =>
+        each.url.endsWith(`${TERMINALS_OF_IT}/1/attach`),
+      );
+
+      if (!one) {
+        throw new Error("nothing has attached to terminal 1");
+      }
+
+      return one;
+    });
+
+    // It dies inside the five seconds of being asked for, so its tab stays
+    // saying why rather than going the way a shell that ran goes.
+    socket.ends();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+          ?.textContent,
+      ).toBe(ENDED_AT_ONCE),
+    );
+
+    // And a second view of that very sentence, from the tab's own menu.
+    await split(container, tabs(container)[0]!, "Split right");
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([["Terminal 1"], ["Terminal 1"]]),
+    );
+
+    // The × on one of them takes both, and the group the first stood in goes
+    // with it: what is left is the one group there always is, empty.
+    fireEvent.click(crosses(groups(container)[1]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(1));
+    expect(holding(container)).toEqual([[]]);
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${notices.error}`),
+    ).toBeNull();
+  });
+
+  /// The same file in two groups is one buffer under two views: typing in
+  /// either shows in the other, the dot is on both tabs, and one save clears
+  /// both (ADR 0019, *Tabs and groups*).
+  it("shows one buffer through both views of a file", async () => {
+    const { container, fetching } = await opened(
+      whenever(SAVING, json(codeWritten), "POST"),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(editors(container)).toHaveLength(2));
+
+    // One read for the file however many views there are: a second view of
+    // something somebody has typed into must not read the disk over their text.
+    expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+
+    fireEvent.input(editors(container)[0]!, {
+      target: { value: "[workspace]\nmembers = []\n" },
+    });
+
+    // Typed in one, shown in the other, there being one text under them.
+    await waitFor(() =>
+      expect(editors(container)[1]!.value).toBe(
+        "[workspace]\nmembers = []\n",
+      ),
+    );
+
+    // And the dot on both tabs: it is the buffer's mark against the disk rather
+    // than the tab's own.
+    expect(dots(container)).toHaveLength(2);
+
+    fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+
+    // One save, and both tabs clean behind it.
+    await waitFor(() => expect(dots(container)).toHaveLength(0));
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) => String(path) === SAVING && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  });
+
+  /// And a file pressed in the tree opens in the group last pressed into, which
+  /// is what active means: the press was made on the tree rather than in any
+  /// group, and the one the human was last working in is the one they meant.
+  it("opens a file pressed in the tree into the group last pressed into", async () => {
+    const { container } = await opened();
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    // The split's own group is where the work is going, so it is the active
+    // one — and the next file lands there.
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    press(container, "README.md");
+    await waitFor(() =>
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml", "README.md"],
+      ]),
+    );
+
+    // A press into the near half makes that one active again, and the file
+    // after it opens there.
+    fireEvent.click(tabs(groups(container)[0]!)[0]!);
+    press(container, ".gitignore");
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", ".gitignore"],
+        ["Cargo.toml", "README.md"],
+      ]),
+    );
+
+    // And which one it is is said where it can be read as well as seen.
+    expect(
+      groups(container).map((group) => group.getAttribute("aria-current")),
+    ).toEqual(["true", null]);
+  });
+
+  /// And the borders between them, every one of which is a divider that drags.
+  ///
+  /// A split node has one between its two halves, and moving it moves the
+  /// shares either side of it: the half that grows takes exactly what the half
+  /// that shrinks gives, and nothing outside that split moves at all. The
+  /// frame's own divider is the pattern — a separator carrying the value it
+  /// decides, reachable from the keyboard, nudged by the same travel a drag
+  /// gives it — with the difference that Code's splits go both ways, so the
+  /// orientation, the keys and the axis all follow the split's direction.
+  ///
+  /// jsdom lays nothing out, so the layer the groups are placed in is stood in
+  /// for. A drag is a point on the screen until something measures it against
+  /// the thing it is a share of; and the floors under the shares are lengths,
+  /// which are worth nothing as shares until the layer they are measured in has
+  /// a size to be one of.
+  describe("and the borders between them", () => {
+    /// How large the layer is pretending to be, in the pixels a drag is
+    /// reported in: fifty rems across and thirty-seven and a half down, at the
+    /// sixteen pixels a rem is here.
+    const ACROSS = 800;
+    const DOWN = 600;
+
+    /// And how large it is at the moment, which the last test changes under the
+    /// groups: a window resized keeps the shares the borders were left at.
+    let across = ACROSS;
+
+    /// What everything else in the document still answers with — the layer
+    /// alone is stood in for, so that the rest of the pane is the unlaid-out
+    /// nothing the rest of this suite reads.
+    const measured = Element.prototype.getBoundingClientRect;
+
+    /// And what the suite's own `ResizeObserver` is, which this block swaps for
+    /// one that reports — written rather than stubbed, `setup.ts` having
+    /// defined the property rather than assigned it.
+    const observing = window.ResizeObserver;
+
+    /// Whatever the pane asked to be told when the layer changes shape. jsdom's
+    /// own stand-in observes and never reports, so this is how a test says the
+    /// window moved.
+    let watching: (() => void)[] = [];
+
+    const resized = (): void => {
+      for (const told of watching) {
+        told();
+      }
+    };
+
+    beforeEach(() => {
+      across = ACROSS;
+      watching = [];
+
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        return this.matches(`.${codePane.stack}`)
+          ? ({
+              left: 0,
+              top: 0,
+              right: across,
+              bottom: DOWN,
+              width: across,
+              height: DOWN,
+            } as DOMRect)
+          : measured.call(this);
+      };
+
+      // Only the layer's own is kept: every other observer on the page is
+      // watching something jsdom has no layout for, and telling those the
+      // window moved would be this block driving panes it is not about.
+      window.ResizeObserver = class {
+        private readonly told: () => void;
+
+        constructor(told: () => void) {
+          this.told = told;
+        }
+
+        observe(target: Element) {
+          if (target.matches(`.${codePane.stack}`)) {
+            watching.push(this.told);
+          }
+        }
+
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver;
+    });
+
+    afterEach(() => {
+      Element.prototype.getBoundingClientRect = measured;
+      window.ResizeObserver = observing;
+    });
+
+    /// The dividers the pane is drawing, in the order the tree reads its
+    /// splits: the one a pair is divided by before either half's own.
+    function dividers(container: ParentNode): HTMLElement[] {
+      return [
+        ...container.querySelectorAll<HTMLElement>(
+          `.${shell.detailsPane} .${codePane.divider}`,
+        ),
+      ];
+    }
+
+    /// Drag one to a point on the layer and let go of it.
+    function dragTo(divider: HTMLElement, at: { x?: number; y?: number }): void {
+      const to = { clientX: at.x ?? 0, clientY: at.y ?? 0 };
+
+      fireEvent.pointerDown(divider, to);
+      fireEvent.pointerMove(window, to);
+      fireEvent.pointerUp(window, to);
+    }
+
+    /// What a group's share of the layer comes to when a floor is what it is
+    /// left with: a length against the layer it is measured in.
+    function floor(way: "beside" | "below"): number {
+      return (FLOORS[way] / ((way === "beside" ? ACROSS : DOWN) / 16)) * 100;
+    }
+
+    /// The pane with one terminal in it, split beside itself — which is the
+    /// layout with one border in it.
+    async function halved(): Promise<HTMLElement> {
+      withTerminals([1]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      return container;
+    }
+
+    /// A drag moves the shares either side of the one border it is of, and
+    /// leaves every other group exactly where it was.
+    it("moves the shares either side of a border, and nothing beyond it", async () => {
+      const container = await halved();
+
+      // Halves, which is where every split starts, and a border over the line
+      // the two of them meet on.
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+      expect(dividers(container)).toHaveLength(1);
+      expect(dividers(container)[0]!.style.left).toBe("50%");
+
+      dragTo(dividers(container)[0]!, { x: ACROSS * 0.3 });
+
+      // What the near half takes, the far half gives: the two of a split sum
+      // to a hundred.
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "30%", height: "100%" },
+          { left: "30%", top: "0%", width: "70%", height: "100%" },
+        ]),
+      );
+
+      // And a split inside the far half, which is a border of its own — across
+      // rather than down, and over the room that half has rather than the
+      // layer.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+      expect(dividers(container)).toHaveLength(2);
+      expect(dividers(container)[1]!.style.left).toBe("30%");
+      expect(dividers(container)[1]!.style.width).toBe("70%");
+
+      dragTo(dividers(container)[1]!, { y: DOWN * 0.75 });
+
+      // The far column is divided three quarters of the way down, and the
+      // near one is exactly where the first drag left it: a border moves the
+      // split it is of and nothing above it.
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "30%", height: "100%" },
+          { left: "30%", top: "0%", width: "70%", height: "75%" },
+          { left: "30%", top: "75%", width: "70%", height: "25%" },
+        ]),
+      );
+    });
+
+    /// A handle nobody can put a pointer on is still a handle, so the arrow
+    /// keys move it — along its own split's axis, and settling at once, there
+    /// being no letting go of a key.
+    it("nudges a border with the arrow keys along its own axis", async () => {
+      const container = await halved();
+      const beside = dividers(container)[0]!;
+
+      expect(beside.getAttribute("role")).toBe("separator");
+      expect(beside.getAttribute("aria-orientation")).toBe("vertical");
+      expect(beside.getAttribute("aria-valuenow")).toBe("50");
+      expect(beside.getAttribute("aria-valuemin")).toBe(
+        String(Math.round(floor("beside"))),
+      );
+      expect(beside.getAttribute("aria-valuemax")).toBe(
+        String(Math.round(100 - floor("beside"))),
+      );
+
+      fireEvent.keyDown(beside, { key: "ArrowRight" });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("51%"),
+      );
+
+      fireEvent.keyDown(beside, { key: "ArrowLeft" });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("50%"),
+      );
+
+      // And the axis it does not travel along is not its: up and down belong
+      // to a border that divides across, and this one divides down the middle.
+      fireEvent.keyDown(beside, { key: "ArrowDown" });
+
+      expect(groups(container)[0]!.style.width).toBe("50%");
+
+      // A stacked split's border is the other way about in every one of those
+      // respects.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+      const below = dividers(container)[1]!;
+
+      expect(below.getAttribute("aria-orientation")).toBe("horizontal");
+
+      fireEvent.keyDown(below, { key: "ArrowRight" });
+
+      expect(groups(container)[1]!.style.height).toBe("50%");
+
+      fireEvent.keyDown(below, { key: "ArrowDown" });
+
+      await waitFor(() =>
+        expect(groups(container)[1]!.style.height).toBe("51%"),
+      );
+    });
+
+    /// And a drag past what a group is owed stops there. The floor is a length
+    /// — what makes a group too narrow is the bar standing in it — so what it
+    /// is worth as a share is arithmetic against the split it is measured in.
+    it("stops a drag at the floor under a group", async () => {
+      const container = await halved();
+
+      dragTo(dividers(container)[0]!, { x: 2 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(`${floor("beside")}%`),
+      );
+
+      dragTo(dividers(container)[0]!, { x: ACROSS - 2 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(
+          `${100 - floor("beside")}%`,
+        ),
+      );
+
+      // And the floor on the other axis is a height, which is a different
+      // length and a different share of a layer that is not square.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+      dragTo(dividers(container)[1]!, { y: DOWN });
+
+      await waitFor(() =>
+        expect(groups(container)[1]!.style.height).toBe(
+          `${100 - floor("below")}%`,
+        ),
+      );
+    });
+
+    /// And a window that changes shape moves no share. The groups are drawn at
+    /// the percentages they were left at, met afresh against the floors at the
+    /// new size — which is the whole reason a border settles a percentage
+    /// rather than a column.
+    it("keeps the shares a border was left at when the layer changes shape", async () => {
+      const container = await halved();
+
+      dragTo(dividers(container)[0]!, { x: ACROSS * 0.3 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("30%"),
+      );
+
+      // Narrowed to thirty-one rems, where three tenths is less than a bar of
+      // tabs is owed: what is *drawn* is the floor.
+      across = 500;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(
+          `${(FLOORS.beside / (500 / 16)) * 100}%`,
+        ),
+      );
+
+      // And the room given back: the share comes back with it, the thirty
+      // having been what was held all along.
+      across = ACROSS;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("30%"),
+      );
+    });
+
+    /// And a layer with less room than one group is owed squeezes the far half
+    /// to nothing rather than past it. A floor measured against a layer smaller
+    /// than itself is worth more than the whole of the split, and a share
+    /// beyond a hundred would leave the half after it worth less than nothing —
+    /// a group placed at a negative width, off the side of a layer its
+    /// neighbour is overflowing.
+    it("squeezes the far half to nothing where a group is owed the whole layer", async () => {
+      const container = await halved();
+
+      // Six and a quarter rems across, where a bar of tabs is owed ten: less
+      // room than the near half alone is worth.
+      across = 100;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "100%", height: "100%" },
+          { left: "100%", top: "0%", width: "0%", height: "100%" },
+        ]),
+      );
+
+      // And the share the human left is handed back whole the moment there is
+      // room for it again: what was held all along is the fifty.
+      across = ACROSS;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]),
+      );
+    });
+  });
+
+  /// And a tab picked up and put down with the pointer, which is how it is
+  /// moved along its own bar and into another group's.
+  ///
+  /// The gesture is the sidebar card's — the pointer captured at the press, the
+  /// rest of it watched at the window, a grace before a press becomes a drag —
+  /// and that half is asked about where it is written, over there. What is
+  /// worth asking here is what a bar of tabs makes of it: where a drop lands,
+  /// what a group left empty does, and what becomes of the socket under a
+  /// terminal that has just moved.
+  ///
+  /// jsdom lays nothing out, so the bars and the tabs on them are stood in for
+  /// the way the layer is for the dividers above: every group's bar is a row of
+  /// its own down the page, and every tab on it is a hundred pixels wide in the
+  /// order it is drawn. Which is the whole of what a drag asks the page —
+  /// which bar the pointer is over, and which side of a tab's middle it fell.
+  describe("and a tab dragged along a bar and into another", () => {
+    /// How tall a bar is pretending to be, and how wide a tab on it, in the
+    /// pixels a drag is reported in.
+    const BAR = 100;
+    const TAB = 100;
+
+    /// And how wide the bar itself is: wider than the tabs on it, there being
+    /// room past the last of them to let a tab go.
+    const WIDE = 400;
+
+    /// And how tall the content under a bar, which is the box the five zones of
+    /// a drop are read off.
+    const ROOM = 200;
+
+    /// So a group is a band of the layer this tall: a bar, and its content
+    /// under it. Every group is drawn as a row of its own here whichever way
+    /// the tree actually divides them — what a drag is asked is which box a
+    /// point is in, and a row apiece is the plainest way to give each of them
+    /// one of its own.
+    const ROW = BAR + ROOM;
+
+    /// What everything that is not a bar, a tab or a group's content still
+    /// answers with.
+    const measured = Element.prototype.getBoundingClientRect;
+
+    /// Which row a thing inside a group stands in, in the order the groups are
+    /// drawn in the layer.
+    function rowOf(within: Element): number {
+      const box = within.closest(`.${codePane.group}`)!;
+      const layer = box.closest(`.${codePane.stack}`)!;
+
+      return [...layer.querySelectorAll(`.${codePane.group}`)].indexOf(box);
+    }
+
+    function boxed(left: number, top: number, wide: number, tall: number) {
+      return {
+        left,
+        top,
+        right: left + wide,
+        bottom: top + tall,
+        width: wide,
+        height: tall,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }
+
+    beforeEach(() => {
+      // Worked out at the moment it is asked for rather than fixed here,
+      // because the bars move under the hand: a tab that was second and is now
+      // first has to answer for where it is now.
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        const bar = this.closest(`.${codePane.tabs}`);
+
+        if (bar !== null) {
+          const top = rowOf(bar) * ROW;
+
+          if (this === bar) {
+            return boxed(0, top, WIDE, BAR);
+          }
+
+          const at = [
+            ...bar.querySelectorAll(`.${codePane.tabFrame}`),
+          ].indexOf(this);
+
+          return at < 0 ? measured.call(this) : boxed(at * TAB, top, TAB, BAR);
+        }
+
+        // And the room a group's views stand in, which is the box the zones of
+        // a drop on its content are fractions of.
+        if (this.classList.contains(codePane.room!)) {
+          return boxed(0, rowOf(this) * ROW + BAR, WIDE, ROOM);
+        }
+
+        return measured.call(this);
+      };
+    });
+
+    afterEach(() => {
+      Element.prototype.getBoundingClientRect = measured;
+    });
+
+    /// A point on the bar of the group drawn Nth, in front of the tab standing
+    /// at this place along it — the near side of that tab's middle, which is
+    /// where one place along a bar becomes the next. Past the last of them
+    /// where there is no tab there, which is the end of the bar.
+    function place(row: number, at: number): { x: number; y: number } {
+      return { x: at * TAB + 10, y: row * ROW + BAR / 2 };
+    }
+
+    /// And a point in the content of the group drawn Nth: the middle of one of
+    /// its five zones, which is where a release decides which of the five
+    /// things it does.
+    function zone(
+      row: number,
+      which: "centre" | "left" | "right" | "above" | "below",
+    ): { x: number; y: number } {
+      const top = row * ROW + BAR;
+      const middle = { x: WIDE / 2, y: top + ROOM / 2 };
+
+      return {
+        centre: middle,
+        left: { x: WIDE * 0.05, y: middle.y },
+        right: { x: WIDE * 0.95, y: middle.y },
+        above: { x: middle.x, y: top + ROOM * 0.05 },
+        below: { x: middle.x, y: top + ROOM * 0.95 },
+      }[which];
+    }
+
+    /// The tab of this name, which is what a drag takes hold of.
+    function tabbed(of: ParentNode, name: string): HTMLButtonElement {
+      const found = tabs(of).find((one) => one.textContent === name);
+
+      if (!found) {
+        throw new Error(`there is no tab called ${name}`);
+      }
+
+      return found;
+    }
+
+    /// Pick one up and carry it over these points with the mouse, letting go at
+    /// the last of them: the press where the tab stands, a move apiece, and the
+    /// release. Past the grace on the way out, since a press that never travels
+    /// is a press.
+    function carry(
+      tab: HTMLElement,
+      ...over: { x: number; y: number }[]
+    ): void {
+      const from = (
+        tab.closest(`.${codePane.tabFrame}`) ?? tab
+      ).getBoundingClientRect();
+
+      fireEvent.pointerDown(tab, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        clientX: from.left + from.width / 2,
+        clientY: from.top + from.height / 2,
+      });
+
+      for (const point of over) {
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: point.x,
+          clientY: point.y,
+        });
+      }
+
+      const last = over.at(-1)!;
+
+      fireEvent.pointerUp(window, {
+        pointerId: 1,
+        clientX: last.x,
+        clientY: last.y,
+      });
+    }
+
+    /// Where the line saying a tab would land is: the group whose bar it is on,
+    /// the tab it is drawn on and which side of that tab. One at most, there
+    /// being one pointer — and none at all every moment nobody is dragging.
+    ///
+    /// Drawn on the tab it would land beside rather than as a thing standing
+    /// between two of them, so this is read off the tabs.
+    function lines(container: ParentNode): string[] {
+      return groups(container).flatMap((group, at) =>
+        [
+          ...group.querySelectorAll<HTMLElement>(
+            `.${codePane.tabFrame}[data-mark]`,
+          ),
+        ].map(
+          (frame) =>
+            `${at} ${frame.dataset.mark!} ${frame.querySelector(`.${codePane.tab}`)?.textContent}`,
+        ),
+      );
+    }
+
+    /// And the zone under the hand, where one is drawn: which group it is in,
+    /// and which of the five it is.
+    ///
+    /// One at most across the whole pane, a pointer being in one zone of one
+    /// group — and none at all every moment nobody is carrying anything.
+    function bands(container: ParentNode): string[] {
+      return groups(container).flatMap((group, at) =>
+        [...group.querySelectorAll<HTMLElement>(`.${codePane.zone}`)].map(
+          (band) => `${at} ${band.dataset.zone!}`,
+        ),
+      );
+    }
+
+    /// The socket onto one of the conversation's terminals, by the number in
+    /// its path: what is worth asserting is which shell a window is watching.
+    function attachedTo(number: number): Promise<Attached> {
+      return waitFor(() => {
+        const socket = Attached.opened.find((one) =>
+          one.url.endsWith(`${TERMINALS_OF_IT}/${number}/attach`),
+        );
+
+        if (!socket) {
+          throw new Error(`nothing has attached to terminal ${number}`);
+        }
+
+        return socket;
+      });
+    }
+
+    /// What a window has typed up its socket.
+    function typed(socket: Attached): unknown[] {
+      return socket.sent
+        .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
+        .filter((wrote) => "PutIn" in wrote)
+        .map((wrote) => wrote.PutIn);
+    }
+
+    /// The pane with three files open in the one group, which is a bar with
+    /// something to reorder on it.
+    async function three() {
+      const mounted = await opened();
+
+      for (const name of ["Cargo.toml", "README.md", ".gitignore"]) {
+        press(mounted.container, name);
+
+        await waitFor(() =>
+          expect(
+            tabs(mounted.container).map((tab) => tab.textContent),
+          ).toContain(name),
+        );
+      }
+
+      return mounted;
+    }
+
+    /// A tab dragged along its own bar lands where the line stood — and one
+    /// that went out and came back to where it was picked up changes nothing,
+    /// there being nothing it asked for.
+    it("lands a tab along its own bar where the line stood", async () => {
+      const { container } = await three();
+
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+
+      // The first of them, carried past the last.
+      carry(tabbed(container, "Cargo.toml"), place(0, 3));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", ".gitignore", "Cargo.toml"],
+        ]),
+      );
+
+      // And out to the end of the bar and back to where it started, which is
+      // a gesture that asked for nothing.
+      carry(tabbed(container, "README.md"), place(0, 3), place(0, 0));
+
+      expect(holding(container)).toEqual([
+        ["README.md", ".gitignore", "Cargo.toml"],
+      ]);
+    });
+
+    /// And the line is drawn while the hand is over a bar, so that where the
+    /// tab will go is on the page before it goes there. A release away from
+    /// every bar is an ending like any other and moves nothing: the bars are
+    /// the whole of what this drops onto.
+    it("draws the line where it would land, and moves nothing away from a bar", async () => {
+      const { container } = await three();
+
+      const held = tabbed(container, "Cargo.toml");
+      const frame = held.closest(`.${codePane.tabFrame}`)!;
+
+      fireEvent.pointerDown(held, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        clientX: 50,
+        clientY: 50,
+      });
+
+      expect(lines(container)).toEqual([]);
+
+      fireEvent.pointerMove(window, {
+        pointerId: 1,
+        clientX: place(0, 2).x,
+        clientY: place(0, 2).y,
+      });
+
+      // One line, on the bar the hand is over and in front of the tab it would
+      // land before — and the tab in the hand taken back while it is carried.
+      await waitFor(() =>
+        expect(lines(container)).toEqual(["0 before .gitignore"]),
+      );
+      expect(frame.classList).toContain(codePane.lifted!);
+
+      // Away from every bar there is nowhere to land, so there is nothing to
+      // draw and nothing to do about the release.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 50, clientY: 900 });
+
+      await waitFor(() => expect(lines(container)).toEqual([]));
+
+      fireEvent.pointerUp(window, {
+        pointerId: 1,
+        clientX: 50,
+        clientY: 900,
+      });
+
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+      expect(frame.classList).not.toContain(codePane.lifted!);
+    });
+
+    /// A tab dragged onto another group's bar leaves its own group, lands where
+    /// the line stood, and makes the group it landed in the active one — which
+    /// is where the work has just gone, and so where the next file pressed in
+    /// the tree opens.
+    it("takes a tab into another group's bar, and makes that group active", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      // The split's own group is the active one, so this opens there.
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+
+      carry(tabbed(groups(container)[1]!, "README.md"), place(0, 0));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", "Cargo.toml"],
+          ["Cargo.toml"],
+        ]),
+      );
+
+      // The group it landed in is the active one, said where it can be read as
+      // well as seen — and the next file opens in it.
+      expect(
+        groups(container).map((group) => group.getAttribute("aria-current")),
+      ).toEqual(["true", null]);
+
+      press(container, ".gitignore");
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", "Cargo.toml", ".gitignore"],
+          ["Cargo.toml"],
+        ]),
+      );
+    });
+
+    /// And a terminal moved keeps the shell under it. The tab carries a live
+    /// socket and this window's own memory of what has scrolled past it, so a
+    /// move that drew the tab afresh in its new group would close the socket,
+    /// throw the scrollback away and reattach to a repaint — which is why a
+    /// view is drawn once and *placed* into the group holding it.
+    it("keeps a moved terminal's socket, its scrollback and its typing", async () => {
+      withTerminals([1, 2]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      const socket = await attachedTo(2);
+
+      socket.says(PAINTED);
+      socket.says({ Printed: "cargo build\r\n" });
+
+      // A second group beside it, made from the tab that is showing — which is
+      // a second view of terminal 1, and so a third socket.
+      await split(container, tabs(container)[0]!, "Split right");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      await waitFor(() => expect(screens()).toHaveLength(3));
+
+      // The one grid on the page: a terminal has none until its first repaint,
+      // and terminal 2's is the only socket that has been painted.
+      const grid = await drawn(groups(container)[0]!, ".xterm-rows");
+
+      await waitFor(() => expect(grid.textContent).toContain("cargo build"));
+
+      carry(tabbed(groups(container)[0]!, "Terminal 2"), place(1, 1));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Terminal 1"],
+          ["Terminal 1", "Terminal 2"],
+        ]),
+      );
+
+      // No fourth socket, and the third one still open: the box the grid is in
+      // was moved rather than made again.
+      expect(screens()).toHaveLength(3);
+      expect(socket.closed).toBe(false);
+
+      // The very grid that was in the group it came from, in the group it
+      // landed in, still holding what scrolled past it.
+      expect(groups(container)[1]!.contains(grid)).toBe(true);
+      expect(grid.textContent).toContain("cargo build");
+
+      // And still taking typing, up the socket it has had all along.
+      fireEvent.keyDown(
+        await drawn<HTMLTextAreaElement>(
+          groups(container)[1]!,
+          ".xterm-helper-textarea",
+        ),
+        { key: "Enter", keyCode: 13, which: 13 },
+      );
+
+      await waitFor(() => expect(typed(socket)).toEqual(["\r"]));
+    });
+
+    /// And a group whose last tab is dragged out of it disappears, its
+    /// neighbour taking the room — the rule its last tab being *closed* already
+    /// follows, and the whole of unsplitting (ADR 0019, *Tabs and groups*).
+    it("collapses a group whose last tab is dragged out of it", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      // The far group's Cargo.toml closed and a file of its own opened in it,
+      // so that what is dragged out of it is the only thing in it.
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+      await waitFor(() => expect(editors(container)).toHaveLength(3));
+
+      fireEvent.click(crosses(groups(container)[1]!)[0]!);
+      await waitFor(() =>
+        expect(holding(container)).toEqual([["Cargo.toml"], ["README.md"]]),
+      );
+
+      carry(tabbed(groups(container)[1]!, "README.md"), place(0, 1));
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([["Cargo.toml", "README.md"]]);
+      expect(stood(groups(container)[0]!)).toEqual({
+        left: "0%",
+        top: "0%",
+        width: "100%",
+        height: "100%",
+      });
+
+      // Both of them still open over the buffers they were always over: a group
+      // that went is a way of standing rather than anything that was in it.
+      expect(editors(container)).toHaveLength(2);
+    });
+
+    /// And a finger picks one up by holding it still. No distance tells a drag
+    /// from a swipe along the bar on a phone — both of them are the finger
+    /// moving — so what tells the two apart is the time before it does, which is
+    /// what the tab's own × freed the long press for (ADR 0019, *Tabs and
+    /// groups*).
+    it("lifts a tab under a finger that holds still, and leaves a swipe alone", async () => {
+      const { container } = await three();
+
+      const finger = (
+        kind: "pointerDown" | "pointerMove" | "pointerUp",
+        on: HTMLElement | Window,
+        at: { x: number; y: number },
+      ): void =>
+        void fireEvent[kind](on, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "touch",
+          clientX: at.x,
+          clientY: at.y,
+        });
+
+      // A finger that travels before its tab has lifted is scrolling the bar,
+      // which is a gesture this leaves entirely alone.
+      finger("pointerDown", tabbed(container, "Cargo.toml"), place(0, 0));
+      finger("pointerMove", window, place(0, 3));
+      finger("pointerUp", window, place(0, 3));
+
+      expect(lines(container)).toEqual([]);
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+
+      // And one that holds still lifts it, and carries it from there.
+      finger("pointerDown", tabbed(container, "Cargo.toml"), place(0, 0));
+
+      // Longer than a tab takes to lift — see `LIFT` in `Code.tsx`.
+      await new Promise((done) => setTimeout(done, 450));
+
+      finger("pointerMove", window, place(0, 3));
+
+      // Past the last of them, which is the line after that one.
+      await waitFor(() =>
+        expect(lines(container)).toEqual(["0 after .gitignore"]),
+      );
+
+      finger("pointerUp", window, place(0, 3));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", ".gitignore", "Cargo.toml"],
+        ]),
+      );
+    });
+
+    /// And a tab put down where the same file is already open is the two views
+    /// becoming one: the one that was carried goes, and the group turns to the
+    /// one it already had. Two tabs of one file in a bar would be two of
+    /// everything that bar says about it — two dots, two marks of which is
+    /// showing — over the one buffer.
+    it("makes one view of two when a tab lands where its file is open", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(editors(container)).toHaveLength(2));
+
+      carry(tabbed(groups(container)[1]!, "Cargo.toml"), place(0, 1));
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([["Cargo.toml"]]);
+
+      // One view left, over the buffer that was always under both — which is
+      // still there, this having closed a view rather than the file.
+      expect(editors(container)).toHaveLength(1);
+      expect(theEditor().model.disposed).toBe(false);
+    });
+
+    /// And the other half of where a tab can land: the five zones of what a
+    /// group is *showing*. The centre moves the tab into that group, the way a
+    /// place along its bar does; each of the four edges splits the group there,
+    /// with the dragged tab alone in the new half — which is the third of ADR
+    /// 0019's three ways to make a split, the other two being the tab's own
+    /// menu and the icon at the end of a bar.
+    describe("and dropped on a group's content", () => {
+      /// A tab dropped on an edge splits the group there, with that tab alone
+      /// in the new half and the rest of the group's tabs staying where they
+      /// were — halves, which is where every split starts.
+      it("splits a group at the edge a tab is dropped on", async () => {
+        const { container } = await three();
+
+        await waitFor(() => expect(editors(container)).toHaveLength(3));
+        expect(groups(container)).toHaveLength(1);
+
+        carry(tabbed(container, ".gitignore"), zone(0, "right"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          [".gitignore"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // The new group is where the work has just gone, so it is the active
+        // one — and the file is open in it over the buffer it was always over.
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual([null, "true"]);
+        expect(editors(container)).toHaveLength(3);
+
+        // And a group's only tab dropped on an edge of that same group asks for
+        // the group it already is: the new half would hold everything the old
+        // one held, and the old one would go the moment it was made.
+        carry(tabbed(groups(container)[1]!, ".gitignore"), zone(1, "right"));
+
+        expect(groups(container)).toHaveLength(2);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          [".gitignore"],
+        ]);
+      });
+
+      /// And which side the new group takes is the side the hand pointed at —
+      /// so a left edge puts it before the group it split and a top edge above
+      /// it, where the menu's two and the bar's icon always put it after.
+      ///
+      /// The second of these is a drop on a group that is already half of a
+      /// split, and it nests a level inside that half rather than adding a
+      /// third group beside it: the split is made where the group stands in the
+      /// tree.
+      it("puts the new group on the side the hand pointed at", async () => {
+        const { container } = await three();
+
+        carry(tabbed(container, "Cargo.toml"), zone(0, "left"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["README.md", ".gitignore"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // And the far half split across, from a drop on its top edge: the half
+        // it had, divided again, rather than a third column beside the two.
+        carry(tabbed(groups(container)[1]!, ".gitignore"), zone(1, "above"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(3));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          [".gitignore"],
+          ["README.md"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "50%" },
+          { left: "50%", top: "50%", width: "50%", height: "50%" },
+        ]);
+      });
+
+      /// And the centre moves the tab into that group without splitting
+      /// anything, the way a place along its bar does: the group it lands in
+      /// becomes the active one, and a group whose last tab has just left
+      /// disappears.
+      it("moves a tab into the group whose centre it was dropped on", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // The split's own group is the active one, so this opens there.
+        press(container, "README.md");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        carry(tabbed(groups(container)[1]!, "README.md"), zone(0, "centre"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md"],
+            ["Cargo.toml"],
+          ]),
+        );
+
+        // Two groups still: a centre drop asks for the group rather than for a
+        // side of it. And the one it landed in is the active one, so the next
+        // file pressed in the tree opens there.
+        expect(groups(container)).toHaveLength(2);
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual(["true", null]);
+
+        // And a lone tab dropped on its own group's centre asks for the group
+        // it is already in, which is nothing at all to do.
+        carry(tabbed(groups(container)[1]!, "Cargo.toml"), zone(1, "centre"));
+
+        expect(groups(container)).toHaveLength(2);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          ["Cargo.toml"],
+        ]);
+      });
+
+      /// And the zone under the hand is drawn while it is over one, so that
+      /// which of the five a release would do is on the page before the hand
+      /// lets go. One anywhere at a time: a pointer is in one zone of one
+      /// group, and a bar under the hand is a line rather than a zone.
+      it("draws the zone under the hand, and only ever one of them", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        press(container, "README.md");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        const held = tabbed(groups(container)[1]!, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: place(1, 1).x,
+          clientY: place(1, 1).y,
+        });
+
+        expect(bands(container)).toEqual([]);
+
+        const over = (at: { x: number; y: number }) =>
+          fireEvent.pointerMove(window, {
+            pointerId: 1,
+            clientX: at.x,
+            clientY: at.y,
+          });
+
+        over(zone(0, "right"));
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 right"]));
+
+        // The middle of the same content is the centre instead, and still the
+        // one band anywhere on the pane.
+        over(zone(0, "centre"));
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 centre"]));
+
+        // A bar is a place along a bar rather than a zone, so what is drawn
+        // there is the line and no band at all.
+        over(place(0, 0));
+
+        await waitFor(() =>
+          expect(lines(container)).toEqual(["0 before Cargo.toml"]),
+        );
+        expect(bands(container)).toEqual([]);
+
+        // And away from every group there is nothing to draw and nothing to do
+        // about the release.
+        over({ x: 50, y: 2000 });
+
+        await waitFor(() => expect(bands(container)).toEqual([]));
+
+        fireEvent.pointerUp(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        expect(bands(container)).toEqual([]);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]);
+      });
+    });
+
+    /// And a file row of the tree, picked up by the same gesture and let go on
+    /// the same two targets: a place along a group's bar, or one of the five
+    /// zones of a group's content. What a drop does is open the file — in that
+    /// group, or in the new group an edge makes.
+    ///
+    /// Here rather than beside the tree's own tests because the targets are the
+    /// ones above and so is the geometry they are measured in: a drag from the
+    /// tree lands on a bar or on a group's content, and jsdom lays out neither.
+    describe("and a file dragged in from the tree", () => {
+      /// A file row of the tree, which is what such a drag takes hold of.
+      function fileRow(of: ParentNode, name: string): HTMLButtonElement {
+        const found = [
+          ...of.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.file}`,
+          ),
+        ].find((one) => one.textContent === name);
+
+        if (!found) {
+          throw new Error(`the tree has no file called ${name}`);
+        }
+
+        return found;
+      }
+
+      /// And a folder row, which is not a drag source: there is nothing to
+      /// open, so a press on one is the expand it has always been.
+      function folderRow(of: ParentNode, name: string): HTMLButtonElement {
+        const found = [
+          ...of.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.folder}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(name));
+
+        if (!found) {
+          throw new Error(`the tree has no folder called ${name}`);
+        }
+
+        return found;
+      }
+
+      /// Every row the tree is drawing, in the order it drew them: what a drag
+      /// that came to nothing must have left exactly as it was.
+      function treeRows(of: ParentNode): string[] {
+        return [
+          ...of.querySelectorAll<HTMLElement>(
+            `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+          ),
+        ].map((row) => row.textContent ?? "");
+      }
+
+      /// A file dropped on a group's content centre opens in that group — the
+      /// group the hand pointed at rather than the active one, which is the
+      /// whole of what dragging one in adds to pressing it.
+      it("opens a file dropped on a group's centre in that group", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // The split's own group is the active one, so a press would open in the
+        // far half. This is let go over the near one.
+        carry(fileRow(container, "README.md"), zone(0, "centre"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md"],
+            ["Cargo.toml"],
+          ]),
+        );
+
+        // Two groups still — a centre asks for the group rather than a side of
+        // it — and the one it landed in is the active one, so the next file
+        // pressed in the tree opens there.
+        expect(groups(container)).toHaveLength(2);
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual(["true", null]);
+
+        press(container, ".gitignore");
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md", ".gitignore"],
+            ["Cargo.toml"],
+          ]),
+        );
+      });
+
+      /// And one dropped on a bar opens at the place the line stood, which is
+      /// the other way into a group that is already there.
+      ///
+      /// A file already open in the group it is dropped on is turned to rather
+      /// than opened twice: there is nothing a second view of a file in the one
+      /// group could show that the first is not showing already.
+      it("opens a file dropped on a bar at the place the line stood", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        press(container, "README.md");
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([["Cargo.toml", "README.md"]]),
+        );
+
+        carry(fileRow(container, ".gitignore"), place(0, 1));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", ".gitignore", "README.md"],
+          ]),
+        );
+
+        // And the same row dropped where its file is already open turns to the
+        // tab it has rather than opening a second beside it.
+        carry(fileRow(container, "README.md"), place(0, 0));
+
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", ".gitignore", "README.md"],
+        ]);
+        await waitFor(() =>
+          expect(
+            tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+          ).toEqual(["false", "false", "true"]),
+        );
+      });
+
+      /// A file dropped on a group's edge splits the group there and opens in
+      /// the new half, which is the third of ADR 0019's three ways to make a
+      /// split reached with a path instead of a tab.
+      it("splits at the edge a file is dropped on, and opens it there", async () => {
+        const { container, fetching } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        carry(fileRow(container, "README.md"), zone(0, "right"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([["Cargo.toml"], ["README.md"]]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // The new group is where the work has just gone, so it is the active
+        // one — the split's own rule, reached the other way round.
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual([null, "true"]);
+
+        // And a file already open somewhere else opens as a second view of the
+        // one buffer: one read for the file however many views there are, which
+        // is what keeps a second view off somebody's unsaved text.
+        carry(fileRow(container, "Cargo.toml"), zone(1, "below"));
+
+        await waitFor(() => expect(editors(container)).toHaveLength(3));
+        expect(groups(container)).toHaveLength(3);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["README.md"],
+          ["Cargo.toml"],
+        ]);
+        expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+      });
+
+      /// A drop away from every bar and every group opens nothing, and leaves
+      /// the tree exactly as it was: the row still where it is, the folder still
+      /// open. Dragging is a way to open a file rather than a move on disk.
+      it("opens nothing where a file is let go away from every group", async () => {
+        const { container, fetching } = await opened();
+
+        const before = treeRows(container);
+
+        expect(holding(container)).toEqual([[]]);
+
+        const held = fileRow(container, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: 0,
+          clientY: 0,
+        });
+
+        // Over the one group there is, which is where the drop would land — and
+        // the row in the hand is taken back while it is carried, the way the
+        // tab in one is.
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: zone(0, "centre").x,
+          clientY: zone(0, "centre").y,
+        });
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 centre"]));
+        expect(held.classList).toContain(treePane.lifted!);
+
+        // And away from it there is nowhere to land, so there is nothing to
+        // draw and nothing to do about the release.
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        await waitFor(() => expect(bands(container)).toEqual([]));
+
+        fireEvent.pointerUp(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        expect(holding(container)).toEqual([[]]);
+        expect(askedFor(fetching, fileOf(pathOf("README.md")))).toBe(0);
+        expect(held.classList).not.toContain(treePane.lifted!);
+
+        // And the tree is the tree it was: nothing here writes anything.
+        expect(treeRows(container)).toEqual(before);
+      });
+
+      /// A press is still a press: one released about where it landed opens the
+      /// file the way it always did, and one that carried the row somewhere
+      /// does not also open it in the group it was dragged past.
+      it("opens a file on a press that did not move, and once on one that did", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([["Cargo.toml"]]),
+        );
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // A press that wobbles inside the grace and lets go is a press, and a
+        // press opens the file in the active group.
+        const held = fileRow(container, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: 20,
+          clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: 22,
+          clientY: 21,
+        });
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 22, clientY: 21 });
+        fireEvent.click(held);
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        // And one that carried the row into the near half opens it there and
+        // nowhere else: the click the release leaves behind is the same
+        // gesture, and answering it again would open the file twice.
+        carry(fileRow(container, ".gitignore"), zone(0, "centre"));
+        fireEvent.click(fileRow(container, ".gitignore"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", ".gitignore"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+      });
+
+      /// And a folder row is not a drag source. There is nothing to open, so
+      /// there is nothing for a drop to do — and the press is the expand it has
+      /// always been.
+      it("does not drag a folder row, and still expands one", async () => {
+        const { container } = await opened();
+
+        const held = folderRow(container, OWN_ROOT.repo);
+
+        carry(held, zone(0, "centre"));
+
+        // Nothing was ever in the hand, so nothing was marked and nothing
+        // opened.
+        expect(bands(container)).toEqual([]);
+        expect(holding(container)).toEqual([[]]);
+
+        // And the press behind it shuts the folder, which is what a press on
+        // one has always done.
+        fireEvent.click(held);
+
+        await waitFor(() =>
+          expect(treeRows(container)).not.toContain("Cargo.toml"),
+        );
+      });
+    });
+  });
+
+  /// And what the device remembers of all of it, which is what a reload comes
+  /// back to.
+  ///
+  /// The keeping above the pane carries the tabs through a swap; the browser's
+  /// own storage carries them through the page going away and coming back — the
+  /// layout, each group's tabs and the one it is showing, and the text nobody
+  /// has saved, per Conversation and never sent to the server (ADR 0019, *Tabs
+  /// and groups*).
+  describe("and the page reloaded", () => {
+    /// Where this conversation's layout and its unsaved text are kept, asked
+    /// for by the names a browser would find them under rather than through the
+    /// module that writes them — the way the widths are asked for in
+    /// `sizing.test.tsx`.
+    const LAYOUT = `verkstead.code.${GRILLING.id}`;
+    const UNSAVED = `verkstead.code-unsaved.${GRILLING.id}`;
+
+    /// What the fixture's own Cargo.toml says, which is what a file nobody has
+    /// typed into comes back as.
+    const ON_DISK = (codeFile as Extract<FileReading, { Text: unknown }>).Text;
+
+    /// And the file as the agent left it while the page was away: another text,
+    /// under another version.
+    const THEIRS: FileReading = {
+      Text: {
+        path: pathOf("Cargo.toml"),
+        text: '[workspace]\nmembers = ["crates/*"]\n',
+        version: "Cargo.toml-2",
+        writable: true,
+      },
+    };
+
+    /// The page gone and loaded again: the render taken down, which is the
+    /// keeping above the pane going with it, and a fresh one mounted over
+    /// whatever this browser is still holding.
+    async function reloaded(...answers: Parameters<typeof serving>) {
+      cleanup();
+
+      return opened(...answers);
+    }
+
+    /// Type into an editor, which is what makes a tab dirty. The last one drawn
+    /// by default, which is the view a file just opened is showing in.
+    async function types(
+      box: HTMLTextAreaElement,
+      text: string,
+    ): Promise<void> {
+      fireEvent.input(box, { target: { value: text } });
+      await waitFor(() => expect(box.value).toBe(text));
+    }
+
+    /// Ctrl+S, fired where the caret is — the pane listens on the document, so
+    /// what this asks is that the press reaches it from inside the editor.
+    function ctrlS(box: HTMLTextAreaElement): void {
+      fireEvent.keyDown(box, { key: "s", ctrlKey: true });
+    }
+
+    /// Every save that went out, as the bodies they were sent with — which is
+    /// where the version a write names itself as being over is read back from.
+    function saved(
+      fetching: ReturnType<typeof serving>,
+    ): Array<{ path: string; version: string; text: string }> {
+      return fetching.mock.calls
+        .filter(
+          ([path, init]) => String(path) === SAVING && init?.method === "POST",
+        )
+        .map(
+          ([, init]) =>
+            JSON.parse(String(init?.body)) as {
+              path: string;
+              version: string;
+              text: string;
+            },
+        );
+    }
+
+    // Every stub below is on the browser's own storage, and one left standing
+    // would be the next test's browser.
+    afterEach(() => vi.restoreAllMocks());
+
+    /// The whole of the first acceptance: the splits, the tabs, which of them
+    /// each group is showing, and the text nobody had saved.
+    it("comes back to the splits, the tabs and the unsaved text", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(tabs(first.container)).toHaveLength(1));
+
+      // Beside itself, and the second file opened into the group the split
+      // made — which is the active one, a split being where the work is going.
+      await split(first.container, tabs(first.container)[0]!, "Split right");
+      await waitFor(() => expect(groups(first.container)).toHaveLength(2));
+
+      press(first.container, "README.md");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+
+      await waitFor(() => expect(editors(first.container)).toHaveLength(3));
+      await types(editors(first.container).at(-1)!, "# verkstead\n\nnotes\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // Which is on the device by now: the layout under one key and the text
+      // under another, so that a storage too full for the second still has the
+      // first.
+      expect(localStorage.getItem(LAYOUT)).toBeTruthy();
+      expect(
+        JSON.parse(localStorage.getItem(UNSAVED)!) as Record<string, string>,
+      ).toEqual({ [pathOf("README.md")]: "# verkstead\n\nnotes\n" });
+
+      const { container, fetching } = await reloaded();
+
+      // The two groups, side by side where they were left, holding what they
+      // were holding.
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml", "README.md"],
+      ]);
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+
+      // And the one each was showing is the one showing: the group that was
+      // split is still on the file it was split from, and the group it made is
+      // on the file opened into it.
+      await waitFor(() =>
+        expect(
+          tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+        ).toEqual(["true", "false", "true"]),
+      );
+
+      // The unsaved text is in the editor it was typed into, and the dot is on
+      // its tab: the file is dirty against what the disk says, which is what it
+      // was before the page went.
+      await waitFor(() =>
+        expect(editors(container).at(-1)?.value).toBe("# verkstead\n\nnotes\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+      expect(
+        tabs(container)[2]!.querySelector(`.${codePane.dot}`),
+      ).toBeTruthy();
+
+      // And the file the human had not touched is the disk's, read afresh: the
+      // readings are not what was stored, they are what the disk says now.
+      expect(editors(container)[0]!.value).toBe(ON_DISK.text);
+
+      // Once per file rather than once per view, two views of one file being
+      // one buffer.
+      expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+      expect(askedFor(fetching, fileOf(pathOf("README.md")))).toBe(1);
+    });
+
+    /// And the terminals are settled against the register on the way back in,
+    /// which is what a reload has in common with a swap: a tab is this device's
+    /// and the shell under it is the server's.
+    it("drops a shell that ended while the page was away, and takes up one opened elsewhere", async () => {
+      let live = [1, 2];
+      const register = whenever(TERMINALS_OF_IT, () => json(idle(live))());
+
+      const first = await opened(register);
+
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Terminal 1", "Terminal 2"],
+        ]),
+      );
+
+      await split(first.container, tabs(first.container)[1]!, "Split right");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Terminal 1", "Terminal 2"],
+          ["Terminal 2"],
+        ]),
+      );
+
+      // The first shell exits while the page is away, and another is opened on
+      // some other device.
+      live = [2, 3];
+
+      const { container } = await reloaded(register);
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Terminal 2"],
+          ["Terminal 2", "Terminal 3"],
+        ]),
+      );
+    });
+
+    /// A dirty file comes back dirty against the version it reads at *now*, so
+    /// a file the agent rewrote while the page was away is a collision to be
+    /// told about rather than a save going out over a version that is no longer
+    /// there.
+    it("comes back dirty against what the disk says now, and the bar on the save it refuses", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // The agent rewrites the file while the page is away, and the server
+      // refuses a write over anything but what it holds now.
+      const { container, fetching } = await reloaded(
+        whenever(fileOf(pathOf("Cargo.toml")), json(THEIRS)),
+        whenever(SAVING, json("Stale" satisfies FileWritten), "POST"),
+      );
+
+      // The human's text is back, over the agent's rather than over the text it
+      // was typed against — and the dot says the two are apart.
+      await waitFor(() =>
+        expect(editors(container)[0]?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+
+      ctrlS(editors(container)[0]!);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+      // Over the version the file reads at now, which is the point: a save
+      // naming the version this device stored would be a write over a file
+      // nobody has read.
+      expect(saved(fetching)[0]!.version).toBe("Cargo.toml-2");
+
+      const bar = await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.moved}`,
+      );
+      expect(bar.textContent).toContain(MOVED);
+    });
+
+    /// And where the storage will not take the text, it still takes the layout:
+    /// two keys and two writes, so the splits and the tabs come back and the
+    /// text is what is lost.
+    it("restores the layout when the unsaved text will not fit", async () => {
+      const setting = Storage.prototype.setItem;
+
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        body: string,
+      ) {
+        if (key === UNSAVED) {
+          throw new DOMException("no room", "QuotaExceededError");
+        }
+
+        setting.call(this, key, body);
+      });
+
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // The layout landed; the text did not, and what would not go is taken
+      // away rather than left to be restored over a file it no longer
+      // describes.
+      expect(localStorage.getItem(LAYOUT)).toBeTruthy();
+      expect(localStorage.getItem(UNSAVED)).toBeNull();
+
+      const { container } = await reloaded();
+
+      await waitFor(() => expect(holding(container)).toEqual([["Cargo.toml"]]));
+
+      // And the tab is the file as the disk has it: clean, and nothing unsaved
+      // to lose a second time.
+      await waitFor(() => expect(editors(container)[0]?.value).toBe(ON_DISK.text));
+      expect(dots(container)).toHaveLength(0);
+    });
+
+    /// And a browser that refuses storage altogether costs the layout and
+    /// nothing else: the pane opens, splits and types exactly as it did, and a
+    /// reload comes back to an empty one.
+    it("costs the layout and nothing else where the browser refuses storage", async () => {
+      const refused = () => {
+        throw new DOMException("storage is blocked", "SecurityError");
+      };
+
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(refused);
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(refused);
+      vi.spyOn(Storage.prototype, "removeItem").mockImplementation(refused);
+
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await split(first.container, tabs(first.container)[0]!, "Split right");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml"],
+        ]),
+      );
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(2));
+
+      const { container } = await reloaded();
+
+      // Nothing was written, so there is nothing to come back to: one group,
+      // saying what an empty pane says.
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([[]]);
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`)
+          ?.textContent,
+      ).toContain(NOTHING_OPEN);
+    });
+
+    /// And the text is held on the device until it is in a buffer, rather than
+    /// until the page has loaded: a reload is a moment where the files are
+    /// being read, Monaco is on its way and there is not a buffer among them,
+    /// and a page that wrote down what it was holding *then* would have emptied
+    /// the key while it was getting ready.
+    it("keeps the unsaved text while the read that restores it is in flight", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() =>
+        expect(localStorage.getItem(UNSAVED)).toBe(
+          JSON.stringify({ [pathOf("Cargo.toml")]: "[workspace]\nmembers = []\n" }),
+        ),
+      );
+
+      // The read of it never answers, so nothing this page does can put the
+      // text back into a buffer.
+      const { container } = await reloaded(
+        whenever(fileOf(pathOf("Cargo.toml")), hangs()),
+      );
+
+      await waitFor(() => expect(holding(container)).toEqual([["Cargo.toml"]]));
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${editorPane.editor}`),
+      ).toBeNull();
+
+      // And the text is still where it was: a second reload would come back to
+      // it, which is what makes a page that cannot read the disk cost nothing.
+      expect(localStorage.getItem(UNSAVED)).toBe(
+        JSON.stringify({ [pathOf("Cargo.toml")]: "[workspace]\nmembers = []\n" }),
+      );
+    });
+
+    /// A stored body that will not parse, or is not the shape of one of these,
+    /// is dropped on the way past — the way the compose page's own draft is. It
+    /// will be no more use on the next visit than it is on this one.
+    it("drops a stored layout it cannot read, and opens empty", async () => {
+      localStorage.setItem(LAYOUT, "{ this is not a layout");
+      localStorage.setItem(UNSAVED, "[]");
+
+      const { container } = await opened();
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([[]]);
+
+      expect(localStorage.getItem(LAYOUT)).toBeNull();
+      expect(localStorage.getItem(UNSAVED)).toBeNull();
+    });
+  });
+
+  /// And the shortcuts, which are the four keystrokes a browser leaves to the
+  /// page: Ctrl+PageDown and Ctrl+PageUp between a group's tabs, Ctrl+\ to
+  /// split one beside itself, Ctrl+` for a shell in it.
+  ///
+  /// They hang on the document where Ctrl+S already hangs, for as long as Code
+  /// is mounted — so a press arrives whichever half of the pane the hands were
+  /// on, and what every one of them acts on is the **active** group rather than
+  /// whatever happens to have the focus. Ctrl+W and Ctrl+Tab are the browser's
+  /// own and are deliberately not taken, and neither is any key a terminal grid
+  /// already had.
+  describe("and the shortcuts", () => {
+    /// One of them, fired wherever the caret really is — on the body by
+    /// default, the listener being the document's.
+    ///
+    /// What comes back is whether the keystroke survived: `false` where
+    /// something took it and called `preventDefault`, which is what a browser
+    /// reads to decide whether to answer the shortcut itself.
+    function ctrl(key: string, on: Element = document.body): boolean {
+      return fireEvent.keyDown(on, { key, ctrlKey: true });
+    }
+
+    /// Which tab each group is showing, by the name on it — the one reading
+    /// that says where a walk along a bar has got to.
+    function shown(container: ParentNode): Array<string | undefined> {
+      return groups(container).map(
+        (group) =>
+          tabs(group).find((tab) => tab.getAttribute("aria-pressed") === "true")
+            ?.textContent ?? undefined,
+      );
+    }
+
+    /// The socket onto one of the conversation's terminals, by the number in
+    /// its path.
+    function attachedTo(number: number): Promise<Attached> {
+      return waitFor(() => {
+        const socket = Attached.opened.find((one) =>
+          one.url.endsWith(`${TERMINALS_OF_IT}/${number}/attach`),
+        );
+
+        if (!socket) {
+          throw new Error(`nothing has attached to terminal ${number}`);
+        }
+
+        return socket;
+      });
+    }
+
+    /// What a window has typed up its socket.
+    function typed(socket: Attached): unknown[] {
+      return socket.sent
+        .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
+        .filter((wrote) => "PutIn" in wrote)
+        .map((wrote) => wrote.PutIn);
+    }
+
+    /// The pane with three files open in the one group, which is a bar with
+    /// somewhere to walk.
+    async function three() {
+      const mounted = await opened();
+
+      for (const name of ["Cargo.toml", "README.md", ".gitignore"]) {
+        press(mounted.container, name);
+
+        await waitFor(() =>
+          expect(
+            tabs(mounted.container).map((tab) => tab.textContent),
+          ).toContain(name),
+        );
+      }
+
+      return mounted;
+    }
+
+    /// Ctrl+PageDown turns to the next tab of the active group and Ctrl+PageUp
+    /// to the one before it, and both wrap at the end they run off.
+    it("walks the active group's tabs, wrapping at each end", async () => {
+      const { container } = await three();
+
+      // The last file opened is the one showing, which is where the walk
+      // starts from.
+      expect(shown(container)).toEqual([".gitignore"]);
+
+      // Past the end of the bar, which comes back round to the first.
+      expect(ctrl("PageDown")).toBe(false);
+      await waitFor(() => expect(shown(container)).toEqual(["Cargo.toml"]));
+
+      ctrl("PageDown");
+      await waitFor(() => expect(shown(container)).toEqual(["README.md"]));
+
+      ctrl("PageUp");
+      await waitFor(() => expect(shown(container)).toEqual(["Cargo.toml"]));
+
+      // And back past the start, which comes round the other way.
+      expect(ctrl("PageUp")).toBe(false);
+      await waitFor(() => expect(shown(container)).toEqual([".gitignore"]));
+
+      // Nothing was opened or closed by any of it: a walk is which tab is
+      // showing and nothing else.
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+    });
+
+    /// And which group walks is the active one — the group last pressed into —
+    /// rather than the one the caret happens to be in.
+    it("walks the group last pressed into, not the one with the focus", async () => {
+      const { container } = await three();
+
+      // A second group, holding the tab the split was made from, and active
+      // because that is where the work was going — with a second file opened
+      // into it, so that it is a bar with somewhere of its own to walk.
+      await split(container, tabs(container)[2]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md", ".gitignore"],
+          [".gitignore", "README.md"],
+        ]),
+      );
+
+      // A press back into the near half makes that one active again, on the
+      // tab it was pressed on.
+      fireEvent.click(tabs(groups(container)[0]!)[0]!);
+      await waitFor(() =>
+        expect(shown(container)).toEqual(["Cargo.toml", "README.md"]),
+      );
+
+      // Fired from inside the *other* group's editor, which is where a caret
+      // would be: the press arrives at the document either way, and what it
+      // walks is the active group.
+      ctrl("PageUp", editors(groups(container)[1]!)[0]!);
+
+      // The near half wrapped to its last tab, and the half the press was made
+      // in is showing exactly what it was.
+      await waitFor(() =>
+        expect(shown(container)).toEqual([".gitignore", "README.md"]),
+      );
+    });
+
+    /// Ctrl+\ splits the active group beside itself: the same split its bar's
+    /// icon and its tab's menu make, with what it was showing showing in both.
+    it("splits the active group to the right on Ctrl+\\", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      expect(ctrl("\\")).toBe(false);
+
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      expect(holding(container)).toEqual([["Cargo.toml"], ["Cargo.toml"]]);
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+
+      // The new group is where the work is going, so it is the active one —
+      // and the file is under two views of the one buffer.
+      expect(
+        groups(container).map((group) => group.getAttribute("aria-current")),
+      ).toEqual([null, "true"]);
+      expect(editors(container)).toHaveLength(2);
+
+      // And again, on the group that split made: the shortcut is the icon, so
+      // it nests the way the icon does.
+      ctrl("\\");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml"],
+        ["Cargo.toml"],
+      ]);
+    });
+
+    /// And Ctrl+` opens a shell in the active group, which is what **New
+    /// terminal** opens.
+    it("opens a terminal in the active group on Ctrl+`", async () => {
+      const { container, fetching } = await opened(
+        whenever(
+          TERMINALS_OF_IT,
+          json({ Opened: { number: 1 } } satisfies TerminalOpened),
+          "POST",
+        ),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      expect(ctrl("`")).toBe(false);
+
+      // In the group the split made, which is the active one — and showing,
+      // the way a terminal opened from the plus shows.
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "Terminal 1"],
+        ]),
+      );
+      expect(shown(container)).toEqual(["Cargo.toml", "Terminal 1"]);
+
+      // One shell asked for, which is one press of the key.
+      expect(
+        fetching.mock.calls.filter(
+          ([path, init]) =>
+            String(path) === TERMINALS_OF_IT && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+
+    /// And nothing here takes a key the grid already had. A terminal with the
+    /// focus in it is a shell being typed into: Ctrl+C interrupts, Ctrl+D ends
+    /// and Ctrl+L clears, and all three go up the socket as the bytes xterm
+    /// makes of them.
+    it("leaves a terminal's own keys to the shell", async () => {
+      withTerminals([1]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const socket = await attachedTo(1);
+      socket.says(PAINTED);
+
+      const typing = await drawn<HTMLTextAreaElement>(
+        container,
+        `.${shell.detailsPane} .xterm-helper-textarea`,
+      );
+
+      fireEvent.keyDown(typing, {
+        key: "c",
+        keyCode: 67,
+        which: 67,
+        ctrlKey: true,
+      });
+      fireEvent.keyDown(typing, {
+        key: "d",
+        keyCode: 68,
+        which: 68,
+        ctrlKey: true,
+      });
+      fireEvent.keyDown(typing, {
+        key: "l",
+        keyCode: 76,
+        which: 76,
+        ctrlKey: true,
+      });
+
+      await waitFor(() =>
+        expect(typed(socket)).toEqual(["\x03", "\x04", "\x0c"]),
+      );
+
+      // And the pane did nothing of its own about any of them: one group, one
+      // tab, and the shell still the one showing.
+      expect(groups(container)).toHaveLength(1);
+      expect(holding(container)).toEqual([["Terminal 1"]]);
+    });
+
+    /// And the two the window keeps are left to it: a page that swallowed
+    /// either would be a pane fighting the browser around it.
+    it("leaves Ctrl+W and Ctrl+Tab to the browser", async () => {
+      const { container } = await three();
+
+      expect(ctrl("w")).toBe(true);
+      expect(ctrl("Tab")).toBe(true);
+
+      expect(groups(container)).toHaveLength(1);
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+      expect(shown(container)).toEqual([".gitignore"]);
+    });
+  });
+});
+
 /// The maximise toggle in Code's header: the press that hides the sidebar and
 /// the Timeline so the editor has the window, and brings them back again.
 ///
@@ -20843,6 +25844,287 @@ describe("a file opened out of the code pane's tree", () => {
 /// Remembered per device beside the pane widths, and for the same reason:
 /// how the frame stands in front of this human is theirs, and a phone that gave
 /// Code the window has said nothing about a laptop's columns.
+describe("the code pane's quick open", () => {
+  /// The palette itself, or nothing where it is not up — the one dialog this
+  /// pane ever draws over itself.
+  function palette(container: ParentNode): HTMLDialogElement | null {
+    return container.querySelector<HTMLDialogElement>(
+      `dialog.${quickPane.palette}`,
+    );
+  }
+
+  /// The field in it, which is where the hands are the moment it opens.
+  function field(container: ParentNode): HTMLInputElement {
+    const found = container.querySelector<HTMLInputElement>(
+      `dialog.${quickPane.palette} .${quickPane.field}`,
+    );
+
+    if (!found) {
+      throw new Error("the palette is not up");
+    }
+
+    return found;
+  }
+
+  /// And the rows under it, as what each says: the file, where it is under its
+  /// root, and which root that is.
+  function offered(container: ParentNode): Array<[string, string, string]> {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `dialog.${quickPane.palette} [role="option"]`,
+      ),
+    ].map((row) => [
+      row.querySelector(`.${quickPane.name}`)?.textContent ?? "",
+      row.querySelector(`.${quickPane.under}`)?.textContent ?? "",
+      row.querySelector(`.${quickPane.repo}`)?.textContent ?? "",
+    ]);
+  }
+
+  /// What the palette says where it has no rows to draw.
+  function said(container: ParentNode): string | undefined {
+    return (
+      container.querySelector(`dialog.${quickPane.palette} p`)?.textContent ??
+      undefined
+    );
+  }
+
+  /// Ctrl+P, fired where the caret really is — the listener being the
+  /// document's, so that it arrives whichever half of the pane the hands were
+  /// in.
+  function ctrlP(on: Element = document.body): boolean {
+    return fireEvent.keyDown(on, { key: "p", ctrlKey: true });
+  }
+
+  /// Typing into the field, which is the whole of the interaction.
+  function type(container: ParentNode, text: string): void {
+    fireEvent.input(field(container), { target: { value: text } });
+  }
+
+  /// The groups the pane is drawing, and what is in each of them.
+  function groups(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.group}`,
+      ),
+    ];
+  }
+
+  function holding(container: ParentNode): string[][] {
+    return groups(container).map((group) => [
+      ...group.querySelectorAll<HTMLButtonElement>(`.${codePane.tab}`),
+    ].map((tab) => tab.textContent ?? ""));
+  }
+
+  /// One of the fixture list's files, by the name at the end of it.
+  function pathOf(name: string): string {
+    const found = (codeFiles as FileListsView).roots
+      .flatMap((root) => root.files)
+      .find((path) => path.endsWith(`/${name}`));
+
+    if (!found) {
+      throw new Error(`the fixture list has no ${name}`);
+    }
+
+    return found;
+  }
+
+  /// What the server answers a read of one of them with.
+  function reading(path: string, text: string): FileReading {
+    return { Text: { path, text, version: `${path}-1`, writable: true } };
+  }
+
+  /// The pane, with the conversation's files answered the way the palette asks
+  /// for them and nothing else open.
+  ///
+  /// Awaited as far as the pane being drawn, because the keystroke is the
+  /// document's: a Ctrl+P fired before this pane has mounted is a press nobody
+  /// is listening for.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(FILES_OF_IT, json(codeFiles)),
+      ...answers,
+    );
+
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.group}`,
+        ),
+      ).toHaveLength(1),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// Ctrl+P drops the palette, and typing part of a path lists what matched
+  /// across every root — each row saying which root it is in, because two of
+  /// them can hold the same path.
+  it("opens on Ctrl+P and lists matches from every root", async () => {
+    const { container } = await opened();
+
+    expect(palette(container)).toBeNull();
+
+    // Taken from the browser, whose own Print is not what anybody meant by it.
+    expect(ctrlP()).toBe(false);
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    type(container, "readme");
+
+    await waitFor(() =>
+      expect(offered(container)).toEqual([
+        ["README.md", "README.md", COMPANION_ROOT.repo],
+        ["README.md", "README.md", OWN_ROOT.repo],
+      ]),
+    );
+  });
+
+  /// And the best match is the first row: a name that begins with what was
+  /// typed above the same letters falling where they may.
+  it("puts the best match first", async () => {
+    const { container } = await opened();
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    type(container, "re");
+
+    await waitFor(() => expect(offered(container).length).toBeGreaterThan(1));
+
+    const rows = offered(container);
+
+    expect(rows[0]?.[0]).toBe("README.md");
+    expect(rows.at(-1)).toEqual([
+      "lib.rs",
+      "crates/server/lib.rs",
+      OWN_ROOT.repo,
+    ]);
+  });
+
+  /// Enter opens the row the keyboard is on, as a tab of the active group —
+  /// which is the group last pressed into, the palette standing over the whole
+  /// pane rather than in any one of them.
+  it("opens the pick into the active group", async () => {
+    const lib = pathOf("lib.rs");
+    const readme = `${OWN_ROOT.path}/README.md`;
+
+    const { container } = await opened(
+      whenever(fileOf(lib), json(reading(lib, "fn main() {}\n"))),
+      whenever(fileOf(readme), json(reading(readme, "# verkstead\n"))),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "lib");
+
+    await waitFor(() => expect(offered(container)).toHaveLength(1));
+    fireEvent.keyDown(field(container), { key: "Enter" });
+
+    // The palette goes with the press: what it was for has happened.
+    await waitFor(() => expect(holding(container)).toEqual([["lib.rs"]]));
+    expect(palette(container)).toBeNull();
+
+    // And a second group, which is the active one from the moment it is made:
+    // the next pick opens there rather than back where the first one went.
+    const tab = container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.tab}`,
+    )!;
+    fireEvent.contextMenu(tab, { clientX: 10, clientY: 10 });
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+    fireEvent.click(
+      [...menu.querySelectorAll("button")].find(
+        (one) => one.textContent === "Split right",
+      )!,
+    );
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "readme");
+
+    // The conversation's own, which is the row the walk starts on.
+    await waitFor(() => expect(offered(container)).toHaveLength(2));
+    fireEvent.keyDown(field(container), { key: "ArrowDown" });
+    fireEvent.keyDown(field(container), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([["lib.rs"], ["lib.rs", "README.md"]]),
+    );
+  });
+
+  /// Escape leaves nothing behind: no tab, nothing read, and a palette opened
+  /// again is an empty field rather than the last search still in it.
+  it("leaves nothing behind on Escape", async () => {
+    const { container, fetching } = await opened();
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    type(container, "readme");
+    await waitFor(() => expect(offered(container)).toHaveLength(2));
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    await waitFor(() => expect(palette(container)).toBeNull());
+    expect(holding(container)).toEqual([[]]);
+    expect(
+      fetching.mock.calls.filter(([asked]) =>
+        String(asked).includes("/files/file?"),
+      ),
+    ).toHaveLength(0);
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+    expect(field(container).value).toBe("");
+
+    // And the list is read afresh with it: there is no watcher until the stage
+    // after this one, so a list kept from the last opening would be a palette
+    // offering a file the agent has since moved.
+    await waitFor(() => expect(askedFor(fetching, FILES_OF_IT)).toBe(2));
+  });
+
+  /// A root the server cut short says so, rather than quietly matching over
+  /// half a checkout.
+  it("says which root is only part here", async () => {
+    const lists = codeFiles as FileListsView;
+    const { container } = await opened(
+      whenever(
+        FILES_OF_IT,
+        json({
+          roots: [{ ...lists.roots[0]!, cut: true }, lists.roots[1]!],
+        }),
+      ),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`dialog.${quickPane.palette} .${quickPane.cut}`)
+          ?.textContent,
+      ).toBe(onlyPartOf(OWN_ROOT.repo)),
+    );
+  });
+
+  /// And a conversation with nothing checked out opens a palette that says
+  /// there is nothing to search — the tree's own answer about the same nothing.
+  it("says so where the conversation has no worktree", async () => {
+    const { container } = await opened(
+      whenever(ROOTS_OF_IT, json({ roots: [] })),
+      whenever(FILES_OF_IT, json({ roots: [] })),
+    );
+
+    ctrlP();
+    await waitFor(() => expect(palette(container)).not.toBeNull());
+
+    await waitFor(() => expect(said(container)).toBe(NOTHING_TO_SEARCH));
+  });
+});
+
 describe("the maximise toggle in the code pane", () => {
   /// Where the toggle's state is kept, asked for by the name a browser would
   /// find it under rather than through the module that writes it — the way the
@@ -21015,6 +26297,365 @@ describe("the maximise toggle in the code pane", () => {
       "timeline",
       "details",
     ]);
+  });
+});
+
+/// The three settings ADR 0019 exposes, on the pane's own ⋯ in Code's header:
+/// word wrap, the font size and the minimap.
+///
+/// The place a pane keeps what is about the pane. They belong to the device
+/// rather than to the Conversation — a phone and a laptop are entitled to draw
+/// the same file differently — so nothing about them goes to the server, and
+/// what a browser that refuses storage gets is VS Code's own defaults rather
+/// than a failure.
+describe("the three settings on the code pane's own menu", () => {
+  /// Where each of them lives, asked for by the name a browser would find it
+  /// under rather than through the module that writes it — the way the maximise
+  /// toggle above is asked for.
+  const WRAP = "verkstead.editor-wrap";
+  const SIZE = "verkstead.editor-font-size";
+  const MINIMAP = "verkstead.editor-minimap";
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  /// One of the fixture folder's files, by name.
+  function pathOf(name: string): string {
+    const listed = codeFolder as Extract<FolderListing, { Listed: unknown }>;
+    const found = listed.Listed.entries.find((entry) => entry.name === name);
+
+    if (!found) {
+      throw new Error(`the fixture folder has no ${name}`);
+    }
+
+    return found.path;
+  }
+
+  /// The pane's own ⋯, which is the menu in the header rather than any of the
+  /// ones its tabs and rows drop.
+  function mark(container: ParentNode): HTMLButtonElement {
+    const found = container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.paneActions} button`,
+    );
+
+    if (!found) {
+      throw new Error("the pane has no menu in its header");
+    }
+
+    return found;
+  }
+
+  /// What it drops, or nothing where it is shut.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.detailsPane} .${codePane.paneActions} [role="menu"]`,
+    );
+  }
+
+  /// And the rows in it, as what each reads as.
+  function offers(container: ParentNode): string[] {
+    return [...(drop(container)?.querySelectorAll("button") ?? [])].map(
+      (row) => row.textContent ?? "",
+    );
+  }
+
+  /// One row of it, by what it reads as.
+  function row(container: ParentNode, says: string): HTMLButtonElement {
+    const found = [
+      ...(drop(container)?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+    ].find((one) => one.textContent?.startsWith(says));
+
+    if (!found) {
+      throw new Error(
+        `the menu has no ${says}; it has ${offers(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// Open the menu, and answer with the card it drops.
+  async function open(container: ParentNode): Promise<HTMLElement> {
+    fireEvent.click(mark(container));
+
+    return drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.paneActions} [role="menu"]`,
+    );
+  }
+
+  /// Press a row of it, which moves the setting it names.
+  function flip(container: ParentNode, says: string): void {
+    fireEvent.click(row(container, says));
+  }
+
+  /// And how each editor open in the pane is drawn *now* — what it was opened
+  /// with, and every change the pane has told it about since.
+  function drawing(): Array<Record<string, unknown>> {
+    return editors
+      .filter((one) => !one.disposed)
+      .map((one) => ({
+        wordWrap: one.drawn.wordWrap,
+        fontSize: one.drawn.fontSize,
+        minimap: one.drawn.minimap,
+      }));
+  }
+
+  /// The pane with the conversation's own root expanded and its files answered,
+  /// and no terminals — so what is open is only ever what a test put there.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(fileOf(pathOf("Cargo.toml")), json(codeFile)),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(
+      rows.find((one) => one.textContent?.startsWith(OWN_ROOT.repo))!,
+    );
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.file}`,
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// The same pane with Cargo.toml open in two groups, which is what *every
+  /// editor in every group* is asked of: the tab the split was made from goes
+  /// on showing in both, so there are two editors over the one buffer.
+  async function inTwoGroups(...answers: Parameters<typeof serving>) {
+    const mounted = await opened(...answers);
+    const { container } = mounted;
+
+    const file = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ].find((one) => one.textContent === "Cargo.toml")!;
+
+    fireEvent.click(file);
+
+    await waitFor(() => expect(drawing()).toHaveLength(1));
+
+    // Split beside, from the icon at the end of the group's own bar.
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.divide}`,
+      )!,
+    );
+
+    await waitFor(() => expect(drawing()).toHaveLength(2));
+
+    return mounted;
+  }
+
+  /// The three of them, in the order ADR 0019 names them — and the font size as
+  /// a level of the same menu rather than a row, being the one of the three
+  /// that is a number.
+  it("draws word wrap, the font size and the minimap on the pane's menu", async () => {
+    const { container } = await opened();
+
+    await open(container);
+
+    expect(offers(container)).toEqual(["Word wrap", "Font size›", "Minimap✓"]);
+
+    // Untouched, which is VS Code's own: lines do not wrap, and the minimap is
+    // there. Said as `aria-checked`, these being settings rather than things to
+    // do.
+    expect(row(container, "Word wrap").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(row(container, "Minimap").getAttribute("aria-checked")).toBe("true");
+
+    // And the sizes, a level down, with VS Code's 14 the one ticked.
+    fireEvent.click(row(container, "Font size"));
+
+    await waitFor(() =>
+      expect(offers(container)).toEqual([
+        "←Font size",
+        "10px",
+        "12px",
+        "14px✓",
+        "16px",
+        "18px",
+        "20px",
+      ]),
+    );
+
+    expect(
+      [...drop(container)!.querySelectorAll('[role="menuitemradio"]')].map(
+        (one) => one.getAttribute("aria-checked"),
+      ),
+    ).toEqual(["false", "false", "true", "false", "false", "false"]);
+  });
+
+  /// An editor is opened at whatever the menu says, which is VS Code's own
+  /// where nobody has said otherwise.
+  it("opens an editor at VS Code's defaults where nothing has been set", async () => {
+    const { container } = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+    ]);
+
+    expect(container.querySelector(`.${codePane.paneActions}`)).toBeTruthy();
+  });
+
+  /// And a change reaches every editor open in every group at once, with no tab
+  /// reopened: the setting is the pane's, and each editor is drawing it.
+  it("reaches every editor in every group at once", async () => {
+    const { container } = await inTwoGroups();
+
+    const before = editors.filter((one) => !one.disposed);
+
+    await open(container);
+    flip(container, "Word wrap");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.wordWrap)).toEqual(["on", "on"]),
+    );
+
+    // The menu stays down, and the row now says which way it is set: these are
+    // settings rather than things to do, and the tick is the answer to the
+    // press.
+    expect(row(container, "Word wrap").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    flip(container, "Minimap");
+    await waitFor(() =>
+      expect(drawing().map((one) => one.minimap)).toEqual([
+        { enabled: false },
+        { enabled: false },
+      ]),
+    );
+
+    fireEvent.click(row(container, "Font size"));
+    await waitFor(() => expect(offers(container)).toContain("18px"));
+    flip(container, "18px");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.fontSize)).toEqual([18, 18]),
+    );
+
+    // And none of it reopened a tab: the editors are the ones that were already
+    // there, redrawn where they stand.
+    expect(editors.filter((one) => !one.disposed)).toEqual(before);
+  });
+
+  /// What was set is this device's, so a reload comes back to it — and an
+  /// editor opened after it is opened that way rather than corrected
+  /// afterwards.
+  it("is remembered per device, and survives a reload", async () => {
+    const first = await opened();
+
+    await open(first.container);
+    flip(first.container, "Word wrap");
+    flip(first.container, "Minimap");
+    fireEvent.click(row(first.container, "Font size"));
+    await waitFor(() => expect(offers(first.container)).toContain("18px"));
+    flip(first.container, "18px");
+
+    await waitFor(() => expect(localStorage.getItem(SIZE)).toBe("18"));
+    expect(localStorage.getItem(WRAP)).toBe("on");
+    expect(localStorage.getItem(MINIMAP)).toBe("off");
+
+    cleanup();
+    resetEditing();
+
+    const again = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "on", fontSize: 18, minimap: { enabled: false } },
+      { wordWrap: "on", fontSize: 18, minimap: { enabled: false } },
+    ]);
+
+    // And putting each back leaves nothing behind, the way the wrap setting on
+    // a Diff does: the absence is already what an untouched browser answers.
+    await open(again.container);
+    flip(again.container, "Word wrap");
+    flip(again.container, "Minimap");
+    fireEvent.click(row(again.container, "Font size"));
+    await waitFor(() => expect(offers(again.container)).toContain("14px"));
+    flip(again.container, "14px");
+
+    await waitFor(() => expect(localStorage.getItem(SIZE)).toBeNull());
+    expect(localStorage.getItem(WRAP)).toBeNull();
+    expect(localStorage.getItem(MINIMAP)).toBeNull();
+  });
+
+  /// And a browser with no storage to read draws VS Code's defaults rather than
+  /// failing: storage is a convenience the whole way down, so what it costs is
+  /// the setting and nothing else.
+  it("draws VS Code's defaults where the browser has no storage", async () => {
+    const refused = () => {
+      throw new Error("this browser has no storage");
+    };
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(refused);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(refused);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(refused);
+
+    const { container } = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+    ]);
+
+    // And the menu still works — the setting moves for as long as the pane is
+    // up, and is simply not there the next time it opens.
+    await open(container);
+    flip(container, "Word wrap");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.wordWrap)).toEqual(["on", "on"]),
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  /// And nothing about any of them goes to the server: they are the device's,
+  /// which is the whole reason they are kept where they are.
+  it("sends nothing to the server", async () => {
+    const { container, fetching } = await inTwoGroups();
+
+    const asked = fetching.mock.calls.length;
+
+    await open(container);
+    flip(container, "Word wrap");
+    flip(container, "Minimap");
+    fireEvent.click(row(container, "Font size"));
+    await waitFor(() => expect(offers(container)).toContain("20px"));
+    flip(container, "20px");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.fontSize)).toEqual([20, 20]),
+    );
+
+    expect(fetching.mock.calls.length).toBe(asked);
   });
 });
 
