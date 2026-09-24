@@ -255,6 +255,16 @@ export interface Border {
 /// A split with less room than its two halves are owed is one where a floor has
 /// to give, and the one that gives is the half beyond the border: it stops
 /// where the near half's own floor is rather than travelling back past it.
+///
+/// **And the near half's own floor gives in its turn at the whole of the
+/// room.** A split with less room than that half *alone* is owed would be owed
+/// more than the hundred there is to divide, and the far half would come out
+/// worth less than nothing — a group placed at a negative width, off the side
+/// of a layer its neighbour is overflowing. Which is a pane narrow rather than
+/// strange: the frame lets the details pane down to a width the tree leaves a
+/// few rems of. So the far half is squeezed to nothing and never past it, and
+/// the share the human left is handed back whole the moment there is room for
+/// it again.
 function travel(
   way: Way,
   parts: readonly [Part, Part],
@@ -269,7 +279,7 @@ function travel(
     return { least: 0, most: 100 };
   }
 
-  const least = (needs(parts[0].node, way) / room) * 100;
+  const least = Math.min((needs(parts[0].node, way) / room) * 100, 100);
 
   return {
     least,

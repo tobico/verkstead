@@ -21645,6 +21645,40 @@ describe("the code pane's groups", () => {
         expect(groups(container)[0]!.style.width).toBe("30%"),
       );
     });
+
+    /// And a layer with less room than one group is owed squeezes the far half
+    /// to nothing rather than past it. A floor measured against a layer smaller
+    /// than itself is worth more than the whole of the split, and a share
+    /// beyond a hundred would leave the half after it worth less than nothing —
+    /// a group placed at a negative width, off the side of a layer its
+    /// neighbour is overflowing.
+    it("squeezes the far half to nothing where a group is owed the whole layer", async () => {
+      const container = await halved();
+
+      // Six and a quarter rems across, where a bar of tabs is owed ten: less
+      // room than the near half alone is worth.
+      across = 100;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "100%", height: "100%" },
+          { left: "100%", top: "0%", width: "0%", height: "100%" },
+        ]),
+      );
+
+      // And the share the human left is handed back whole the moment there is
+      // room for it again: what was held all along is the fifty.
+      across = ACROSS;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]),
+      );
+    });
   });
 
   /// And a tab picked up and put down with the pointer, which is how it is
