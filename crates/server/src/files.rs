@@ -2649,6 +2649,9 @@ mod tests {
         // `.gitignore` and `README.md` are tracked; `crates/server/lib.rs` is
         // untracked and not ignored; `target/` and `*.log` are ignored, and the
         // git directory is in nobody's answer.
+        //
+        // Spelled the way this platform spells a path rather than the way git
+        // answered — see [`joined`], which is what the list joins by and why.
         let mut paths = files(&listed, 0);
         paths.sort();
 
@@ -2657,7 +2660,12 @@ mod tests {
             [
                 worktree.join(".gitignore").display().to_string(),
                 worktree.join("README.md").display().to_string(),
-                worktree.join("crates/server/lib.rs").display().to_string(),
+                worktree
+                    .join("crates")
+                    .join("server")
+                    .join("lib.rs")
+                    .display()
+                    .to_string(),
             ]
         );
     }
