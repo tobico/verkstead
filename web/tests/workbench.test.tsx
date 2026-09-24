@@ -18125,6 +18125,55 @@ describe("the code pane saying it is drawn", () => {
     await waitFor(() => expect(attached!.closed).toBe(true));
   });
 
+  /// And it dials again where the socket closed under a pane that is still
+  /// drawn, which is a server restarted under it or a connection that dropped
+  /// rather than a detach.
+  ///
+  /// The one failure here that says nothing: the socket carries no messages, so
+  /// a page that took the closing for the pane going would draw a tree that
+  /// never followed the disk again, with nothing missing to notice.
+  it("dials again where the socket closed under a pane still drawn", async () => {
+    withTerminals([]);
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+
+    const first = await waitFor(() => {
+      const [one] = pane();
+      if (!one) {
+        throw new Error("the pane has not said it is drawn");
+      }
+      return one;
+    });
+
+    // The server going away under it, which is what an update is.
+    first.ends();
+
+    const second = await waitFor(
+      () => {
+        const open = pane();
+        if (open.length < 2) {
+          throw new Error("the pane has not attached again");
+        }
+        return open[1]!;
+      },
+      { timeout: 3000 },
+    );
+
+    expect(second.url).toBe(first.url);
+    expect(second.closed).toBe(false);
+
+    // And the pane going is not dialled again: the same event, and nothing left
+    // to attach for.
+    unmount();
+    await waitFor(() => expect(second.closed).toBe(true));
+
+    second.ends();
+    await new Promise((settle) => setTimeout(settle, 600));
+
+    expect(pane()).toHaveLength(2);
+  });
+
   /// And a pane that never opened says nothing: the watcher is on demand, and a
   /// conversation nobody has opened Code on costs the server no watch.
   it("says nothing at all where the pane was never opened", async () => {

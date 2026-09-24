@@ -627,6 +627,25 @@ export const WRITE_REFUSAL: Record<
 export const MOVED =
   "This file changed on disk while you were editing it, so nothing was saved.";
 
+/// How long the pane waits before dialling its attachment again when the socket
+/// closes under it, and how far that wait doubles out to.
+///
+/// **A socket closing is not the pane going.** That it dies with the tab is the
+/// whole reason it is what says a pane is drawn — but a server restarted under
+/// an open pane closes it too, and so does a connection that dropped or a
+/// tunnel that blinked, and a pane that read any of those as a detach would go
+/// on drawing a tree that never followed the disk again. Nothing would say so
+/// either: the socket carries nothing, so there is no message missing and no
+/// sentence to draw.
+///
+/// So it is dialled again for as long as the pane is drawn. Quickly at first,
+/// because a server taken down for an update is seconds; backing off to a few
+/// seconds after that, because one that is not coming back is not worth dialling
+/// in a loop. A connection that lands puts it back to the first wait, so a blip
+/// an hour later is answered as quickly as this one was.
+const ATTACH_AGAIN = 250;
+const ATTACH_AT_MOST = 10_000;
+
 /// And what a tab whose file has gone says, over the text it still has.
 ///
 /// Drawn as a bar above the editor rather than in place of it, which is the
@@ -861,10 +880,48 @@ export function Code(props: {
   // And let go of on the way out, which is a details pane swapped for an Event
   // as much as it is one closed — the server waits a moment for the pane to
   // come back before it stops anything, so a swap costs no watcher.
+  //
+  // And dialled again where it closes under a pane that is still drawn, which is
+  // a restarted server or a connection that dropped rather than a detach — see
+  // [`ATTACH_AGAIN`], which is where the waits and the reason for them are.
   createEffect(() => {
-    const attached = new WebSocket(filesSocket(props.conversation.id));
+    const at = filesSocket(props.conversation.id);
 
-    onCleanup(() => attached.close());
+    let attached: WebSocket | undefined;
+    let waiting: ReturnType<typeof setTimeout> | undefined;
+    let again = ATTACH_AGAIN;
+    // Whether the pane has gone, which is the one closing that is not dialled
+    // again: a `close()` of this pane's own making raises the same event a
+    // server going away does, and there is nothing left here to attach for.
+    let over = false;
+
+    const dial = (): void => {
+      const socket = new WebSocket(at);
+      attached = socket;
+
+      // A connection that landed, so the next one to drop is answered as
+      // quickly as this one was.
+      socket.addEventListener("open", () => {
+        again = ATTACH_AGAIN;
+      });
+
+      socket.addEventListener("close", () => {
+        if (over || socket !== attached) {
+          return;
+        }
+
+        waiting = setTimeout(dial, again);
+        again = Math.min(again * 2, ATTACH_AT_MOST);
+      });
+    };
+
+    dial();
+
+    onCleanup(() => {
+      over = true;
+      clearTimeout(waiting);
+      attached?.close();
+    });
   });
 
   // And the editor, fetched because this pane is open and for no other reason
