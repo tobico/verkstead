@@ -164,11 +164,11 @@ describe("a shared conversation", () => {
     expect(screen.queryByText("Resume")).toBeNull();
 
     // And neither of the two icons on the Timeline's own header: one offers a
-    // reader a publish of somebody else's conversation, and the other a shell
-    // in a sandbox on somebody else's machine.
+    // reader a publish of somebody else's conversation, and the other the
+    // worktrees and shells of a conversation on somebody else's machine.
     expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
     expect(
-      container.querySelector('button[aria-label^="Terminal"]'),
+      container.querySelector('button[aria-label^="Code"]'),
     ).toBeNull();
 
     // And nothing anywhere on the page that is a row of a menu or a field to

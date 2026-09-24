@@ -19,6 +19,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "mermaid": "^11.16.1",
+    "monaco-editor": "^0.56.0",
     "solid-js": "^1.9.9",
     "uqr": "^0.1.3"
   },

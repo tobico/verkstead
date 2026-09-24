@@ -1,0 +1,375 @@
+/* The pane under its header: the tree down the side, and the group of tabs
+   beside it.
+
+   A row that is the pane's own height — it wears the frame's `paneScreen`, so
+   `Panes.module.css` gives it the room the header leaves and nothing scrolls
+   behind it — with the tree keeping its width and the group taking the rest.
+   `min-height: 0` on both halves for the reason a column of terminals always
+   needs it: a flex item's floor is its content, and a grid that would not
+   shrink is a pane that grows past the window.
+
+   On a phone they stack. Sixteen rems of names beside a terminal on a screen
+   twenty-three wide is neither of them, so the tree goes above the group with a
+   height of its own and the group takes what is left — which keeps both
+   reachable, where hiding the tree would put the files of a Conversation out of
+   reach of the device most of this workbench is read on. What the tree does
+   with the height it is given is its own, in `Tree.module.css`. */
+.body {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 40rem) {
+  .body {
+    flex-direction: column;
+  }
+}
+
+/* Code's tab bar, holding a Conversation's own terminals one per tab — see
+   `Code.tsx`.
+
+   The bar is the Output pane's Transcript/Screen switch again — a group of
+   pressed-or-not buttons in a bordered strip, standing in the pane's header
+   beside the title — restyled after VS Code's (ADR 0019, *Tabs and groups*):
+   the tabs abut rather than sit spaced, each with a kind icon at one end and a
+   × at the other, and the one showing takes the paper the pane is drawn on
+   while the rest stay in the strip's own fill. What it does not copy is the
+   mark that travels under the pressed one — that one slides between two labels
+   that are always both there, and these come and go as shells are opened and
+   end, so a mark that had to find its way to an element that may have just
+   appeared would be machinery bought for nothing. */
+.tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* One tab, as the eye reads it: the label and the × in one shape, because a
+   button inside a button is not a thing a browser draws and two buttons side by
+   side are not a thing the eye should read as two tabs.
+
+   The edge between them is the tab's own left, so the first of them has none —
+   VS Code's separator, which is what tells abutting tabs apart when neither is
+   the one showing. */
+.tabFrame {
+  display: flex;
+  flex: none;
+  align-items: center;
+  border-left: 1px solid var(--edge);
+}
+
+.tabFrame:first-child {
+  border-left: 0;
+}
+
+/* And the one showing, in the paper the pane's content is drawn on: VS Code's
+   active tab is the editor's own ground carried up into the bar, which is what
+   says the tab and what is under it are one thing. Read off the label button
+   rather than written on the frame, `aria-pressed` being the one word that says
+   which is showing. */
+.tabFrame:has(.tab[aria-pressed="true"]) {
+  background: var(--paper);
+}
+
+/* The label: what kind of thing the tab holds, and what it is called. Named
+   rather than taken as the strip's buttons, because the plus at the end is a
+   button of the strip too and is not one of these. */
+.tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.2rem 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  cursor: pointer;
+
+  /* A long press on a word is how text is selected. A tab is a label to press
+     rather than one to copy out of here, so the selection goes — which is what
+     the sidebar's cards say about the same gesture, and what leaves the gesture
+     free for the drag that will pick a tab up. */
+  user-select: none;
+}
+
+.tab[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .tab:not([aria-pressed="true"]):hover {
+    color: var(--ink);
+  }
+}
+
+/* The kind icon, a shade quieter than the name beside it: what it says is what
+   sort of thing this is, which is worth a glance rather than a read. */
+.kind {
+  flex: none;
+  font-size: 0.9em;
+  opacity: 0.75;
+}
+
+/* And the name. A tab is called what its shell calls itself, and what a shell
+   calls itself is whatever it likes — a prompt that puts a whole path in its
+   title would otherwise be one tab wide enough to push every other one out of
+   the strip. Cut off at a measure a name reads in, and the strip scrolls as it
+   always did for the ones past the edge. */
+.name {
+  max-width: 12rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The × that closes it. Sized to the label it stands beside rather than to the
+   icon buttons elsewhere in the app, whose padding is a header's.
+
+   Always drawn, rather than VS Code's appear-on-hover: there is no hover on a
+   phone, and a × that only a pointer can find is a tab a finger cannot close.
+   What it costs on a pointer is a mark in the quiet ink until the hand reaches
+   it. */
+.close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+@media (hover: hover) {
+  .close:hover {
+    color: var(--ink);
+    background: var(--card);
+    opacity: 1;
+  }
+}
+
+/* And the way to another one, at the end of the strip. The icon button the app
+   draws everywhere something is added, sized down to the strip it stands in:
+   its own padding is a header's, and this is a row of small labels.
+
+   Named under the strip, as the switch this is built from names its two labels:
+   what is being said is smaller than what `IconButton.module.css` says about
+   every one of these, and a rule of one class against a rule of one class is
+   settled by which sheet the bundler happened to put second. */
+.tabs .plus {
+  flex: none;
+  align-self: center;
+  margin: 0 0.15rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* What the group draws while it holds nothing: the hint, and the press that
+   opens a shell. Where a tab's content goes rather than over the whole pane —
+   the tree stands beside this — and centred in it, there being nothing else on
+   the page for it to line up with. */
+.nothing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 3rem 0;
+  text-align: center;
+}
+
+/* And the card a × on a busy tab puts up before it ends anything: the question,
+   the sentence saying what is running in there, and the two ways out of it.
+
+   The Actions menu's confirm card again, and deliberately the same shape —
+   `Actions.module.css` says the whole of why it is built this way, and this is
+   the same question asked about a shell instead of a run. Drawn over the page
+   through the same `Modal`, so what is here is the four things inside the card
+   it draws. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own — said over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled in the accent. The way back beside
+   it is a secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* A file's tab holds the editor, and what that is drawn in is its own —
+   `Editor.module.css`, beside the component that opens Monaco into it.
+
+   What a picture's tab holds is here, which is the other thing a tab can be:
+   the file itself, drawn at the size it is and no larger than the pane.
+
+   Centred in the room the group gives it, the way a picture in a viewer sits,
+   and on the chequer-free plain ground the rest of the pane is on — what is
+   worth seeing about an icon is its own edges rather than a backdrop invented
+   to show its transparency off. */
+.picture {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 1rem;
+  overflow: auto;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* The dot on a tab holding text nobody has saved — VS Code's own mark, in the
+   quiet ink the name beside it is drawn in.
+
+   Beside the name rather than in place of the ×, which is where VS Code puts
+   it: that trade works because a pointer hovering turns the dot back into a ×,
+   and there is no hover on a phone. Drawn by this element rather than written
+   as a character, so the tab's own text is the file's name and nothing else. */
+.dot {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.1rem;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+/* And the bar over a save refused because the file moved under it: what
+   happened, and the two presses that settle which text the next save is of —
+   see `Moved` in `Code.tsx`.
+
+   In the tab above whatever it is holding, rather than over the page like the
+   two confirm cards: nothing waits on it, the editor under it goes on taking
+   typing, and a file whose save was refused is something to come back to. The
+   attention colour rather than the error one — an agent writing the same file
+   is the ordinary way of things here, and the thing to do about it is on the
+   row. */
+.moved {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.movedWhy {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+/* The two of them together at the end of the row, so that the sentence reads
+   before the presses do. */
+.movedOut {
+  display: flex;
+  flex: none;
+  gap: 0.5rem;
+}
+
+/* The maximise toggle, at the end of the pane's header: the press that hides
+   the sidebar and the Timeline so that the editor has the window, and the one
+   that brings them back.
+
+   Drawn as the × on a tab is rather than as the app's icon button, and for the
+   same reason the tabs are buttons rather than a tablist: what stands in this
+   header is a row of small marks sized to each other, and an icon button's own
+   padding is a header's. The pressed state is the fill the tab showing takes,
+   which is the one paint this bar has for *this is the state you are in*. */
+.maximise {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.maximise[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--code-wash);
+  border-color: var(--edge);
+}
+
+@media (hover: hover) {
+  .maximise:hover {
+    color: var(--ink);
+  }
+}

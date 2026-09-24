@@ -70,6 +70,15 @@ const KEYS: Record<Divider, string> = {
   pair: "verkstead.pane-pair",
 };
 
+/// And where the maximise toggle's last state lives.
+///
+/// Beside the widths because it is the same kind of thing: how the frame in
+/// front of this human stands, settled by them and nothing the server has any
+/// business knowing (ADR 0019, *One pane, replacing the Terminal*). A phone
+/// that gave Code the window has said nothing about a laptop's columns, exactly
+/// as a sidebar dragged narrow on one says nothing about the other.
+const MAXIMISED = "verkstead.pane-maximised";
+
 /// The widths together: the conversations pane, the middle pane beside it, and
 /// the middle pane of the frame that has no conversations — each as a
 /// percentage of the frame it is drawn in.
@@ -298,4 +307,24 @@ export function nudged(
 
 function between(share: number, { least, most }: ReturnType<typeof range>): number {
   return Math.min(Math.max(share, least), most);
+}
+
+/// Whether this device last left Code with the window to itself.
+///
+/// Off where it has said nothing, which is what every first opening is:
+/// anything but the value [`setMaximised`] writes reads as off, the way the
+/// wrap setting beside it does.
+export function maximised(): boolean {
+  return read(MAXIMISED) === "on";
+}
+
+/// Remember which way the toggle was left.
+export function setMaximised(on: boolean): void {
+  if (on) {
+    write(MAXIMISED, "on");
+  } else {
+    // Removed rather than written as "off": off is already what an untouched
+    // browser answers, and this way turning it off leaves nothing behind.
+    forget(MAXIMISED);
+  }
 }

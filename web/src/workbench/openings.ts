@@ -14,8 +14,9 @@
 //! - `roadmaps/:name` — a roadmap, by the directory name that is its identity.
 //! - `share` — sharing the Conversation, there being one of that per
 //!   Conversation as well.
-//! - `terminal` — the Conversation's own terminals, which is one pane however
-//!   many shells are open in it (ADR 0013).
+//! - `code` — Code: the Conversation's editor, which is one pane however many
+//!   files and shells are open in it (ADR 0019). The word the Terminal pane
+//!   stood at is gone, and the path it stood at redirects — see `App.tsx`.
 //! - `steer` — the steer being written, there being one pending steer per
 //!   Conversation. The one of the six that is not on the record at all: it has
 //!   not happened yet, which is why it is named by a word rather than by an
@@ -48,11 +49,11 @@ import type { ConversationView, TimelineEvent } from "../api/types";
 /// one per conversation; a roadmap carries its own name after it, a worktree
 /// being allowed any number of those.
 ///
-/// And a word for the two panes no card opens at all: the Share, and the
-/// Conversation's own Terminal. Each is opened by an icon on the Timeline's
-/// header, and there is one of each per Conversation the way there is one
-/// backlog of it — a Conversation may have several shells open, and they are
-/// tabs of the one pane rather than panes of their own.
+/// And a word for the two panes no card opens at all: the Share, and Code.
+/// Each is opened by an icon on the Timeline's header, and there is one of each
+/// per Conversation the way there is one backlog of it — a Conversation may
+/// have several files and shells open, and they are tabs of the one pane rather
+/// than panes of their own.
 ///
 /// And a word for the steer being written, which has a card and no Event: the
 /// pending steer is one per Conversation like the backlog, and it is not on the
@@ -66,7 +67,7 @@ export type Opening =
   | number
   | "backlog"
   | "share"
-  | "terminal"
+  | "code"
   | "steer"
   | `roadmap:${string}`;
 
@@ -98,7 +99,7 @@ export function pathTo(
   if (
     opening === "backlog" ||
     opening === "share" ||
-    opening === "terminal" ||
+    opening === "code" ||
     opening === "steer"
   ) {
     return `${under}/${opening}`;
@@ -136,7 +137,7 @@ export function openingAt(pathname: string): Opening | null {
   if (
     (what === "backlog" ||
       what === "share" ||
-      what === "terminal" ||
+      what === "code" ||
       what === "steer") &&
     which === undefined
   ) {

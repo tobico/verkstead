@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 
 use verkstead_server::sandbox::Rendering;
 use verkstead_server::terminal::{COLUMNS, Terminal};
+use verkstead_server::terminals::busy;
 
 /// How long to wait for something the probe says. Generously long: what is
 /// being waited on is a process starting, and a first `powershell.exe` on a
@@ -321,4 +322,41 @@ async fn gone(running: u32) -> bool {
     }
 
     false
+}
+
+/// And what the server reads off a console to know whether somebody is working
+/// in it, which on this platform is nothing at all.
+///
+/// A pseudoconsole has no foreground process group: there are no process groups
+/// of the Unix kind here, and nothing in the API says which of the processes
+/// attached to a console a keystroke is going to. So the terminal answers *I
+/// cannot tell*, and the one caller reads that as busy — which is what makes
+/// every close of a terminal on this platform ask first (ADR 0019, *Tabs and
+/// groups*).
+///
+/// Asked with something really running on it, so that the answer is the
+/// platform's rather than an empty console's.
+#[tokio::test]
+async fn a_console_says_nothing_about_what_is_in_front_of_it() {
+    let mut terminal = Terminal::open().expect("this machine has pseudoconsoles");
+
+    let mut child = terminal
+        .spawn(&shell("echo asked & pause"))
+        .expect("a shell to run on it");
+
+    until(&terminal, |said| said.contains("asked")).await;
+
+    assert_eq!(
+        terminal.foreground(),
+        None,
+        "a pseudoconsole has no foreground process group to read",
+    );
+
+    assert!(
+        busy::of(&terminal, &busy::named(CMD)),
+        "which is read as busy, so that every close here asks first",
+    );
+
+    let _ = child.start_kill();
+    let _ = child.wait().await;
 }

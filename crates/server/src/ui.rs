@@ -37,16 +37,17 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
-    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConversationView, Creation, Cursor, FileReading, FileRootsView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
+    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
+    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -223,6 +224,43 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/terminals/{number}/attach",
             get(crate::terminals::attach),
+        )
+        // And the other half of Code: the files of the Worktrees it is drawn
+        // over. Beside the terminals' routes, which is what puts them behind the
+        // Workbench Key — a session's network is the host's own, so the key is
+        // the whole of what keeps a session out of a read of any file in any of
+        // the Conversation's Worktrees (ADR 0019, *The server reads and writes
+        // the Worktree, outside the Sandbox*).
+        //
+        // Two under the one path, because a tree asks two things: which roots
+        // there are, and what one folder of one of them holds. Conversation-
+        // scoped, the roots being that Conversation's checkouts and nothing
+        // else's — see [`crate::files`].
+        .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
+        .route("/api/ui/conversations/{id}/files/folder", get(folder))
+        // And one file of one of those folders, opened: what it holds, what
+        // kind of thing that turned out to be, and the version a write names
+        // itself as being over — see [`file`]. Asked for by path like the
+        // folder beside it, and bounded by the same roots.
+        //
+        // The save is the same path posted to, because it is the same file: a
+        // read and a write of one thing, which is what a `GET` and a `POST` on
+        // one route are for. What goes up is the path, that version and the
+        // text — see [`write_file`].
+        //
+        // With a body limit of its own over the router's default, the way the
+        // attachment routes and the Question Set raise theirs — and here
+        // because the default is *smaller* than the file a read is allowed to
+        // hand over: without it the largest files Code opens would be ones it
+        // lets somebody type into and then refuses to save, by a status rather
+        // than by one of this API's sentences. See
+        // [`crate::files::MAX_WRITE_BYTES`], which is what JSON can make of the
+        // read's own cap.
+        .route(
+            "/api/ui/conversations/{id}/files/file",
+            get(file)
+                .post(write_file)
+                .layer(DefaultBodyLimit::max(crate::files::MAX_WRITE_BYTES)),
         )
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
@@ -2873,12 +2911,13 @@ async fn commit_pane(
 }
 
 /// `GET /api/ui/conversations/{id}/terminals` — which of the Conversation's
-/// terminals are live.
+/// terminals are live, and whether anybody is working in each.
 ///
-/// Their numbers and nothing else: a terminal is a shell in a Sandbox rather
-/// than a record, so there is nothing about one to hand over but which of the
-/// Conversation's it is — see [`crate::terminals`]. What is *on* each of them
-/// arrives down its own socket.
+/// A number and a flag: a terminal is a shell in a Sandbox rather than a
+/// record, so there is nothing about one to hand over but which of the
+/// Conversation's it is and the one judgement only this side can make about it
+/// — see [`crate::terminals`], and [`crate::terminals::busy`] for the flag.
+/// What is *on* each of them arrives down its own socket.
 ///
 /// A Conversation this server has never opened one for has none, which is the
 /// same empty answer as one whose shells have all exited: the register is memory
@@ -2913,6 +2952,220 @@ async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) ->
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "opening a terminal failed");
             unavailable("the terminal could not be opened")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/files/roots` — the Worktrees Code draws a
+/// root apiece for.
+///
+/// The Conversation's own first, then each companion's in the order the
+/// Conversation carries them, a read-only one marked read-only rather than left
+/// out — see [`crate::files::roots`], which is where that parts company with
+/// the Diff a Set carries.
+///
+/// A Conversation this server has never checked anything out for has none, and
+/// so has one that has been closed. Neither is a 404: the roots are a reading
+/// of the record rather than a record of their own, and a tree with no roots in
+/// it is a tree.
+async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as every other id here: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileRootsView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileRootsView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    Json(FileRootsView {
+        roots: crate::files::roots(&conversation),
+    })
+    .into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/files/folder?path=<path>` — what one folder
+/// of one of those roots holds.
+///
+/// One folder per request and never a walk, which is the shape the path field's
+/// browse answers in and is why the tree asks again for every level somebody
+/// expands.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// registering a Repo refuses: a path outside every root, a path under `.git`,
+/// a Worktree that has gone and a folder that has are four different sentences
+/// for the human and none of them is a failure to retry — see
+/// [`verkstead_render::FolderListing`].
+///
+/// A path is asked for in full rather than as a root and a path under it. The
+/// tree holds the paths the roots endpoint gave it and joins names onto them,
+/// so a path is the one thing it has to say — and what bounds the read is the
+/// roots either way, which is a reading this server makes rather than anything
+/// a request can claim.
+async fn folder(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Browsing>,
+) -> HttpResponse {
+    // No path at all is a path under no root, which is what an empty one comes
+    // to below: a tree asks about folders it was handed, and the roots are the
+    // first of those.
+    let asked = asking.path.unwrap_or_default();
+
+    // And an id that names no Conversation names no roots, so nothing is under
+    // one of them — read as permissively as every other id here.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FolderListing::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        // A Conversation that is not there has no roots, so nothing is under
+        // one of them. The same sentence a path off the machine gets, and the
+        // same thing is true of it.
+        Ok(None) => return Json(FolderListing::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: opening a folder is a read, asking each of its entries
+    // what it is is a read, and git is a process.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::folder(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asked),
+        )
+    })
+    .await;
+
+    match read {
+        Ok(listing) => Json(listing).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "listing a folder of a Worktree failed");
+            unavailable("the folder could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/files/file?path=<path>` — one file of one of
+/// those roots, opened.
+///
+/// What comes back says which of four kinds of thing it read — text, an image,
+/// a binary it will not send, or a file over the size cap — and text carries a
+/// version, which is a hash of the bytes and is what a write will name itself
+/// as being over (ADR 0019, *Versioned reads, and a stale write is refused*).
+///
+/// Asked for by path like the folder beside it, and refused in the body the
+/// same way: a path outside every root, a path under `.git`, a Worktree that
+/// has gone and a file that has are each their own sentence — see
+/// [`verkstead_render::FileReading`].
+async fn file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Browsing>,
+) -> HttpResponse {
+    // No path at all is a path under no root, which is what an empty one comes
+    // to below: a tab is opened from a row of the tree, which was handed the
+    // path it presses with.
+    let asked = asking.path.unwrap_or_default();
+
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileReading::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        // A Conversation that is not there has no roots, so nothing is under
+        // one of them — the folder's answer, and the same thing is true of it.
+        Ok(None) => return Json(FileReading::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a file is opened and read whole.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::read(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asked),
+        )
+    })
+    .await;
+
+    match read {
+        Ok(reading) => Json(reading).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a file of a Worktree failed");
+            unavailable("the file could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/file` — one of them written back.
+///
+/// The path, the version the read handed over and the text, in the body: a save
+/// is a write of *this text, if the file is still the one I read*, and the
+/// version is what makes the second half of that sentence true (ADR 0019,
+/// *Versioned reads, and a stale write is refused*).
+///
+/// Refused in the body like the read beside it, and with one refusal of its own:
+/// a write over a version that has moved is refused with nothing written and
+/// nothing to go on, which is what draws the *Reload* / *Keep mine* bar in
+/// front of the human. **And nothing to go on is the point of it** — both
+/// presses under that bar read the file afresh through the endpoint beside
+/// this one, and a version handed back without the text it belongs to would be
+/// half an answer; see [`FileWritten::Stale`], where the asymmetry with
+/// [`FileWritten::Written`] is argued. A read-only root refuses before the disk
+/// is touched.
+///
+/// **Not a record**, for the reason nothing else in `files` is: a save is the
+/// human's own hand in their own checkout, and what records it is the commit
+/// they make afterwards.
+async fn write_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileWrite>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileWritten::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileWritten::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a file is hashed and then written.
+    let written = tokio::task::spawn_blocking(move || {
+        crate::files::write(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            &asking.version,
+            &asking.text,
+        )
+    })
+    .await;
+
+    match written {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "writing a file of a Worktree failed");
+            unavailable("the file could not be written")
         }
     }
 }
@@ -4673,6 +4926,10 @@ fn last_four(token: &str) -> String {
 /// The path is optional because a field standing empty is where a browse
 /// begins, and an empty one is read as no path at all: `?path=` is what a
 /// cleared input sends, and it names the same nothing.
+///
+/// Shared with Code's folder read, which asks the same one thing of a different
+/// reading — see [`folder`], where no path is a path under no root rather than
+/// a browse's starting point.
 #[derive(Debug, serde::Deserialize)]
 struct Browsing {
     path: Option<String>,

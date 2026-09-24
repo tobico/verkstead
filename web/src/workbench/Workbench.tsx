@@ -24,6 +24,24 @@
 //! than in the route table — see `zero.ts` — and only where the URL names no
 //! Conversation: one reached by its own link is drawn whatever the list says.
 //!
+//! Two of them again, and one of them, where Code has been given the window.
+//! The maximise toggle in its header hides the sidebar and the Timeline so the
+//! editor has the room the two of them were standing in, which is this page
+//! handing the frame fewer panes — the same way the one-Event Conversation
+//! above takes the Timeline away. A whole-window mode outside the frame was
+//! considered and rejected: the widths, the dividers and the ways between the
+//! panes all live in it (ADR 0019, *One pane, replacing the Terminal*). Kept
+//! per device beside the pane widths, and Code's alone — every other details
+//! pane is read beside the record it belongs to, so opening one hands the
+//! panes back.
+//!
+//! And what Code has open is kept here as well, which is the other thing this
+//! page holds for a pane rather than about one. The frame draws one details
+//! pane at a time and takes down the rest, so tabs and text nobody has saved
+//! would go with the pane and come back as an empty one; held above the swap,
+//! they are where they were left — see `keeping.ts`, which is also where the
+//! warning on the way out of the page reads its answer from.
+//!
 //! Which level it is follows the URL: naming a Conversation walks the page into
 //! it, and walking back out to the list takes the name off again. One account of
 //! where the page stands rather than two — left selected behind the list, the
@@ -34,12 +52,12 @@
 //! What is open is the URL's rather than this page's, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
-//! the backlog, the roadmap, the Share pane and the Terminal are the exceptions
-//! — the two lists are read off the worktree rather than recorded, and sharing
-//! and a shell in the Sandbox belong to the Conversation rather than to any
-//! moment on it — and each names itself by a word instead of an id. Every one of them has a path of its own under the
-//! Conversation — see `openings.ts` — so a details pane survives being navigated
-//! away from and back, and can be linked to.
+//! the backlog, the roadmap, the Share pane and Code are the exceptions — the
+//! two lists are read off the worktree rather than recorded, and sharing and
+//! the Worktrees belong to the Conversation rather than to any moment on it —
+//! and each names itself by a word instead of an id. Every one of them has a
+//! path of its own under the Conversation — see `openings.ts` — so a details
+//! pane survives being navigated away from and back, and can be linked to.
 //!
 //! Opening a Conversation lands on the end of its record: the last Event with a
 //! pane behind it is selected and the URL is rewritten to its path, so the human
@@ -82,10 +100,11 @@ import {
   createMemo,
   createSignal,
   on,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
-import { Panes, type Pane } from "../Panes";
+import { Panes, matching, type Pane } from "../Panes";
 import { loadConversation, seeConversation } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -101,9 +120,11 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { BESIDE, maximised as remembered, setMaximised } from "../widths";
 import { Asked } from "./Asked";
 import { Backlog } from "./Backlog";
 import { Brief } from "./Brief";
+import { Code } from "./Code";
 import { Commit } from "./Commit";
 import { Composer, composing } from "./Composer";
 import { Conversations } from "./Conversations";
@@ -114,9 +135,9 @@ import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
 import { Frozen, Steer } from "./Steer";
-import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
+import { keeping, type Kept } from "./keeping";
 import {
   landing,
   openingAt,
@@ -247,6 +268,71 @@ export function Workbench(): JSX.Element {
   /// either: a path names the Conversation and the detail together, so a new
   /// Conversation's path names no detail of the old one's.
   const event = createMemo(() => openingAt(where.pathname));
+
+  /// What Code has open, per Conversation, kept above the frame that swaps the
+  /// details pane for whatever else the Timeline opens.
+  ///
+  /// Here rather than in the pane because the pane is what goes: the frame
+  /// draws one details pane at a time and takes down the rest, so tabs and
+  /// unsaved text held inside it would be lost on the swap and found again as
+  /// an empty pane on the way back (ADR 0019, *Tabs and groups*). This page
+  /// stands for the whole of a Conversation and for every Conversation walked
+  /// through, which is exactly as long as those are worth keeping — see
+  /// `keeping.ts`.
+  const code = keeping();
+
+  // And text nobody has saved is worth a word before the page goes. The
+  // browser's own warning rather than one of ours: what is being left is the
+  // page itself, which nothing on it can hold up or draw over, and the only
+  // thing a listener may do about it is say that there is something to lose.
+  //
+  // Asked of every Conversation this page has kept anything for rather than of
+  // the one on the screen: a buffer left dirty in one and an Event opened in
+  // another is still text about to go.
+  //
+  // What the browser draws is its own sentence, and both ways of asking for it
+  // are made because browsers disagree about which they read.
+  const leavingPage = (event: BeforeUnloadEvent): void => {
+    if (!code.unsaved()) {
+      return;
+    }
+
+    event.preventDefault();
+    event.returnValue = "";
+  };
+
+  window.addEventListener("beforeunload", leavingPage);
+  onCleanup(() => window.removeEventListener("beforeunload", leavingPage));
+
+  /// Whether Code has been given the window, which is the maximise toggle in
+  /// its header (ADR 0019, *One pane, replacing the Terminal*).
+  ///
+  /// Read off this device rather than started off, so that a reader who left it
+  /// maximised comes back to it maximised — beside the pane widths, and kept
+  /// the same way and for the same reason.
+  const [whole, setWhole] = createSignal(remembered());
+
+  const maximise = (on: boolean): void => {
+    setWhole(on);
+    setMaximised(on);
+  };
+
+  /// Whether the window is wide enough for the toggle to have anything to hide.
+  ///
+  /// Below this the frame is walked one pane at a time and the details pane
+  /// already has the window, so there is nothing to give it: the toggle is not
+  /// drawn at all there, and whatever this device remembers is left where it
+  /// is, exactly as the widths are.
+  const beside = matching(BESIDE);
+
+  /// And whether the frame is actually standing Code alone: the toggle on, the
+  /// window wide enough, and Code the pane that is open.
+  ///
+  /// The last of those is what keeps the mode Code's own. Every other details
+  /// pane is read beside the record it belongs to, and a Brief drawn across a
+  /// whole window because somebody maximised the editor an hour ago would be
+  /// this setting answering for a pane it was never about.
+  const maximised = () => whole() && beside() && event() === "code";
 
   /// Whether there is anything to list, which is where the zero state is
   /// decided: the sidebar's own query, read here as well — see `zero.ts`.
@@ -449,8 +535,12 @@ export function Workbench(): JSX.Element {
   /// at taken off: a Timeline that is not drawn is not a level to walk through,
   /// in either direction. So opening such a Conversation lands on the composer,
   /// and the way out of it is the way out of the Conversation — see [`leaving`].
+  ///
+  /// And the frame standing Code alone is the details pane whatever this says:
+  /// there is no other pane in the document for it to name, and `data-pane` is
+  /// what decides which one is drawn below the last breakpoint.
   const showing = (): Pane =>
-    alone() && pane() === "middle" ? "details" : pane();
+    maximised() || (alone() && pane() === "middle") ? "details" : pane();
 
   /// The way off a details pane: where it goes, and what it is called.
   ///
@@ -583,16 +673,25 @@ export function Workbench(): JSX.Element {
         pane={showing()}
         middleLabel="Timeline"
         conversations={
-          <Conversations
-            selected={selected()}
-            open={(id) => navigate(pathOf(id))}
-          />
+          // And nothing where Code has been given the window: the frame draws
+          // no conversations pane when it is handed none either, so maximising
+          // is the two columns beside the editor going rather than a mode of
+          // its own. A whole-window frame outside this one was considered and
+          // rejected — the widths, the dividers and the ways between the panes
+          // all live here (ADR 0019, *One pane, replacing the Terminal*).
+          maximised() ? undefined : (
+            <Conversations
+              selected={selected()}
+              open={(id) => navigate(pathOf(id))}
+            />
+          )
         }
         middle={
           // Nothing at all where the record is the one Event: the frame draws no
           // middle pane when it is handed none, and the details pane takes the
-          // column it would have stood in. See [`alone`].
-          alone() ? undefined : (
+          // column it would have stood in. See [`alone`]. And nothing while
+          // Code has the window, which is the other half of the toggle above.
+          maximised() || alone() ? undefined : (
             <Show when={open()} keyed>
               <TimelinePane
                 id={selected()}
@@ -611,6 +710,8 @@ export function Workbench(): JSX.Element {
               conversation={conversation}
               event={event()}
               back={leaving()}
+              code={code.of}
+              maximise={beside() ? { on: whole(), set: maximise } : undefined}
               shut={shut}
             />
           </Show>
@@ -703,6 +804,17 @@ function DetailsPane(props: {
   /// and the icon that do are the Timeline's, and the Timeline is not drawn.
   back: { to: string; go: () => void };
 
+  /// What Code has open in a Conversation, out of the keeping the page holds
+  /// above this pane — see `keeping.ts`. Asked for rather than handed over,
+  /// because it is one Conversation's and this pane is drawn for whichever one
+  /// the page has open.
+  code: (conversation: number) => Kept;
+
+  /// And the maximise toggle, where the window is wide enough for it to have
+  /// something to hide. Code's alone: it is the one pane that wants the window,
+  /// and the only one the page reads the setting against.
+  maximise?: { on: boolean; set: (on: boolean) => void };
+
   /// And the way off a pane whose subject has gone, which is the pending
   /// steer's alone: cancelling or submitting the form leaves no form to be
   /// drawn, so the page lets go of the address as well as of the level. See
@@ -731,12 +843,12 @@ function DetailsPane(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog, the roadmap, the Share pane, the Terminal and the pending
-  /// steer are none of these and are not looked for here at all: none of the
-  /// five has an Event — the two lists are read off the worktree every time the
-  /// Conversation is, sharing and a shell in the Sandbox belong to the
-  /// Conversation rather than to any moment on it, and a pending steer has not
-  /// happened yet — so the pane draws them from the selection itself, see the
+  /// The backlog, the roadmap, the Share pane, Code and the pending steer are
+  /// none of these and are not looked for here at all: none of the five has an
+  /// Event — the two lists are read off the worktree every time the
+  /// Conversation is, sharing and the Worktrees belong to the Conversation
+  /// rather than to any moment on it, and a pending steer has not happened
+  /// yet — so the pane draws them from the selection itself, see the
   /// `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
@@ -788,16 +900,15 @@ function DetailsPane(props: {
     <Show when={props.conversation.data}>
       {(conversation) => (
         <Switch>
-          {/* The backlog, the roadmap, the Share pane, the Terminal and the
-              steer being written, which are the five things this pane draws
-              that are not Events: the two lists are read off the worktree every
-              time the Conversation is, sharing and a shell in the Sandbox
-              belong to the Conversation rather than to anything on its record,
-              and a pending steer has not happened yet. So there is nothing on
-              the record to name any of them by, and each is named by a word
-              instead. Ahead of the Events because they are not among them —
-              [`opened`] looks for an id, and none of the five selections is
-              one. */}
+          {/* The backlog, the roadmap, the Share pane, Code and the steer
+              being written, which are the five things this pane draws that are
+              not Events: the two lists are read off the worktree every time
+              the Conversation is, sharing and the Worktrees belong to the
+              Conversation rather than to anything on its record, and a pending
+              steer has not happened yet. So there is nothing on the record to
+              name any of them by, and each is named by a word instead. Ahead
+              of the Events because they are not among them — [`opened`] looks
+              for an id, and none of the five selections is one. */}
           <Match when={props.event === "backlog"}>
             <Backlog
               conversation={conversation()}
@@ -812,13 +923,15 @@ function DetailsPane(props: {
               back={props.back.go}
             />
           </Match>
-          {/* And the terminals it holds of its own, opened by the icon beside
-              that one — a shell in the Conversation's Sandbox, which is no
-              part of the record either (ADR 0013). */}
-          <Match when={props.event === "terminal"}>
-            <Terminal
+          {/* And Code, opened by the icon beside that one — the Conversation's
+              Worktrees and the shells it holds of its own inside its Sandbox,
+              which is no part of the record either (ADR 0013, ADR 0019). */}
+          <Match when={props.event === "code"}>
+            <Code
               conversation={conversation()}
               back={props.back.go}
+              held={props.code(conversation().id)}
+              maximise={props.maximise}
             />
           </Match>
           {/* And the steer being written, which is the fifth: the pending steer

@@ -95,7 +95,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
-import { faShare, faTerminal } from "@fortawesome/free-solid-svg-icons";
+import { faCode, faShare } from "@fortawesome/free-solid-svg-icons";
 import {
   For,
   Match,
@@ -522,28 +522,28 @@ export function Timeline(props: {
               />
             </Show>
 
-            {/* And a terminal of the human's own inside the Conversation's
-                Sandbox, which is a pane of its own beside that one — see
-                `Terminal.tsx`. Drawn exactly as Share is and for the same
-                reason: another thing standing in a pane that is selected and
-                opened into the pane beside it.
+            {/* And Code, the Conversation's editor: its Worktrees and the
+                shells of the human's own inside its Sandbox, which is a pane
+                of its own beside that one — see `Code.tsx`. Drawn exactly as
+                Share is and for the same reason: another thing standing in a
+                pane that is selected and opened into the pane beside it.
 
-                Disabled where there is no Worktree to open a shell in — a
-                Draft, and a Conversation that has been closed — with the label
-                saying so, because an icon that does nothing when it is pressed
-                says nothing about why. */}
+                Disabled where there is no Worktree to edit or open a shell in —
+                a Draft, and a Conversation that has been closed — with the
+                label saying so, because an icon that does nothing when it is
+                pressed says nothing about why. */}
             <Show when={!props.readOnly}>
               <IconButton
-                of={faTerminal}
+                of={faCode}
                 label={
                   props.conversation.worktree === null
-                    ? "Terminal — there is no worktree yet"
-                    : "Terminal"
+                    ? "Code — there is no worktree yet"
+                    : "Code"
                 }
                 disabled={props.conversation.worktree === null}
-                open={props.selected === "terminal"}
+                open={props.selected === "code"}
                 press={() => {
-                  props.select("terminal");
+                  props.select("code");
                   props.details();
                 }}
               />

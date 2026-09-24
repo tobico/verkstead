@@ -590,3 +590,63 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
     // either way, so anything else is replaced rather than refused.
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
+
+/// And the same run again with something written to it, which is the one git
+/// read here that has an input as well as an answer.
+///
+/// [`crate::files`] asks `check-ignore` which of a folder's entries a checkout
+/// ignores, and the paths go in on standard input rather than on the command
+/// line: a folder wide enough for the question to be worth asking in one run is
+/// a folder wide enough to overrun an argument list.
+///
+/// **Written and read at the same time**, which is the whole of why this is not
+/// [`accepting`] with one more argument. `check-ignore` answers as it reads —
+/// every path it has decided is ignored goes back down its own pipe before it
+/// has finished with the ones still coming — so a caller that wrote the input
+/// whole before reading a byte of the answer would deadlock on exactly the
+/// folder this exists for: once the answer fills a pipe, git blocks writing
+/// while this side blocks writing, and neither moves again. Around eight
+/// hundred ignored entries in one folder is enough. So the input goes down a
+/// thread of its own while [`std::process::Child::wait_with_output`] drains the
+/// answer, and the pipe is closed by that thread ending, which is the end
+/// `--stdin` is waiting for.
+///
+/// Scoped rather than spawned loose, so the thread cannot outlive the borrow it
+/// writes from and nothing is copied to give it one.
+pub(crate) fn feeding(dir: &Path, args: &[&str], input: &str, ok: &[i32]) -> Option<String> {
+    use std::io::Write;
+
+    let mut child = Command::new("git")
+        // Reading a repository should never take a lock on it — see
+        // [`accepting`], which is where that is said and why.
+        .arg("--no-optional-locks")
+        .args(args)
+        .unseen()
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let output = std::thread::scope(|writers| {
+        // A git that has already exited — the directory is no repository, say —
+        // is a pipe with nobody at the other end, which is an error to swallow
+        // rather than a reason to fail: what it exited with is read below like
+        // any other answer. The same goes for one that stops reading partway.
+        if let Some(mut writing) = child.stdin.take() {
+            writers.spawn(move || {
+                let _ = writing.write_all(input.as_bytes());
+            });
+        }
+
+        child.wait_with_output()
+    })
+    .ok()?;
+
+    if !ok.contains(&output.status.code()?) {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}

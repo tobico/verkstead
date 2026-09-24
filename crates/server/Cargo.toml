@@ -71,6 +71,13 @@ semver.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
+# The version a file read by the Code pane carries, which is a hash of its bytes
+# and is what a write names itself as being over (ADR 0019) — see `src/files.rs`.
+# A content hash rather than a modification time: two writes inside one clock
+# tick are the collision this exists to catch, and a hash of the bytes cannot
+# miss one. Already in the tree under p256, so what this line adds to a build is
+# nothing.
+sha2 = "0.10"
 sqlx.workspace = true
 # A directory to clone a gist into on the way to publishing a share, cleaned up
 # by dropping it — see `publishing`. A dependency rather than a dev-dependency

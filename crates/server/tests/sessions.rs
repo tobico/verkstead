@@ -73,8 +73,8 @@ use verkstead_render::{
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
     PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
+    TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -3247,8 +3247,9 @@ async fn upload<T: DeserializeOwned>(app: &Router, path: &str, body: &str) -> T 
 }
 
 /// And the one thing in the API that is asked for by taking it away: closing a
-/// Conversation's terminal, which answers with nothing to read.
-async fn delete(app: &Router, path: &str) {
+/// Conversation's terminal, which answers with what became of the close — the
+/// terminal ended, or a shell somebody is working in and nothing done.
+async fn delete<T: DeserializeOwned>(app: &Router, path: &str) -> T {
     let (status, body) = fetch(
         app,
         Request::builder()
@@ -3259,11 +3260,8 @@ async fn delete(app: &Router, path: &str) {
     )
     .await;
 
-    assert_eq!(
-        status,
-        StatusCode::NO_CONTENT,
-        "DELETE {path} failed: {body}"
-    );
+    assert_eq!(status, StatusCode::OK, "DELETE {path} failed: {body}");
+    read(&body)
 }
 
 /// A stub saying its work is done: the marker it writes to have the relay give
@@ -20192,10 +20190,36 @@ impl Watcher {
     }
 
     /// Either of them: dial the socket and take the repaint it opens with.
+    ///
+    /// **Dialled until it opens rather than once**, because *running* and
+    /// *attachable* are two different moments and every caller here reaches
+    /// this one off the first. A session's Event is drawn as running from the
+    /// moment its Capture opens — see `Sessions::writing`, where the launch
+    /// note answers for a whole launch before the register does — and the
+    /// Screen it is being drawn on reaches the register only once the relay is
+    /// up, at the far end of that launch. So [`Grilling::running`] and
+    /// [`Grilling::attachable`] return an Event whose Screen may not be there
+    /// yet, and a single dial inside that window is refused: a 404, which is
+    /// what this used to panic on and what a loaded runner opens wide enough to
+    /// hit.
+    ///
+    /// Waiting it out is what tells that refusal from the other one with the
+    /// same status — a Screen that has ended, and never will be there — because
+    /// one of them opens within `PATIENCE` and the other does not. The panic is
+    /// the same message either way, and now it means the second.
     async fn watching(url: String) -> Watcher {
-        let (socket, _) = tokio_tungstenite::connect_async(&url)
-            .await
-            .unwrap_or_else(|error| panic!("{url} to be attachable: {error}"));
+        let deadline = Instant::now() + *PATIENCE;
+
+        let socket = loop {
+            match tokio_tungstenite::connect_async(&url).await {
+                Ok((socket, _)) => break socket,
+                Err(error) => {
+                    assert!(Instant::now() < deadline, "{url} to be attachable: {error}",);
+
+                    pause(Duration::from_millis(25)).await;
+                }
+            }
+        };
 
         let mut watcher = Watcher {
             socket,
@@ -30568,13 +30592,27 @@ async fn a_terminal_runs_a_shell_in_the_conversations_worktree() {
 
     // And it is on the list of live ones, which is what the pane asks for when
     // it loads and what a reload comes back to.
+    //
+    // The numbers alone here. Whether anybody is working in one is a reading of
+    // this moment, and this moment is the one right after the Sandbox was
+    // started — a shell that has not finished coming up has not taken the
+    // terminal's foreground yet, so it reads busy, which is the safe way round
+    // and not a thing to hold this test to. The flag is asked about where it is
+    // the subject, in
+    // [`a_terminal_says_whether_somebody_is_working_in_it`].
     let live: TerminalsView = get(
         &fixture.app,
         &format!("/api/ui/conversations/{}/terminals", fixture.id),
     )
     .await;
 
-    assert_eq!(live.live, vec![number]);
+    assert_eq!(
+        live.live
+            .iter()
+            .map(|terminal| terminal.number)
+            .collect::<Vec<i64>>(),
+        vec![number],
+    );
 
     let mut watcher = Watcher::terminal(at, fixture.id, number).await;
 
@@ -30919,11 +30957,29 @@ async fn closing_a_terminal_ends_its_shell_and_takes_it_off_the_register() {
 
     until_ticking(&ticks).await;
 
-    delete(
-        &fixture.app,
-        &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
-    )
-    .await;
+    // Something is running in it, so the first press is answered *busy* and
+    // nothing is done — which is the pane's card, asked here as the wire asks
+    // it. The close that follows is the human having said yes.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+        )
+        .await,
+        TerminalClosed::Busy,
+    );
+
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!(
+                "/api/ui/conversations/{}/terminals/{number}?asked=true",
+                fixture.id
+            ),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
 
     // The delete answers once the shell has been reaped, so what it had written
     // by the time it came back is the last of it.
@@ -30971,13 +31027,150 @@ async fn closing_a_terminal_ends_its_shell_and_takes_it_off_the_register() {
     );
 
     // Closing it again is a close that has already happened rather than a
-    // refusal: the row is on a menu somebody may press twice, and a second press
-    // is not news.
-    delete(
-        &fixture.app,
-        &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+    // refusal: the × is a press somebody may make twice, and a second press is
+    // not news — and nothing is busy about a terminal that is not there, so it
+    // is not asked about either.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
+}
+
+/// And whether somebody is working in one is the server's own reading, taken
+/// off the pseudo-terminal it is holding: the shell at a prompt, and whatever
+/// it is running while it runs (ADR 0019, *Tabs and groups*).
+///
+/// Asked here, end to end, because this is the only place the whole shape is
+/// real: the shell is inside the Sandbox, which on this platform is `bwrap
+/// --unshare-all`, so it is a grandchild of the process the server holds and it
+/// is in a pid namespace of its own. What is being proved is that the number
+/// the terminal answers with still reaches `/proc` on this side, and that the
+/// name under it is the shell's — which is why the reading is by name and not
+/// by pid. The comparison itself, and the same reading behind a second wrapper
+/// of the shape a dev shell adds, are in `terminal.rs`.
+///
+/// And the close is the other half: a × on a busy tab is refused with nothing
+/// done until the press comes back saying the human was asked.
+#[tokio::test]
+async fn a_terminal_says_whether_somebody_is_working_in_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let ticks = spill.path().join("ticks");
+
+    let fixture = grilling_spilling(
+        spill,
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+        PULL_REQUEST,
     )
     .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for what is typed to land on one row, and typed at all so
+    // that the shell is known to be up and at a prompt: a terminal read before
+    // its shell has taken the foreground is a reading of nothing in particular.
+    //
+    // The word is put together by the shell rather than written in the line,
+    // because the line is echoed by the terminal the moment it is typed — a
+    // grid holding what the answer will say proves only that somebody typed.
+    watcher.resize(200, 40).await;
+    watcher.types("printf 'at a %s\\n' prompt\r").await;
+    watcher.until(|grid| grid.contains("at a prompt")).await;
+
+    assert_eq!(
+        terminals_of(&fixture).await,
+        vec![TerminalView {
+            number,
+            busy: false
+        }],
+        "a shell at its prompt is a terminal nobody is working in",
+    );
+
+    // And now something that goes on running, which is what a build in a
+    // terminal is. The file it ticks into is what says it has really started,
+    // the flag being the thing under test rather than the thing to wait on.
+    watcher.types(&ticking_away(&ticks)).await;
+    until_ticking(&ticks).await;
+
+    assert_eq!(
+        terminals_of(&fixture).await,
+        vec![TerminalView { number, busy: true }],
+        "a shell running something is a terminal somebody is working in",
+    );
+
+    // So the × is refused, and the shell goes on running behind the card the
+    // pane draws.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+        )
+        .await,
+        TerminalClosed::Busy,
+    );
+
+    let when_refused = ticked(&ticks);
+    pause(Duration::from_millis(250)).await;
+
+    assert_ne!(
+        ticked(&ticks),
+        when_refused,
+        "a close that was refused should have left the shell exactly as it was",
+    );
+
+    // And the press that comes back from the card ends it, whatever is running.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!(
+                "/api/ui/conversations/{}/terminals/{number}?asked=true",
+                fixture.id
+            ),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
+
+    watcher.until_closed().await;
+
+    assert!(
+        terminals_of(&fixture).await.is_empty(),
+        "a terminal that was closed should be off the register",
+    );
+}
+
+/// The terminals a Conversation is holding, as the pane reads them back.
+async fn terminals_of(fixture: &Grilling) -> Vec<TerminalView> {
+    let view: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    view.live
 }
 
 /// And closing the Conversation ends every terminal it was holding, before the

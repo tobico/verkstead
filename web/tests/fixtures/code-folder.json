@@ -1,0 +1,37 @@
+{
+  "Listed": {
+    "entries": [
+      {
+        "folder": true,
+        "name": "crates",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/crates"
+      },
+      {
+        "folder": true,
+        "name": "web",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/web"
+      },
+      {
+        "folder": false,
+        "name": ".gitignore",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/.gitignore"
+      },
+      {
+        "folder": false,
+        "name": "Cargo.toml",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/Cargo.toml"
+      },
+      {
+        "folder": false,
+        "name": "README.md",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/README.md"
+      },
+      {
+        "folder": false,
+        "name": "icon.png",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/icon.png"
+      }
+    ],
+    "path": "/var/lib/verkstead/worktrees/verkstead-code-pane"
+  }
+}

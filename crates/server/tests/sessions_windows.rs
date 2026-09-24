@@ -58,8 +58,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, Capture, ConversationStopped, ConversationView, GrillingStarted,
-    ProfileSaved, Registered, Shown, Size, Started, TerminalOpened, TerminalsView, TimelineEvent,
-    Watching,
+    ProfileSaved, Registered, Shown, Size, Started, TerminalClosed, TerminalOpened, TerminalView,
+    TerminalsView, TimelineEvent, Watching,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -86,12 +86,12 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 
 /// How long to wait for something a session says.
 ///
-/// **Long enough for the first four of these at once**, which is the case it has
-/// to cover and is nothing like what one of them costs. libtest runs as many
-/// tests as the machine has cores, so the `windows-2025` runner starts four of
-/// these together — four workbenches, four pseudoconsoles and four Windows
-/// PowerShells coming up on four cores — and the four whose names sort first are
-/// the ones that pay for it.
+/// **Long enough for the first four of these at once**, which is one of the two
+/// cases it has to cover and is nothing like what one of them costs. libtest
+/// runs as many tests as the machine has cores, so the `windows-2025` runner
+/// starts four of these together — four workbenches, four pseudoconsoles and
+/// four Windows PowerShells coming up on four cores — and the four whose names
+/// sort first are the ones that pay for it.
 ///
 /// Measured on the job: that first four take three quarters of a minute to reach
 /// their first line, where a test behind them reaches its own in ten. So a minute
@@ -99,10 +99,21 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 /// raised for is the run where exactly those four timed out together and all
 /// eight behind them passed.
 ///
-/// Three minutes, then — which is not a claim that anything should take three
+/// **And long enough for the first `rustc` behind a boundary**, which is the
+/// other and is minutes rather than seconds.
+/// [`a_rust_session_compiles_through_the_compile_server`] is the one test here
+/// whose session has a compile server up and a toolchain reached through a
+/// junction, and the first thing it writes it writes after running the first
+/// `rustc` that account has ever run out of `.rustup`. Measured on the job: 152,
+/// 173 and 262 seconds end to end — and twice, on a commit the job passed when
+/// it was run again, it gave up with the whole of a three-minute deadline spent
+/// on that first wait and nothing after it attempted.
+///
+/// Six minutes, then — which is not a claim that anything should take six
 /// minutes. What this deadline is for is a session that is never going to say
-/// anything at all, and nothing that is going to say something comes near it.
-const PATIENCE: Duration = Duration::from_secs(180);
+/// anything at all, and what raised it is that three minutes had stopped telling
+/// one of those from a session that was going to say something.
+const PATIENCE: Duration = Duration::from_secs(360);
 
 /// And how long a thing that was going to happen has had to happen in — which
 /// is what the one test here about something *not* happening waits out.
@@ -1221,6 +1232,23 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
     read(&body)
 }
 
+/// And the one thing in the API that is asked for by taking it away: closing a
+/// Conversation's terminal, which answers with what became of the close.
+async fn delete<T: DeserializeOwned>(app: &Router, path: &str) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "DELETE {path} failed: {body}");
+    read(&body)
+}
+
 async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status();
@@ -1883,14 +1911,17 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     let number = fixture.terminal().await;
 
     // And it is on the list of live ones, which is what the pane asks for when
-    // it loads and what a reload comes back to.
+    // it loads and what a reload comes back to — reading busy, because this
+    // platform cannot tell: a pseudoconsole has no foreground process group,
+    // and *cannot tell* is read as busy so that a close asks before it ends a
+    // shell somebody may be working in (ADR 0019, *Tabs and groups*).
     let live: TerminalsView = get(
         &fixture.app,
         &format!("/api/ui/conversations/{}/terminals", fixture.id),
     )
     .await;
 
-    assert_eq!(live.live, vec![number]);
+    assert_eq!(live.live, vec![TerminalView { number, busy: true }]);
 
     let mut watcher = Watcher::terminal(at, fixture.id, number).await;
 
@@ -1946,6 +1977,53 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
         .await;
 
     until_there(&worktree.join("stood-here.txt")).await;
+
+    // And so every close here asks first: the flag reads busy because this
+    // platform cannot tell, and a close that has not been asked about is
+    // refused with the shell left exactly as it was.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+        )
+        .await,
+        TerminalClosed::Busy,
+    );
+
+    assert_eq!(
+        terminals_of(&fixture).await,
+        vec![TerminalView { number, busy: true }],
+        "a close that was refused should have left the terminal on the register",
+    );
+
+    // Until the press comes back from the card, which ends it.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!(
+                "/api/ui/conversations/{}/terminals/{number}?asked=true",
+                fixture.id
+            ),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
+
+    assert!(
+        terminals_of(&fixture).await.is_empty(),
+        "and the press that was asked about should have ended it",
+    );
+}
+
+/// The terminals a Conversation is holding, as the pane reads them back.
+async fn terminals_of(fixture: &Grilling) -> Vec<TerminalView> {
+    let view: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    view.live
 }
 
 /// A compile server comes up on this platform, and it comes up **as the session

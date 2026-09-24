@@ -31,7 +31,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Answered, SetReading, SetView, Standing};
+use verkstead_render::{Answered, FileReading, SetReading, SetView, Standing};
 use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
@@ -3191,6 +3191,143 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And what the Code pane's tree is drawn from: the roots a Conversation's
+    // Worktrees come to, and one folder of one of them.
+    //
+    // A Conversation of its own, with two real checkouts behind it — its own and
+    // a read-only companion's, which is the pair the tree has to draw
+    // differently — because both of these are readings of the disk and neither
+    // is in the store at all. Made under a temporary directory and pinned back
+    // to `/var/lib/verkstead/worktrees`, where every other fixture's Worktree is.
+    //
+    // Real repositories rather than bare directories, because the listing is
+    // what git says is not ignored: the fixture carries a checkout holding a
+    // `target/` that is nowhere in the answer, which is the one thing about a
+    // folder listing a hand-written mock would have got wrong.
+    let (_code_dir, code_pool, code_app) = empty_app().await;
+    let code_root = _code_dir.path().canonicalize().unwrap();
+    let coding = coded(&code_pool, &code_root).await;
+
+    write(
+        "code-roots.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!("/api/ui/conversations/{coding}/files/roots"),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    write(
+        "code-folder.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!(
+                    "/api/ui/conversations/{coding}/files/folder?path={}",
+                    code_root.join("worktrees/verkstead-code-pane").display()
+                ),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    // And what a file pressed in that tree opens as: the two kinds that carry
+    // content — text, which is what the editor draws, and a picture, which is
+    // previewed in its tab.
+    //
+    // Real files in that checkout rather than made-up answers, for the folder
+    // listing's reason and one of its own: the version a read carries is a hash
+    // of the bytes, so a hand-written one would be a number nothing on either
+    // side could have arrived at.
+    //
+    // No fixture for the other two kinds or for the refusals — each of those is
+    // a word and a sentence the viewer draws from it, which is a test about the
+    // wording rather than a payload to be pinned.
+    write(
+        "code-file.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!(
+                    "/api/ui/conversations/{coding}/files/file?path={}",
+                    code_root
+                        .join("worktrees/verkstead-code-pane/Cargo.toml")
+                        .display()
+                ),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    write(
+        "code-image.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!(
+                    "/api/ui/conversations/{coding}/files/file?path={}",
+                    code_root
+                        .join("worktrees/verkstead-code-pane/icon.png")
+                        .display()
+                ),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    // And what Ctrl+S in that tab is answered with: the version the file now
+    // has, which the tab saves over next.
+    //
+    // Made by really writing the checkout, over the version the read above
+    // really handed back, because the version is the whole subject: it is a
+    // hash of what went onto the disk, and a hand-written one would be a number
+    // nothing on either side could have arrived at. Last of the Code fixtures
+    // for that reason — it moves the file the two before it were read from.
+    //
+    // No fixture for a refused save. Every one of those is a word, and what the
+    // viewer makes of each is a sentence or the Reload / Keep mine bar — which
+    // is a test about the wording and the presses rather than a payload to pin.
+    let saving = code_root.join("worktrees/verkstead-code-pane/Cargo.toml");
+    let version = match serde_json::from_str::<FileReading>(
+        &get(
+            &code_app,
+            &format!(
+                "/api/ui/conversations/{coding}/files/file?path={}",
+                saving.display()
+            ),
+        )
+        .await,
+    )
+    .unwrap()
+    {
+        FileReading::Text { version, .. } => version,
+        other => panic!("expected text, got {other:?}"),
+    };
+
+    write(
+        "code-written.json",
+        &post(
+            &code_app,
+            &format!("/api/ui/conversations/{coding}/files/file"),
+            &serde_json::json!({
+                "path": saving.to_str().unwrap(),
+                "version": version,
+                "text": "[workspace]\nmembers = [\"crates/*\"]\n",
+            }),
+        )
+        .await,
+    );
+
     // And what the Remote access section reads: what this machine's Tailscale
     // is doing. One fixture per state the pane draws differently, because each
     // of them is a different sentence in front of the human — a machine with
@@ -3572,6 +3709,131 @@ fn pin_base(json: &str, commit: &str) -> String {
     payload["base_commit"] = commit.into();
 
     serde_json::to_string(&payload).unwrap()
+}
+
+/// A Conversation with two real checkouts behind it, for the Code fixtures: its
+/// own Worktree and a read-only companion's.
+///
+/// Both are repositories git itself made a worktree of, because what the tree
+/// draws is what git says is not ignored — a directory with a `.gitignore` in it
+/// and no repository around it ignores nothing. The Conversation's own holds the
+/// shape of a checkout somebody is working in: a folder to expand, a file or two
+/// to open, and a `target/` that is ignored and so is nowhere in the answer.
+///
+/// Answered with the Conversation's id. The paths are the caller's, being what
+/// it pins.
+async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
+    let repo = coded_repository(&under.join("repos/verkstead"));
+    let registered = store::register_repo(pool, &repo, "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(pool, registered.id, "code-pane")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    let worktree = under.join("worktrees/verkstead-code-pane");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "code-pane",
+            &worktree.to_string_lossy(),
+            &base,
+        ],
+    );
+
+    // What a checkout somebody has been building in looks like: a couple of
+    // folders, the files at its top, and the build directory its `.gitignore`
+    // keeps out of the tree.
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    std::fs::create_dir_all(worktree.join("web/src")).unwrap();
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("Cargo.toml"), "[workspace]\n").unwrap();
+    std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+    std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+
+    // And a picture in it, which is the one kind of file the pane draws rather
+    // than edits: a one-pixel PNG, there being nothing about what is *in* it
+    // that a fixture is pinning.
+    std::fs::write(worktree.join("icon.png"), PIXEL).unwrap();
+
+    // And the companion beside it, read-only: checked out detached, and a root
+    // the tree marks rather than one it leaves out.
+    let alongside = coded_repository(&under.join("repos/askance"));
+    let companion = store::register_repo(pool, &alongside, "askance", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    store::add_companion(pool, conversation, companion.id)
+        .await
+        .unwrap();
+    store::configure_companion(
+        pool,
+        conversation,
+        companion.id,
+        store::Change::Mode(store::CompanionMode::ReadOnly),
+    )
+    .await
+    .unwrap();
+
+    let at = git(&alongside, &["rev-parse", "HEAD"]).trim().to_owned();
+    let checkout = under.join("worktrees/askance-code-pane");
+    git(
+        &alongside,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            &checkout.to_string_lossy(),
+            &at,
+        ],
+    );
+
+    store::start_grilling(
+        pool,
+        conversation,
+        &base,
+        &worktree,
+        &[store::CompanionWorktree {
+            repo_id: companion.id,
+            path: checkout,
+            base_commit: Some(at),
+        }],
+    )
+    .await
+    .unwrap();
+
+    conversation
+}
+
+/// The picture in that checkout: a one-pixel PNG, which is the smallest thing
+/// that is really one.
+const PIXEL: &[u8] = &[
+    0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D', b'R',
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89,
+];
+
+/// A repository with one commit in it, ignoring what a Rust checkout ignores.
+fn coded_repository(path: &Path) -> std::path::PathBuf {
+    std::fs::create_dir_all(path).unwrap();
+    git(path, &["init", "--initial-branch", "main"]);
+    git(path, &["config", "user.email", "tests@verkstead.invalid"]);
+    git(path, &["config", "user.name", "Verkstead Tests"]);
+    git(path, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    std::fs::write(path.join(".gitignore"), "target/\n").unwrap();
+    git(path, &["add", "-A"]);
+    git(path, &["commit", "-m", "first"]);
+
+    path.to_owned()
 }
 
 /// Run git in `dir` and take its stdout, for the one fixture whose worktree is a

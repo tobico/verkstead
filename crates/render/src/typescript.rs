@@ -22,17 +22,18 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileReading,
+    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
+    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -217,12 +218,36 @@ fn the_viewers_types_are_written_from_these() {
     Watching::export_all(&config).unwrap();
 
     // And the terminals a Conversation holds of its own: which of them are
-    // live, and what became of asking for another (ADR 0013). A shell in the
-    // Conversation's Sandbox is not a record, so the numbers are the whole of
-    // what there is to send — what is *on* one arrives down the socket above,
-    // in the same two shapes a Screen is watched in.
+    // live and whether anything is running in each, what became of asking for
+    // another, and what became of closing one (ADR 0013, and ADR 0019 for the
+    // busy flag). A shell in the Conversation's Sandbox is not a record, so a
+    // number and that flag are the whole of what there is to send — what is
+    // *on* one arrives down the socket above, in the same two shapes a Screen
+    // is watched in.
     TerminalsView::export_all(&config).unwrap();
     TerminalOpened::export_all(&config).unwrap();
+    TerminalClosed::export_all(&config).unwrap();
+
+    // And the other half of Code: the Worktrees its tree stands on, and one
+    // folder of one of them. The roots are what bounds the files API — the
+    // Conversation's own checkout and each companion's, a read-only one marked
+    // — and a folder is read when it is expanded and never walked (ADR 0019,
+    // *The tree*). The listing writes its entries with it.
+    FileRootsView::export_all(&config).unwrap();
+    FolderListing::export_all(&config).unwrap();
+
+    // And one file of one of those folders, opened: what kind of thing it
+    // turned out to be, the version a write will name itself as being over, and
+    // the same refusals said about a file (ADR 0019, *Versioned reads, and a
+    // stale write is refused*).
+    FileReading::export_all(&config).unwrap();
+
+    // And one written back: the text over the version the read handed over, and
+    // what became of it. A write over a version that has moved is refused with
+    // the version the disk has now, which is what draws the Reload / Keep mine
+    // bar in front of the human.
+    FileWrite::export_all(&config).unwrap();
+    FileWritten::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

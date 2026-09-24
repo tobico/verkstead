@@ -22,6 +22,7 @@
 mod answering;
 mod browsing;
 mod conversations;
+mod files;
 mod onboarding;
 mod profiles;
 mod push;
@@ -54,13 +55,16 @@ pub use conversations::{
     Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
     SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
     SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
-    TakenUp, TaskDocument, TaskEntry, TaskListEvent, TaskListReached, TaskSource, TerminalOpened,
-    TerminalsView, TimelineEvent, UnreadableSetEvent, Watching, Worktree, agent_output_event,
-    agent_output_pinned, backlog_pane, brief_event, commit_event, commit_pane, handoff_event,
-    manual_task_event, moved_event, notice_event, proposal_view, pull_request_details,
-    pull_request_event, pull_request_reached, question_set_event, resolve_conflicts_event,
-    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
-    task_list_event, task_list_reached, unreadable_set_event,
+    TakenUp, TaskDocument, TaskEntry, TaskListEvent, TaskListReached, TaskSource, TerminalClosed,
+    TerminalOpened, TerminalView, TerminalsView, TimelineEvent, UnreadableSetEvent, Watching,
+    Worktree, agent_output_event, agent_output_pinned, backlog_pane, brief_event, commit_event,
+    commit_pane, handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
+    pull_request_details, pull_request_event, pull_request_reached, question_set_event,
+    resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event, stage_list_reached,
+    steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
+};
+pub use files::{
+    FileReading, FileRoot, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
 };
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,

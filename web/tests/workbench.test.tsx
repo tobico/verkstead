@@ -12,7 +12,13 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@solidjs/testing-library";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -34,6 +40,11 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileReading,
+  FileRoot,
+  FileRootsView,
+  FileWritten,
+  FolderListing,
   GrillingStarted,
   Merging,
   NoticeEvent,
@@ -61,6 +72,7 @@ import type {
   Submitted,
   TakenUp,
   TaskListEvent,
+  TerminalClosed,
   TerminalOpened,
   TerminalsView,
   TimelineEvent,
@@ -168,23 +180,41 @@ import prPane from "../src/workbench/PullRequest.module.css";
 // Sharing the Conversation, which is a details pane of its own: the published
 // share it draws, and the presses that came out of the actions menu.
 import sharePane from "../src/workbench/Share.module.css";
-// And a terminal of the human's own inside the conversation's sandbox, which
-// is the other details pane nothing on the record opens.
+// And Code, which holds the terminals of the human's own inside the
+// conversation's sandbox — the other details pane nothing on the record opens.
 import {
   // Aliased: `AT_ONCE` above this is the force-stop endpoint, which is a
   // different sense of the words and was here first.
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
+  FILE_REFUSAL,
+  MOVED,
+  NOTHING_OPEN,
   TERMINAL_REFUSAL,
-} from "../src/workbench/Terminal";
+  WRITE_REFUSAL,
+} from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
-import terminalPane from "../src/workbench/Terminal.module.css";
+import codePane from "../src/workbench/Code.module.css";
+// And the editor a file opens in, which is Monaco — stood in for below. The
+// module that imports the package is read as text as well as mocked away: what
+// it imports is the decision ADR 0019 made, and nothing mounted could assert it.
+import { DARK, LIGHT, NO_EDITOR } from "../src/workbench/Editor";
+import editorPane from "../src/workbench/Editor.module.css";
+import monacoModule from "../src/workbench/monaco.ts?raw";
+// And the tree down its side, over every worktree the conversation has.
+import { FOLDER_REFUSAL, NO_ROOTS } from "../src/workbench/Tree";
+import treePane from "../src/workbench/Tree.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
 // component drawing it are two independent statements about the same icon.
 import { faCircle } from "@fortawesome/free-regular-svg-icons";
-import { faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCheck,
+  faFile,
+  faTerminal,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
 import {
   SAID as CHECKS_SAID,
   SPOKEN as CHECKS_SPOKEN,
@@ -201,7 +231,7 @@ import conflictMark from "../src/workbench/Merging.module.css";
 // rules that give it one are what jsdom cannot lay out.
 import attachedPane from "../src/workbench/Attached.module.css";
 import attachedCss from "../src/workbench/Attached.module.css?raw";
-import terminalCss from "../src/workbench/Terminal.module.css?raw";
+import codeCss from "../src/workbench/Code.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
@@ -268,6 +298,7 @@ import {
   showing,
 } from "./pickers";
 import {
+  type Answer,
   askedFor,
   hangs,
   json,
@@ -277,6 +308,16 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+// The stand-in for Monaco, and what it wrote down about what the pane did with
+// it. The same module `vi.mock` above put in place of the seam, imported the
+// ordinary way — so this is that instance and not a second one.
+import {
+  loading,
+  refusing,
+  reset as resetEditing,
+  theEditor,
+  themed,
+} from "./editing";
 import { pending } from "./steering";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
@@ -299,6 +340,11 @@ import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
 import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
+import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
+import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
+import codeFile from "./fixtures/code-file.json" with { type: "json" };
+import codeImage from "./fixtures/code-image.json" with { type: "json" };
+import codeWritten from "./fixtures/code-written.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import repoView from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -311,6 +357,13 @@ const drawing = vi.hoisted(() =>
   vi.fn((_how?: { root?: ParentNode }) => vi.fn()),
 );
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
+
+/// And the editor, which is the pane's own doing rather than this file's: what
+/// is asked here is which file Code opened and how, never what Monaco drew with
+/// it. Stood in for so that nothing here mounts twenty-three megabytes of
+/// editor in a jsdom with no layout — see `tests/editing.ts`, which is also
+/// where the chunk the real seam would fetch is never fetched from.
+vi.mock("../src/workbench/editing", () => import("./editing"));
 
 /// How many columns fit in the pane, which is what the Screen of a live session
 /// sends up its socket.
@@ -389,6 +442,50 @@ function theClipboard(): string[] {
   return written;
 }
 
+/// The colour scheme the browser is in, and a way to change it under the page.
+///
+/// `tests/setup.ts` answers every media query with a flat no, which is what
+/// xterm wants and what every other test here wants: nothing in the app asks
+/// about a scheme but the editor and the diagrams. This stands over that for
+/// the one test that does, answering the question and reporting a change the way
+/// a `MediaQueryList` does.
+///
+/// Every listener spelling, for the reason the setup's stub has both: xterm is
+/// mounted beside the editor in this pane, and it reaches for whichever it
+/// finds.
+function theScheme(dark: boolean) {
+  const listening = new Set<(event: MediaQueryListEvent) => void>();
+  const list = {
+    get matches() {
+      return dark;
+    },
+    media: "(prefers-color-scheme: dark)",
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener: (_of: string, said: (event: MediaQueryListEvent) => void) =>
+      listening.add(said),
+    removeEventListener: (
+      _of: string,
+      said: (event: MediaQueryListEvent) => void,
+    ) => listening.delete(said),
+    dispatchEvent: () => false,
+  };
+
+  vi.stubGlobal("matchMedia", () => list);
+
+  return {
+    /// The device moving between light and dark, which is the only warning the
+    /// page gets.
+    into(now: boolean) {
+      dark = now;
+      for (const said of listening) {
+        said({ matches: now } as MediaQueryListEvent);
+      }
+    },
+  };
+}
+
 const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The conversation that clicking one of those roadmaps made: a draft adopting
@@ -421,6 +518,13 @@ function briefOf(conversation: ConversationView): BriefEvent {
 
 /// The Brief on the opened Conversation's Timeline.
 const BRIEF = briefOf(OPEN);
+
+// What the editor was asked for and opened with, forgotten before each test
+// rather than after it: the pane reads a file and then draws it, so a read
+// answered as the last test ended lands an editor in the moment between that
+// test's own teardown and this one's first line. Cleared here, that straggler
+// is the previous test's rather than the next test's first surprise.
+beforeEach(resetEditing);
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -17712,17 +17816,53 @@ const TERMINALS_OF_IT = `/api/ui/conversations/${GRILLING.id}/terminals`;
 /// And where the first of them is watched.
 const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
 
-/// The terminal icon on the Timeline's header, which is the whole of the way
-/// into the pane: no card opens it, a terminal belonging to the conversation
-/// rather than to any moment on its record.
-function terminalIcon(container: ParentNode): HTMLButtonElement | null {
+/// Where the worktrees Code's tree is drawn over are listed — the conversation's
+/// own and each companion's, which is what bounds the files API (ADR 0019).
+const ROOTS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/roots`;
+
+/// And where one folder of one of them is read, which is what expanding a row
+/// asks for.
+function folderOf(path: string): string {
+  return `/api/ui/conversations/${GRILLING.id}/files/folder?path=${encodeURIComponent(path)}`;
+}
+
+/// And where one file of one of them is read, which is what pressing a row of
+/// the tree asks for.
+function fileOf(path: string): string {
+  return `/api/ui/conversations/${GRILLING.id}/files/file?path=${encodeURIComponent(path)}`;
+}
+
+/// The roots the fixtures carry: the conversation's own worktree, and a
+/// read-only companion's beside it.
+const OWN_ROOT = (codeRoots as FileRootsView).roots[0]!;
+const COMPANION_ROOT = (codeRoots as FileRootsView).roots[1]!;
+
+/// The code icon on the Timeline's header, which is the whole of the way into
+/// the pane: no card opens it, Code belonging to the conversation rather than
+/// to any moment on its record.
+function codeIcon(container: ParentNode): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(
-    `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+    `.${shell.middlePane} .${button.iconButton}[aria-label^="Code"]`,
   );
+}
+
+/// The terminals a conversation is holding, as the list endpoint answers them:
+/// the numbers, each with nothing running in it.
+///
+/// Idle is the shape nearly every test here wants — what a busy one does is its
+/// own describe below — and the flag is the server's own reading, so a test
+/// that had to write one out per terminal would be writing the server's
+/// judgement rather than the pane's behaviour.
+function idle(live: number[]): TerminalsView {
+  return { live: live.map((number) => ({ number, busy: false })) };
 }
 
 /// The workbench with a conversation holding one live terminal, the socket
 /// stubbed, and whatever else the test wants answered.
+///
+/// The roots come with it, every opening of the pane reading them: the tree is
+/// half of Code, and a test about its tabs should no more have to say what the
+/// tree asked for than it has to say what the sidebar did.
 function withTerminals(
   live: number[],
   ...answers: Parameters<typeof serving>
@@ -17732,12 +17872,13 @@ function withTerminals(
 
   return theGrillingStanding(
     {},
-    whenever(TERMINALS_OF_IT, json({ live } satisfies TerminalsView)),
+    whenever(TERMINALS_OF_IT, json(idle(live))),
+    whenever(ROOTS_OF_IT, json(codeRoots)),
     ...answers,
   );
 }
 
-describe("the way into the terminal pane", () => {
+describe("the way into the code pane", () => {
   /// Drawn as Share beside it is, and for the same reason: another thing
   /// standing in a pane that is selected and opened into the pane beside it.
   it("stands on the timeline's header as an icon button", async () => {
@@ -17746,10 +17887,10 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Code"]`,
     );
 
-    expect(icon.getAttribute("aria-label")).toBe("Terminal");
+    expect(icon.getAttribute("aria-label")).toBe("Code");
     expect(icon.querySelector("svg")).toBeTruthy();
     expect((icon as HTMLButtonElement).disabled).toBe(false);
   });
@@ -17762,21 +17903,21 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Code"]`,
     );
     expect(icon.getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(icon);
 
     await waitFor(() =>
-      expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+      expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
     );
-    expect(terminalIcon(container)!.className).toContain(button.open);
+    expect(codeIcon(container)!.className).toContain(button.open);
   });
 
-  /// A conversation with no worktree has nowhere to open a shell, so the icon
-  /// is off — and says why, because a shape that has gone grey says nothing
-  /// when it is read aloud.
+  /// A conversation with no worktree has nothing to edit and nowhere to open a
+  /// shell, so the icon is off — and says why, because a shape that has gone
+  /// grey says nothing when it is read aloud.
   it("is disabled, saying why, where there is no worktree", async () => {
     withTerminals([], whenever(
       `/api/ui/conversations/${GRILLING.id}`,
@@ -17786,12 +17927,12 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn<HTMLButtonElement>(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label^="Code"]`,
     );
 
     expect(icon.disabled).toBe(true);
     expect(icon.getAttribute("aria-label")).toBe(
-      "Terminal — there is no worktree yet",
+      "Code — there is no worktree yet",
     );
   });
 
@@ -17799,20 +17940,52 @@ describe("the way into the terminal pane", () => {
   /// the URL, so a cold load of this path opens on it.
   it("stands at a path of its own", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
-    expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+    expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /// And the pane says what it is, in the same word the icon that opened it is
+  /// read aloud in: the header of a details pane is what somebody who walked
+  /// into it on a phone has to go on.
+  it("heads the pane with the word the icon is read in", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    const head = await drawn(
+      container,
+      `.${shell.detailsPane} .${paneHead.head} h1`,
+    );
+    expect(head.textContent).toBe("Code");
+  });
+
+  /// And the path it stood at while it was the Terminal pane lands on it, so a
+  /// link somebody kept and a browser that remembered the old one still reach
+  /// the pane — see `Moved` in `src/App.tsx`. A redirect rather than a second
+  /// path: what is open is in the URL, and two URLs for one pane would be two
+  /// accounts of what is open.
+  it("lands the path the terminal pane stood at on it", async () => {
+    withTerminals([1]);
+    const { container, history } = mount(
+      `/conversations/${GRILLING.id}/terminal`,
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/code`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true");
   });
 });
 
-describe("a conversation's terminal", () => {
+describe("a conversation's terminal in the code pane", () => {
   /// The server holds the shell, so the pane is the way back to it rather than
   /// where it lives: a reload attaches to what is already running instead of
   /// starting a second shell beside it.
   it("attaches to the terminal that is already live", async () => {
     const fetching = withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
 
@@ -17840,9 +18013,15 @@ describe("a conversation's terminal", () => {
     );
   });
 
-  /// And where none is live it opens one, because the pane never stands empty.
-  it("opens one where none is live, and attaches to that", async () => {
-    withTerminals(
+  /// And where none is live the pane stands empty and says so: it opens no
+  /// shell of its own accord, and **New terminal** is what opens one.
+  ///
+  /// The rule the Terminal pane inverted (ADR 0019, *Tabs and groups*). That
+  /// pane never stood empty because a shell was the whole of what it held; a
+  /// pane that will hold files has something to show without one, and a shell
+  /// started by opening a pane is a Sandbox nobody asked for.
+  it("opens none of its own accord, and offers one instead", async () => {
+    const fetching = withTerminals(
       [],
       whenever(
         TERMINALS_OF_IT,
@@ -17850,7 +18029,26 @@ describe("a conversation's terminal", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    const nothing = await drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.nothing}`,
+    );
+    expect(nothing.textContent).toContain(NOTHING_OPEN);
+
+    // Nothing was asked for and nothing is watching: the pane read the
+    // register and stopped there.
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === TERMINALS_OF_IT && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+    expect(Attached.opened).toHaveLength(0);
+
+    // And the press in the empty state is what opens one.
+    fireEvent.click(nothing.querySelector("button")!);
 
     const socket = await attached();
     expect(socket.url.endsWith(TERMINAL_ATTACH)).toBe(true);
@@ -17866,19 +18064,19 @@ describe("a conversation's terminal", () => {
   ///
   /// The reading is frozen, which means an answer still in the cache is never
   /// asked for again — so a pane that came back to one would be reading the
-  /// register as it stood when it last closed. Where the pane had opened the
-  /// shell itself that is the empty list it started from, and it would open a
-  /// second beside the first, leaving the first running with no tab over it and
-  /// no way to close it.
+  /// register as it stood when it last closed. Where the shell was opened in
+  /// this pane that is the empty list it started from, so the pane would come
+  /// back to no tabs at all and leave the shell running with nothing over it
+  /// and no way to close it.
   it("asks which are live again every time the pane opens", async () => {
-    // What the server is holding, which is nothing until the pane opens one.
+    // What the server is holding, which is nothing until one is opened here.
     let live: number[] = [];
 
     const fetching = withTerminals(
       [],
       // Answered afresh on every ask rather than fixed at mount, which is the
       // whole of what this is about.
-      whenever(TERMINALS_OF_IT, () => json({ live } satisfies TerminalsView)()),
+      whenever(TERMINALS_OF_IT, () => json(idle(live))()),
       whenever(
         TERMINALS_OF_IT,
         json({ Opened: { number: 1 } } satisfies TerminalOpened),
@@ -17887,7 +18085,16 @@ describe("a conversation's terminal", () => {
     );
 
     const { container, history } = mount(
-      `/conversations/${GRILLING.id}/terminal`,
+      `/conversations/${GRILLING.id}/code`,
+    );
+
+    // The shell this pane opened, which the register holds from here on: the
+    // pane opens none of its own accord, so there is a press in front of it.
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.nothing} button`,
+      ),
     );
 
     (await attached()).says(PAINTED);
@@ -17910,7 +18117,7 @@ describe("a conversation's terminal", () => {
 
     // And back into it, which reads the register again and comes back to the
     // shell that is already running rather than opening a second beside it.
-    history.set({ value: `/conversations/${GRILLING.id}/terminal` });
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
 
     await waitFor(() =>
       expect(
@@ -17937,7 +18144,7 @@ describe("a conversation's terminal", () => {
   /// keys — see "sends what the mouse did up the same socket".
   it("keeps what scrolled past, so the wheel reads it back", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
     socket.says(PAINTED);
@@ -17972,28 +18179,40 @@ describe("a conversation's terminal", () => {
     expect(socket.sent).toHaveLength(said);
   });
 
-  /// The terminal fills the pane: the reading measure comes off, and the pane
-  /// ends where the window does rather than scrolling on down the page.
+  /// The tree and the terminal fill the pane between them: the reading measure
+  /// comes off, and the pane ends where the window does rather than scrolling on
+  /// down the page.
   it("fills the pane, with no reading measure and nothing to scroll", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
     socket.says(PAINTED);
+
+    // The two names the frame reads are on the row holding both halves, which
+    // is the thing the pane is sized around now that the tree stands beside the
+    // tabs: the height rule every terminal pane takes, and the width rule this
+    // one takes on top of it.
+    const body = await drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.body}`,
+    );
+
+    expect(body.classList).toContain(shell.paneScreen!);
+    expect(body.classList).toContain(shell.paneWide!);
+
+    expect(shellCss).toContain(
+      ".panes > .detailsPane:has(.paneWide) {\n  padding-inline: 1.25rem;\n}",
+    );
 
     const grid = await drawn(
       container,
       `.${shell.detailsPane} .${attachedPane.screen}`,
     );
 
-    // The two names the frame reads: the height rule every terminal pane takes,
-    // and the width rule this one takes on top of it.
+    // And the grid itself is still what the column fills, which is what puts a
+    // terminal's height in the pane's hands rather than in its content's.
     expect(grid.classList).toContain(shell.paneScreen!);
-    expect(grid.classList).toContain(shell.paneWide!);
-
-    expect(shellCss).toContain(
-      ".panes > .detailsPane:has(.paneWide) {\n  padding-inline: 1.25rem;\n}",
-    );
 
     // And it is a live one, so it is clipped rather than scrolled — see the
     // Screen's own reasoning about what a scrollbar costs a socket.
@@ -18012,7 +18231,14 @@ describe("a conversation's terminal", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.nothing} button`,
+      ),
+    );
 
     const said = await drawn(
       container,
@@ -18043,7 +18269,7 @@ describe("a conversation's terminal", () => {
   });
 });
 
-describe("the terminal pane's tabs", () => {
+describe("the code pane's tabs", () => {
   /// The socket onto one of a conversation's terminals, found by the number in
   /// its path rather than by the order they opened: what is worth asserting is
   /// which shell a window is watching.
@@ -18065,7 +18291,7 @@ describe("the terminal pane's tabs", () => {
   function tabs(container: ParentNode): HTMLButtonElement[] {
     return [
       ...container.querySelectorAll<HTMLButtonElement>(
-        `.${shell.detailsPane} .${terminalPane.tab}`,
+        `.${shell.detailsPane} .${codePane.tab}`,
       ),
     ];
   }
@@ -18087,12 +18313,48 @@ describe("the terminal pane's tabs", () => {
       .map((wrote) => wrote.Resized);
   }
 
+  /// The × at the end of each tab, in the order the tabs are drawn.
+  function crosses(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.close}`,
+      ),
+    ];
+  }
+
+  /// And the empty state, which is what the pane draws where it has no tabs at
+  /// all: the hint, and the press that opens a shell.
+  function nothing(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.detailsPane} .${codePane.nothing}`,
+    );
+  }
+
+  /// A pane with nothing in it has no bar: an empty strip with a plus at the end
+  /// is furniture about tabs that are not there, and what the pane draws instead
+  /// is the hint and the press, where the tabs' content goes.
+  it("draws no tab bar where there is nothing open", async () => {
+    withTerminals([]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.nothing}`,
+    );
+
+    expect(said.textContent).toContain(NOTHING_OPEN);
+    expect(said.querySelector("button")?.textContent).toBe("New terminal");
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${codePane.tabs}`),
+    ).toBeNull();
+  });
+
   /// Every terminal the server has is a tab, in the order they were opened and
   /// called by the number it issued — which is why those numbers are never
   /// reused. A reload comes back to all of them rather than to the first.
   it("draws a tab for every terminal that is live, in the order opened", async () => {
     withTerminals([1, 2, 3]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(3));
 
@@ -18122,6 +18384,59 @@ describe("the terminal pane's tabs", () => {
     expect(attachedCss).toContain(".screen[hidden] {\n  display: none;\n}");
   });
 
+  /// And every tab is drawn the way VS Code draws one: what kind of thing it
+  /// holds at one end, and the × that closes it at the other (ADR 0019, *Tabs
+  /// and groups*). A terminal's kind is the terminal icon; the files that will
+  /// stand beside them bring their own.
+  it("draws a kind icon at one end of every tab and a × at the other", async () => {
+    withTerminals([1, 2]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+    // The shape itself, named here rather than read off the component, so that
+    // the test and the pane are two statements about the same icon.
+    for (const tab of tabs(container)) {
+      expect(tab.querySelector("svg path")?.getAttribute("d")).toBe(
+        faTerminal.icon[4],
+      );
+    }
+
+    // And the × beside each, called by the tab it would close: an icon says
+    // nothing when it is read aloud, and two of these in a row saying "Close"
+    // would say nothing about which.
+    expect(crosses(container).map((cross) => cross.getAttribute("aria-label"))).toEqual(
+      ["Close Terminal 1", "Close Terminal 2"],
+    );
+
+    for (const cross of crosses(container)) {
+      expect(cross.querySelector("svg path")?.getAttribute("d")).toBe(
+        faXmark.icon[4],
+      );
+    }
+  });
+
+  /// And nothing comes down on a right-click any more. Close was on a menu
+  /// because a × beside a small label is easy to hit by accident; the × is what
+  /// VS Code's bar has, and a busy shell asking first is what carries that
+  /// worry now. What the gesture is freed for is dragging a tab.
+  it("leaves a right-click on a tab to the browser", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    // Not prevented, which is the whole of what this pane now does about it.
+    expect(
+      fireEvent.contextMenu(tabs(container)[0]!, {
+        clientX: 120,
+        clientY: 40,
+      }),
+    ).toBe(true);
+
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeNull();
+  });
+
   /// Plus opens another and shows it. The one that was showing goes on running:
   /// its socket is not closed and its grid is still there behind the new one.
   it("opens another terminal on plus and shows it", async () => {
@@ -18133,7 +18448,7 @@ describe("the terminal pane's tabs", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     first.says(PAINTED);
@@ -18173,7 +18488,7 @@ describe("the terminal pane's tabs", () => {
   /// hidden one measures nothing at all, so its nothing would win.
   it("says a size for the tab showing and none for the hidden ones", async () => {
     withTerminals([1, 2]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     const second = await attachedTo(2);
@@ -18222,7 +18537,7 @@ describe("the terminal pane's tabs", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     first.says(PAINTED);
@@ -18319,14 +18634,14 @@ describe("the terminal pane's tabs", () => {
 
     /// A shell that ends is a socket that closes: the server takes the terminal
     /// off its register the moment it exits, and every watcher hears that. The
-    /// tab goes with it, and the pane never stands empty, so another opens where
-    /// it was the last.
-    it("takes the tab away and opens another where it was the last", async () => {
+    /// tab goes with it — and where it was the last, the pane stands empty and
+    /// says so rather than opening another behind it.
+    it("takes the tab away and stands empty where it was the last", async () => {
       const fetching = withTerminals(
         [1],
         whenever(TERMINALS_OF_IT, opens(2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -18334,6 +18649,16 @@ describe("the terminal pane's tabs", () => {
 
       // `exit` typed into the only shell there was.
       first.ends();
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
+
+      expect(asked(fetching)).toBe(0);
+      expect(standing(container)).toBeUndefined();
+
+      // And the press in the empty state opens the next one, which is the whole
+      // of how a pane that has run out of shells gets another.
+      fireEvent.click(nothing(container)!.querySelector("button")!);
 
       const second = await attachedTo(2);
       expect(second.url.startsWith("ws://")).toBe(true);
@@ -18345,14 +18670,13 @@ describe("the terminal pane's tabs", () => {
       );
 
       expect(asked(fetching)).toBe(1);
-      expect(standing(container)).toBeUndefined();
     });
 
     /// And where it was one of several, that tab goes and the others stand:
     /// nothing opens, because the pane is not empty.
     it("leaves the other tabs standing where it was one of several", async () => {
       const fetching = withTerminals([1, 2, 3]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const second = await attachedTo(2);
       await waitFor(() => expect(tabs(container)).toHaveLength(3));
@@ -18378,7 +18702,14 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${codePane.nothing} button`,
+        ),
+      );
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -18387,14 +18718,13 @@ describe("the terminal pane's tabs", () => {
       ahead = ENDED_WITHIN;
       first.ends();
 
-      await attachedTo(2);
-      await waitFor(() =>
-        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
-          "Terminal 2",
-        ]),
-      );
+      // The tab goes rather than standing: this one ran. What is left is the
+      // empty pane, which is where every shell that ends leaves it.
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(standing(container)).toBeUndefined();
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
 
-      expect(asked(fetching)).toBe(2);
+      expect(asked(fetching)).toBe(1);
     });
 
     /// And one that ended the moment it was asked for is a shell that could not
@@ -18406,7 +18736,14 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${codePane.nothing} button`,
+        ),
+      );
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -18475,7 +18812,8 @@ describe("the terminal pane's tabs", () => {
       expect(asked(fetching)).toBe(1);
       expect(Attached.opened).toHaveLength(1);
 
-      // Plus is a press, and it replaces the tab that was only there to say why.
+      // New terminal is a press, and it replaces the tab that was only there to
+      // say why.
       fireEvent.click(
         await drawn(
           container,
@@ -18500,7 +18838,14 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, json("Refused" satisfies TerminalOpened), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${codePane.nothing} button`,
+        ),
+      );
 
       await waitFor(() =>
         expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
@@ -18510,8 +18855,9 @@ describe("the terminal pane's tabs", () => {
       expect(Attached.opened).toHaveLength(0);
       expect(asked(fetching)).toBe(1);
 
-      // And plus asks again, which is the one thing that does: the refusal it is
-      // answered with replaces the one standing rather than piling up beside it.
+      // And New terminal asks again, which is the one thing that does: the
+      // refusal it is answered with replaces the one standing rather than
+      // piling up beside it.
       fireEvent.click(
         await drawn(
           container,
@@ -18524,84 +18870,86 @@ describe("the terminal pane's tabs", () => {
     });
   });
 
-  /// Closing a tab, which is the one thing a tab offers that pressing it does
-  /// not already do — and it is on a menu rather than on the tab, because what a
-  /// stray press would end is a shell somebody is working in.
+  /// Closing a tab, which is the × at its end: the one thing a tab offers that
+  /// pressing it does not already do, and what VS Code's own bar has there.
   describe("and closing one", () => {
-    /// Where a tab's own menu comes down, painted by the pane and dropped by the
-    /// one menu component the app has.
-    function menu(container: ParentNode): HTMLElement | null {
-      return container.querySelector<HTMLElement>(
-        `.${terminalPane.tabActions} > .${dropdown.drop}`,
-      );
-    }
-
-    /// The same, waited for.
-    function opened(container: ParentNode): Promise<HTMLElement> {
-      return drawn(
-        container,
-        `.${terminalPane.tabActions} > .${dropdown.drop}`,
-      );
-    }
-
-    /// What the server answers a close with: nothing at all, which is what a
-    /// terminal ending has to say for itself.
+    /// What the server answers a close with, for a shell nobody is working in:
+    /// the terminal has ended.
     function closes(number: number) {
       return whenever(
         `${TERMINALS_OF_IT}/${number}`,
-        () => Promise.resolve(new Response(null, { status: 204 })),
+        json("Closed" satisfies TerminalClosed),
         "DELETE",
       );
     }
 
-    /// How many closes went out for one terminal.
+    /// And for one somebody is: the press is answered *busy* and nothing
+    /// happens, until it comes back saying the human was asked.
+    ///
+    /// Two answers under two keys, which is the shape of the thing: the second
+    /// press is a different request — the first with `?asked=true` on it — and
+    /// a stand-in that answered both the same way would be one where the card
+    /// changed nothing.
+    function busy(number: number): Answer[] {
+      return [
+        whenever(
+          `${TERMINALS_OF_IT}/${number}`,
+          json("Busy" satisfies TerminalClosed),
+          "DELETE",
+        ),
+        whenever(
+          `${TERMINALS_OF_IT}/${number}?asked=true`,
+          json("Closed" satisfies TerminalClosed),
+          "DELETE",
+        ),
+      ];
+    }
+
+    /// How many closes went out for one terminal, asked or not.
     function closed(
       fetching: ReturnType<typeof serving>,
       number: number,
     ): number {
       return fetching.mock.calls.filter(
         ([path, init]) =>
-          String(path) === `${TERMINALS_OF_IT}/${number}` &&
+          String(path).startsWith(`${TERMINALS_OF_IT}/${number}`) &&
           init?.method === "DELETE",
       ).length;
     }
 
-    /// A right-click on a tab drops the menu, and Close ends that shell: the
-    /// request goes out, and the tab goes when the socket under it closes —
-    /// which is the one thing a tab is ever told about a terminal ending,
-    /// whichever end asked for it.
+    /// And how many of them said the human had been asked, which is what the
+    /// card's own press puts on the wire.
+    function confirmed(
+      fetching: ReturnType<typeof serving>,
+      number: number,
+    ): number {
+      return fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === `${TERMINALS_OF_IT}/${number}?asked=true` &&
+          init?.method === "DELETE",
+      ).length;
+    }
+
+    /// The × ends that shell: the request goes out, and the tab goes when the
+    /// socket under it closes — which is the one thing a tab is ever told about
+    /// a terminal ending, whichever end asked for it.
     it("closes the shell a tab stands on, and the tab goes with it", async () => {
       const fetching = withTerminals(
         [1, 2],
         closes(1),
         whenever(TERMINALS_OF_IT, opens(3), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       await waitFor(() => expect(tabs(container)).toHaveLength(2));
 
-      expect(menu(container)).toBeNull();
-
-      // The browser's own menu is not what a right-click on a tab is asking
-      // for, so it is taken off the press.
-      expect(
-        fireEvent.contextMenu(tabs(container)[0]!, {
-          clientX: 120,
-          clientY: 40,
-        }),
-      ).toBe(false);
-
-      const rows = [...(await opened(container)).querySelectorAll("button")];
-      expect(rows.map((row) => row.textContent)).toEqual(["Close"]);
-
-      fireEvent.click(rows[0]!);
+      fireEvent.click(crosses(container)[0]!);
 
       await waitFor(() => expect(closed(fetching, 1)).toBe(1));
 
-      // The menu goes with the press, and the tab is still there: the shell is
-      // the server's, and what says it has ended is its socket closing.
-      expect(menu(container)).toBeNull();
+      // The tab is still there: the shell is the server's, and what says it has
+      // ended is its socket closing.
       expect(tabs(container)).toHaveLength(2);
 
       first.ends();
@@ -18612,39 +18960,34 @@ describe("the terminal pane's tabs", () => {
         ]),
       );
 
-      // And nothing was opened behind it: the pane still has a tab, so it is
-      // not standing empty.
+      // And nothing was opened behind it.
       expect(asked(fetching)).toBe(0);
     });
 
-    /// The same menu from a finger, which is the whole of what a touch device
-    /// has: a long press fires this same event, and a tab has no second gesture
-    /// to protect — unlike a sidebar card, whose long press already picks it up
-    /// to be dragged.
-    it("opens the same menu on a long press", async () => {
-      withTerminals([1], closes(1));
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    /// The × closes the tab it is on rather than the one showing, which is the
+    /// whole of what a × per tab means: the shell somebody is not looking at is
+    /// as closeable as the one they are.
+    it("closes the tab its × is on rather than the one showing", async () => {
+      const fetching = withTerminals([1, 2], closes(2));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
-      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      const second = await attachedTo(2);
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
 
-      const tab = tabs(container)[0]!;
+      // The first is the one showing, and it is the second's × that is pressed.
+      expect(tabs(container)[0]!.getAttribute("aria-pressed")).toBe("true");
 
-      fireEvent.pointerDown(tab, {
-        button: 0,
-        pointerId: 1,
-        pointerType: "touch",
-        clientX: 40,
-        clientY: 40,
-      });
+      fireEvent.click(crosses(container)[1]!);
 
-      // The long press itself, as a phone reports it: the same `contextmenu` a
-      // right-click makes, with nothing on it to say which hand it came from.
-      expect(
-        fireEvent.contextMenu(tab, { clientX: 40, clientY: 40 }),
-      ).toBe(false);
+      await waitFor(() => expect(closed(fetching, 2)).toBe(1));
 
-      const rows = [...(await opened(container)).querySelectorAll("button")];
-      expect(rows.map((row) => row.textContent)).toEqual(["Close"]);
+      second.ends();
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 1",
+        ]),
+      );
     });
 
     /// And closing one the pane opened moments ago takes its tab away rather
@@ -18656,34 +18999,35 @@ describe("the terminal pane's tabs", () => {
         closes(1),
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${codePane.nothing} button`,
+        ),
+      );
 
       const first = await attachedTo(1);
       first.says(PAINTED);
       await waitFor(() => expect(tabs(container)).toHaveLength(1));
 
-      fireEvent.contextMenu(tabs(container)[0]!, { clientX: 40, clientY: 40 });
-      fireEvent.click((await opened(container)).querySelector("button")!);
+      fireEvent.click(crosses(container)[0]!);
 
       await waitFor(() => expect(closed(fetching, 1)).toBe(1));
 
       first.ends();
 
-      // The tab goes, and another opens where it was the last: the pane never
-      // stands empty, and nothing here is a shell that could not start.
-      await attachedTo(2);
-      await waitFor(() =>
-        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
-          "Terminal 2",
-        ]),
-      );
-
+      // The tab goes rather than standing on a sentence, and the pane is empty
+      // behind it: nothing here is a shell that could not start.
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
       expect(standing(container)).toBeUndefined();
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
     });
 
     /// A tab that is only standing there to say why has no shell to end and no
-    /// socket to hear it on, so Close simply takes it away — and the pane opens
-    /// another, because a press is somebody asking again.
+    /// socket to hear it on, so its × simply takes it away — and the pane stands
+    /// empty behind it, because nothing here opens a shell on its own.
     it("takes away a tab that is standing on a refusal", async () => {
       const fetching = withTerminals(
         [],
@@ -18693,14 +19037,20 @@ describe("the terminal pane's tabs", () => {
           "POST",
         ),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${codePane.nothing} button`,
+        ),
+      );
 
       await waitFor(() =>
         expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
       );
 
-      fireEvent.contextMenu(tabs(container)[0]!, { clientX: 40, clientY: 40 });
-      fireEvent.click((await opened(container)).querySelector("button")!);
+      fireEvent.click(crosses(container)[0]!);
 
       // Nothing was asked of the server about it: there was never a shell, and
       // no number to name one by.
@@ -18708,7 +19058,137 @@ describe("the terminal pane's tabs", () => {
         fetching.mock.calls.filter(([, init]) => init?.method === "DELETE"),
       ).toHaveLength(0);
 
-      await waitFor(() => expect(asked(fetching)).toBe(2));
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
+      expect(asked(fetching)).toBe(1);
+    });
+
+    /// The card the server's *busy* puts up, or nothing where nothing is being
+    /// asked about. On the body rather than in the container, a `dialog` being
+    /// drawn in the top layer.
+    function card(): HTMLDialogElement | null {
+      return document.body.querySelector<HTMLDialogElement>(
+        `dialog.${codePane.confirming}`,
+      );
+    }
+
+    /// The same, waited for: the card is a request away rather than a signal
+    /// away, the server being the one that says a shell is busy.
+    function carded(): Promise<HTMLDialogElement> {
+      return waitFor(() => {
+        const up = card();
+        if (!up) throw new Error("nothing is being asked about");
+        return up;
+      });
+    }
+
+    /// The press in it that makes the close, and the one that leaves the shell
+    /// alone — told apart the way every confirm pair in the app is, by which of
+    /// them is the secondary.
+    async function confirms(): Promise<HTMLButtonElement> {
+      return (await carded()).querySelector<HTMLButtonElement>(
+        `.${codePane.confirmingOut} button:not(.${codePane.secondary})`,
+      )!;
+    }
+
+    async function keeps(): Promise<HTMLButtonElement> {
+      return (await carded()).querySelector<HTMLButtonElement>(
+        `.${codePane.confirmingOut} button.${codePane.secondary}`,
+      )!;
+    }
+
+    /// A × on a tab whose shell has something running in it asks first, and
+    /// nothing has happened when it does: the press went out, the server
+    /// answered *busy*, and the shell is still running behind the card.
+    ///
+    /// Asked of the server at the press rather than read off the list the pane
+    /// loaded with, which is the whole point of the second request: a build
+    /// started after the pane opened is a build.
+    it("asks before it ends a shell somebody is working in", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+
+      const up = await carded();
+
+      // Which shell it is about, so that a pane with several says which of them
+      // is on its way out.
+      expect(up.textContent).toContain("Terminal 1");
+
+      // One press out, and it was not the one that ends anything: nothing has
+      // happened yet, and the tab is where it was.
+      expect(closed(fetching, 1)).toBe(1);
+      expect(confirmed(fetching, 1)).toBe(0);
+      expect(tabs(container)).toHaveLength(1);
+      expect(first.closed).toBe(false);
+    });
+
+    /// And the way out of it leaves the shell exactly as it was, which is what
+    /// makes the card worth drawing.
+    it("leaves the shell running where the card is answered the other way", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+      fireEvent.click(await keeps());
+
+      await waitFor(() => expect(card()).toBeNull());
+
+      expect(confirmed(fetching, 1)).toBe(0);
+      expect(tabs(container)).toHaveLength(1);
+    });
+
+    /// And answering it the other way makes the press, saying it was asked —
+    /// after which the shell ends whatever is running in it, and the tab goes
+    /// the way every ended shell's tab goes.
+    it("ends the shell once the card is answered", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+      fireEvent.click(await confirms());
+
+      await waitFor(() => expect(confirmed(fetching, 1)).toBe(1));
+      await waitFor(() => expect(card()).toBeNull());
+
+      // Still there until its socket closes, which is the one thing a tab is
+      // ever told about a terminal ending.
+      expect(tabs(container)).toHaveLength(1);
+
+      first.ends();
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
+    });
+
+    /// And an idle shell asks nothing at all: the server answers the first
+    /// press with the terminal ended, and there is no card to answer.
+    it("asks nothing where nobody is working in it", async () => {
+      const fetching = withTerminals([1], closes(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+
+      await waitFor(() => expect(closed(fetching, 1)).toBe(1));
+
+      first.ends();
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(card()).toBeNull();
+      expect(confirmed(fetching, 1)).toBe(0);
     });
   });
 
@@ -18724,7 +19204,7 @@ describe("the terminal pane's tabs", () => {
     /// which is the number.
     it("calls a tab what its shell calls itself", async () => {
       withTerminals([1]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const socket = await attachedTo(1);
 
@@ -18752,7 +19232,7 @@ describe("the terminal pane's tabs", () => {
     /// nothing about it can reach another tab.
     it("names only the tab whose shell said it", async () => {
       withTerminals([1, 2]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       const second = await attachedTo(2);
@@ -18774,7 +19254,7 @@ describe("the terminal pane's tabs", () => {
     /// numbered the shell and no more — until the shell next draws a prompt.
     it("reads the number again after a reload", async () => {
       withTerminals([1]);
-      const before = mount(`/conversations/${GRILLING.id}/terminal`);
+      const before = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -18788,7 +19268,7 @@ describe("the terminal pane's tabs", () => {
       // back to a grid and to nothing that says what it is called.
       before.unmount();
 
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const again = await waitFor(() => {
         const opened = Attached.opened.filter((one) =>
@@ -18819,9 +19299,1722 @@ describe("the terminal pane's tabs", () => {
     /// However long a name is, the strip is a strip: a title the length of a
     /// path is cut off rather than allowed to push every other tab out of it.
     it("cuts a long name off rather than widening the strip", () => {
-      expect(terminalCss).toContain("max-width: 12rem;");
-      expect(terminalCss).toContain("text-overflow: ellipsis;");
+      expect(codeCss).toContain("max-width: 12rem;");
+      expect(codeCss).toContain("text-overflow: ellipsis;");
     });
+  });
+});
+
+
+/// The tree down the side of Code: a root per worktree the conversation has, and
+/// one folder read when it is expanded (ADR 0019, *The tree*).
+///
+/// The fixtures behind it are what the real endpoints wrote — a conversation
+/// with its own worktree and a read-only companion beside it, and one folder of
+/// the first with git's ignores already taken out — so what is asserted here is
+/// what the tree does with an answer rather than what the answer says.
+describe("the code pane's file tree", () => {
+  /// The rows the tree is drawing, in the order it drew them: the roots, and
+  /// whatever is open under them.
+  function rows(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+      ),
+    ];
+  }
+
+  /// And what each of them says.
+  function named(container: ParentNode): string[] {
+    return rows(container).map((row) => row.textContent ?? "");
+  }
+
+  /// The button for one row, found by what it is called — which is how a human
+  /// finds one, and is not the position it happens to be drawn at.
+  function row(container: ParentNode, name: string): HTMLButtonElement {
+    const found = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.folder}`,
+      ),
+    ].find((one) => one.textContent?.startsWith(name));
+
+    if (!found) {
+      throw new Error(
+        `no row called ${name}; the tree has ${named(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// The conversation's own worktree first, then each companion's — and the
+  /// read-only one marked, which is what says a file opened out of it will take
+  /// no typing.
+  it("draws a root for every worktree, a read-only companion marked", async () => {
+    withTerminals([]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+    expect(named(container)).toEqual([
+      OWN_ROOT.repo,
+      `${COMPANION_ROOT.repo}read-only`,
+    ]);
+
+    // The mark is on the companion alone: the conversation's own worktree is
+    // where the work is done.
+    expect(
+      rows(container).map(
+        (one) => one.querySelector(`.${treePane.readOnly}`)?.textContent,
+      ),
+    ).toEqual([undefined, "read-only"]);
+  });
+
+  /// And a conversation with no worktree has no tree, which is a sentence
+  /// rather than an empty box: a draft has nothing checked out yet, and a closed
+  /// conversation has had its checkouts taken back.
+  it("says so where the conversation has no worktree", async () => {
+    withTerminals([], whenever(ROOTS_OF_IT, json({ roots: [] })));
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    // Re-queried rather than held: the tree swaps one line for the other as the
+    // reading lands, and what it swaps is the element.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${treePane.tree} p`)
+          ?.textContent,
+      ).toContain(NO_ROOTS),
+    );
+  });
+
+  /// Nothing is read until somebody presses a row: a tree that read itself would
+  /// walk a rust checkout's `target/` before the pane had drawn.
+  it("reads no folder until a root is expanded", async () => {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(0);
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    // What git ignores is not in the answer, and neither is `.git`: both are
+    // the server's doing, so the tree draws what it was handed.
+    await waitFor(() =>
+      expect(named(container)).toEqual([
+        OWN_ROOT.repo,
+        "crates",
+        "web",
+        ".gitignore",
+        "Cargo.toml",
+        "README.md",
+        "icon.png",
+        `${COMPANION_ROOT.repo}read-only`,
+      ]),
+    );
+
+    expect(named(container)).not.toContain("target");
+    expect(named(container)).not.toContain(".git");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// One folder at a time, each expanded row asking for itself: a folder inside
+  /// one already open is a request of its own rather than something that came
+  /// down with the first.
+  it("reads one folder per expand, and never a walk", async () => {
+    const inside = `${OWN_ROOT.path}/crates`;
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        folderOf(inside),
+        json({
+          Listed: {
+            path: inside,
+            entries: [
+              { name: "server", path: `${inside}/server`, folder: true },
+            ],
+          },
+        } satisfies FolderListing),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(named(container)).toContain("crates"));
+    expect(askedFor(fetching, folderOf(inside))).toBe(0);
+
+    fireEvent.click(row(container, "crates"));
+
+    await waitFor(() => expect(named(container)).toContain("server"));
+    expect(askedFor(fetching, folderOf(inside))).toBe(1);
+  });
+
+  /// And it is read again on every expand. Nothing yet tells the page that the
+  /// disk moved — the agent writes, a build runs, a terminal tab checks out a
+  /// branch — so what a folder held last time is not what it holds now.
+  it("reads the folder again every time it is expanded", async () => {
+    // What is in the worktree, which the agent rewrites between the two
+    // expands. Answered afresh on every ask, which is the whole of what this is
+    // about.
+    let held = ["Cargo.toml"];
+
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), () =>
+        json({
+          Listed: {
+            path: OWN_ROOT.path,
+            entries: held.map((name) => ({
+              name,
+              path: `${OWN_ROOT.path}/${name}`,
+              folder: false,
+            })),
+          },
+        } satisfies FolderListing)(),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+    await waitFor(() => expect(named(container)).toContain("Cargo.toml"));
+
+    // Shut, which forgets what it held.
+    fireEvent.click(row(container, OWN_ROOT.repo));
+    await waitFor(() => expect(named(container)).not.toContain("Cargo.toml"));
+
+    held = ["Cargo.toml", "Cargo.lock"];
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(named(container)).toContain("Cargo.lock"));
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// A folder the server refused says which refusal it is, where its rows would
+  /// have been: each of them is a different thing for a human to read, and none
+  /// of them is a status code.
+  it("draws the sentence a refused folder came back with", async () => {
+    withTerminals(
+      [],
+      whenever(
+        folderOf(OWN_ROOT.path),
+        json("RootGone" satisfies FolderListing),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${treePane.why}`,
+    );
+
+    expect(said.textContent).toBe(FOLDER_REFUSAL.RootGone);
+  });
+
+  /// And each of the four is its own sentence rather than one "could not be
+  /// read", because only the human can tell which of them they are looking at.
+  it("words every refusal as the thing it is", () => {
+    expect(new Set(Object.values(FOLDER_REFUSAL)).size).toBe(
+      Object.keys(FOLDER_REFUSAL).length,
+    );
+
+    expect(FOLDER_REFUSAL.Outside).toContain("worktrees");
+    expect(FOLDER_REFUSAL.UnderGit).toContain(".git");
+    expect(FOLDER_REFUSAL.RootGone).toContain("worktree");
+    expect(FOLDER_REFUSAL.Missing).toContain("no longer");
+  });
+
+  /// A folder says which way it is, which is the one thing about a row that is
+  /// read aloud: a caret is a shape, and `aria-expanded` is the word for it.
+  it("says which way each folder is", async () => {
+    withTerminals([], whenever(folderOf(OWN_ROOT.path), json(codeFolder)));
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    expect(row(container, OWN_ROOT.repo).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() =>
+      expect(row(container, OWN_ROOT.repo).getAttribute("aria-expanded")).toBe(
+        "true",
+      ),
+    );
+  });
+});
+
+/// What a file pressed in that tree opens as: a tab of the group beside it,
+/// holding whatever the server read — the text in an editor, a picture in its
+/// tab, and a line where there is nothing to draw (ADR 0019, *Monaco, whole*).
+describe("a file opened out of the code pane's tree", () => {
+  /// The text file the fixtures carry, and the picture beside it, taken out of
+  /// the readings the endpoint wrote rather than made up here.
+  const TEXT = (codeFile as Extract<FileReading, { Text: unknown }>).Text;
+  const PICTURE = (codeImage as Extract<FileReading, { Image: unknown }>).Image;
+
+  /// The file rows of the tree, which are presses of their own: a folder is
+  /// read off the disk, and a file is opened as a tab.
+  function files(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ];
+  }
+
+  /// One of them, found by what it is called — which is how a human finds one.
+  function press(container: ParentNode, name: string): void {
+    const found = files(container).find((one) => one.textContent === name);
+
+    if (!found) {
+      throw new Error(
+        `no file called ${name}; the tree has ${files(container)
+          .map((one) => one.textContent)
+          .join(", ")}`,
+      );
+    }
+
+    fireEvent.click(found);
+  }
+
+  /// The tabs of the group, and the × at the end of each.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.tab}`,
+      ),
+    ];
+  }
+
+  function crosses(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.close}`,
+      ),
+    ];
+  }
+
+  /// And what a file's tab holds: the editor its text is in, the picture, or
+  /// the line saying why there is neither.
+  ///
+  /// The box inside it rather than the card, because the editor is Monaco and
+  /// Monaco is stood in for — what a test reads a value off and types into is
+  /// the `textarea` the stand-in put where the real editor's view would be. See
+  /// `tests/editing.ts`.
+  function editor(container: ParentNode): HTMLTextAreaElement | null {
+    return container.querySelector<HTMLTextAreaElement>(
+      `.${shell.detailsPane} .${editorPane.editor} textarea`,
+    );
+  }
+
+  function said(container: ParentNode): string | null | undefined {
+    return container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+      ?.textContent;
+  }
+
+  /// The workbench with one root of the tree expanded, which is how a file is
+  /// reached: nothing is read until a row is pressed, and a file is a row under
+  /// the folder it is in.
+  async function expanded(
+    at: FileRoot,
+    listing: FolderListing,
+    ...answers: Parameters<typeof serving>
+  ) {
+    const fetching = withTerminals(
+      [1],
+      whenever(folderOf(at.path), json(listing)),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(rows.find((row) => row.textContent?.startsWith(at.repo))!);
+    await waitFor(() =>
+      expect(files(mounted.container).length).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// A file pressed opens as a tab of the group, called what the file is and
+  /// holding what the server read.
+  it("opens a file pressed in the tree as a tab beside the terminals", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    // Nothing is read until the press: a tree of names costs nothing to draw,
+    // and a file is read when somebody asks for it.
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(0);
+    expect(tabs(container)).toHaveLength(1);
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+    expect(tabs(container)[1]!.textContent).toBe("Cargo.toml");
+
+    // The kind at its end, which is the one thing an icon there says: this one
+    // is a file rather than a shell.
+    expect(
+      tabs(container)[1]!.querySelector("svg path")?.getAttribute("d"),
+    ).toBe(faFile.icon[4]);
+
+    // And it is the one showing, a file pressed being a file somebody is about
+    // to read.
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(
+      tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true"]);
+
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+
+    // And the read carried a version — a hash of the bytes, which is what a
+    // save will name itself as being over. The endpoint wrote this fixture, so
+    // what is asserted is the answer the pane is really handed.
+    expect(TEXT.version).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  /// And the register not answering does not take the files with it.
+  ///
+  /// The two halves of this group belong to different places: a shell is the
+  /// server's, and a file is this page's own once it has been read and typed
+  /// into. So a terminals read that failed is a line above what is open rather
+  /// than a line where what is open would have been — a tab still in the bar
+  /// and nothing behind it would be somebody's unsaved text put out of reach
+  /// by the other half of the pane.
+  it("keeps an open file reachable when the terminals cannot be read", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+      whenever(
+        TERMINALS_OF_IT,
+        json({ error: "this conversation's terminals could not be read" }, 503),
+      ),
+    );
+
+    press(container, "Cargo.toml");
+
+    // The line is drawn, and the file is open under it.
+    await waitFor(() =>
+      expect(said(container)).toContain(
+        "Could not read this conversation's terminals",
+      ),
+    );
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(tabs(container)).toHaveLength(1);
+    expect(tabs(container)[0]!.textContent).toBe("Cargo.toml");
+  });
+
+  /// And with nothing open behind it, the pane still offers the way to open
+  /// something: a read that ended in that line is a look that is over, so the
+  /// hint settles rather than waiting for a list that is not coming.
+  it("still offers a new terminal when the terminals cannot be read", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(
+        TERMINALS_OF_IT,
+        json({ error: "this conversation's terminals could not be read" }, 503),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`),
+      ).toBeTruthy(),
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`)
+        ?.textContent,
+    ).toContain("New terminal");
+  });
+
+  /// A picture is drawn in its tab rather than opened in the editor: the bytes
+  /// came with the reading, so there is nothing more to fetch.
+  it("draws a picture as a picture", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(PICTURE.path), json(codeImage)),
+    );
+
+    press(container, "icon.png");
+
+    const drawn = await waitFor(() => {
+      const found = container.querySelector<HTMLImageElement>(
+        `.${shell.detailsPane} .${codePane.picture} img`,
+      );
+
+      if (!found) {
+        throw new Error("nothing is drawn in the tab");
+      }
+
+      return found;
+    });
+
+    expect(drawn.getAttribute("src")).toBe(
+      `data:${PICTURE.media_type};base64,${PICTURE.base64}`,
+    );
+    // Read aloud as the file it is: an alt of nothing would be a picture a
+    // screen reader passes over without saying what was opened.
+    expect(drawn.getAttribute("alt")).toBe("icon.png");
+    expect(editor(container)).toBeNull();
+  });
+
+  /// And the two kinds there is nothing to draw of are each their own line: a
+  /// binary the server will not send, and a file over the size cap.
+  it("says why where there is nothing to draw", async () => {
+    for (const [answer, sentence] of [
+      ["Binary", FILE_REFUSAL.Binary],
+      ["TooLarge", FILE_REFUSAL.TooLarge],
+    ] as const) {
+      const { container, unmount } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(answer satisfies FileReading)),
+      );
+
+      press(container, "Cargo.toml");
+
+      await waitFor(() => expect(said(container)).toBe(sentence));
+      expect(editor(container)).toBeNull();
+
+      unmount();
+    }
+  });
+
+  /// And each of those lines is its own sentence rather than one "could not be
+  /// opened", because only the human can tell which of them they are looking
+  /// at — and the cap is named, the way the composer's own refusal names it.
+  it("words every reason a file draws nothing as the thing it is", () => {
+    expect(new Set(Object.values(FILE_REFUSAL)).size).toBe(
+      Object.keys(FILE_REFUSAL).length,
+    );
+
+    expect(FILE_REFUSAL.Binary).toContain("not text");
+    expect(FILE_REFUSAL.TooLarge).toContain("2 MB");
+    expect(FILE_REFUSAL.Missing).toContain("no longer");
+    expect(FILE_REFUSAL.NotAFile).toContain("folder");
+  });
+
+  /// A file in a read-only companion opens read-only and takes no typing: the
+  /// root's own flag, which is what saves a human finding out by typing.
+  it("opens a file in a read-only companion read-only", async () => {
+    const at = `${COMPANION_ROOT.path}/ASKING.md`;
+
+    const { container } = await expanded(
+      COMPANION_ROOT,
+      {
+        Listed: {
+          path: COMPANION_ROOT.path,
+          entries: [{ name: "ASKING.md", path: at, folder: false }],
+        },
+      } satisfies FolderListing,
+      whenever(
+        fileOf(at),
+        json({
+          Text: {
+            path: at,
+            version: "3f1a",
+            text: "# asking\n",
+            writable: false,
+          },
+        } satisfies FileReading),
+      ),
+    );
+
+    press(container, "ASKING.md");
+
+    await waitFor(() => expect(editor(container)?.value).toBe("# asking\n"));
+    expect(editor(container)!.readOnly).toBe(true);
+  });
+
+  /// And one in the conversation's own worktree is not, which is the other half
+  /// of the same sentence.
+  it("opens a file of the conversation's own worktree to be typed in", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(editor(container)!.readOnly).toBe(false);
+
+    // And what is typed is held in the buffer behind the tab rather than
+    // thrown away: the save of the next task is what this becomes.
+    fireEvent.input(editor(container)!, {
+      target: { value: "[workspace]\nmembers = []\n" },
+    });
+
+    await waitFor(() =>
+      expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+    );
+  });
+
+  /// The same file pressed twice is one buffer under one tab — there is one
+  /// group in this stage — so the second press turns to the tab it already has
+  /// rather than opening a second beside it.
+  it("turns to the tab a file already has rather than opening a second", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+    // Away to the terminal beside it, so that the second press has somewhere to
+    // come back from.
+    fireEvent.click(tabs(container)[0]!);
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["true", "false"]),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["false", "true"]),
+    );
+
+    expect(tabs(container)).toHaveLength(2);
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+  });
+
+  /// And the × at the end of a file's tab closes it, taking its reading with
+  /// it: there is nothing at the server to end, and opening it again is a fresh
+  /// reading of the disk the way expanding a folder is.
+  it("closes a file on its × and reads it afresh next time", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+    expect(crosses(container)[1]!.getAttribute("aria-label")).toBe(
+      "Close Cargo.toml",
+    );
+
+    fireEvent.click(crosses(container)[1]!);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(editor(container)).toBeNull();
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+  });
+
+  /// The editor is a chunk of its own, fetched because Code was opened and for
+  /// no other reason (ADR 0019, *Monaco, whole*). The rest of the workbench
+  /// never pays for it.
+  it("fetches the editor when Code first opens and not before", async () => {
+    withTerminals([1], whenever(folderOf(OWN_ROOT.path), json(codeFolder)));
+
+    const { history, container } = mount(`/conversations/${GRILLING.id}`);
+
+    // The Conversation's own page, drawn whole — the record, the sidebar, the
+    // header with the code icon on it — and nothing of the editor asked for.
+    await drawn(container, `.${shell.detailsPane}`);
+    expect(loading.times).toBe(0);
+
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
+
+    // And opening the pane is what asks for it, before anybody has pressed a
+    // file: the chunk is warmed by the pane so that a file pressed a moment
+    // later opens into an editor that is already here.
+    await waitFor(() => expect(loading.times).toBeGreaterThan(0));
+  });
+
+  /// And what a file is coloured in is the path it was read at, which is the
+  /// whole of how a language is chosen: Monaco registered every extension when
+  /// it registered every language, so a `.rs` file is Rust and a `.ts` file is
+  /// one the TypeScript service will answer about. Nothing on this side has a
+  /// table of extensions, and nothing on this side should ever grow one.
+  it("makes the buffer at the file's own path, which is what colours it", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
+    expect(made.model.path).toBe(TEXT.path);
+    expect(made.model.text).toBe(TEXT.text);
+
+    // And it is read aloud as the file it is showing. Left alone Monaco names
+    // its own typing *Editor content*, which says nothing about which file is
+    // open in it.
+    expect(made.opening.ariaLabel).toBe("Cargo.toml");
+  });
+
+  /// It follows the workbench's light and dark, which is the one thing about the
+  /// editor this stage sets: VS Code's own two themes, picked by the scheme the
+  /// browser is in and followed live — there is no theme switch anywhere in this
+  /// workbench, so the media query is both the setting and the only warning of a
+  /// change.
+  it("opens in the workbench's own theme and follows it into dark", async () => {
+    const scheme = theScheme(false);
+
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(theEditor().opening.theme).toBe(LIGHT);
+
+    scheme.into(true);
+
+    // Set on the package rather than on the editor, Monaco's themes being the
+    // package's — which is why what is read back is what it was last told
+    // rather than anything about the one editor open.
+    await waitFor(() => expect(themed.last).toBe(DARK));
+
+    scheme.into(false);
+    await waitFor(() => expect(themed.last).toBe(LIGHT));
+  });
+
+  /// And where the chunk never arrives, the tab says so. The editor comes over
+  /// the same network the rest of the workbench is on, so a tab that simply
+  /// stayed blank would be the pane saying nothing at all about one that had
+  /// gone.
+  it("says so where the editor could not be fetched", async () => {
+    refusing.chunk = true;
+
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(said(container)).toBe(NO_EDITOR));
+    expect(editor(container)).toBeNull();
+  });
+
+  /// And the editor is kept whole, which is the decision this stage is built on
+  /// (ADR 0019, *Monaco, whole*): the package's own root entry, which registers
+  /// every built-in language by itself, and the four bundled services beside it
+  /// — TypeScript and JavaScript, JSON, CSS, HTML.
+  ///
+  /// Read off the module rather than asked of a mounted editor, because the
+  /// suite deliberately mounts none: what this guards against is the import
+  /// being narrowed to a list of the languages somebody happened to think of,
+  /// which is exactly the diet ADR 0019 decided against.
+  it("imports the editor whole, with a worker for each of its services", () => {
+    // The package root, rather than one of the per-language entries under it.
+    expect(monacoModule).toContain('from "monaco-editor"');
+    expect(monacoModule).not.toMatch(/from "monaco-editor\/(?!\w+\/)/);
+
+    // And the five workers, which the package ships one file each of and Vite
+    // bundles from the `?worker` suffix. The TypeScript one carries the
+    // TypeScript compiler and is the weight a diet would take first; it stays.
+    for (const worker of [
+      "monaco-editor/editor/editor.worker?worker",
+      "monaco-editor/language/css/css.worker?worker",
+      "monaco-editor/language/html/html.worker?worker",
+      "monaco-editor/language/json/json.worker?worker",
+      "monaco-editor/language/typescript/ts.worker?worker",
+    ]) {
+      expect(monacoModule).toContain(worker);
+    }
+  });
+
+  /// Saving, which is explicit and is Ctrl+S: the dot on the dirty tab, the
+  /// write over the version the read handed over, and what a write over a file
+  /// that has moved since is answered with (ADR 0019, *Versioned reads, and a
+  /// stale write is refused*).
+  describe("and saving it", () => {
+    /// Where a file of this conversation is written back, which is the path it
+    /// was read at posted to: it is the same file, and a read and a write of
+    /// one thing are what a GET and a POST on one route are for.
+    const SAVING = `/api/ui/conversations/${GRILLING.id}/files/file`;
+
+    /// What a save that landed comes back as, out of the fixture the endpoint
+    /// wrote: the version the file now has, which is a hash of what went onto
+    /// the disk and is what the tab's next save names.
+    const WRITTEN = codeWritten as Extract<FileWritten, { Written: unknown }>;
+
+    /// The same file as the agent left it: another text, under another version.
+    ///
+    /// What a second read of it answers with, which is what both presses on the
+    /// bar make — one keeps what comes back and the other throws it away.
+    const THEIRS = {
+      Text: {
+        path: TEXT.path,
+        version: "3f1a",
+        text: '[workspace]\nmembers = ["crates/*"]\n',
+        writable: true,
+      },
+    } satisfies FileReading;
+
+    /// What the server answers each save with, in order — the last repeated,
+    /// the way `serving` repeats its own last answer.
+    ///
+    /// A sequence rather than one answer, because the bar is about the *second*
+    /// save: the first is refused for a file that moved, and what Keep mine is
+    /// for is the one after it landing.
+    function saves(...outcomes: FileWritten[]): Answer {
+      let taken = 0;
+
+      return whenever(
+        SAVING,
+        () => json(outcomes[Math.min(taken++, outcomes.length - 1)])(),
+        "POST",
+      );
+    }
+
+    /// And what each read of that file answers with, in the same shape and for
+    /// the same reason: Reload is a second reading of a file that has moved
+    /// since the first.
+    function reads(...kinds: FileReading[]): Answer {
+      let taken = 0;
+
+      return whenever(fileOf(TEXT.path), () =>
+        json(kinds[Math.min(taken++, kinds.length - 1)])(),
+      );
+    }
+
+    /// Every save that went out, as the bodies they were sent with — which is
+    /// where the version a write names itself as being over is read back from.
+    function saved(
+      fetching: ReturnType<typeof serving>,
+    ): Array<{ path: string; version: string; text: string }> {
+      return fetching.mock.calls
+        .filter(
+          ([path, init]) => String(path) === SAVING && init?.method === "POST",
+        )
+        .map(
+          ([, init]) =>
+            JSON.parse(String(init?.body)) as {
+              path: string;
+              version: string;
+              text: string;
+            },
+        );
+    }
+
+    /// The dot on a tab holding text that is not on the disk. Read off the tab
+    /// rather than off the pane, a pane with several files open being one where
+    /// which tab wears it is the whole point.
+    function dots(container: ParentNode): Element[] {
+      return [
+        ...container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+        ),
+      ];
+    }
+
+    /// The bar a refused stale save puts up.
+    function bar(container: ParentNode): HTMLElement | null {
+      return container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.moved}`,
+      );
+    }
+
+    function barred(container: ParentNode): Promise<HTMLElement> {
+      return waitFor(() => {
+        const up = bar(container);
+
+        if (!up) {
+          throw new Error("nothing is up about a refused save");
+        }
+
+        return up;
+      });
+    }
+
+    /// And one of its two presses, by what it says — which is how a human finds
+    /// one.
+    async function offers(
+      container: ParentNode,
+      named: string,
+    ): Promise<HTMLButtonElement> {
+      const found = [
+        ...(await barred(container)).querySelectorAll<HTMLButtonElement>(
+          "button",
+        ),
+      ].find((one) => one.textContent === named);
+
+      if (!found) {
+        throw new Error(`the bar has no ${named}`);
+      }
+
+      return found;
+    }
+
+    /// The card a × on a tab holding unsaved text puts up, or nothing where
+    /// nothing is being asked about. On the body, a `dialog` being drawn in the
+    /// top layer.
+    function card(): HTMLDialogElement | null {
+      return document.body.querySelector<HTMLDialogElement>(
+        `dialog.${codePane.confirming}`,
+      );
+    }
+
+    function carded(): Promise<HTMLDialogElement> {
+      return waitFor(() => {
+        const up = card();
+
+        if (!up) {
+          throw new Error("nothing is being asked about");
+        }
+
+        return up;
+      });
+    }
+
+    /// Ctrl+S, fired where the caret really is. The pane listens on the
+    /// document — Monaco binds nothing to this itself — so what is asked here
+    /// is that the press reaches it from inside the editor.
+    function ctrlS(container: ParentNode): void {
+      fireEvent.keyDown(editor(container) ?? document.body, {
+        key: "s",
+        ctrlKey: true,
+      });
+    }
+
+    /// The workbench with one file of the conversation's own worktree open in a
+    /// tab, and whatever the reads and the saves are to be answered with.
+    async function opened(...answers: Parameters<typeof serving>) {
+      const mounted = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        reads(codeFile as FileReading),
+        ...answers,
+      );
+
+      press(mounted.container, "Cargo.toml");
+      await waitFor(() =>
+        expect(editor(mounted.container)?.value).toBe(TEXT.text),
+      );
+
+      return mounted;
+    }
+
+    /// Let a read that is in flight land.
+    ///
+    /// The one wait in here that is on the turn rather than on the page, and
+    /// **Keep mine** is why: it takes the disk's version and keeps the human's
+    /// text, so the bar goes at the press and nothing else about the tab moves
+    /// — there is no mark for a test to wait on, and the thing that changed is
+    /// the version the *next* save will name.
+    function lands(): Promise<void> {
+      return new Promise((done) => setTimeout(done, 0));
+    }
+
+    /// Type into the editor, which is what makes a tab dirty.
+    async function types(container: ParentNode, text: string): Promise<void> {
+      fireEvent.input(editor(container)!, { target: { value: text } });
+      await waitFor(() => expect(editor(container)?.value).toBe(text));
+    }
+
+    /// A tab with text in it that is not on the disk wears a dot; Ctrl+S writes
+    /// it; and the dot goes when the write lands.
+    it("marks a dirty tab, and Ctrl+S writes it to disk", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      // Nothing typed, nothing to say: a file as the disk has it is a tab like
+      // any other.
+      expect(dots(container)).toHaveLength(0);
+
+      await types(container, "[workspace]\nmembers = []\n");
+
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      // And it is said in words as well as drawn, so that a tab read aloud says
+      // which of them is holding something unsaved.
+      expect(dots(container)[0]!.getAttribute("aria-label")).toBe("unsaved");
+
+      ctrlS(container);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+      // What went up is the file, the version the read handed over, and the
+      // text as it stands — which is the whole of what a save is.
+      expect(saved(fetching)[0]).toEqual({
+        path: TEXT.path,
+        version: TEXT.version,
+        text: "[workspace]\nmembers = []\n",
+      });
+
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+      expect(bar(container)).toBeNull();
+
+      // And what came back is a version of what was written, which the endpoint
+      // itself wrote this fixture to say: a hash of the bytes, the way the read
+      // above carries one.
+      expect(WRITTEN.Written.version).toMatch(/^[0-9a-f]{64}$/);
+      expect(WRITTEN.Written.version).not.toBe(TEXT.version);
+    });
+
+    /// And the version the save answered with is what the next one is over: the
+    /// tab knows what it has just written, rather than reading the file again
+    /// to find out.
+    it("saves the next time over the version the last save answered with", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      await types(container, "one\n");
+      ctrlS(container);
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+
+      await types(container, "two\n");
+      ctrlS(container);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(2));
+      expect(saved(fetching)[1]).toEqual({
+        path: TEXT.path,
+        version: WRITTEN.Written.version,
+        text: "two\n",
+      });
+
+      // And the file was never read again: a save answers with the version, so
+      // there is nothing to go back for.
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+    });
+
+    /// A Ctrl+S on a file with nothing to save writes nothing. The press is a
+    /// reflex rather than a request, and a write that changed nothing would
+    /// still move the file under every watcher there is.
+    it("writes nothing where there is nothing to write", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      ctrlS(container);
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      expect(saved(fetching)).toHaveLength(0);
+
+      // And typed into and typed back is the same thing: dirty is the buffer
+      // against what the disk said rather than a flag somebody set.
+      await types(container, "changed\n");
+      await types(container, TEXT.text);
+
+      expect(dots(container)).toHaveLength(0);
+      ctrlS(container);
+      expect(saved(fetching)).toHaveLength(0);
+    });
+
+    /// A save over a file the agent has changed since is refused, and the bar
+    /// is what the pane draws over it — with nothing written and the human's
+    /// text where it was.
+    it("puts the Reload / Keep mine bar up over a refused stale save", async () => {
+      const { container, fetching } = await opened(
+        saves("Stale"),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      const up = await barred(container);
+
+      expect(up.textContent).toContain(MOVED);
+      expect(await offers(container, "Reload")).toBeTruthy();
+      expect(await offers(container, "Keep mine")).toBeTruthy();
+
+      // Nothing was lost and nothing is clean: the text is still the human's,
+      // and the dot is still on the tab.
+      expect(editor(container)!.value).toBe("mine\n");
+      expect(dots(container)).toHaveLength(1);
+      expect(saved(fetching)).toHaveLength(1);
+    });
+
+    /// **Keep mine** keeps the text and takes the disk's version, so that the
+    /// next save is a write over what is really there — and lands.
+    ///
+    /// The version comes off a fresh read rather than off the refusal, which is
+    /// why the press is a request: what the disk holds is what the tab has to
+    /// measure the editor against, and the refusal never said.
+    it("saves over the version the disk now has once Keep mine is pressed", async () => {
+      const { container, fetching } = await opened(
+        reads(codeFile as FileReading, THEIRS),
+        saves("Stale", WRITTEN),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      fireEvent.click(await offers(container, "Keep mine"));
+
+      // The bar goes, the text stays, and the tab is still dirty — there is
+      // still something here that is not on the disk.
+      await waitFor(() => expect(bar(container)).toBeNull());
+      await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+      await lands();
+
+      expect(editor(container)!.value).toBe("mine\n");
+      expect(dots(container)).toHaveLength(1);
+
+      ctrlS(container);
+
+      // And the save after it names the version that read handed over, which is
+      // what makes it land.
+      await waitFor(() => expect(saved(fetching)).toHaveLength(2));
+      expect(saved(fetching)[1]).toEqual({
+        path: TEXT.path,
+        version: "3f1a",
+        text: "mine\n",
+      });
+
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+    });
+
+    /// And **Reload** takes the disk's text, which is the same read with the
+    /// other thing done to it: the agent's text, the version that goes with it,
+    /// and a tab that is clean over both.
+    it("takes the disk's text once Reload is pressed", async () => {
+      const { container, fetching } = await opened(
+        reads(codeFile as FileReading, THEIRS),
+        saves("Stale"),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+      await barred(container);
+
+      fireEvent.click(await offers(container, "Reload"));
+
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe(THEIRS.Text.text),
+      );
+
+      // The file was read again, which is the whole of what either press is:
+      // the refusal carried nothing to work from, and what is drawn is what
+      // the disk answered with.
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2);
+      expect(bar(container)).toBeNull();
+      expect(dots(container)).toHaveLength(0);
+
+      // And nothing was written by either press: the bar is about which text
+      // the next save is of.
+      expect(saved(fetching)).toHaveLength(1);
+    });
+
+    /// A save into a read-only root is refused with its own sentence, which is
+    /// the one refusal a write has that a read does not.
+    it("says so where the root takes no writes", async () => {
+      const { container } = await opened(saves("ReadOnly"));
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      await waitFor(() => expect(said(container)).toBe(WRITE_REFUSAL.ReadOnly));
+
+      // A sentence rather than the bar: there is nothing to choose between, and
+      // the text is still the human's.
+      expect(bar(container)).toBeNull();
+      expect(dots(container)).toHaveLength(1);
+    });
+
+    /// And each of those lines is its own sentence rather than one "could not
+    /// be saved", for the reason every list of refusals in this pane has one
+    /// apiece: only the human can tell which of them they are looking at.
+    it("words every reason a save was refused as the thing it is", () => {
+      expect(new Set(Object.values(WRITE_REFUSAL)).size).toBe(
+        Object.keys(WRITE_REFUSAL).length,
+      );
+
+      expect(WRITE_REFUSAL.ReadOnly).toContain("only reads");
+      expect(WRITE_REFUSAL.RootGone).toContain("no longer on disk");
+      expect(WRITE_REFUSAL.Missing).toContain("no longer there");
+    });
+
+    /// And closing a tab with unsaved text in it asks first, which is the other
+    /// half of the rule a busy shell's confirm is the first of.
+    it("asks before a × throws unsaved text away", async () => {
+      const { container } = await opened();
+
+      await types(container, "mine\n");
+
+      fireEvent.click(crosses(container)[1]!);
+
+      const up = await carded();
+
+      // Which file it is, so that a pane with several open says which of them
+      // is about to lose its text.
+      expect(up.textContent).toContain("Cargo.toml");
+
+      // And nothing has happened: the tab is where it was, with its text in it.
+      expect(tabs(container)).toHaveLength(2);
+
+      // The way out of it keeps both.
+      fireEvent.click(
+        up.querySelector<HTMLButtonElement>(
+          `.${codePane.confirmingOut} button.${codePane.secondary}`,
+        )!,
+      );
+
+      await waitFor(() => expect(card()).toBeNull());
+      expect(tabs(container)).toHaveLength(2);
+      expect(editor(container)!.value).toBe("mine\n");
+    });
+
+    /// And the press inside it closes the tab, text and all.
+    it("closes the tab once the card is answered", async () => {
+      const { container } = await opened();
+
+      await types(container, "mine\n");
+      fireEvent.click(crosses(container)[1]!);
+
+      fireEvent.click(
+        (await carded()).querySelector<HTMLButtonElement>(
+          `.${codePane.confirmingOut} button:not(.${codePane.secondary})`,
+        )!,
+      );
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(editor(container)).toBeNull();
+    });
+
+    /// A tab with nothing unsaved in it asks nothing at all, which is what
+    /// keeps the confirm worth having.
+    it("asks nothing where there is nothing to lose", async () => {
+      const { container } = await opened();
+
+      fireEvent.click(crosses(container)[1]!);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(card()).toBeNull();
+    });
+  });
+
+  /// And what happens to all of it when the pane is swapped for another and
+  /// opened again — which is the ordinary way of working in this workbench,
+  /// the details pane being where every Event is read too.
+  ///
+  /// The pane goes when it is not the one showing: the frame draws one details
+  /// pane at a time and takes down the rest. So what Code holds is held above
+  /// it — see `src/workbench/keeping.ts` — and the swap does not reach it.
+  /// Which is only true of what belongs to this page. A shell belongs to the
+  /// server, so the tabs over the terminals are settled against the register on
+  /// every opening (ADR 0019, *Tabs and groups*).
+  describe("and the pane swapped away and back", () => {
+    /// Type into the editor, which is what makes a tab dirty.
+    async function types(container: ParentNode, text: string): Promise<void> {
+      fireEvent.input(editor(container)!, { target: { value: text } });
+      await waitFor(() => expect(editor(container)?.value).toBe(text));
+    }
+
+    /// Away to another of the conversation's details panes and back again,
+    /// which is the swap: the pane comes down on the way out and is mounted
+    /// afresh on the way in.
+    async function away(
+      container: ParentNode,
+      history: { set: (to: { value: string }) => void },
+    ): Promise<void> {
+      history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${shell.detailsPane} .${codePane.body}`),
+        ).toBeNull(),
+      );
+
+      history.set({ value: `/conversations/${GRILLING.id}/code` });
+      await drawn(container, `.${shell.detailsPane} .${codePane.body}`);
+    }
+
+    /// The dot on a tab holding text that is not on the disk.
+    function dots(container: ParentNode): Element[] {
+      return [
+        ...container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+        ),
+      ];
+    }
+
+    /// The whole of the first acceptance: the tabs, which one is showing, and
+    /// the text nobody has saved are all where they were left.
+    ///
+    /// And the file is not read again. What is drawn is the reading the tab
+    /// already had — which it has to be, the buffer being text typed over that
+    /// version: a fresh read would be a fresh version, and the dirty comparison
+    /// under the dot would be against text the human never saw.
+    it("finds the tabs, the one showing and the unsaved text", async () => {
+      const { container, history, fetching } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      await types(container, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      await away(container, history);
+
+      // The tab bar as it was: the shell that was live, and the file after it.
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Cargo.toml",
+      ]);
+
+      // The one that was showing, still showing — and the text that was typed
+      // into it, still in it and still unsaved.
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["false", "true"]);
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+    });
+
+    /// And the tree comes back open where it was left, which is the other
+    /// thing the human did with this pane: the walk down to a file.
+    ///
+    /// Held above the swap with the tabs and for their reason. A tree back at
+    /// its roots after every Event would be that walk made again, and the
+    /// folder is not read a second time either — a swap is not an expand, and
+    /// what is drawn is the listing that was last read.
+    it("finds the tree's folders still open, and reads none of them again", async () => {
+      const { container, history, fetching } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+      );
+
+      const opened = files(container).length;
+      expect(opened).toBeGreaterThan(0);
+      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+
+      await away(container, history);
+
+      await waitFor(() => expect(files(container)).toHaveLength(opened));
+      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    });
+
+    /// And a folder shut before the swap stays shut while the one above it
+    /// stays open, the keeping being what is open rather than what was ever
+    /// opened.
+    it("keeps one folder open and the one collapsed under it shut", async () => {
+      const UNDER = `${OWN_ROOT.path}/crates`;
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(
+          folderOf(UNDER),
+          json({
+            Listed: {
+              path: UNDER,
+              entries: [{ folder: false, name: "server", path: `${UNDER}/server` }],
+            },
+          } satisfies FolderListing),
+        ),
+      );
+
+      /// The folder rows of the tree, by what each is called.
+      const folders = (): HTMLButtonElement[] => [
+        ...container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      const under = (): HTMLButtonElement =>
+        folders().find((row) => row.textContent === "crates")!;
+
+      // Open the folder inside the root, then shut it again — so what is left
+      // is one folder open and one that was and is not.
+      fireEvent.click(under());
+      await waitFor(() => expect(under().getAttribute("aria-expanded")).toBe("true"));
+
+      fireEvent.click(under());
+      await waitFor(() =>
+        expect(under().getAttribute("aria-expanded")).toBe("false"),
+      );
+
+      await away(container, history);
+
+      // The root is still open — its rows are drawn — and the folder under it
+      // is still shut.
+      await waitFor(() => expect(under()).toBeTruthy());
+      expect(
+        folders()
+          .find((row) => row.textContent?.startsWith(OWN_ROOT.repo))!
+          .getAttribute("aria-expanded"),
+      ).toBe("true");
+      expect(under().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    /// A file closed before the swap stays closed, which is the other half of
+    /// the same thing: what comes back is what was left rather than what was
+    /// ever opened.
+    it("leaves a file that was closed closed", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      fireEvent.click(crosses(container)[1]!);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(tabs(container)[0]!.textContent).toBe("Terminal 1");
+    });
+
+    /// And the terminals are settled against the register rather than kept: a
+    /// shell that ended while the pane was down has nothing left to attach to,
+    /// so its tab is dropped rather than drawn.
+    ///
+    /// Which is what makes the keeping safe to hold at all. The files are this
+    /// page's and come back untouched; the shells are the server's, and the
+    /// list is what says which of them are still running.
+    it("drops a terminal whose shell has ended since, and keeps the rest", async () => {
+      let live = [1, 2];
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+        // Answered afresh on every ask rather than fixed at mount, the whole
+        // question here being what the second opening is told.
+        whenever(TERMINALS_OF_IT, () => json(idle(live))()),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(3));
+
+      // The second shell exits while somebody is reading an Event.
+      live = [2];
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 2",
+        "Cargo.toml",
+      ]);
+    });
+
+    /// And a shell opened somewhere else since — another device, another tab of
+    /// this browser — arrives at the end of the bar, the register being what
+    /// says which shells there are.
+    it("takes up a shell the register has and this page has not", async () => {
+      let live = [1];
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+        whenever(TERMINALS_OF_IT, () => json(idle(live))()),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      live = [1, 4];
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(3));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Cargo.toml",
+        "Terminal 4",
+      ]);
+    });
+
+    /// And leaving the page with text nobody has saved warns, which is the
+    /// browser's own question rather than one of ours: nothing on a page can
+    /// hold up its own unloading, and saying there is something to lose is the
+    /// whole of what a listener may do about it.
+    ///
+    /// Asked from above the pane, so that it is still asked while Code is not
+    /// the pane showing — a buffer left dirty and an Event opened over it is
+    /// still text about to go.
+    it("warns before the page goes with unsaved text in it", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      // Nothing typed, nothing to warn about: a page with a file open as the
+      // disk has it is a page with nothing to lose.
+      expect(leaves()).toBe(false);
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+      expect(leaves()).toBe(false);
+
+      await types(container, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      expect(leaves()).toBe(true);
+
+      // And from the Event beside it, the pane being down saying nothing about
+      // whether there is anything in it.
+      history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${shell.detailsPane} .${codePane.body}`),
+        ).toBeNull(),
+      );
+
+      expect(leaves()).toBe(true);
+    });
+
+    /// Leaving the page, as the browser asks about it: the event is cancelled
+    /// where there is something to lose, and goes through where there is not.
+    function leaves(): boolean {
+      return !window.dispatchEvent(
+        new Event("beforeunload", { cancelable: true }),
+      );
+    }
+  });
+});
+
+/// The maximise toggle in Code's header: the press that hides the sidebar and
+/// the Timeline so the editor has the window, and brings them back again.
+///
+/// An editor wants room, and the details pane is what the two panes beside it
+/// leave. What it is *not* is a second frame: the widths, the dividers and the
+/// ways between the panes all live in the one this workbench is drawn in, so
+/// maximising is that frame being handed fewer panes (ADR 0019, *One pane,
+/// replacing the Terminal*).
+///
+/// Remembered per device beside the pane widths, and for the same reason:
+/// how the frame stands in front of this human is theirs, and a phone that gave
+/// Code the window has said nothing about a laptop's columns.
+describe("the maximise toggle in the code pane", () => {
+  /// Where the toggle's state is kept, asked for by the name a browser would
+  /// find it under rather than through the module that writes it — the way the
+  /// widths beside it are asked for in `sizing.test.tsx`.
+  const MAXIMISED = "verkstead.pane-maximised";
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  /// The window this test is being read on, said the only way the frame asks:
+  /// which of its two breakpoints hold. Every listener spelling, for the reason
+  /// the setup's own stub has both — xterm is mounted in this pane and reaches
+  /// for whichever it finds.
+  function windowIs(width: "narrow" | "wide"): void {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: width === "wide" && query.startsWith("(min-width:"),
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent: () => false,
+    }));
+  }
+
+  /// Code open on such a window, with its live shell attached.
+  ///
+  /// Waited for down to the socket rather than to the pane: the tab the
+  /// register's shell comes back as is what opens one, and a test that pressed
+  /// and ended before it had would leave an attach in flight behind it.
+  async function opened(width: Parameters<typeof windowIs>[0] = "wide") {
+    windowIs(width);
+    withTerminals([1]);
+
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+    await drawn(
+      mounted.container,
+      `.${shell.detailsPane} .${attachedPane.screen}`,
+    );
+
+    return mounted;
+  }
+
+  function toggle(container: ParentNode): HTMLButtonElement | null {
+    return container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.maximise}`,
+    );
+  }
+
+  /// Which of the frame's panes are in the document at all. A level the frame
+  /// was handed nothing for is not drawn rather than drawn empty, which is what
+  /// maximising asks of it.
+  function panes(container: ParentNode): string[] {
+    return [
+      [shell.conversationsPane, "conversations"],
+      [shell.middlePane, "timeline"],
+      [shell.detailsPane, "details"],
+    ]
+      .filter(([name]) => container.querySelector(`.${name}`) !== null)
+      .map(([, said]) => said!);
+  }
+
+  /// Off when Code first opens, whatever the pane held last time.
+  it("stands off, with the three panes up", async () => {
+    const { container } = await opened();
+
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("false");
+    expect(panes(container)).toEqual(["conversations", "timeline", "details"]);
+  });
+
+  /// And the press takes the two panes beside the editor away, the details pane
+  /// taking the window they were standing in.
+  it("takes the sidebar and the timeline away, and gives them back", async () => {
+    const { container } = await opened();
+
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("true");
+
+    // And the way out of the mode is the press that made it, there being
+    // nothing else on the screen to press.
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() =>
+      expect(panes(container)).toEqual([
+        "conversations",
+        "timeline",
+        "details",
+      ]),
+    );
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And what it was left at is this device's, so a reload comes back to it.
+  it("is remembered per device, and survives a reload", async () => {
+    const first = await opened();
+
+    fireEvent.click(toggle(first.container)!);
+    await waitFor(() => expect(panes(first.container)).toEqual(["details"]));
+
+    expect(localStorage.getItem(MAXIMISED)).toBe("on");
+
+    cleanup();
+
+    const again = await opened();
+
+    expect(toggle(again.container)!.getAttribute("aria-pressed")).toBe("true");
+    expect(panes(again.container)).toEqual(["details"]);
+
+    // And turning it off leaves nothing behind, the way the wrap setting does:
+    // off is what an untouched browser already answers.
+    fireEvent.click(toggle(again.container)!);
+    await waitFor(() => expect(localStorage.getItem(MAXIMISED)).toBeNull());
+  });
+
+  /// The mode is Code's own. Every other details pane is read beside the record
+  /// it belongs to, so opening one brings the panes back — and coming back to
+  /// Code finds the toggle where it was left.
+  it("gives the panes back to every other pane of the conversation", async () => {
+    const { container, history } = await opened();
+
+    fireEvent.click(toggle(container)!);
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+
+    history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+
+    await waitFor(() =>
+      expect(panes(container)).toEqual([
+        "conversations",
+        "timeline",
+        "details",
+      ]),
+    );
+
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+  });
+
+  /// And while the pane has the window there is nowhere beside it to go back
+  /// *to*: the Timeline is not drawn, so the way out of the level goes with it.
+  it("takes the way back out of the header with them", async () => {
+    const { container } = await opened();
+
+    await drawn(container, `.${shell.detailsPane} .${paneHead.back}`);
+
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${paneHead.back}`),
+      ).toBeNull(),
+    );
+  });
+
+  /// And on a window the details pane already has, the toggle is not drawn at
+  /// all: there is no pane beside this one for a press to hide, and a control
+  /// about a layout that is not standing is furniture.
+  it("is absent on a window that is walked one pane at a time", async () => {
+    const { container } = await opened("narrow");
+
+    expect(toggle(container)).toBeNull();
+
+    // And the pane is the one being read, which is what a narrow window is:
+    // there is nothing to maximise because there is nothing else up.
+    expect(panes(container)).toEqual([
+      "conversations",
+      "timeline",
+      "details",
+    ]);
   });
 });
 

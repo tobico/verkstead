@@ -65,6 +65,17 @@
 //! terminal comes off the register — after which every watcher's socket closes,
 //! which is the one thing a tab is ever told about a terminal ending.
 //!
+//! **And one of the four asks first.** A tab's × is the only ending a human
+//! makes about one terminal on purpose, and a shell with something other than
+//! itself in the foreground is one somebody is in the middle of working in —
+//! so that close is refused, with nothing done, until the press comes back
+//! saying they were asked (ADR 0019, *Tabs and groups*). Whether anybody is
+//! working in one is read off the pseudo-terminal this module holds: see
+//! [`busy`], which is the whole of that reading and why it is by name. The
+//! other three ask nobody — a shell that exited has ended itself, and a
+//! Conversation closing and a server stopping are endings of everything at
+//! once.
+//!
 //! **Not a record.** Nothing here writes to the store, puts anything on a
 //! Timeline or reaches a Share: a session's bytes are kept because they are the
 //! record of what an agent did, and a human's shell is the human doing
@@ -79,16 +90,20 @@
 /// answer — see [`shell`], which is the whole of the choosing.
 pub mod shell;
 
+/// And whether somebody is working in one, which is what a × on its tab asks
+/// before it ends the shell — see [`busy`].
+pub mod busy;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use axum::Json;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use tokio::sync::oneshot;
-use verkstead_render::TerminalOpened;
+use verkstead_render::{TerminalClosed, TerminalOpened, TerminalView};
 
 use crate::AppState;
 use crate::capture::Reading;
@@ -150,18 +165,33 @@ struct Held {
     live: HashMap<i64, Watched>,
 }
 
-/// One live terminal, as the register holds it: what it is drawing, and the two
-/// words that end it.
+/// One live terminal, as the register holds it: what it is drawing, what it is
+/// running on, what is running on it, and the two words that end it.
 ///
-/// The three travel together for the reason a session's [`Launched`] does: a
-/// Screen nothing can end is a shell nobody can close, and a word to end one
-/// with nothing to wait on would be a Conversation closing over a Worktree its
-/// shell is still standing in.
+/// They travel together for the reason a session's [`Launched`] does: a Screen
+/// nothing can end is a shell nobody can close, and a word to end one with
+/// nothing to wait on would be a Conversation closing over a Worktree its shell
+/// is still standing in.
 ///
 /// [`Launched`]: crate::sessions
 struct Watched {
     /// What it is drawing, for anybody who wants to watch — see [`Live`].
     screen: Live,
+
+    /// The pseudo-terminal it is running on, which is where whether anybody is
+    /// working in it is read from — see [`busy`].
+    ///
+    /// The Screen is holding the same one and the relay a third time: it is an
+    /// [`Arc`] shared three ways rather than three terminals, so the register
+    /// keeping one costs a clone and is what gives the close something to read.
+    terminal: Arc<Terminal>,
+
+    /// And what the shell in it is called, which is the other half of that
+    /// reading: busy is the foreground being something other than *this*.
+    ///
+    /// The name rather than the path, taken as the kernel takes a `comm` — see
+    /// [`busy::named`], and [`busy`] for why a name and not a pid.
+    shell: String,
 
     /// Word to the relay that this terminal is to end, which it answers with a
     /// hangup and then a kill — see [`follow`].
@@ -178,6 +208,12 @@ struct Watched {
 }
 
 impl Watched {
+    /// Whether something other than its shell is in the foreground of it, which
+    /// is what a × on its tab asks before it ends anything — see [`busy`].
+    fn busy(&self) -> bool {
+        busy::of(&self.terminal, &self.shell)
+    }
+
     /// Tell the relay this terminal is to end, and hand back what says it has.
     ///
     /// Split from the waiting so that a Conversation with several can hang them
@@ -198,17 +234,32 @@ impl Terminals {
         Terminals::default()
     }
 
-    /// The numbers of the terminals still live on this Conversation, oldest
-    /// first — which is the order they were opened in.
-    pub(crate) fn live(&self, conversation_id: i64) -> Vec<i64> {
+    /// The terminals still live on this Conversation, oldest first — which is
+    /// the order they were opened in — each with whether anybody is working in
+    /// it.
+    ///
+    /// The flag is read here rather than kept: it is a fact about what the shell
+    /// is doing this moment, and a pane that loaded an hour ago is holding an
+    /// hour-old answer whatever this side does. What it is for is the tab bar
+    /// having something to say at all; the reading a close acts on is the
+    /// close's own — see [`Terminals::end`].
+    pub(crate) fn live(&self, conversation_id: i64) -> Vec<TerminalView> {
         let open = self.held();
 
         let Some(held) = open.get(&conversation_id) else {
             return Vec::new();
         };
 
-        let mut live: Vec<i64> = held.live.keys().copied().collect();
-        live.sort_unstable();
+        let mut live: Vec<TerminalView> = held
+            .live
+            .iter()
+            .map(|(&number, watched)| TerminalView {
+                number,
+                busy: watched.busy(),
+            })
+            .collect();
+
+        live.sort_unstable_by_key(|terminal| terminal.number);
         live
     }
 
@@ -248,21 +299,55 @@ impl Terminals {
     /// after it: a tab closing wants the socket under it closed, and a
     /// Conversation closing takes away the Worktree the shell was standing in.
     ///
-    /// Nothing is refused for. A number nothing is holding is a terminal that
-    /// has already ended, which is this asked for and already done.
-    pub(crate) async fn end(&self, conversation_id: i64, number: i64) {
-        let taken = self
-            .held()
-            .get_mut(&conversation_id)
-            .and_then(|held| held.live.remove(&number));
+    /// **Unless somebody is working in it and nobody has said to go ahead.**
+    /// `asked` is the human having been asked and having said yes, which is
+    /// what the second press of a × on a busy tab carries; without it, a
+    /// terminal with something other than its shell in the foreground is left
+    /// exactly as it was and [`TerminalClosed::Busy`] is what comes back. The
+    /// reading is taken here, at the moment of the press, rather than off the
+    /// list the pane loaded with — see [`busy`].
+    ///
+    /// Nothing else is refused for. A number nothing is holding is a terminal
+    /// that has already ended, which is this asked for and already done, and is
+    /// [`TerminalClosed::Closed`] whether or not anybody was asked.
+    pub(crate) async fn end(
+        &self,
+        conversation_id: i64,
+        number: i64,
+        asked: bool,
+    ) -> TerminalClosed {
+        let taken = {
+            let mut open = self.held();
+
+            let Some(held) = open.get_mut(&conversation_id) else {
+                return TerminalClosed::Closed;
+            };
+
+            // Read while it is still on the register and taken off in the same
+            // hold, so that nothing can come between the judgement and the
+            // ending it is the judgement about.
+            if !asked && held.live.get(&number).is_some_and(Watched::busy) {
+                tracing::info!(
+                    conversation_id,
+                    number,
+                    "a terminal was not closed: something other than its shell is running in it"
+                );
+
+                return TerminalClosed::Busy;
+            }
+
+            held.live.remove(&number)
+        };
 
         let Some(watched) = taken else {
-            return;
+            return TerminalClosed::Closed;
         };
 
         let _ = watched.hung_up().await;
 
         tracing::info!(conversation_id, number, "a terminal was closed");
+
+        TerminalClosed::Closed
     }
 
     /// And every one this Conversation has, which is what its close does — see
@@ -386,14 +471,19 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             // Said twice: it is the command the Sandbox runs, and it is what
             // `SHELL` names inside — so what the human is typing into and what
             // anything they start reads out of the environment are one shell.
+            //
+            // Three times, counting what comes back beside the sandbox: the
+            // register keeps what the shell is *called*, because that is what
+            // the busy check has to compare a foreground process against — see
+            // [`busy`].
             agents
                 .sandboxed(&conversation, &profile, &argv)
-                .map(|(sandbox, argv)| (sandbox.shelled(&chosen), argv))
+                .map(|(sandbox, argv)| (sandbox.shelled(&chosen), argv, busy::named(&chosen)))
         }
     })
     .await?;
 
-    let Some((sandbox, argv)) = built else {
+    let Some((sandbox, argv, named)) = built else {
         tracing::error!(
             conversation_id,
             "there is no sandbox to open a terminal in, so none was opened"
@@ -473,6 +563,8 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         conversation_id,
         Watched {
             screen: screen.clone(),
+            terminal: terminal.clone(),
+            shell: named,
             closing,
             ended,
         },
@@ -714,8 +806,21 @@ pub(crate) async fn attach(
     })
 }
 
+/// Whether the human has been asked about a busy shell and said to go ahead.
+///
+/// `?asked=true` on the close, and nothing at all on the first press — which is
+/// what makes asking the default rather than something a careless caller has to
+/// remember to want. Read off the query rather than a body because a delete
+/// carries none.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct Asked {
+    /// Said by the press that comes back after the confirm. Absent is no, and
+    /// so is a value that is not a yes.
+    asked: Option<bool>,
+}
+
 /// `DELETE /api/ui/conversations/{id}/terminals/{n}` — close one, which is what
-/// the row on a tab's menu asks for.
+/// the × at the end of its tab asks for.
 ///
 /// The shell is hung up and then killed where it lingers, and the terminal comes
 /// off the register — after which every watcher's socket closes under them,
@@ -727,21 +832,33 @@ pub(crate) async fn attach(
 /// Conversation closed the moment after a tab was is a Worktree with nothing
 /// standing in it.
 ///
-/// Nothing to answer with and nothing to be refused for. A number nothing is
-/// holding is a shell that has already ended, which is a close that has already
-/// happened — and a Conversation this server never opened one for is the same
-/// answer for the same reason.
+/// **And refused while somebody is working in it**, until the press comes back
+/// saying they were asked: a shell with something other than itself in the
+/// foreground answers [`TerminalClosed::Busy`] and goes on running, and
+/// `?asked=true` is the human having said yes to the card the pane drew
+/// (ADR 0019, *Tabs and groups*). A platform that cannot tell reads busy, so
+/// every close there asks — see [`busy`].
+///
+/// Nothing else is refused for. A number nothing is holding is a shell that has
+/// already ended, which is a close that has already happened — and a
+/// Conversation this server never opened one for is the same answer for the same
+/// reason.
 pub(crate) async fn close(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, String)>,
+    Query(asked): Query<Asked>,
 ) -> HttpResponse {
     // Read as permissively as the attach above, and for the same reason: a pair
     // of ids that name no numbers name no terminal.
     let (Ok(id), Ok(number)) = (id.parse::<i64>(), number.parse::<i64>()) else {
-        return StatusCode::NO_CONTENT.into_response();
+        return Json(TerminalClosed::Closed).into_response();
     };
 
-    state.terminals.end(id, number).await;
-
-    StatusCode::NO_CONTENT.into_response()
+    Json(
+        state
+            .terminals
+            .end(id, number, asked.asked == Some(true))
+            .await,
+    )
+    .into_response()
 }

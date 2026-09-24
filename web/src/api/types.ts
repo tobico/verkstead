@@ -1947,6 +1947,198 @@ export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * What one file of one of those roots is, read — or the named reason it is
+ * not drawn.
+ *
+ * **A read says which of four kinds of thing it read**
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Monaco, whole*):
+ * text, which opens in the editor; an image, which is previewed in its tab;
+ * any other binary, which is a line saying so; and a file over the size cap,
+ * which is another. The kinds are the server's reading rather than the
+ * viewer's guess, because the bytes are the server's and the whole point of
+ * the last two is that they never cross the wire.
+ *
+ * **And a read carries a version**, which is a hash of the bytes it read: a
+ * [`FileWrite`] names the version it is over, and a write over a file the
+ * agent has changed since is refused (*Versioned reads, and a stale write is
+ * refused*). On the text alone, that being the only kind anything writes back.
+ *
+ * The refusals are [`FolderListing`]'s, said about a file: each of them is a
+ * different sentence for the human and none of them is a status code.
+ */
+export type FileReading = { "Text": { 
+/**
+ * The file this read, as it was asked for — the folder listing's own
+ * rule, and for its reason: a path answered back through a resolution
+ * would read as somewhere else on a machine whose temporary directory
+ * is a symlink.
+ */
+path: string, 
+/**
+ * A hash of the bytes that were read, which a write names itself as
+ * being over.
+ *
+ * Of the bytes rather than of the text, so that what a write is
+ * measured against is what is on the disk: a file is read and hashed
+ * in one pass, and the same pass is what a save compares against.
+ */
+version: string, 
+/**
+ * What is in it.
+ */
+text: string, 
+/**
+ * Whether the root it is in can be written.
+ *
+ * The root's own flag rather than the file's mode: a read-only
+ * companion is checked out detached and nothing in it is to be
+ * written, whatever its permissions happen to say. A file that opens
+ * read-only takes no typing, which is what saves a human finding out
+ * by typing.
+ */
+writable: boolean, } } | { "Image": { path: string, 
+/**
+ * What to draw it as — `image/png` and the rest — read off the name.
+ *
+ * The extension rather than the bytes: what a browser will draw is
+ * decided by this string, and a file named `.png` that is not one is
+ * a broken picture either way.
+ */
+media_type: string, 
+/**
+ * Its bytes, base64.
+ */
+base64: string, } } | "Binary" | "TooLarge" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unreadable": { why: string, } };
+
+/**
+ * One of them: which repository it is a checkout of, where it is, and what may
+ * be done in it.
+ */
+export type FileRoot = { 
+/**
+ * The Repo's name, which is what the row is called: a root is a checkout
+ * and what the human knows it by is the repository it is of.
+ */
+repo: string, 
+/**
+ * And the directory itself, which is what a folder listing under it is
+ * asked for by.
+ *
+ * As the Conversation recorded it rather than resolved: the tree asks for
+ * paths built out of this one, and a path answered back through a
+ * resolution would read as somewhere else on a machine whose temporary
+ * directory is a symlink.
+ */
+path: string, 
+/**
+ * Whether this is the Conversation's own, as against a companion's.
+ *
+ * The first root is always the own one where there is one, so this says
+ * nothing a reader could not count — except on a Conversation whose own
+ * Worktree has gone and whose companions have not, which is where a tree
+ * drawing the first row as the work's own would be lying.
+ */
+own: boolean, 
+/**
+ * And whether anything here can be written. False for a read-only
+ * companion, which is checked out detached and is a root to read.
+ */
+writable: boolean, };
+
+/**
+ * The Worktrees Code draws a root apiece for.
+ *
+ * The Conversation's own first and each companion's after it, which is the
+ * order the tree draws them in. Empty for a Conversation that has no
+ * checkouts — one before grilling starts, and one that has been closed — which
+ * is a tree with nothing in it rather than anything to report.
+ */
+export type FileRootsView = { roots: Array<FileRoot>, };
+
+/**
+ * A file as the human has it, written back over the version it was read at.
+ *
+ * The path, so that a write is bounded by exactly the roots a read is; the
+ * version, which is what the read handed over and what the disk is measured
+ * against; and the text itself. Three fields and no flag: there is one kind of
+ * write, and it is *this text, if the file is still the one I read*
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Versioned reads, and
+ * a stale write is refused*).
+ */
+export type FileWrite = { path: string, 
+/**
+ * The version the read carried, which is what this write is over.
+ *
+ * Not optional and never blank: a write that named no version would be
+ * last-writer-wins by the back door, and the collision is the point.
+ */
+version: string, 
+/**
+ * And what to put there.
+ */
+text: string, };
+
+/**
+ * What became of writing it.
+ *
+ * **A write over a version that has moved is refused**, which is what draws
+ * the bar in front of the human: *Reload* takes the disk's text, and *Keep
+ * mine* keeps theirs over the version the disk now has so that their next save
+ * lands. Both of them read the file afresh through the endpoint beside this
+ * one, and they differ only in what becomes of the text in the editor.
+ *
+ * So this refusal is a bare word where [`FileWritten::Written`] carries a
+ * version, and the asymmetry is the point: after a write that landed the
+ * viewer knows what is on the disk, because it is what it just sent. After one
+ * that was refused it does not, and a version handed over without the text it
+ * belongs to would be half an answer — enough for the next save to land, and
+ * not enough for the viewer to say whether the editor still differs from the
+ * disk at all.
+ *
+ * The rest are [`FileReading`]'s refusals said about a write, plus the one
+ * that is a write's alone: a root that takes none. Each is a sentence for the
+ * human rather than a status code, the way every other refusal in this module
+ * is.
+ */
+export type FileWritten = { "Written": { version: string, } } | "Stale" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unwritable": { why: string, } };
+
+/**
+ * One thing in a folder.
+ *
+ * The name and the whole path both, for the reason a browse's entry carries
+ * both: the name is the row, and the path is what the next listing — or, from
+ * the stage after this one, the read that opens the file — is asked for.
+ */
+export type FolderEntry = { name: string, 
+/**
+ * Where it is: the folder that was asked for, with the name joined on.
+ *
+ * Built rather than read back off the directory, so that every path the
+ * tree holds is spelled the way the root it came from is. What follows a
+ * symlink is the reading, which happens afresh each time one of these is
+ * asked about.
+ */
+path: string, 
+/**
+ * Whether it is a folder to expand, as against a file to open.
+ *
+ * Two kinds rather than the browse's three: a `.git` inside a checkout is
+ * not something Code shows at all, so there is no repository to mark.
+ * Followed rather than read off the link, which is what the filesystem
+ * itself would do with it.
+ */
+folder: boolean, };
+
+/**
+ * What one folder of a root holds, or the named reason it holds nothing.
+ */
+export type FolderListing = { "Listed": { 
+/**
+ * The folder this lists, as it was asked for.
+ */
+path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unreadable": { why: string, } };
+
+/**
  * What became of starting a Conversation grilling.
  *
  * Every refusal is named rather than collapsed into one, because each of them
@@ -4787,6 +4979,22 @@ at: string,
 list: TaskListEvent | null, };
 
 /**
+ * And what became of closing one.
+ *
+ * Two answers rather than a status, because one of them is a question put
+ * back to the human: a × on a tab whose shell has something running in it is
+ * answered with *it is busy* and nothing done, and the press that comes back
+ * after they have said yes carries the word that says so (ADR 0019, *Tabs and
+ * groups*).
+ *
+ * The reading is the server's own and is taken at the moment of the press,
+ * which is what the second half of a two-part close buys: the list a pane
+ * loaded with says what was running when it loaded, and a shell somebody
+ * started a build in since is busy all the same.
+ */
+export type TerminalClosed = "Closed" | "Busy";
+
+/**
  * And what became of asking for another one.
  *
  * Named refusals like every other press in the workbench, because each of them
@@ -4797,17 +5005,41 @@ list: TaskListEvent | null, };
 export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused";
 
 /**
+ * One of them: which of the Conversation's it is, and whether somebody is
+ * working in it.
+ *
+ * Nearly nothing, and that is the shape of the thing. A terminal is a shell in
+ * a Sandbox and nothing else — no record, no Event, nothing in a Share
+ * (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
+ * is here is the number the socket is found by and the one judgement only the
+ * server can make about it.
+ */
+export type TerminalView = { 
+/**
+ * The number this server issued it, which is what its socket and its close
+ * are addressed by and what a tab comes back to after a reload.
+ */
+number: number, 
+/**
+ * Whether something other than the shell is in the foreground of it: a
+ * build, an editor, anything somebody would rather not have killed under
+ * them (ADR 0019, *Tabs and groups*).
+ *
+ * The server's own judgement, read off the pseudo-terminal it holds rather
+ * than asked of the shell — and read by *name*, the shell's own pid never
+ * reaching this side. A platform that cannot tell says busy, so that the
+ * one it cannot tell on confirms every close rather than ending a shell
+ * somebody was in.
+ */
+busy: boolean, };
+
+/**
  * The terminals a Conversation has running, as the pane that draws them reads
  * them back.
  *
- * The numbers alone. A terminal is a shell in a Sandbox and nothing else — no
- * record, no Event, nothing in a Share (ADR 0013) — so there is nothing about
- * one to send but which of the Conversation's it is: what is *on* each of them
- * arrives down a socket of its own.
- *
  * Oldest first, which is the order they were opened in.
  */
-export type TerminalsView = { live: Array<number>, };
+export type TerminalsView = { live: Array<TerminalView>, };
 
 /**
  * One entry in a Timeline.

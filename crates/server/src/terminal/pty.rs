@@ -127,6 +127,28 @@ impl Terminal {
         child
     }
 
+    /// Which process group is in the foreground of this terminal, as this
+    /// process numbers it — or `None` where the terminal will not say.
+    ///
+    /// What the kernel keeps for the terminal itself, asked of the end Verkstead
+    /// holds rather than of anything running on the other one: a master answers
+    /// `TIOCGPGRP` for its slave's foreground group, which is what lets the
+    /// server read a shell it is not the parent of and has no controlling
+    /// terminal in common with.
+    ///
+    /// **Numbered as the server numbers processes**, whatever namespace the
+    /// group is really in. The shell in a Conversation's terminal is inside the
+    /// Sandbox's own pid namespace, and the kernel translates a pid into the
+    /// namespace of whoever is asking on its way out — so what comes back here
+    /// is a number `/proc` on this side answers about. See
+    /// [`crate::terminals::busy`], the one caller and the whole of what it is
+    /// for.
+    pub fn foreground(&self) -> Option<u32> {
+        let group = rustix::termios::tcgetpgrp(self.held.get_ref()).ok()?;
+
+        u32::try_from(group.as_raw_nonzero().get()).ok()
+    }
+
     /// Make the window `columns` by `rows`, and tell whatever is running on it.
     ///
     /// The kernel's own notification rather than anything of Verkstead's: a

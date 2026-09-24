@@ -36,6 +36,11 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileReading,
+  FileRootsView,
+  FileWrite,
+  FileWritten,
+  FolderListing,
   GrillingStarted,
   OnboardingView,
   OpenPullRequestRepo,
@@ -80,6 +85,7 @@ import type {
   Subscribed,
   Subscription,
   TakenUp,
+  TerminalClosed,
   TerminalOpened,
   TerminalsView,
   TranscriptView,
@@ -506,9 +512,10 @@ function socketAt(path: string): string {
 /// sandbox, in the same machinery a session's Screen is watched through
 /// (ADR 0013).
 ///
-/// The numbers alone, which is the whole of what there is to say about one from
-/// out here — a terminal is memory on the server rather than a record, so what
-/// is *on* each of them arrives down the socket below.
+/// A number and whether anything is running in it, which is the whole of what
+/// there is to say about one from out here — a terminal is memory on the server
+/// rather than a record, so what is *on* each of them arrives down the socket
+/// below.
 export function listTerminals(id: number): Promise<TerminalsView> {
   return get<TerminalsView>(`/api/ui/conversations/${id}/terminals`);
 }
@@ -529,21 +536,111 @@ export function terminalSocket(id: number, number: number): string {
   return socketAt(`/api/ui/conversations/${id}/terminals/${number}/attach`);
 }
 
-/// And closing one, which is the **Close** row on its tab's menu: the shell is
-/// hung up and then killed where it lingers, and the terminal comes off the
-/// server's register.
+/// And closing one, which is the × at the end of its tab: the shell is hung up
+/// and then killed where it lingers, and the terminal comes off the server's
+/// register.
 ///
 /// Taking the thing away rather than posting about it — the one delete in the
 /// app, because a terminal is something the server is holding rather than a
-/// record it keeps. Nothing to read back: what the tab hears is its own socket
-/// closing, which is what it hears from a shell that exited by itself.
-export async function closeTerminal(id: number, number: number): Promise<void> {
-  await refused(
-    await fetch(`/api/ui/conversations/${id}/terminals/${number}`, {
-      method: "DELETE",
-      headers: { accept: "application/json" },
-    }),
+/// record it keeps.
+///
+/// **Two-part where somebody is working in it.** The server answers `Busy` and
+/// leaves the shell running when its foreground is something other than the
+/// shell itself, which is what the pane asks the human about; `asked` is that
+/// answer coming back, and the close it carries is made whatever is running
+/// (ADR 0019). Read rather than ignored for that reason: the answer is the
+/// question.
+export async function closeTerminal(
+  id: number,
+  number: number,
+  asked = false,
+): Promise<TerminalClosed> {
+  return taken<TerminalClosed>(
+    await fetch(
+      `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
+      {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      },
+    ),
   );
+}
+
+/// The worktrees Code's tree is drawn over: the conversation's own first, then
+/// each companion's, each saying whether anything in it can be written.
+///
+/// What bounds the files API, rather than a list for the eye: the server reads
+/// and writes the worktrees as itself, with no sandbox in front of it, and a
+/// path under none of these is refused (ADR 0019).
+export function listFileRoots(id: number): Promise<FileRootsView> {
+  return get<FileRootsView>(`/api/ui/conversations/${id}/files/roots`);
+}
+
+/// And what one folder of one of them holds.
+///
+/// One folder per ask and never a walk — the shape a path field browses with,
+/// and why the tree asks again for every level somebody expands. Git-ignored
+/// paths and `.git` are not in the answer.
+///
+/// Every refusal is in the body rather than in the status: a path outside every
+/// root, a path under `.git`, a worktree that has gone and a folder that has are
+/// four different sentences to draw where the rows would be.
+export function listFolder(id: number, path: string): Promise<FolderListing> {
+  const asking = new URLSearchParams({ path });
+
+  return get<FolderListing>(
+    `/api/ui/conversations/${id}/files/folder?${asking}`,
+  );
+}
+
+/// And one file of one of those folders, opened.
+///
+/// What comes back says which of four kinds of thing it read — text, an image,
+/// a binary it will not send, or a file over the size cap — and text carries a
+/// version, which is a hash of the bytes and is what a write names itself as
+/// being over (ADR 0019).
+///
+/// Refused in the body like the folder beside it: a path outside every root, a
+/// path under `.git`, a worktree that has gone and a file that has are each
+/// their own sentence rather than a status to retry.
+export function readFile(id: number, path: string): Promise<FileReading> {
+  const asking = new URLSearchParams({ path });
+
+  return get<FileReading>(`/api/ui/conversations/${id}/files/file?${asking}`);
+}
+
+/// And that file written back, over the version the read handed over.
+///
+/// The same path the read is at, posted to rather than got: it is the same
+/// file, and a read and a write of one thing are what a GET and a POST on one
+/// route are for.
+///
+/// **The version is the whole of it.** A write over a file the agent has
+/// changed since is refused rather than landing, which is what the pane draws
+/// its Reload / Keep mine bar from (ADR 0019, *Versioned reads, and a stale
+/// write is refused*). Last writer wins is what this is not: an agent's edit
+/// silently overwritten by a human who never saw it is exactly what the version
+/// exists to surface.
+///
+/// A write that landed answers with the version it made, so the tab need not
+/// read the file again to save over it. A refused one answers with nothing to
+/// go on, and the presses under the bar read the file: what the viewer knows
+/// after a write that landed is what it just sent, and after one that did not
+/// it knows nothing at all.
+///
+/// Refused in the body like the read beside it, a root that takes no writes
+/// among them, because each of those is a different sentence for the human.
+export function writeFile(
+  id: number,
+  path: string,
+  version: string,
+  text: string,
+): Promise<FileWritten> {
+  return post<FileWritten>(`/api/ui/conversations/${id}/files/file`, {
+    path,
+    version,
+    text,
+  } satisfies FileWrite);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

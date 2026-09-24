@@ -79,10 +79,15 @@ export type Pane = "conversations" | "middle" | "details";
 ///
 /// The stylesheet answers the same question for itself; this is for the parts
 /// of the layout that are the page's rather than the rules' — which dividers
-/// exist, and whether this device's remembered widths are read at all. A
+/// exist, whether this device's remembered widths are read at all, and whether
+/// there is a pane standing beside the details for a maximise toggle to hide. A
 /// browser with no `matchMedia` to ask answers no to everything, which is the
 /// narrow layout: one pane, no dividers, nothing read.
-function matching(query: string): Accessor<boolean> {
+///
+/// Exported because the last of those is asked above the frame rather than
+/// inside it: what hands the frame its panes is the page, so what decides
+/// whether it is handed fewer of them is the page's question too.
+export function matching(query: string): Accessor<boolean> {
   if (typeof window.matchMedia !== "function") {
     return () => false;
   }

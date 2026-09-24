@@ -619,6 +619,14 @@ fn grants_first(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
 }
 
 /// `path` reachable at `reach`, and everything under it with it.
+///
+/// **And the inheritance is what Code stands on.** A session here runs as an
+/// account of Verkstead's own, and the files API writes into the Worktree as
+/// the human — so a file the server has just written carries this entry only
+/// because the entry is handed down (ADR 0019, *The server reads and writes the
+/// Worktree, outside the Sandbox*). The flags are asserted in this module's own
+/// tests; whether the session really opens such a file is the one thing left to
+/// a hand on a real machine, Wine emulating no inheritance to try it against.
 fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
     let rights = match reach {
         // Read and traverse, which is what reading a directory of tools is.
@@ -1749,6 +1757,69 @@ mod tests {
             before,
             "and reading as it did before once the boundary has gone",
         );
+    }
+
+    /// **And the entry over a Worktree is handed down to what is made in it**,
+    /// which is what says a file the server writes there is a file the session
+    /// can read.
+    ///
+    /// The one thing ADR 0019 left to be verified at the first stage of the
+    /// Code pane rather than assumed: on this platform a session runs as an
+    /// account of Verkstead's own, and the files API writes into the Worktree
+    /// as the human. A file the session could not then read would be the one
+    /// thing that breaks it — and nothing writes such a file at a session's
+    /// start, so the entry's inheritance is the whole of the answer.
+    ///
+    /// **What is asserted is the flags on the written entry**, not a read
+    /// attempted through them. The effective read is one account opening a file
+    /// another made, which wants two logons and a real machine; Wine does not
+    /// emulate inheritance at all, so a test that attempted it would be a test
+    /// that only ever ran in one place. `tests/sandbox_windows.rs` is where a
+    /// boundary is attempted rather than read, and it says why nothing else
+    /// here reads a list back.
+    #[test]
+    fn the_entry_granted_over_a_worktree_is_handed_down_to_what_is_made_in_it() {
+        let held = tempfile::tempdir().expect("a directory to stand a Worktree in");
+        let worktree = held.path().join("verkstead-code-pane");
+        std::fs::create_dir_all(worktree.join("crates")).unwrap();
+
+        let entries = vec![Entry {
+            path: worktree.clone(),
+            wanted: Wanted::Granted(Reach::ReadWrite),
+        }];
+        let cut = inheriting(&entries);
+
+        write(&entries, NOBODY, &cut).expect("a grant over a Worktree");
+
+        let nobody = Sid::of(NOBODY).expect("an identity that names nobody");
+        let granted: Vec<Vec<u8>> = listed(&worktree)
+            .into_iter()
+            .filter(|ace| whose(ace).is_some_and(|theirs| nobody.is(theirs)) && !inherited(ace))
+            .collect();
+
+        assert_eq!(
+            granted.len(),
+            1,
+            "a Worktree should be one entry of the account's own, and its list says: {}",
+            said_plainly(&worktree),
+        );
+
+        assert_eq!(
+            granted[0][1],
+            BOTH_WAYS,
+            "and that entry should be handed down to the files and the folders made under it, \
+             which is what makes one entry the answer for a Worktree rather than one per file \
+             in it. Its list says: {}",
+            said_plainly(&worktree),
+        );
+
+        assert_ne!(
+            mask(&granted[0]) & FILE_GENERIC_WRITE,
+            0,
+            "and a Worktree is granted read-write, a session being what commits in it",
+        );
+
+        strip(&entries, &cut, NOBODY);
     }
 
     /// What one path's list says, entry by entry.
