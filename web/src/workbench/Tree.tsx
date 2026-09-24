@@ -52,8 +52,9 @@
 //! about a drag writes anything: the row is still where it is and the folder
 //! still open or closed, whatever the drag came to.
 //!
-//! No row menu, no quick open and no git status marks: those are stages 02 and
-//! 03 of the roadmap, and each of them wants this tree to be here first.
+//! No row menu and no quick open: those are stage 03 of the roadmap, and no git
+//! status marks, which are stage 04's with the watcher that keeps them honest.
+//! Each of them wants this tree to be here first.
 
 import {
   faChevronDown,
