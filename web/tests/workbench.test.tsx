@@ -19862,6 +19862,41 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     expect(drop(container)).toBeNull();
   });
 
+  /// And which root a row is in is measured on the separator after the path,
+  /// not on the string alone: a colliding checkout is named
+  /// `<repo>-<branch>-<id>`, so a companion's worktree can start with the whole
+  /// of the conversation's own and still be a different root — with a different
+  /// answer about what may be written in it.
+  it("reads a row against its own root, not one whose path it merely extends", async () => {
+    const extending = {
+      own: false,
+      path: `${OWN_ROOT.path}-57`,
+      repo: "askance",
+      writable: false,
+    };
+
+    const { container } = await expanded(
+      whenever(
+        ROOTS_OF_IT,
+        json({ roots: [OWN_ROOT, extending] } satisfies FileRootsView),
+      ),
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    // The conversation's own root is writable and drops its two rows, which is
+    // what says the reading did not simply stop finding anything.
+    expect(rightClick(row(container, OWN_ROOT.repo))).toBe(true);
+    await waitFor(() => expect(offered(container)).toEqual(["New file", "New folder"]));
+
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    // And the companion beside it is read-only, though its path begins with
+    // every character of the one above.
+    expect(rightClick(row(container, extending.repo))).toBe(false);
+    expect(drop(container)).toBeNull();
+  });
+
   /// A file row's menu is the mouse's alone: a phone has no right-click and
   /// fires the same event from a long press, which is the gesture that file row
   /// is dragged into a group with (ADR 0019, *Tabs and groups*).

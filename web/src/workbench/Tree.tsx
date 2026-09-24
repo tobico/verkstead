@@ -360,6 +360,19 @@ function about(field: Field | null): string | undefined {
   return "over" in field ? field.over : field.at;
 }
 
+/// And whether the field that is open is about a row of `within`, or of
+/// anything under it.
+///
+/// Which is what a folder shut and a folder deleted both ask: a row being named
+/// inside one is a row that is no longer drawn. Measured by [`under`] rather
+/// than on the prefix alone, so that a folder called `src` does not take a
+/// field open in `srcs` with it.
+function inside(field: Field | null, within: string): boolean {
+  const at = about(field);
+
+  return at !== undefined && under(at, within);
+}
+
 /// And what a row inside a folder is called: the path with the folder cut off
 /// the front of it.
 ///
@@ -369,6 +382,33 @@ function about(field: Field | null): string | undefined {
 /// left after the folder and the one separator after it is the name.
 function named(path: string, within: string): string {
   return path.slice(within.length + 1);
+}
+
+/// And whether `path` is `within` itself, or anything under it.
+///
+/// **Measured on the separator after the prefix rather than on the prefix
+/// alone**, which is the whole of what this is for: a worktree whose name
+/// extends another's — `unclaimed_path` names a colliding checkout
+/// `<repo>-<branch>-<id>` — is a *different* root that starts with the first
+/// one's path, and a folder called `srcs` is not inside one called `src`. The
+/// server's own bound compares path components for this reason; this is the
+/// same comparison said in a string.
+///
+/// Either separator, because a path here is spelled the way the root it came
+/// from is and a worktree on Windows uses a `\` — the same test `Code.tsx`
+/// makes where a rename and a delete carry everything under a folder.
+///
+/// A path *is* inside itself: the tree asks for a root's own listing the moment
+/// somebody expands it, and a folder shut takes the field on its own row with
+/// it.
+export function under(path: string, within: string): boolean {
+  if (path === within) {
+    return true;
+  }
+
+  const next = path.slice(within.length, within.length + 1);
+
+  return path.startsWith(within) && (next === "/" || next === "\\");
 }
 
 export function Tree(props: {
@@ -536,7 +576,7 @@ export function Tree(props: {
   /// it is wanted for is one press: whether the menu has anything to offer over
   /// this row, which is the root's own writable flag.
   const rooted = (path: string): FileRoot | undefined =>
-    roots.data?.roots.find((root) => path.startsWith(root.path));
+    roots.data?.roots.find((root) => under(path, root.path));
 
   /// Read a folder off the disk and hold what came back.
   ///
@@ -572,7 +612,7 @@ export function Tree(props: {
   /// that is shut is not drawing its rows.
   const toggle = (path: string): void => {
     if (expanded(path)) {
-      if (about(field())?.startsWith(path) === true) leave();
+      if (inside(field(), path)) leave();
 
       setReading((was) => was.filter((one) => one !== path));
       setHeld((was) => {
@@ -785,7 +825,7 @@ export function Tree(props: {
 
         // A field anywhere inside what has just gone is a field on a row that is
         // not there any more — a folder shut takes one the same way.
-        if (about(field())?.startsWith(asked.over) === true) leave();
+        if (inside(field(), asked.over)) leave();
 
         props.deleted(asked.over);
 
