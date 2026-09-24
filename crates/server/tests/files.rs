@@ -1418,7 +1418,9 @@ async fn the_file_lists_are_every_root_of_the_conversation_in_order() {
     );
 
     // Spelled in full the way the root is, which is what a tab is opened by:
-    // the same string the tree would have handed over for the same file.
+    // the same string the tree would have handed over for the same file. A
+    // segment at a time here for that reason — git's own separator is not every
+    // platform's, and a path spelled its way is one the tree never drew.
     let mut own = view.roots[0].files.clone();
     own.sort();
 
@@ -1427,7 +1429,12 @@ async fn the_file_lists_are_every_root_of_the_conversation_in_order() {
         [
             worktree.join(".gitignore").display().to_string(),
             worktree.join("README.md").display().to_string(),
-            worktree.join("crates/server/lib.rs").display().to_string(),
+            worktree
+                .join("crates")
+                .join("server")
+                .join("lib.rs")
+                .display()
+                .to_string(),
         ]
     );
 
@@ -1533,11 +1540,16 @@ async fn the_marks_are_every_root_of_the_conversation_folded_up() {
             ),
             (worktree.join("crates").to_str().unwrap(), Marked::Untracked),
             (
-                worktree.join("crates/server").to_str().unwrap(),
+                worktree.join("crates").join("server").to_str().unwrap(),
                 Marked::Untracked
             ),
             (
-                worktree.join("crates/server/lib.rs").to_str().unwrap(),
+                worktree
+                    .join("crates")
+                    .join("server")
+                    .join("lib.rs")
+                    .to_str()
+                    .unwrap(),
                 Marked::Untracked
             ),
         ]

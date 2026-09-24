@@ -732,7 +732,8 @@ pub(crate) fn list(roots: &[FileRoot]) -> FileListsView {
 /// makes for this reason: the page opens what it is given, and a path it had
 /// joined with a `/` under a Worktree spelled with a `\` would be a second name
 /// for a file the tree already has a name for — two names, two buffers, two
-/// tabs over one file.
+/// tabs over one file. Which is why git's own answer is joined on a segment at a
+/// time rather than whole — see [`joined`], where the separator is.
 ///
 /// Deduplicated on the way in, because one path can come back twice: a file in
 /// conflict is in the index once per stage, and `ls-files` says it once per
@@ -771,7 +772,7 @@ fn listed(root: &FileRoot) -> FileList {
             break;
         }
 
-        files.push(at.join(under).display().to_string());
+        files.push(joined(at, under).display().to_string());
     }
 
     FileList {
@@ -871,8 +872,10 @@ fn marked(root: &FileRoot) -> FileStatus {
 
         // Spelled in full the way the root is, which is what the tree draws its
         // rows by: git answers with the path under the checkout, and a mark the
-        // page could not match to a row would be a mark nothing drew.
-        let path = at.join(under);
+        // page could not match to a row would be a mark nothing drew. A segment
+        // at a time, because git's own separator is not every platform's — see
+        // [`joined`].
+        let path = joined(at, under);
 
         // And folded up, the file first and then every folder over it as far as
         // the root, which is the row the fold is *for*: a change deep in a tree
@@ -1296,6 +1299,29 @@ fn asked_about(entry: &FolderEntry) -> String {
 /// [`watchable`] asks by — everything it asks about being one.
 fn spelled_as_a_folder(path: &Path) -> String {
     format!("{}/", path.display())
+}
+
+/// One of git's own paths joined onto `root`, a segment at a time.
+///
+/// **Not `root.join(answer)`**, which is the whole point of this. Git answers
+/// with a `/` between the segments on every platform, and `join` puts the
+/// platform's own separator in front of what it is handed without touching what
+/// is inside it — so a plain join under a Worktree spelled with a `\` reads
+/// `…\crates/server\`, a spelling nothing else in this pane ever writes.
+///
+/// Which matters because these paths are matched against the rows the tree drew,
+/// and matched as strings: a mark is drawn by looking a row's own path up, and a
+/// palette's row is opened as a tab beside whatever the tree already has open.
+/// A second spelling of one file is a mark nothing draws and a second buffer over
+/// a file that already had one.
+///
+/// Empty segments are left out, so that nothing in git's answer can make this
+/// push a separator with no name after it.
+fn joined(root: &Path, answer: &str) -> PathBuf {
+    answer
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .fold(root.to_owned(), |at, segment| at.join(segment))
 }
 
 /// Folders first, then by name — the browse's order, which is what the eye
@@ -2737,13 +2763,19 @@ mod tests {
     /// And the same said about one root, as the paths *under* it: what the fold
     /// is about is which rows are marked, and a temporary directory in front of
     /// every one of them says nothing about that.
+    ///
+    /// **Nothing normalised on the way out.** What a mark has to be is spelled
+    /// the way the row it is drawn on is, and a reading that put every separator
+    /// the same way round would pass whichever way they really were — which is
+    /// the one thing worth proving here on Windows. So the expectations are
+    /// spelled by [`spelled`] instead.
     fn marked_under(root: &Path, view: &FileStatusView) -> Vec<(String, Marked)> {
         marks(view, 0)
             .into_iter()
             .map(|(path, mark)| {
                 let under = Path::new(&path)
                     .strip_prefix(root)
-                    .map(|under| under.to_string_lossy().replace('\\', "/"))
+                    .map(|under| under.to_string_lossy().into_owned())
                     // The root's own row, which is the last thing the fold marks
                     // and is drawn as the repository rather than as a path.
                     .unwrap_or_default();
@@ -2751,6 +2783,16 @@ mod tests {
                 (under, mark)
             })
             .collect()
+    }
+
+    /// A path under a root as this platform spells one, written here a segment
+    /// at a time so that the spelling is the platform's rather than git's.
+    ///
+    /// What the tree joins its rows by, and so what a mark has to match: on
+    /// Windows that is `crates\server`, and a mark spelled `crates/server` is a
+    /// mark no row ever looks up.
+    fn spelled(under: &str) -> String {
+        under.split('/').collect::<PathBuf>().display().to_string()
     }
 
     /// A file that has moved is marked changed, one git has never seen is marked
@@ -2778,12 +2820,64 @@ mod tests {
             [
                 // The root wears both, so it wears the stronger.
                 (String::new(), Marked::Changed),
-                ("README.md".to_owned(), Marked::Changed),
-                ("crates".to_owned(), Marked::Untracked),
-                ("crates/server".to_owned(), Marked::Untracked),
-                ("crates/server/lib.rs".to_owned(), Marked::Untracked),
+                (spelled("README.md"), Marked::Changed),
+                (spelled("crates"), Marked::Untracked),
+                (spelled("crates/server"), Marked::Untracked),
+                (spelled("crates/server/lib.rs"), Marked::Untracked),
             ]
         );
+    }
+
+    /// And every mark is spelled the way the row it is drawn on is, which is
+    /// what lets the tree look one up by its own path.
+    ///
+    /// **The one thing here that a Linux reading cannot say.** Git answers with
+    /// a `/` between the segments whatever the platform, and a row of the tree is
+    /// joined with the platform's own — so on Windows a mark joined whole would
+    /// read `…\crates/server` over a row that reads `…\crates\server`, and
+    /// nothing below the top of a root would ever find its mark. Read against
+    /// the listings rather than against strings written here, the listings being
+    /// what draws the rows.
+    ///
+    /// The palette's list is asked the same question, for the same reason said
+    /// about a tab: a path spelled two ways is two buffers over one file.
+    #[test]
+    fn a_mark_is_spelled_the_way_the_row_it_is_drawn_on_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+        std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+
+        let roots = [root(&worktree)];
+
+        // The walk down to it, as the tree draws it: one listing per level, and
+        // the row's own path off each.
+        let row = |within: &Path, name: &str| {
+            listed(folder(&roots, within))
+                .into_iter()
+                .find(|entry| entry.name == name)
+                .unwrap_or_else(|| panic!("the tree drew no {name} in {}", within.display()))
+                .path
+        };
+
+        let crates = row(&worktree, "crates");
+        let server = row(Path::new(&crates), "server");
+        let lib = row(Path::new(&server), "lib.rs");
+
+        let marked: Vec<String> = status(&roots).roots[0]
+            .marks
+            .iter()
+            .map(|mark| mark.path.clone())
+            .collect();
+
+        for at in [&crates, &server, &lib] {
+            assert!(marked.contains(at), "{at} is not among {marked:?}");
+        }
+
+        // And the palette opens the file by the string the tree would have
+        // handed over for it.
+        assert!(files(&list(&roots), 0).contains(&lib), "{lib}");
     }
 
     /// And a folder holding one of each wears the changed one, wherever in it
@@ -2805,9 +2899,9 @@ mod tests {
             marked_under(&worktree, &status(&[root(&worktree)])),
             [
                 (String::new(), Marked::Changed),
-                ("src".to_owned(), Marked::Changed),
-                ("src/main.rs".to_owned(), Marked::Changed),
-                ("src/new.rs".to_owned(), Marked::Untracked),
+                (spelled("src"), Marked::Changed),
+                (spelled("src/main.rs"), Marked::Changed),
+                (spelled("src/new.rs"), Marked::Untracked),
             ]
         );
     }
@@ -2828,9 +2922,9 @@ mod tests {
             marked_under(&worktree, &status(&[root(&worktree)])),
             [
                 (String::new(), Marked::Untracked),
-                ("notes".to_owned(), Marked::Untracked),
-                ("notes/one.md".to_owned(), Marked::Untracked),
-                ("notes/two.md".to_owned(), Marked::Untracked),
+                (spelled("notes"), Marked::Untracked),
+                (spelled("notes/one.md"), Marked::Untracked),
+                (spelled("notes/two.md"), Marked::Untracked),
             ]
         );
     }
