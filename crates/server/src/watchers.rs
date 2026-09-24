@@ -53,9 +53,19 @@
 //! and what is there is walked from while what has gone is forgotten — see
 //! [`Watching::caught_up`]. And where a burst named no paths at all — a watcher
 //! that lost its place, a burst too wide to remember them — the whole of every
-//! root is walked instead, and that walk is the whole account of what is there:
-//! anything it does not name has gone, which is the only word about a removal
-//! such a burst ever gives.
+//! root is walked instead, and that walk is the account of what is there:
+//! anything it does not name is let go of, which is the only word about a
+//! removal such a burst ever gives. On Windows it names everything this watcher
+//! holds whatever became of it, a watch being what keeps a deleted directory in
+//! its parent's listing — see [`Held::spread_whole`], where that falls out.
+//!
+//! **And a burst about nothing the pane draws is not announced.** What is
+//! watched is what the tree has rows for, so a path a burst names that is a
+//! directory *not* watched is a directory the page cannot see — a build's own
+//! `target/`, and whatever a platform reports against it afterwards, which
+//! Windows does: a non-recursive watch there says the child changed when
+//! something deep under it is written. So a `cargo build` is not a Nudge every
+//! couple of seconds over a tree that never moved — see [`Watching::drawn`].
 //!
 //! **And each root's git `index` and `HEAD`, and nothing else under a
 //! repository's insides.** The commit's own writes are the Worktree moving too,
@@ -109,11 +119,15 @@ const QUIET: Duration = Duration::from_millis(250);
 /// And how long a burst that will not go quiet is allowed to run before it is
 /// announced anyway.
 ///
-/// [`QUIET`] alone would leave a page in front of a three-minute build showing
-/// the tree as it stood when the build began, because the quiet it is waiting
-/// for never comes. This is the other end of that: a build still running is
-/// announced every couple of seconds, which is a handful of Nudges for the
+/// [`QUIET`] alone would leave a page in front of a three-minute checkout
+/// showing the tree as it stood when it began, because the quiet it is waiting
+/// for never comes. This is the other end of that: something still writing is
+/// looked at every couple of seconds, which is a handful of Nudges for the
 /// thousands of files it wrote rather than one at the very end.
+///
+/// A burst that turns out to be about nothing the pane draws is still not
+/// announced, so this is a ceiling on the Nudges a *build* costs rather than the
+/// rate of them — see [`Watching::drawn`].
 const AT_MOST: Duration = Duration::from_secs(2);
 
 /// How many directories of one Conversation's Worktrees are watched.
@@ -322,7 +336,10 @@ async fn following(
     // catches up with: the roots themselves are watched above, before anything
     // is awaited, so the top of a Worktree is being followed while the walk is
     // still on its way down.
-    let Some(mut watching) = aside(conversation_id, watching, Burst::whole()).await else {
+    // Announced about by nothing, whatever it found: the page opened this socket
+    // and read the world it is drawing in the same breath, and the tree reads
+    // every folder it has open the moment it is drawn.
+    let Some((mut watching, _)) = aside(conversation_id, watching, Burst::whole()).await else {
         return;
     };
 
@@ -369,8 +386,9 @@ async fn following(
                 // Caught up with before it is announced, so that the folder the
                 // burst made is being watched by the time the page has read it —
                 // a file written in it a moment later is a Nudge rather than
-                // nothing.
-                let Some(caught) = aside(
+                // nothing. And the catch-up is what says whether there is
+                // anything to announce: see [`Watching::caught_up`].
+                let Some((caught, saying)) = aside(
                     conversation_id,
                     watching,
                     std::mem::take(&mut burst),
@@ -380,7 +398,9 @@ async fn following(
 
                 watching = caught;
 
-                nudges.announce(Nudge::Files { conversation: conversation_id });
+                if saying {
+                    nudges.announce(Nudge::Files { conversation: conversation_id });
+                }
             }
         }
     }
@@ -392,25 +412,31 @@ async fn following(
 }
 
 /// Off the runtime with the watching while it catches up with `burst`, and back
-/// with it.
+/// with it and with whether the burst is worth announcing.
 ///
 /// The walk opens a directory per directory and runs a git per level, which is
 /// blocking work of the kind the rest of this server puts on a thread that may
 /// block — so the watcher goes across with it and comes back, rather than being
-/// shared with a lock nothing else would ever take.
+/// shared with a lock nothing else would ever take. Whether to announce comes
+/// back with it for the same reason: reading what is at a path is the disk being
+/// asked, and the disk is asked over here.
 ///
 /// `None` is that thread having ended badly, which takes the watcher with it:
 /// there is nothing left to watch with and nothing to be done about it, so the
 /// task says so and stops.
-async fn aside(conversation_id: i64, mut watching: Watching, burst: Burst) -> Option<Watching> {
+async fn aside(
+    conversation_id: i64,
+    mut watching: Watching,
+    burst: Burst,
+) -> Option<(Watching, bool)> {
     let caught = tokio::task::spawn_blocking(move || {
-        watching.caught_up(burst);
-        watching
+        let saying = watching.caught_up(burst);
+        (watching, saying)
     })
     .await;
 
     match caught {
-        Ok(watching) => Some(watching),
+        Ok(caught) => Some(caught),
         Err(error) => {
             tracing::error!(
                 %error,
@@ -507,9 +533,12 @@ impl Watching {
     /// not name is forgotten, that being the only word about a removal such a
     /// burst ever gives. See [`Held::spread_whole`].
     ///
+    /// And hand back whether the burst is worth telling the page about, which is
+    /// whether any of it is about something the pane draws — see [`Watching::drawn`].
+    ///
     /// Blocking: the walk is [`crate::files::watchable`], which reads
     /// directories and runs git.
-    fn caught_up(&mut self, burst: Burst) {
+    fn caught_up(&mut self, burst: Burst) -> bool {
         match burst.whole {
             // The whole of every root, which is the first walk and any burst too
             // wide to have remembered what it made.
@@ -564,6 +593,37 @@ impl Watching {
         for at in &self.insides {
             self.held.again(at);
         }
+
+        // And whether any of it is worth a word, asked now that the walk has
+        // caught up: a directory the burst made is watched by this point, and one
+        // it took away is forgotten.
+        //
+        // A burst that named nothing is, and is most of them — a write says the
+        // file it wrote and nothing about where a directory could have appeared,
+        // so the paths it carries are none. So is a whole walk, which is a
+        // watcher that lost its place and knows nothing about what it missed.
+        burst.whole || burst.moved.is_empty() || burst.moved.iter().any(|moved| self.drawn(moved))
+    }
+
+    /// Whether `at` is something the pane draws, which is what a burst is
+    /// measured by.
+    ///
+    /// **Anything that is not a directory is.** A file is a row of the tree or a
+    /// tab of the pane, and a path that is not there at all is what a removal
+    /// names — the row that has gone. The two git files the insides are watched
+    /// through are files too, which is how a commit reaches the marks.
+    ///
+    /// **A directory is only where it is watched**, and what is not watched is
+    /// what the walk left out: what git ignores, and `.git`. So a build's own
+    /// `target/` appearing is a burst about no row there is, and so is whatever a
+    /// platform reports against that directory afterwards — which Windows does,
+    /// a non-recursive watch there saying the *child* changed when something deep
+    /// under it is written. Left unasked, a `cargo build` would be a Nudge every
+    /// couple of seconds and every one of them would have the page re-read every
+    /// open folder, every open file and a `git status` per root, to be told
+    /// nothing moved.
+    fn drawn(&self, at: &std::path::Path) -> bool {
+        !matches!(std::fs::symlink_metadata(at), Ok(it) if it.is_dir()) || self.held.already(at)
     }
 }
 
@@ -619,8 +679,21 @@ impl Held {
     /// is one nothing ever watches and a file written straight into it is a Nudge
     /// nobody gets.
     ///
-    /// Nothing is said to the watcher about what is dropped, for [`Held::forget`]'s
-    /// reason: the kernel let the watch go with the directory.
+    /// **And the watcher is told**, unlike [`Held::forget`]: that one is a
+    /// removal the kernel had already dropped the watch for, and this is a walk
+    /// noticing a directory has gone with nobody having said so. Windows keeps a
+    /// deleted directory in its parent's listing for as long as anything holds a
+    /// handle on it, and a watch *is* such a handle — so letting go is both what
+    /// frees the allowance and what lets the directory finally go.
+    ///
+    /// **Which is a walk on Windows that finds nothing to let go of**, and that
+    /// is the whole of what this does there. A directory this watcher still holds
+    /// is a directory still in its parent's listing, so the walk names it and the
+    /// reconciliation keeps it — and nothing is lost by that, because the name is
+    /// not free for anything to be made at either, and a removal somebody *did*
+    /// hear about came through [`Held::forget`] instead. Where a removal is
+    /// walkable — Linux, macOS — this is what answers the bursts that never named
+    /// one.
     fn spread_whole(&mut self, roots: &[PathBuf]) {
         let mut found = HashSet::new();
 
@@ -630,7 +703,14 @@ impl Held {
             found.extend(crate::files::watchable(root, root, left));
         }
 
-        self.watched.retain(|held| found.contains(held));
+        for at in self
+            .watched
+            .difference(&found)
+            .cloned()
+            .collect::<Vec<PathBuf>>()
+        {
+            self.let_go_of(&at);
+        }
 
         for at in found {
             self.hold(at);
@@ -697,6 +777,19 @@ impl Held {
     /// `rm -r` is one word about the top of it and nothing about the rest.
     fn forget(&mut self, at: &std::path::Path) {
         self.watched.retain(|held| !held.starts_with(at));
+    }
+
+    /// And let go of one outright, which is a walk having found it gone.
+    ///
+    /// The watcher is told here, where [`Held::forget`] says nothing: that one
+    /// answers a removal the kernel had already dropped the watch for, and this
+    /// answers a directory nobody said anything about — so the watch may well
+    /// still be held, and on Windows holding it is what keeps the directory in
+    /// its parent's listing at all. A refusal is nothing to say: a watch the
+    /// platform has already dropped is one there was nothing to give back.
+    fn let_go_of(&mut self, at: &std::path::Path) {
+        let _ = self.watcher.unwatch(at);
+        self.watched.remove(at);
     }
 }
 
@@ -915,7 +1008,14 @@ async fn attached(
     while socket.recv().await.is_some() {}
 }
 
-#[cfg(test)]
+/// What the register a walk keeps does with a directory that has gone.
+///
+/// **Not on Windows**, and the one test in here says why: a deleted directory is
+/// still listed, and still answers that it is a directory, while anything holds a
+/// handle on it — so a removal nobody heard about is a removal nothing on that
+/// platform can find. Everything else about this module is asked over a real
+/// watcher and a real socket in `tests/watching.rs`, which runs everywhere.
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 
@@ -939,6 +1039,16 @@ mod tests {
     /// remembered its paths. Left in, the name would be one [`Held::already`]
     /// answers *yes* about — so a directory made again at it would be watched by
     /// nothing, and a file written straight into it would be a Nudge nobody gets.
+    ///
+    /// **Not asked on Windows, which is what this module is gated on.** A deleted
+    /// directory stays in its parent's listing, and answers that it is a
+    /// directory, for as long as anything holds a handle on it — and a watch is
+    /// such a handle, so the very thing this would be measuring is what keeps the
+    /// directory there to be found. Nothing is lost by that: the name is not free
+    /// for anything to be made at either, so neither half of the cost above can
+    /// arise until the watch goes. A removal somebody *did* hear about is
+    /// [`Held::forget`]'s, on every platform, and `tests/watching.rs` asks about
+    /// that one over a real watcher.
     #[test]
     fn a_whole_walk_forgets_a_directory_that_has_gone() {
         let dir = tempfile::tempdir().unwrap();

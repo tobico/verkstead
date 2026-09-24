@@ -523,13 +523,17 @@ async fn a_file_written_three_levels_down_reaches_the_page() {
     drop(pane);
 }
 
-/// And a build filling an ignored directory reaches nobody: what a `cargo build`
-/// writes is thousands of files under a `target/` the tree does not draw, and
-/// nothing inside it is watched at all.
+/// And a build filling an ignored directory reaches nobody at all: what a
+/// `cargo build` writes is thousands of files under a `target/` the tree does
+/// not draw, nothing inside it is watched, and its own appearing is no row
+/// either.
 ///
-/// The directory is made *after* the pane attached, which is the harder half:
-/// a directory that appeared is walked from where it appeared, and this one is
-/// one the walk is to refuse.
+/// The directory is made *after* the pane attached, which is the harder half: a
+/// directory that appeared is walked from where it appeared, this one is one the
+/// walk is to refuse, and it is a directory the watcher goes on hearing about
+/// from the root above it — a non-recursive watch on Windows says the child
+/// changed when something deep under it is written. So what is asked here is the
+/// whole of the claim: nothing about any of it is a Nudge.
 #[tokio::test]
 async fn a_build_filling_an_ignored_directory_reaches_nobody() {
     let (dir, pool, app, at) = fresh_app().await;
@@ -539,11 +543,7 @@ async fn a_build_filling_an_ignored_directory_reaches_nobody() {
 
     let (pane, mut page) = following(&app, at, conversation, &worktree).await;
 
-    // The build makes its own directory, which is the Worktree moving and is
-    // announced — and is the last thing about it anybody hears.
     made(&worktree, "target/debug/deps");
-    assert_eq!(page.nudge().await, Nudge::Files { conversation });
-    let _ = page.heard(Duration::from_millis(100)).await;
 
     for each in 0..500 {
         wrote(&worktree, &format!("target/debug/deps/{each}.o"));
@@ -552,7 +552,7 @@ async fn a_build_filling_an_ignored_directory_reaches_nobody() {
     assert_eq!(
         page.heard(SETTLING).await,
         Vec::new(),
-        "nothing inside an ignored directory should be watched"
+        "nothing about an ignored directory should reach the page"
     );
 
     drop(pane);
