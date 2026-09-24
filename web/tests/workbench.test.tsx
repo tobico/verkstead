@@ -25191,6 +25191,365 @@ describe("the maximise toggle in the code pane", () => {
   });
 });
 
+/// The three settings ADR 0019 exposes, on the pane's own ⋯ in Code's header:
+/// word wrap, the font size and the minimap.
+///
+/// The place a pane keeps what is about the pane. They belong to the device
+/// rather than to the Conversation — a phone and a laptop are entitled to draw
+/// the same file differently — so nothing about them goes to the server, and
+/// what a browser that refuses storage gets is VS Code's own defaults rather
+/// than a failure.
+describe("the three settings on the code pane's own menu", () => {
+  /// Where each of them lives, asked for by the name a browser would find it
+  /// under rather than through the module that writes it — the way the maximise
+  /// toggle above is asked for.
+  const WRAP = "verkstead.editor-wrap";
+  const SIZE = "verkstead.editor-font-size";
+  const MINIMAP = "verkstead.editor-minimap";
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  /// One of the fixture folder's files, by name.
+  function pathOf(name: string): string {
+    const listed = codeFolder as Extract<FolderListing, { Listed: unknown }>;
+    const found = listed.Listed.entries.find((entry) => entry.name === name);
+
+    if (!found) {
+      throw new Error(`the fixture folder has no ${name}`);
+    }
+
+    return found.path;
+  }
+
+  /// The pane's own ⋯, which is the menu in the header rather than any of the
+  /// ones its tabs and rows drop.
+  function mark(container: ParentNode): HTMLButtonElement {
+    const found = container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.paneActions} button`,
+    );
+
+    if (!found) {
+      throw new Error("the pane has no menu in its header");
+    }
+
+    return found;
+  }
+
+  /// What it drops, or nothing where it is shut.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.detailsPane} .${codePane.paneActions} [role="menu"]`,
+    );
+  }
+
+  /// And the rows in it, as what each reads as.
+  function offers(container: ParentNode): string[] {
+    return [...(drop(container)?.querySelectorAll("button") ?? [])].map(
+      (row) => row.textContent ?? "",
+    );
+  }
+
+  /// One row of it, by what it reads as.
+  function row(container: ParentNode, says: string): HTMLButtonElement {
+    const found = [
+      ...(drop(container)?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+    ].find((one) => one.textContent?.startsWith(says));
+
+    if (!found) {
+      throw new Error(
+        `the menu has no ${says}; it has ${offers(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// Open the menu, and answer with the card it drops.
+  async function open(container: ParentNode): Promise<HTMLElement> {
+    fireEvent.click(mark(container));
+
+    return drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.paneActions} [role="menu"]`,
+    );
+  }
+
+  /// Press a row of it, which moves the setting it names.
+  function flip(container: ParentNode, says: string): void {
+    fireEvent.click(row(container, says));
+  }
+
+  /// And how each editor open in the pane is drawn *now* — what it was opened
+  /// with, and every change the pane has told it about since.
+  function drawing(): Array<Record<string, unknown>> {
+    return editors
+      .filter((one) => !one.disposed)
+      .map((one) => ({
+        wordWrap: one.drawn.wordWrap,
+        fontSize: one.drawn.fontSize,
+        minimap: one.drawn.minimap,
+      }));
+  }
+
+  /// The pane with the conversation's own root expanded and its files answered,
+  /// and no terminals — so what is open is only ever what a test put there.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(fileOf(pathOf("Cargo.toml")), json(codeFile)),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(
+      rows.find((one) => one.textContent?.startsWith(OWN_ROOT.repo))!,
+    );
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.file}`,
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// The same pane with Cargo.toml open in two groups, which is what *every
+  /// editor in every group* is asked of: the tab the split was made from goes
+  /// on showing in both, so there are two editors over the one buffer.
+  async function inTwoGroups(...answers: Parameters<typeof serving>) {
+    const mounted = await opened(...answers);
+    const { container } = mounted;
+
+    const file = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ].find((one) => one.textContent === "Cargo.toml")!;
+
+    fireEvent.click(file);
+
+    await waitFor(() => expect(drawing()).toHaveLength(1));
+
+    // Split beside, from the icon at the end of the group's own bar.
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.divide}`,
+      )!,
+    );
+
+    await waitFor(() => expect(drawing()).toHaveLength(2));
+
+    return mounted;
+  }
+
+  /// The three of them, in the order ADR 0019 names them — and the font size as
+  /// a level of the same menu rather than a row, being the one of the three
+  /// that is a number.
+  it("draws word wrap, the font size and the minimap on the pane's menu", async () => {
+    const { container } = await opened();
+
+    await open(container);
+
+    expect(offers(container)).toEqual(["Word wrap", "Font size›", "Minimap✓"]);
+
+    // Untouched, which is VS Code's own: lines do not wrap, and the minimap is
+    // there. Said as `aria-checked`, these being settings rather than things to
+    // do.
+    expect(row(container, "Word wrap").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(row(container, "Minimap").getAttribute("aria-checked")).toBe("true");
+
+    // And the sizes, a level down, with VS Code's 14 the one ticked.
+    fireEvent.click(row(container, "Font size"));
+
+    await waitFor(() =>
+      expect(offers(container)).toEqual([
+        "←Font size",
+        "10px",
+        "12px",
+        "14px✓",
+        "16px",
+        "18px",
+        "20px",
+      ]),
+    );
+
+    expect(
+      [...drop(container)!.querySelectorAll('[role="menuitemradio"]')].map(
+        (one) => one.getAttribute("aria-checked"),
+      ),
+    ).toEqual(["false", "false", "true", "false", "false", "false"]);
+  });
+
+  /// An editor is opened at whatever the menu says, which is VS Code's own
+  /// where nobody has said otherwise.
+  it("opens an editor at VS Code's defaults where nothing has been set", async () => {
+    const { container } = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+    ]);
+
+    expect(container.querySelector(`.${codePane.paneActions}`)).toBeTruthy();
+  });
+
+  /// And a change reaches every editor open in every group at once, with no tab
+  /// reopened: the setting is the pane's, and each editor is drawing it.
+  it("reaches every editor in every group at once", async () => {
+    const { container } = await inTwoGroups();
+
+    const before = editors.filter((one) => !one.disposed);
+
+    await open(container);
+    flip(container, "Word wrap");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.wordWrap)).toEqual(["on", "on"]),
+    );
+
+    // The menu stays down, and the row now says which way it is set: these are
+    // settings rather than things to do, and the tick is the answer to the
+    // press.
+    expect(row(container, "Word wrap").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    flip(container, "Minimap");
+    await waitFor(() =>
+      expect(drawing().map((one) => one.minimap)).toEqual([
+        { enabled: false },
+        { enabled: false },
+      ]),
+    );
+
+    fireEvent.click(row(container, "Font size"));
+    await waitFor(() => expect(offers(container)).toContain("18px"));
+    flip(container, "18px");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.fontSize)).toEqual([18, 18]),
+    );
+
+    // And none of it reopened a tab: the editors are the ones that were already
+    // there, redrawn where they stand.
+    expect(editors.filter((one) => !one.disposed)).toEqual(before);
+  });
+
+  /// What was set is this device's, so a reload comes back to it — and an
+  /// editor opened after it is opened that way rather than corrected
+  /// afterwards.
+  it("is remembered per device, and survives a reload", async () => {
+    const first = await opened();
+
+    await open(first.container);
+    flip(first.container, "Word wrap");
+    flip(first.container, "Minimap");
+    fireEvent.click(row(first.container, "Font size"));
+    await waitFor(() => expect(offers(first.container)).toContain("18px"));
+    flip(first.container, "18px");
+
+    await waitFor(() => expect(localStorage.getItem(SIZE)).toBe("18"));
+    expect(localStorage.getItem(WRAP)).toBe("on");
+    expect(localStorage.getItem(MINIMAP)).toBe("off");
+
+    cleanup();
+    resetEditing();
+
+    const again = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "on", fontSize: 18, minimap: { enabled: false } },
+      { wordWrap: "on", fontSize: 18, minimap: { enabled: false } },
+    ]);
+
+    // And putting each back leaves nothing behind, the way the wrap setting on
+    // a Diff does: the absence is already what an untouched browser answers.
+    await open(again.container);
+    flip(again.container, "Word wrap");
+    flip(again.container, "Minimap");
+    fireEvent.click(row(again.container, "Font size"));
+    await waitFor(() => expect(offers(again.container)).toContain("14px"));
+    flip(again.container, "14px");
+
+    await waitFor(() => expect(localStorage.getItem(SIZE)).toBeNull());
+    expect(localStorage.getItem(WRAP)).toBeNull();
+    expect(localStorage.getItem(MINIMAP)).toBeNull();
+  });
+
+  /// And a browser with no storage to read draws VS Code's defaults rather than
+  /// failing: storage is a convenience the whole way down, so what it costs is
+  /// the setting and nothing else.
+  it("draws VS Code's defaults where the browser has no storage", async () => {
+    const refused = () => {
+      throw new Error("this browser has no storage");
+    };
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(refused);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(refused);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(refused);
+
+    const { container } = await inTwoGroups();
+
+    expect(drawing()).toEqual([
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+      { wordWrap: "off", fontSize: 14, minimap: { enabled: true } },
+    ]);
+
+    // And the menu still works — the setting moves for as long as the pane is
+    // up, and is simply not there the next time it opens.
+    await open(container);
+    flip(container, "Word wrap");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.wordWrap)).toEqual(["on", "on"]),
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  /// And nothing about any of them goes to the server: they are the device's,
+  /// which is the whole reason they are kept where they are.
+  it("sends nothing to the server", async () => {
+    const { container, fetching } = await inTwoGroups();
+
+    const asked = fetching.mock.calls.length;
+
+    await open(container);
+    flip(container, "Word wrap");
+    flip(container, "Minimap");
+    fireEvent.click(row(container, "Font size"));
+    await waitFor(() => expect(offers(container)).toContain("20px"));
+    flip(container, "20px");
+
+    await waitFor(() =>
+      expect(drawing().map((one) => one.fontSize)).toEqual([20, 20]),
+    );
+
+    expect(fetching.mock.calls.length).toBe(asked);
+  });
+});
+
 /// The banner above the record that points at Remote access: the one line on a
 /// Conversation page that is about the workbench rather than about the work.
 ///

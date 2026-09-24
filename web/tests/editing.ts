@@ -33,6 +33,18 @@ export type Opening = {
   readOnly?: boolean;
   automaticLayout?: boolean;
   model?: Model;
+} & Drawing;
+
+/// The three settings the pane's own menu carries, as Monaco takes them —
+/// which is what a test about them reads back.
+///
+/// Apart from the rest of an opening because they are also what `updateOptions`
+/// is handed: they are the pane's rather than a tab's, and a change to one is
+/// told to every editor already open.
+export type Drawing = {
+  wordWrap?: string;
+  fontSize?: number;
+  minimap?: { enabled?: boolean };
 };
 
 /// A buffer, which is the path it was made at and the text that is in it.
@@ -65,6 +77,11 @@ export type Editor = {
   model: Model;
   /// What it was opened with.
   opening: Opening;
+  /// And how it is drawn *now*: what it was opened with, and every change the
+  /// pane has told it about since. The three settings on the pane's menu are
+  /// the pane's rather than a tab's, so what a test about one asks is what the
+  /// editor is set to at the moment rather than what it was made with.
+  drawn: Drawing;
   /// Where the text really is, for a test to read and type into.
   typing: HTMLTextAreaElement;
   /// And whether the tab it was in has gone.
@@ -174,14 +191,33 @@ const monaco = {
 
       at.append(typing);
 
-      const made: Editor = { model, opening, typing, disposed: false };
+      const made: Editor = {
+        model,
+        opening,
+        // Whatever it was opened with, to be moved by every change since — the
+        // way Monaco merges what `updateOptions` is handed into what it already
+        // had.
+        drawn: {
+          wordWrap: opening.wordWrap,
+          fontSize: opening.fontSize,
+          minimap: opening.minimap,
+        },
+        typing,
+        disposed: false,
+      };
 
       opened.push(made);
 
       return {
-        updateOptions: (options: { readOnly?: boolean }) => {
+        updateOptions: (options: { readOnly?: boolean } & Drawing) => {
           if (options.readOnly !== undefined) {
             typing.readOnly = options.readOnly;
+          }
+
+          for (const [named, value] of Object.entries(options)) {
+            if (named !== "readOnly" && value !== undefined) {
+              Object.assign(made.drawn, { [named]: value });
+            }
           }
         },
         dispose: () => {
@@ -209,7 +245,7 @@ type Uri = { path: string };
 /// And one editor, as much of it as the pane calls — which is two things, an
 /// editor here being a view over a buffer rather than somewhere text is kept.
 type Standalone = {
-  updateOptions(options: { readOnly?: boolean }): void;
+  updateOptions(options: { readOnly?: boolean } & Drawing): void;
   dispose(): void;
 };
 

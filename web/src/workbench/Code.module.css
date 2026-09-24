@@ -670,3 +670,53 @@
     color: var(--ink);
   }
 }
+
+/* The pane's own ⋯, beside the maximise toggle: what is about the pane rather
+   than about anything open in it, which is the three settings every editor is
+   drawn with (ADR 0019, *Monaco, whole*).
+
+   The mark itself and the paint under it are the menu component's, so this one
+   and the sidebar's read as the same button — what is said here is where it
+   stands in the header and how wide what it drops is. Narrow: three short rows
+   and a level of font sizes. */
+.paneActions {
+  flex: none;
+}
+
+.paneActions > [role="menu"] {
+  width: 11rem;
+}
+
+/* A settings row: the words at one end and the tick that says which way it is
+   set at the other, which is the nested row's own shape and for the same
+   reason — what is at the far end is the state of the row rather than another
+   thing to press.
+
+   Written through the menu it is in rather than as `.setting` alone, because
+   the rule it is turning round — the column every row of every menu is laid
+   out as, in `Menu.module.css` — carries an element on the end of it and so
+   outweighs a bare class. */
+.paneActions [role="menu"] .setting {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* The tick, which is the one part of these rows that is not the row paint the
+   menu already draws: in the accent, because it is the answer to what the press
+   asked rather than more of the label. */
+.paneActions [role="menu"] .setting > span {
+  color: var(--accent);
+}
+
+/* And each of the three named, so each can be found. They take nothing else of
+   their own — a setting is a setting however it is spelled. */
+.wrap {
+}
+
+.minimap {
+}
+
+.size {
+}

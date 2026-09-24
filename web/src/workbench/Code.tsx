@@ -303,6 +303,22 @@
 //! no group does joins the active group, which is how a shell opened on another
 //! device arrives.
 //!
+//! **And the pane's own ⋯ in the header**, which is where what is about the
+//! pane rather than about anything open in it goes: the three settings ADR 0019
+//! exposes — word wrap, the font size and the minimap — each a row of the one
+//! menu the app has. Kept per device beside the Diff's own wrap setting (see
+//! `device.ts`) and never sent to the server, for the reason that one is: a
+//! phone and a laptop are entitled to draw the same file differently, and
+//! neither has any business deciding for the other. A browser that refuses
+//! storage costs the setting and nothing else, the editors drawing VS Code's
+//! defaults, which is what an untouched browser already gets.
+//!
+//! **And the settings are the pane's rather than an editor's**, which is what
+//! makes a press reach every editor open in every group at once, live, with no
+//! tab reopened — the way the light and dark themes already do. One signal
+//! here, read by each editor as it is drawn: the menu writes it and the tabs
+//! below it read it, and they are two halves of the one pane.
+//!
 //! **And a maximise toggle at the end of the header**, which gives the editor
 //! the window: the sidebar and the Timeline go, and this pane takes what they
 //! were standing in. Off when Code first opens and remembered per device beside
@@ -388,7 +404,7 @@ import {
 
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
-import { ContextMenu } from "../Menu";
+import { ContextMenu, Menu, Nested } from "../Menu";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
@@ -407,6 +423,16 @@ import type {
   FolderListing,
   TerminalOpened,
 } from "../api/types";
+// The three settings the pane's own menu carries, where this device keeps them.
+// Renamed on the way in: the pane holds them in a signal of its own, and the
+// two halves of that — what was read at rest, and the writing down of a change
+// — read better here than the storage's own names would beside it.
+import {
+  SIZES,
+  drawn as atRest,
+  setDrawn as remember,
+  type Drawn,
+} from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
@@ -803,6 +829,35 @@ export function Code(props: {
     askedAt,
     refuse,
   } = props.held;
+
+  /// How every editor in the pane is drawn: word wrap, the font size and the
+  /// minimap, which are the three settings ADR 0019 exposes.
+  ///
+  /// **Here rather than in an editor**, which is the whole of what makes a
+  /// press on the menu reach every editor open in every group at once: one
+  /// answer, read by each of them, so none of them has an opinion of its own to
+  /// fall out of step with the others. The menu in the header writes it and the
+  /// tabs below read it, and they are two halves of the one pane.
+  ///
+  /// **And read off the device as the pane is built**, the way the maximise
+  /// toggle beside it is: a reload comes back to what was set, and a browser
+  /// with no storage to read comes back to VS Code's defaults rather than to a
+  /// failure. Per device and never sent to the server — a phone and a laptop
+  /// are entitled to draw the same file differently.
+  const [drawing, setDrawing] = createSignal(atRest());
+
+  /// Move one of the three, and remember it for the next pane this device
+  /// opens.
+  ///
+  /// One setting at a time, which is what a row of the menu is: the other two
+  /// are carried over rather than said again, so a press cannot quietly put one
+  /// of them back.
+  const draw = (change: Partial<Drawn>): void => {
+    const settled = { ...drawing(), ...change };
+
+    setDrawing(settled);
+    remember(settled);
+  };
 
   /// And which one they are being asked about, where a close was refused for a
   /// shell somebody is working in.
@@ -2605,6 +2660,68 @@ export function Code(props: {
           }
           title="Code"
         >
+          {/* The pane's own ⋯, which is where what is about the pane rather
+              than about anything open in it goes: the three settings every
+              editor is drawn with (ADR 0019, *Monaco, whole*).
+
+              Here rather than on a settings page somewhere else, which would
+              be a page about one pane of one Conversation — and here rather
+              than per editor, because one answer for the whole pane is what
+              makes a press reach every group at once. */}
+          <Menu
+            class={styles.paneActions!}
+            label="Editor settings"
+            name="Editor settings"
+            mark
+          >
+            {() => (
+              <>
+                {/* Left open on a press, unlike every other menu in the app:
+                    these are settings rather than things to do, the tick beside
+                    each is the answer to what the press asked, and somebody
+                    turning the wrap on is as likely as not about to reach for
+                    the size under it. */}
+                <Setting
+                  says="Word wrap"
+                  class={styles.wrap!}
+                  on={drawing().wrap}
+                  press={() => draw({ wrap: !drawing().wrap })}
+                />
+
+                {/* The one of the three that is not a switch, so it is a level
+                    of this same menu rather than a row: one card, one backdrop
+                    and one way out, with the sizes inside it. */}
+                <Nested label="Font size">
+                  {() => (
+                    <For each={SIZES}>
+                      {(size) => (
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          class={`${styles.setting!} ${styles.size!}`}
+                          aria-checked={drawing().size === size}
+                          onClick={() => draw({ size })}
+                        >
+                          {size}px
+                          <Show when={drawing().size === size}>
+                            <span aria-hidden="true">✓</span>
+                          </Show>
+                        </button>
+                      )}
+                    </For>
+                  )}
+                </Nested>
+
+                <Setting
+                  says="Minimap"
+                  class={styles.minimap!}
+                  on={drawing().minimap}
+                  press={() => draw({ minimap: !drawing().minimap })}
+                />
+              </>
+            )}
+          </Menu>
+
           {/* And the way to give the editor the window, at the end of the
               header: the sidebar and the Timeline go, and the details pane —
               which is this one — takes what they were standing in (ADR 0019,
@@ -2977,6 +3094,7 @@ export function Code(props: {
                         reading={readings()[tab.file]}
                         buffer={buffers()[tab.file]}
                         name={named(tab.file)}
+                        drawn={drawing()}
                         bar={bars()[tab.file]}
                         reload={() => void reread(tab.file)}
                         keep={() => void reread(tab.file, true)}
@@ -3287,6 +3405,40 @@ function Busy(props: {
   );
 }
 
+/// One of the pane's settings that is on or off, as a row of its menu.
+///
+/// A `menuitemcheckbox` rather than a button, because that is what it is: the
+/// press does not do something and leave, it moves a setting whose state is
+/// part of the row. Which is also why the tick is drawn — `aria-checked` says
+/// it to a screen reader, and a mark beside the words says it to everybody
+/// else.
+///
+/// Two of the three are this shape. The third is a number and is a level of the
+/// same menu, written where it is used.
+function Setting(props: {
+  /// What the row reads as, which is what the setting is called.
+  says: string;
+  /// The caller's class on it, so each of them can be found.
+  class: string;
+  on: boolean;
+  press: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      class={`${styles.setting} ${props.class}`}
+      aria-checked={props.on}
+      onClick={() => props.press()}
+    >
+      {props.says}
+      <Show when={props.on}>
+        <span aria-hidden="true">✓</span>
+      </Show>
+    </button>
+  );
+}
+
 /// What is in a file's tab: the text in an editor, the picture, or the line
 /// saying why there is nothing to draw.
 ///
@@ -3316,6 +3468,10 @@ function Opened(props: {
   /// What the file is called, which is what an editor and a picture alike are
   /// read aloud as.
   name: string;
+  /// How the pane draws its editors, which is the pane's own answer rather than
+  /// this tab's: it is handed through to whichever editor this tab holds, and a
+  /// change on the menu above reaches every one of them at once.
+  drawn: Drawn;
   /// What the last save came to, where it came to anything to draw.
   bar: Bar | undefined;
   /// **Reload**: take what is on the disk now, text and version together.
@@ -3410,6 +3566,7 @@ function Opened(props: {
             name={props.name}
             model={props.buffer?.model}
             writable={false}
+            drawn={props.drawn}
           />
         </Match>
         <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
@@ -3423,6 +3580,7 @@ function Opened(props: {
               name={props.name}
               model={props.buffer?.model}
               writable={read().writable}
+              drawn={props.drawn}
             />
           )}
         </Match>

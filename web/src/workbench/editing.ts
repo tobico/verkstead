@@ -54,11 +54,20 @@ export type Standalone = Pick<
 >;
 
 /// What an editor is opened with — the buffer, what it is read aloud as, the
-/// theme, whether it takes typing, and whether it follows the element it is in.
+/// theme, whether it takes typing, whether it follows the element it is in, and
+/// the three settings the pane's own menu carries.
 ///
-/// VS Code's defaults but for those: word wrap, the font size and the minimap
-/// are stage 03 of the roadmap, and are its defaults until then.
+/// VS Code's defaults but for those.
 export type Opening = Package.editor.IStandaloneEditorConstructionOptions;
+
+/// And those three on their own: word wrap, the font size and the minimap, as
+/// the words Monaco takes them in.
+///
+/// A type rather than three arguments, because they are set twice — once as an
+/// editor is opened and again each time the menu moves one — and the two have
+/// to be the same three words or an editor would open drawn one way and be
+/// redrawn another. See `device.ts`, where what this is made out of is kept.
+export type Drawing = Pick<Opening, "wordWrap" | "fontSize" | "minimap">;
 
 /// And the package, as the three calls this pane makes of it.
 export type Monaco = {

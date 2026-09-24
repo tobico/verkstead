@@ -3,9 +3,10 @@
 //!
 //! Deliberately per device and never sent to the server — a phone and a laptop
 //! answer the same Set from different places, and neither has any business
-//! deciding how the other draws a Diff. Push notifications are per device for
-//! the same reason, but the browser is the one that remembers those, so nothing
-//! about them is kept here.
+//! deciding how the other draws a Diff — or how the other draws a file in Code,
+//! which is the three settings at the foot of this file. Push notifications are
+//! per device for the same reason, but the browser is the one that remembers
+//! those, so nothing about them is kept here.
 //!
 //! Storage is a convenience the whole way down: a browser that refuses it costs
 //! the human their drafts and their settings and nothing else, so nothing on
@@ -98,5 +99,83 @@ export function forget(key: string): void {
     localStorage.removeItem(key);
   } catch {
     // As above: there was nothing to lose but the setting.
+  }
+}
+
+/// And the three settings Code's own menu carries, one key each.
+///
+/// Namespaced like the wrap above them, and named for the editors rather than
+/// for the pane: what they are about is how a file is drawn, and the pane is
+/// only where they are asked for.
+const EDITOR_WRAP = "verkstead.editor-wrap";
+const EDITOR_SIZE = "verkstead.editor-font-size";
+const EDITOR_MINIMAP = "verkstead.editor-minimap";
+
+/// How every editor Code mounts is drawn: whether lines wrap, how large the
+/// text is, and whether the minimap stands down the side.
+///
+/// The three [ADR 0019](../../docs/adr/0019-the-code-pane.md) exposes, and no
+/// more: everything else about an editor is VS Code's default, which is what
+/// asking for VS Code's feel means.
+export type Drawn = {
+  wrap: boolean;
+  /// In pixels, which is the unit Monaco takes and the one the menu says.
+  size: number;
+  minimap: boolean;
+};
+
+/// VS Code's own, which is what an untouched browser answers and what a browser
+/// with no storage at all answers too.
+///
+/// Written out rather than left to Monaco by omission, because the menu has to
+/// draw a tick against one of its rows before anybody has pressed anything: a
+/// setting nobody can see the value of is a row that says nothing.
+export const DRAWN: Drawn = { wrap: false, size: 14, minimap: true };
+
+/// The font sizes the menu offers, in the order it draws them.
+///
+/// A list rather than a field, the menu being rows: a span either side of VS
+/// Code's own 14, far enough out at each end to be worth the row.
+export const SIZES: readonly number[] = [10, 12, 14, 16, 18, 20];
+
+/// How this device wants its editors drawn.
+///
+/// Anything but what [`setDrawn`] writes reads as the default, per setting: a
+/// key somebody has edited by hand, a size no longer offered, or a browser that
+/// answers nothing at all are each one setting back to VS Code's and the others
+/// left alone.
+export function drawn(): Drawn {
+  const size = Number(read(EDITOR_SIZE));
+
+  return {
+    wrap: read(EDITOR_WRAP) === "on",
+    size: SIZES.includes(size) ? size : DRAWN.size,
+    minimap: read(EDITOR_MINIMAP) !== "off",
+  };
+}
+
+/// Remember how this device wants them drawn, and for every editor it opens
+/// after these.
+///
+/// Each setting left at its default is removed rather than written, the way the
+/// wrap above is: the absence is already the default, so a device that has put
+/// everything back leaves nothing behind.
+export function setDrawn(settings: Drawn): void {
+  keep(EDITOR_WRAP, settings.wrap === DRAWN.wrap, settings.wrap ? "on" : "off");
+  keep(EDITOR_SIZE, settings.size === DRAWN.size, String(settings.size));
+  keep(
+    EDITOR_MINIMAP,
+    settings.minimap === DRAWN.minimap,
+    settings.minimap ? "on" : "off",
+  );
+}
+
+/// Write one of them out, or take it away where it is what an untouched browser
+/// already answers.
+function keep(key: string, standard: boolean, body: string): void {
+  if (standard) {
+    forget(key);
+  } else {
+    write(key, body);
   }
 }

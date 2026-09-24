@@ -25,9 +25,15 @@
 //! it this stage sets: `vs` and `vs-dark`, VS Code's own two, picked by the
 //! scheme the browser is in and followed live — the workbench has no theme
 //! switch, so `prefers-color-scheme` is both the setting and the only warning
-//! of a change, exactly as it is for the diagrams in `set/diagrams.ts`. Word
-//! wrap, the font size and the minimap are stage 03's, on the pane's own menu;
-//! until then they are VS Code's defaults like everything else.
+//! of a change, exactly as it is for the diagrams in `set/diagrams.ts`.
+//!
+//! **And the three settings on the pane's own menu**, which are followed the
+//! same way and for the same reason: word wrap, the font size and the minimap
+//! (ADR 0019, *Monaco, whole*). They are handed in rather than read here,
+//! because they are one answer for the whole pane — a change on the menu
+//! reaches every editor open in every group at once, with no tab reopened —
+//! and where that answer is kept is `device.ts`, per device and never sent to
+//! the server. Everything else about an editor is VS Code's default.
 //!
 //! **The editor is fetched rather than bundled in** — see [`./editing`] and
 //! [`./monaco`]. The pane warms that fetch when it opens, so by the time a file
@@ -50,8 +56,15 @@ import {
   type JSX,
 } from "solid-js";
 
+import type { Drawn } from "../device";
 import { ErrorLine } from "../notices";
-import { load, type Model, type Monaco, type Standalone } from "./editing";
+import {
+  load,
+  type Drawing,
+  type Model,
+  type Monaco,
+  type Standalone,
+} from "./editing";
 import styles from "./Editor.module.css";
 
 /// VS Code's own two themes, by the names Monaco ships them under.
@@ -72,6 +85,20 @@ const SCHEME = "(prefers-color-scheme: dark)";
 export const NO_EDITOR =
   "The editor could not be loaded. Check the connection and open the file again.";
 
+/// The pane's three settings, in the words Monaco takes them in.
+///
+/// One function for both the opening and the change, so that an editor is never
+/// made one way and redrawn another — see [`Drawing`]. Said in full each time
+/// rather than as a difference: Monaco merges what it is handed into the options
+/// it already has, and three fields is cheaper to read than a diff would be.
+function drawing(settings: Drawn): Drawing {
+  return {
+    wordWrap: settings.wrap ? "on" : "off",
+    fontSize: settings.size,
+    minimap: { enabled: settings.minimap },
+  };
+}
+
 export function Editor(props: {
   /// What the file is called, which is what the editor is read aloud as: a path
   /// in a checkout is a sentence, and the name is what the tab above says too.
@@ -84,6 +111,10 @@ export function Editor(props: {
   /// opens read-only and takes no typing — the root's own flag rather than the
   /// file's mode.
   writable: boolean;
+  /// How the pane wants its editors drawn: word wrap, the font size and the
+  /// minimap. One answer for every editor the pane has open, so a change on the
+  /// menu reaches all of them at once rather than the one being looked at.
+  drawn: Drawn;
 }): JSX.Element {
   /// Where the editor is drawn. Its own element rather than this component's
   /// root, because Monaco fills whatever it is given and the line below has to
@@ -142,6 +173,10 @@ export function Editor(props: {
       theme: dark() ? DARK : LIGHT,
       readOnly: !props.writable,
       automaticLayout: true,
+      // Opened at whatever the pane's menu says rather than at Monaco's own and
+      // corrected afterwards, so a tab opened while the text is set large is
+      // never drawn small for a frame first.
+      ...drawing(props.drawn),
     });
   });
 
@@ -165,6 +200,23 @@ export function Editor(props: {
   // it is read is the one place it is written.
   createEffect(() => {
     editing?.updateOptions({ readOnly: !props.writable });
+  });
+
+  // And the three the pane's menu carries, which do change under an editor that
+  // is already open: a press on the menu moves the setting the whole pane reads,
+  // and every editor drawing it is redrawn where it stands. Unlike the theme,
+  // these are the editor's rather than the package's, so each one is told —
+  // which is what a hidden tab needs as much as the one showing, its editor
+  // being alive behind the `hidden` and read the moment somebody turns back.
+  //
+  // Read before the editor is reached for rather than inside the call, because
+  // `?.` on an editor that is not there yet would short-circuit the argument
+  // with it — and an effect that never read the settings is one that is never
+  // told they moved.
+  createEffect(() => {
+    const settings = drawing(props.drawn);
+
+    editing?.updateOptions(settings);
   });
 
   return (
