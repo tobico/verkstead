@@ -21262,6 +21262,76 @@ describe("the code pane's groups", () => {
     expect(theEditor().model.disposed).toBe(false);
   });
 
+  /// And a tab that is only standing there to say why its shell never started
+  /// is closed out of *every* group holding it, the way a shell that ended is
+  /// and the way **New terminal** replacing one takes it.
+  ///
+  /// A split makes a second view of whatever its group was showing, so that
+  /// sentence can stand in two bars at once — and it is one shell's however
+  /// many views of it were made. A copy left behind would be a tab with its
+  /// sentence taken away, no socket left to close and nothing at the server for
+  /// its × to end: a tab nobody could close at all.
+  it("closes a tab standing on a shell that never started out of every group", async () => {
+    withTerminals(
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 1 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    // The one way into an empty pane, which is the press under the hint.
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.nothing} button`,
+      ),
+    );
+
+    const socket = await waitFor(() => {
+      const one = Attached.opened.find((each) =>
+        each.url.endsWith(`${TERMINALS_OF_IT}/1/attach`),
+      );
+
+      if (!one) {
+        throw new Error("nothing has attached to terminal 1");
+      }
+
+      return one;
+    });
+
+    // It dies inside the five seconds of being asked for, so its tab stays
+    // saying why rather than going the way a shell that ran goes.
+    socket.ends();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+          ?.textContent,
+      ).toBe(ENDED_AT_ONCE),
+    );
+
+    // And a second view of that very sentence, from the tab's own menu.
+    await split(container, tabs(container)[0]!, "Split right");
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([["Terminal 1"], ["Terminal 1"]]),
+    );
+
+    // The × on one of them takes both, and the group the first stood in goes
+    // with it: what is left is the one group there always is, empty.
+    fireEvent.click(crosses(groups(container)[1]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(1));
+    expect(holding(container)).toEqual([[]]);
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${notices.error}`),
+    ).toBeNull();
+  });
+
   /// The same file in two groups is one buffer under two views: typing in
   /// either shows in the other, the dot is on both tabs, and one save clears
   /// both (ADR 0019, *Tabs and groups*).

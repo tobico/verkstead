@@ -1742,7 +1742,12 @@ export function Code(props: {
   /// already here: a build started since the pane opened is a build.
   ///
   /// A tab that is only standing there to say why has no shell to end and no
-  /// socket to hear it on, so it simply goes. Nothing is drawn about a request
+  /// socket to hear it on, so it simply goes — **out of every group holding
+  /// it**, the way a shell that ended goes and the way **New terminal**
+  /// replacing one takes it. A sentence about a shell that never started is one
+  /// shell's however many views of it a split made, and a copy left behind
+  /// would be a tab with its sentence taken away, no socket to close and
+  /// nothing at the server for its × to end. Nothing is drawn about a request
   /// that failed: the shell is the server's, and a tab still there is what says
   /// it is still running.
   ///
@@ -1780,7 +1785,9 @@ export function Code(props: {
         delete rest[number];
         return rest;
       });
-      take(group, tab);
+      everywhere((was) =>
+        was.filter((one) => !("terminal" in one && one.terminal === number)),
+      );
       return;
     }
 
