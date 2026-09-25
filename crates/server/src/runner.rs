@@ -1998,8 +1998,96 @@ pub(crate) async fn following_up(
 const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
      put to you has been closed unanswered";
 
-/// The human has said there is nothing else: end the session, and put the
-/// Conversation back in the wrap-up it was opened over.
+/// The human has said there is nothing else: end the session, and land the
+/// Conversation wherever this follow-up ends.
+///
+/// **Two endings, and the pull request is what tells them apart.** A follow-up
+/// steered into is something taken up about work that is already on one, so where
+/// it ends is where it started — see [`back_to_the_wrap_up`]. A **Tinker** starts
+/// straight into Follow-up on a branch nobody has opened anything on, and what
+/// its rounds left on that branch is the whole of what decides: commits mean the
+/// pull request is sent for and the ordinary wrap-up runs over what is opened,
+/// and nothing means Done.
+///
+/// **The branch is asked, once, here — and not the `pushed` flag.** `pushed` is
+/// *more commits than when this session launched*, and a follow-up picked up
+/// again reads that baseline afresh, so a Tinker that commits, loses its session,
+/// is relaunched and then ends on a round that committed nothing reads
+/// `pushed: false`. Landing Done on that would leave the work on a branch with no
+/// pull request and nothing watching it. So what stands on the branch past the
+/// commit it was cut from is asked of git — see [`crate::commits::touched`] — and
+/// `pushed` goes on meaning what it has always meant.
+///
+/// The session is ended first, because the Worktree is about to be handed to
+/// whatever comes next: a review or a `submitting` session queueing behind an
+/// agent that has nothing left to do would wait for a session Verkstead is
+/// finished with.
+async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Driving) {
+    tracing::info!(
+        conversation_id,
+        "the human has nothing else, so the follow-up is over and its session is being ended",
+    );
+
+    state.sessions.end(conversation_id).await;
+
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(
+                conversation_id,
+                "there is no Conversation left to land a follow-up on",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation a follow-up was on failed");
+            return;
+        }
+    };
+
+    // The Conversation's own repository's, which is the pull request that makes a
+    // wrap-up: a companion's is something a wrap-up covers rather than something
+    // to end into. A steer into Follow-up is refused without one, so this is
+    // exactly the question *is this a Tinker's branch* — asked of the record,
+    // because a Tinker that has already been round once is on a pull request and
+    // ends the ordinary way.
+    let on_a_pull_request = match store::pull_request(
+        &state.pool,
+        conversation_id,
+        conversation.repo.id,
+    )
+    .await
+    {
+        Ok(found) => found.is_some(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a follow-up's work is on a pull request failed");
+            return;
+        }
+    };
+
+    if on_a_pull_request {
+        return back_to_the_wrap_up(state, conversation_id, already, driving).await;
+    }
+
+    if holds_commits(state, &conversation).await {
+        tracing::info!(
+            conversation_id,
+            "the follow-up built something on a branch that is on no pull request, so a \
+             session is being sent to open one",
+        );
+
+        // Held across the session and the wrap-up it starts, which is what
+        // [`asked_for_a_pull_request`] leaves behind it: dropping first would
+        // leave a moment where a sweep could find the Conversation undriven.
+        let _driving = driving;
+
+        return asked_for_a_pull_request(state, conversation_id).await;
+    }
+
+    finished(state, conversation_id, driving).await
+}
+
+/// Land a follow-up back in the wrap-up it was opened over.
 ///
 /// **Where a follow-up ends is where it started.** It is something taken up
 /// about work that is already on a pull request, so what is left when it is over
@@ -2019,17 +2107,14 @@ const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act 
 /// *pushed*, which is the right way round: the cost is one poll of GitHub, and
 /// the cost the other way is a wrap-up finished over a suite nobody watched.
 ///
-/// The session is ended first, because the Worktree is about to be handed to the
-/// wrap-up's own watchers: a review queueing behind an agent that has nothing
-/// left to do would wait for a session Verkstead is finished with.
-async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Driving) {
-    tracing::info!(
-        conversation_id,
-        "the human has nothing else, so the follow-up is over and its session is being ended",
-    );
-
-    state.sessions.end(conversation_id).await;
-
+/// Which is the one place `pushed` is asked for at all, and the reason it is not
+/// what a Tinker's ending reads — see [`over`].
+async fn back_to_the_wrap_up(
+    state: &AppState,
+    conversation_id: i64,
+    already: i64,
+    driving: Driving,
+) {
     let pushed = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed > already,
         Err(error) => {
@@ -2073,6 +2158,107 @@ async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Dri
     let _driving = driving;
 
     crate::checks::afresh(state.clone(), conversation_id).await;
+}
+
+/// And land one in Done, because its rounds built nothing.
+///
+/// A Tinker that was questions and answers alone: there is no pull request to
+/// carry anything to and nothing to carry, so there is nothing for a wrap-up to
+/// be about and nothing to dispatch. The move and the line on the Timeline are
+/// the whole of it, and the Worktree stays as it is for any Done Conversation.
+///
+/// Nothing is pushed to the devices and nothing is stamped unseen either, which
+/// is what parts this from a wrap-up settling: the human is the one who ended
+/// this, a moment ago, by ticking **Nothing else** — see `crate::settling`, whose
+/// news is for a milestone nobody was there for.
+async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
+    // Held until the move is written, which is what every driver here holds it
+    // for: dropping first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it over a follow-up that had finished.
+    let _driving = driving;
+
+    match store::follow_up_done(&state.pool, conversation_id).await {
+        Ok(store::Ending::Finished) => {}
+        Ok(outcome) => {
+            tracing::info!(
+                conversation_id,
+                ?outcome,
+                "there was no follow-up left to end, so nothing was moved",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "finishing a follow-up that built nothing failed");
+            return;
+        }
+    }
+
+    tracing::info!(
+        conversation_id,
+        "the follow-up built nothing and its branch is on no pull request, so the work is done",
+    );
+
+    // The Timeline has a move on it and the card reads differently, and an open
+    // page should say so without being reloaded.
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
+}
+
+/// Whether anything stands on the Conversation's branch past the commit it was
+/// cut from.
+///
+/// Asked of git in the Conversation's own repository, which is where a branch is
+/// a fact: the record's own commit count is a poller's, and what this decides is
+/// whether there is work nothing is watching. The repository rather than the
+/// Worktree, exactly as everything else that asks about the branch does — see
+/// [`crate::commits::touched`], whose reading this is.
+///
+/// A base commit missing from the record is nothing to read against, so it reads
+/// as *nothing on the branch* with a line in the log — the same answer the
+/// wrap-up gives a companion it cannot tell apart from what it branched off.
+///
+/// **And a rename is followed first**, which is the one thing this has to do that
+/// asking git does not. A Tinker's first session is the one told to rename the
+/// branch, and Verkstead learns about a rename by reading the checkout rather than
+/// being told — so the name the record was written with may be one git has let go
+/// of, and a branch git cannot resolve reads as holding nothing. One
+/// `git symbolic-ref` in the ordinary case; see [`crate::renames`], whose reading
+/// the commit sweep does every couple of seconds for the same reason.
+async fn holds_commits(state: &AppState, conversation: &store::Conversation) -> bool {
+    let Some(base) = conversation.base_commit.clone() else {
+        tracing::error!(
+            conversation_id = conversation.id,
+            "a follow-up has no base commit, so what it built cannot be told from what \
+             it branched off",
+        );
+        return false;
+    };
+
+    let repo = conversation.repo.path.clone();
+
+    let branch = match conversation.worktree.as_deref() {
+        Some(worktree) => crate::renames::follow(
+            &state.pool,
+            conversation.id,
+            &repo,
+            worktree,
+            &conversation.branch,
+        )
+        .await
+        .unwrap_or_else(|| conversation.branch.clone()),
+        None => conversation.branch.clone(),
+    };
+
+    // Off the runtime's threads: git is a process.
+    match tokio::task::spawn_blocking(move || crate::commits::touched(&repo, &base, &branch)).await
+    {
+        Ok(holds) => holds,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = conversation.id, "asking git what a follow-up's branch holds failed");
+            false
+        }
+    }
 }
 
 /// Take off any Question Set the follow-up left standing on the Conversation.

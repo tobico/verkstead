@@ -14,19 +14,21 @@
 //! round asked after a marked one puts the follow-up back to running, and a mark
 //! left by the follow-up before this one ends nothing.
 //!
-//! And the landing that reading ends in: back to Wrapping over the pull request
-//! the follow-up was opened about, with the checks put back to waiting where it
-//! pushed.
+//! And the two landings that reading ends in: back to Wrapping over the pull
+//! request the follow-up was opened about, with the checks put back to waiting
+//! where it pushed — and Done, for a follow-up on a branch nothing built anything
+//! on and no pull request is waiting for.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Ending, Lifecycle, PullRequest, Recorded, Settlements, Steer, Steering, Submission,
-    WAITED_ON, WaitingOn, ask, ended_on, follow_up_over, load_conversation, load_response,
-    lock_set, nothing_else, open_database, record_another_pull_request, register_repo,
-    settle_wrap_up, start_conversation, steer_conversation, submit_response, wrap_up_settled,
+    Ask, Ending, Event, Lifecycle, PullRequest, Recorded, Settlements, Steer, Steering, Submission,
+    WAITED_ON, WaitingOn, ask, ended_on, follow_up_done, follow_up_over, load_conversation,
+    load_response, lock_set, nothing_else, open_database, record_another_pull_request,
+    register_repo, settle_wrap_up, start_conversation, steer_conversation, submit_response,
+    timeline, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -537,6 +539,66 @@ async fn a_follow_up_that_pushed_nothing_lands_with_every_settle_standing() {
     );
 }
 
+/// And the other landing: Done, for a follow-up on a branch nothing was built on
+/// and no pull request is waiting for.
+///
+/// A **Tinker** whose rounds were questions and answers alone. There is nothing
+/// to open a pull request over and nothing for a wrap-up to be about, so the move
+/// is the whole of it — and it is a move like every other, which means a line on
+/// the Timeline saying when the Conversation got there. Which of the two landings
+/// a follow-up takes is read off its branch by the caller; the store writes the
+/// one it is asked for.
+#[tokio::test]
+async fn a_follow_up_that_built_nothing_lands_in_done_with_the_move_on_its_timeline() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    following_up(&pool, conversation).await;
+
+    assert_eq!(
+        follow_up_done(&pool, conversation).await.unwrap(),
+        Ending::Finished,
+    );
+
+    let conversation_row = load_conversation(&pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(
+        conversation_row.state,
+        Lifecycle::Done,
+        "there is nothing on the branch to wrap up, so the work is finished",
+    );
+
+    let moved = moves(&pool, conversation).await;
+
+    assert_eq!(
+        moved.last(),
+        Some(&Lifecycle::Done),
+        "and the Timeline says when it got there, as it does for every move: \
+         {moved:?}",
+    );
+    assert!(
+        !moved.contains(&Lifecycle::Wrapping),
+        "without passing through a wrap-up on the way: there was never a pull \
+         request for one to be about: {moved:?}",
+    );
+}
+
+/// The states a Conversation's Timeline says it has moved through, in order.
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event.event {
+            Event::Moved(state) => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     let (_dir, pool) = fresh_pool().await;
@@ -549,6 +611,18 @@ async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     );
     assert_eq!(
         follow_up_over(&pool, 404, false).await.unwrap(),
+        Ending::NoSuchConversation,
+    );
+
+    // And the landing beside it is refused by the same two names: both are the
+    // one move out of Follow-up, so neither is a way into Done or Wrapping from
+    // anywhere else.
+    assert_eq!(
+        follow_up_done(&pool, conversation).await.unwrap(),
+        Ending::NotFollowingUp,
+    );
+    assert_eq!(
+        follow_up_done(&pool, 404).await.unwrap(),
         Ending::NoSuchConversation,
     );
 }

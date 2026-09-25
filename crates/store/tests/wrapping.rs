@@ -6,7 +6,9 @@
 //! Timeline say afterwards: the state, the PR Event, and the move under it.
 //!
 //! Two states get here, because two kinds of work end on a pull request: a
-//! backlog worked to empty, from Implementing, and a roadmap, from Grilling.
+//! backlog worked to empty, from Implementing, and a roadmap, from Grilling. And
+//! two doors beside them: a Draft holding a pull request somebody opened
+//! elsewhere, and a Tinker in Follow-up whose ending sent for one.
 //!
 //! And a Conversation can arrive twice. A review that split its findings out
 //! into a backlog sends the work back to be built, and its finish step wraps up
@@ -22,7 +24,8 @@ use verkstead_store::{
     pick_direction, pull_request, pull_request_repo, pull_requests, record_another_pull_request,
     record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
     resolve_conflicts, save_brief, settle_wrap_up, standing, start_conversation, start_grilling,
-    start_pull_request_adoption, take_up, timeline, unfinished_pull_requests, wrap_up_settled,
+    start_pull_request_adoption, start_tinkering, take_up, timeline, unfinished_pull_requests,
+    wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -74,6 +77,37 @@ async fn implementing(pool: &SqlitePool) -> i64 {
     pick_direction(pool, id, verkstead_schema::Direction::Inline)
         .await
         .unwrap();
+
+    id
+}
+
+/// And a **Tinker**, which is a Conversation the one start press put straight
+/// into Follow-up — the fourth state a pull request can be recorded against.
+///
+/// Walked there by the press that makes one, for the reason [`grilling`] is
+/// walked: a Conversation dropped into a state by hand is one nothing else in the
+/// store agrees about.
+async fn tinkering(pool: &SqlitePool) -> i64 {
+    let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let id = start_conversation(pool, repo.id, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    save_brief(pool, id, "# Rate limiting\n").await.unwrap();
+    start_tinkering(
+        pool,
+        id,
+        "c0ffee",
+        Path::new("/state/worktrees/rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     id
 }
@@ -346,6 +380,49 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
             .collect::<Vec<_>>(),
         [Lifecycle::Wrapping],
         "one move, from the Draft it was straight into the wrap-up",
+    );
+}
+
+/// And a Conversation in Follow-up is: a Tinker whose rounds committed on a
+/// branch that is on no pull request, whose ending sent a session to open one.
+///
+/// The fourth door, and the one that saves a second wrap-up entry being written
+/// beside the ending — what the ending does is send for the pull request, and
+/// recording one is the move, exactly as it is for every other ending. A
+/// follow-up steered into never comes through here: it is on a pull request
+/// already, and its ending lands it back in the wrap-up it was opened over.
+#[tokio::test]
+async fn a_follow_up_is_moved_on_by_the_pull_request_its_ending_sent_for() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = tinkering(&pool).await;
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::FollowUp,
+        "the press landed it there rather than in a grilling",
+    );
+
+    assert_eq!(
+        record_pull_request(&pool, id, own(&pool, id).await, &opened())
+            .await
+            .unwrap(),
+        Wrapping::Started,
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Wrapping);
+
+    let events = events(&pool, id).await;
+
+    assert_eq!(
+        events.last(),
+        Some(&Event::Moved(Lifecycle::Wrapping)),
+        "the move is the last thing on the Timeline: {events:?}",
+    );
+    assert_eq!(
+        events[events.len() - 2],
+        Event::PullRequest(opened()),
+        "and the PR is what it moved on: {events:?}",
     );
 }
 

@@ -1016,13 +1016,23 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
-/// What became of landing a follow-up back in the wrap-up it was opened over.
+/// What became of landing a follow-up, which is one of two places.
+///
+/// Two of them because a follow-up is reached two ways. One steered into is
+/// something taken up about work that is already on a pull request, and it goes
+/// back to the wrap-up it was opened over; a **Tinker** starts straight into one
+/// on a branch nobody has opened anything on, and there what the branch holds is
+/// what decides. See [`follow_up_over`] and [`follow_up_done`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
     /// Landed: the Conversation is wrapping up again and the move is on its
     /// Timeline, with the checks put back to waiting where the follow-up
     /// pushed anything.
     Wrapped,
+
+    /// Landed the other way: the Conversation is Done and the move is on its
+    /// Timeline, nothing having been built for a wrap-up to be about.
+    Finished,
 
     /// It is not following anything up, so there is no follow-up here to end —
     /// closed out from under the session, or steered somewhere else while this
@@ -4110,11 +4120,12 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// Land a follow-up back in the wrap-up it was opened over, because the human
 /// has said there is nothing else.
 ///
-/// The way out of Follow-up, and the only one there is short of a steer. A
-/// follow-up is something taken up about work that is already on a pull request,
-/// so where it ends is where it started: the wrap-up carries on over whatever
-/// the branch now holds, and *back to Done* is that wrap-up's own settling rule
-/// rather than anything decided here — see [`finish_wrap_up`].
+/// One of the two ways out of Follow-up short of a steer, and the one a
+/// follow-up steered into takes. It is something taken up about work that is
+/// already on a pull request, so where it ends is where it started: the wrap-up
+/// carries on over whatever the branch now holds, and *back to Done* is that
+/// wrap-up's own settling rule rather than anything decided here — see
+/// [`finish_wrap_up`]. The other way is [`follow_up_done`].
 ///
 /// Refused for anything but Follow-up, as every move here is refused outside the
 /// state it leaves: a Conversation closed or steered out from under the session
@@ -4139,6 +4150,42 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// One transaction, as every move is: a Conversation that says Wrapping always
 /// has the move on its Timeline to say when it got there.
 pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Wrapping, pushed).await
+}
+
+/// And land one in Done, because the branch it was following up on holds nothing.
+///
+/// The second way out of Follow-up, and a **Tinker**'s where its rounds built
+/// nothing at all: there is no pull request to carry the work to and no work to
+/// carry, so there is nothing for a wrap-up to be about. The Worktree stays as it
+/// is, as it does for any Done Conversation.
+///
+/// Which of the two a Tinker takes is read off its branch at the ending rather
+/// than off anything in the record — see `crate::runner`, which asks git once and
+/// calls the one that fits. Nothing here decides it, exactly as nothing here
+/// decides which state a start lands in.
+///
+/// No `pushed`, because there is nothing to have pushed to: a Conversation that
+/// gets here is on no pull request, so there are no checks to put back to
+/// waiting.
+///
+/// Refused for anything but Follow-up, and one transaction, for
+/// [`follow_up_over`]'s reasons.
+pub async fn follow_up_done(pool: &SqlitePool, id: i64) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Done, false).await
+}
+
+/// What the two of them do, which is the same move to different states.
+///
+/// `landing` is the whole of what the caller decides here, as it is for a start
+/// — see [`start`]. `pushed` only ever means anything on the way to Wrapping,
+/// there being no settle to unsettle anywhere else.
+async fn out_of_follow_up(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+    pushed: bool,
+) -> Result<Ending> {
     let mut tx = super::writing(pool, "ending a follow-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -4174,17 +4221,20 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Wrapping.stored())
+        .bind(landing.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+        .with_context(|| format!("moving Conversation {id} out of following up"))?;
 
-    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    moved(&mut tx, id, landing).await?;
 
     tx.commit().await.context("ending a follow-up")?;
 
-    Ok(Ending::Wrapped)
+    Ok(match landing {
+        Lifecycle::Wrapping => Ending::Wrapped,
+        _ => Ending::Finished,
+    })
 }
 
 /// Send a Done Conversation back to wrapping up, because the human pressed

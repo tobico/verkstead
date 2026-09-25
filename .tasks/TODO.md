@@ -25,4 +25,4 @@ Roadmap stage: [03: Tinker, and No grilling retires](docs/roadmaps/processes/03-
 - [x] 01: No grilling retires — [details](01-no-grilling-retires.md)
 - [x] 02: The Tinker start — [details](02-the-tinker-start.md)
 - [x] 03: The follow-up on a bare branch — [details](03-a-bare-branch.md)
-- [ ] 04: The ending reads the branch — [details](04-the-ending.md)
+- [x] 04: The ending reads the branch — [details](04-the-ending.md)
