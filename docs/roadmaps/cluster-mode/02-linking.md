@@ -4,14 +4,14 @@
 
 Two Verksteads become one cluster, and a third joins through either. On A, the
 Devices section of Remote access has **Add**: type B's address, and A's list
-shows a pending row,
-*Waiting for confirmation on B*, with A's fingerprint and Cancel. On B, every
-open workbench raises a modal — A's name, OS, address and fingerprint, Allow
-and Deny — and B's phones get a push. Allow exchanges certificates, B hands A
-every member and announces A to each of them over its own link, with no further
-press anywhere; both lists now read the same. Unlink drops a device from the cluster for everyone,
-asked once. A member that stops answering stays on the list dimmed
-*unreachable*. Demonstrable end to end with three servers.
+shows a pending row, *Waiting for confirmation on B*, with A's fingerprint and
+Cancel. On B, every open workbench raises a modal — A's name, OS, address and
+fingerprint, Allow and Deny — and B's phones get a push. Allow exchanges
+certificates, B hands A every member and announces A to each of them over its
+own link, with no further press anywhere; both lists now read the same. Unlink
+drops a device from the cluster for everyone, asked once. A member that stops
+answering stays on the list dimmed *unreachable*. Demonstrable end to end with
+three servers.
 
 ## Decisions in force
 
@@ -37,6 +37,12 @@ asked once. A member that stops answering stays on the list dimmed
   pending row and is dismissed. A blocking dialog on A was rejected.
 - **Every device advertises all its addresses on every exchange**, a peer
   trying them in order; the typed address is just the first known.
+- **A renewed certificate is announced to every member** over the link already
+  held, which is what completes stage 01's changeover: the member records the
+  new fingerprint against the same device id, and the renewing device goes on
+  presenting the old certificate until every member has acknowledged. One that
+  was unreachable is announced to again when it next answers. Without this the
+  re-issue stage 01 makes would strand a cluster on fingerprints nobody holds.
 - **Unlink removes the device for everyone**, asked once as Remove on a Repo
   is; cutting only this device's own pair was rejected. Unreachable members
   stay listed, dimmed, Unlink still working.
@@ -82,6 +88,12 @@ asked once. A member that stops answering stays on the list dimmed
 6. **Unlink** — asked once, broadcast to every member, the leaver told to
    forget everyone.
    - The leaver's Devices list is empty but for itself.
+7. **The renewal announced** — stage 01's re-issue told to every member over
+   the existing link, the new fingerprint recorded against the same id, the old
+   certificate presented until all have acknowledged.
+   - A device that renews stays reachable throughout, from every member.
+   - A member that was down when it renewed is told when it comes back, and
+     the changeover finishes then.
 
 ## Re-verify at start
 

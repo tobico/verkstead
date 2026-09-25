@@ -3,15 +3,15 @@
 ## Goal
 
 A Verkstead knows what it is and can be asked. At first start it invents a
-device id and a self-signed certificate beside `workbench.key`; it listens on
-a TLS peer listener of its own, every interface, port 8423, that presents that
-certificate and asks the caller for one without insisting on it; an
-un-gated identity endpoint on that listener answers with the device's id, name,
-OS and addresses; and the
-**Remote access** pane gains a **Devices** section whose list holds this device
-alone — name with an OS icon, *this device*, its addresses, no Unlink.
-Demonstrable end to end: start two servers, curl one's identity from the other's
-machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
+device id and a self-signed certificate beside `workbench.key`, re-issuing the
+certificate as its expiry comes near; it listens on a TLS peer listener of its
+own, every interface, port 8423, that presents that certificate and asks the
+caller for one without insisting on it; an un-gated identity endpoint on that
+listener answers with the device's id, name, OS and addresses; and the **Remote
+access** pane gains a **Devices** section whose list holds this device alone —
+name with an OS icon, *this device*, its addresses, no Unlink. Demonstrable end
+to end: start two servers, curl one's identity from the other's machine, open
+Remote access on each and see a WSL read as *Linux (WSL)*.
 
 ## Decisions in force
 
@@ -21,6 +21,16 @@ machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
   certificate*). The id is short enough to sit in a URL segment. The tailnet
   node name and the hostname were rejected as ids: one is gone off the tailnet,
   the other collides.
+- **The certificate is renewed rather than issued once for ever**
+  ([ADR-0020](../../adr/0020-cluster-mode.md), *A device is an id and a
+  certificate*): an expired one is refused at the handshake, so a single
+  long-lived certificate would take every link in a cluster down on one day,
+  the only way back being to re-link every device by hand. A validity long
+  enough never to matter was not taken for that reason. What belongs to this
+  stage is the validity, the re-issue a good while before the expiry, and
+  keeping both certificates over the changeover; the announcement of the new
+  fingerprint to every member is stage 02's, there being no member to tell yet
+  — the re-issue here simply has nobody to announce to and says so.
 - **The name is the hostname read at each start, with an OS icon.** Nothing
   is typed. WSL is detected from the kernel release and reads *Linux (WSL)*,
   because Windows and its WSL share a hostname.
@@ -63,7 +73,14 @@ machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
    read back after, with the platform's file mode.
    - A second start reads the same id; deleting the files makes fresh ones.
    - The certificate's fingerprint is stable and printable.
-2. **The peer listener** — a second axum server over rustls on the peer
+2. **The renewal** — the validity written down, a re-issue when the expiry is
+   near enough, and the outgoing certificate kept beside the new one until
+   nothing is owed an announcement.
+   - A start with the expiry near re-issues; one with it far off does not.
+   - Both fingerprints are printable over the changeover, and the listener
+     presents the old one while any member is unacknowledged.
+   - With no members, a re-issue completes at once.
+3. **The peer listener** — a second axum server over rustls on the peer
    address, presenting the certificate and requesting a client certificate
    without requiring one, with the membership check as middleware over every
    route but the identity endpoint.
@@ -72,11 +89,11 @@ machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
    - A call with an unknown client certificate reaches the identity endpoint
      too, and is refused by every gated route.
    - The NixOS module opens the option and the VM test binds it.
-3. **The identity endpoint and the machine reading** — id, name, OS with WSL
+4. **The identity endpoint and the machine reading** — id, name, OS with WSL
    detection, addresses; the wire type exported to TypeScript.
    - Under WSL the OS reads *Linux (WSL)*; elsewhere the platform's own word.
    - Addresses list the tailnet name and IP first where Tailscale is up.
-4. **The Devices section** — a third section in the Remote access pane, with
+5. **The Devices section** — a third section in the Remote access pane, with
    its own reading, and the list holding this device's row.
    - The row carries the OS icon and *this device* and offers no Unlink.
    - The Remote access card's line says how many devices are linked.
@@ -99,3 +116,6 @@ machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
   the platform word only in `crates/server/src/platform.rs`.
 - `nix/module.nix` still has the single `listen` option and the VM test in
   `nix/vm-test.nix`.
+- Whether anything in the tree generates a certificate already — `rcgen` or its
+  like is new — and what validity it defaults to, since a default accepted
+  without looking is exactly the silent expiry this stage is written against.

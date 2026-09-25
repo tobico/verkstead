@@ -29,6 +29,20 @@ and the name the Brief called for. A WSL is detected from its kernel release
 and read as *Linux (WSL)*, because a Windows machine and its WSL share a
 hostname and the OS is what tells them apart.
 
+**The certificate is renewed before it runs out.** It carries a validity like
+any other, and an expired one is refused at the handshake — so a certificate
+issued once and read back for ever would take every link in the cluster down
+together on the same day, with re-linking every device by hand as the only way
+back. Instead a device re-issues its certificate a good while before the expiry
+and **announces the new fingerprint to every member over the link it already
+holds**, the same way an introducer announces a newcomer. Until every member has
+acknowledged the new one the device keeps presenting the old, so the changeover
+never costs a call: a member that was unreachable is announced to again when it
+next answers, and one that never does is a member the human unlinks anyway. A
+validity long enough never to matter was the other way and was not taken — the
+id and the certificate outlive any guess made at first start, and a link that
+silently stops working years later is the failure nobody would diagnose.
+
 ## The peer listener, and mutual TLS
 
 Devices talk over a **listener of their own**: TLS, every interface, port 8423
