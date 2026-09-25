@@ -1570,8 +1570,11 @@ pub async fn run_on_keyed(
     // And what the peer listener answers, which is a router of its own rather
     // than the one above: this port is other devices' and the workbench's is
     // the human's browser and its sessions, and the one thing they share so far
-    // is the device they are both about — see [`peer`].
-    let peers = peer::router(device);
+    // is the device they are both about — see [`peer`]. The member list it is
+    // gated on is empty and read from nowhere: this build has no join to make
+    // a member with, so the identity endpoint is the whole of what anybody
+    // reaches and everything else is refused for not being a member's.
+    let peers = peer::router(device, peer::Members::none());
 
     // The workbench and the peer listener together, and on Windows the named
     // pipe beside them: everything a request can ask for over the socket it can

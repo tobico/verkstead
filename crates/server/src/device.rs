@@ -366,7 +366,20 @@ fn fingerprint_of(pem: &str) -> Result<String, rustls_pki_types::pem::Error> {
 
     let certificate = CertificateDer::from_pem_slice(pem.as_bytes())?;
 
-    Ok(printable(Sha256::digest(&certificate)))
+    Ok(fingerprint_of_der(&certificate))
+}
+
+/// The same fingerprint of a certificate that arrived rather than one that was
+/// read off a file: the bytes are already the DER, there being no PEM around
+/// them on the wire.
+///
+/// Said here rather than at the other end, because the two have to be the one
+/// spelling. A member list is keyed by what [`Device::fingerprint`] prints and
+/// a caller's certificate is checked against it — see [`crate::peer::Caller`] —
+/// so a second spelling would be a comparison between two true strings about
+/// the same certificate that never matched.
+pub(crate) fn fingerprint_of_der(certificate: &CertificateDer<'_>) -> String {
+    printable(Sha256::digest(certificate))
 }
 
 /// A digest in the spelling a person compares by eye: upper-case hex, in pairs,

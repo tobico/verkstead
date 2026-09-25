@@ -608,6 +608,29 @@ letting a server come up answering half of what it promised.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Member Gate**:
+What stands over every route on the **Peer Listener** but the un-gated three:
+the certificate the handshake took is matched against this device's members by
+fingerprint, and a caller that is not one of them is refused. The handshake
+asks for a certificate and does not insist on one, so this is the first place a
+path and a caller are known together and the only place either is judged.
+**The un-gated surface is a list of three and nothing grows it.** The identity
+endpoint, which asks for no certificate at all; the join post, which comes from
+a non-member by definition and whose certificate is pinned into the pending
+request it creates; and the dial-back answering a join, matched against the
+certificate that pending request is holding rather than against the member
+list. Everything else on that listener is a member's or is refused — including
+a path no route answers, which is refused rather than missed, a stranger having
+no business being told which of this device's endpoints exist.
+**The refusal says it is a membership rather than a missing path.** A device
+posting a join has two ways of not getting through — a Verkstead that will not
+have it, and a Verkstead too old to have the route at all — and those want
+different things of it: a human to press Allow, or an upgrade on the other
+machine. So the refusal is `Forbidden` and names what it is, and it carries no
+challenge, the credential being a certificate already asked for and already
+given or withheld.
+_Avoid_: peer auth, mutual TLS gate, the cluster gate, peer middleware
+
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.

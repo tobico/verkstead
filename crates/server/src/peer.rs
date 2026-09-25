@@ -27,8 +27,21 @@
 //! posting one is a stranger by definition, and the membership it is asking for
 //! is what it has not got yet. What the handshake still insists on is that a
 //! caller presenting a certificate holds the key that signed it — see
-//! [`WhateverArrives`], which checks the signature and nothing else. The gate
-//! that *acts* on the certificate is per route and comes after this.
+//! [`WhateverArrives`], which checks the signature and nothing else. What the
+//! certificate *means* is a per-route question, and [`gate`] is where it is
+//! asked.
+//!
+//! **The un-gated surface is a list of three, and everything else is a
+//! member's.** The identity endpoint, which asks for no certificate at all;
+//! the join post, which comes from a non-member by definition and whose
+//! certificate is pinned into the pending request it creates; and the dial-back
+//! answering a join, matched against the certificate that pending request is
+//! holding. The last two are the next stage's, so the list has one entry today
+//! and [`gate`] stands over everything else — and with nothing in [`Members`]
+//! yet, refused is what everything else is. The refusal says that much: a
+//! caller this device holds no membership for, rather than a path that is not
+//! there. A device posting a join has to be able to tell a Verkstead that will
+//! not have it from one too old to have the route at all.
 //!
 //! **The accept loop never waits on a handshake.** Each connection's is run in
 //! a task of its own and the completed ones are queued, because
@@ -50,8 +63,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::connect_info::{ConnectInfo, Connected};
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::serve::IncomingStream;
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{
@@ -171,22 +189,195 @@ impl Listener {
         let socket = tokio::net::TcpListener::from_std(self.socket)
             .context("handing the peer listener's socket to the runtime")?;
 
-        axum::serve(Handshaken::over(socket, self.presenting, self.address), app)
-            .await
-            .context("serving the peer listener")
+        axum::serve(
+            Handshaken::over(socket, self.presenting, self.address),
+            // With a [`Caller`] beside every request, which is how the
+            // certificate the handshake took gets out of the connection and
+            // into a route. It is a fact about the connection rather than
+            // about any one request carried on it, so it is put there by the
+            // serve rather than by anything a caller sends — there is no
+            // header a peer could write to say who it is.
+            app.into_make_service_with_connect_info::<Caller>(),
+        )
+        .await
+        .context("serving the peer listener")
     }
 }
 
-/// Everything this listener answers.
+/// Everything this listener answers: the un-gated surface, with everything
+/// else behind [`gate`].
 ///
-/// One route for now. The join, the dial-back that answers one and the whole of
-/// a member's relayed traffic come after, and each of those is a member's or is
-/// refused — this one is nobody's, which is why a device nothing has heard of
-/// can read it.
-pub fn router(device: Device) -> Router {
+/// One route stands outside it for now — the identity endpoint, which is
+/// nobody's, which is why a device nothing has heard of can read it. The join
+/// and the dial-back that answers one come out here beside it when there is a
+/// pending join for either to be matched against; a member's relayed traffic
+/// goes the other way, inside [`members_only`] with the gate over it.
+///
+/// **What is not a route is refused rather than missed**, because the gate is
+/// the fallback: a path nothing here answers is one this caller has no
+/// business asking after either, and a listener that said which of its
+/// endpoints existed would be telling a stranger what to reach for. That is
+/// the Workbench Key's own arrangement, where a path under `/api/` that no
+/// route answers is refused at the gate rather than missed at the fallback.
+pub fn router(device: Device, members: Members) -> Router {
     Router::new()
         .route(IDENTITY, get(identity))
         .with_state(device)
+        .fallback_service(members_only(members))
+}
+
+/// Everything a membership admits, which today is nothing at all.
+///
+/// The routes go in here as the stages that need them arrive, and the gate over
+/// them is one layer rather than a check inside each: a route added without its
+/// check is the kind of mistake that reads as working code, and there is no
+/// spelling of this router that has a route outside the gate.
+fn members_only(members: Members) -> Router {
+    Router::new().layer(axum::middleware::from_fn_with_state(members, gate))
+}
+
+/// The devices this one has linked to, as the gate asks after them.
+///
+/// **Empty, and read from nowhere.** A member is made by a join, and the join
+/// is the next stage's — so what this holds is not a store that happens to
+/// have nothing in it yet, it is the one question the gate has to be able to
+/// ask, with the only answer this stage can honestly give.
+#[derive(Debug, Clone)]
+pub struct Members;
+
+impl Members {
+    /// None of them, which is the membership of every Verkstead this build can
+    /// make.
+    pub fn none() -> Members {
+        Members
+    }
+
+    /// Whether the device whose certificate has this fingerprint is one of
+    /// them.
+    ///
+    /// The fingerprint rather than the device id, because the id is a string
+    /// in a payload and anybody may write one: what a member *is* on this
+    /// listener is the certificate it presented at the handshake, and the
+    /// fingerprint is that certificate said in the spelling both ends of a
+    /// link compare — see [`Device::fingerprint`].
+    fn holds(&self, _fingerprint: &str) -> bool {
+        false
+    }
+}
+
+/// The member gate: everything [`members_only`] carries is a member's or is
+/// refused.
+///
+/// The certificate was taken at the handshake, before any path was known — see
+/// [`WhateverArrives`] — so this is the first place a path and a caller are
+/// known together, and it is the only place either is judged.
+async fn gate(
+    State(members): State<Members>,
+    ConnectInfo(caller): ConnectInfo<Caller>,
+    request: Request,
+    next: Next,
+) -> Response {
+    match caller.fingerprint() {
+        Some(fingerprint) if members.holds(&fingerprint) => next.run(request).await,
+        _ => refused(),
+    }
+}
+
+/// And the refusal, which is one answer for a caller that showed nothing and a
+/// caller that showed a certificate nothing here has recorded: both are a
+/// device this one holds no membership for, and there is nothing else to say
+/// to either.
+///
+/// **`Forbidden` rather than `Not Found`**, and it says which it is. A device
+/// posting a join has two ways of not getting through — a Verkstead that will
+/// not have it, and a Verkstead too old to have the route at all — and those
+/// want different things of it: the first is a human to press Allow, the
+/// second an upgrade on the other machine. A refusal that read as a missing
+/// path would leave the two indistinguishable.
+///
+/// No `WWW-Authenticate`, for the reason the Workbench Key's refusal carries
+/// none — see [`crate::key`]. The credential here is a certificate, and it was
+/// asked for at the handshake and already given or already withheld: a
+/// challenge after the fact is a question this caller cannot answer on this
+/// connection.
+fn refused() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        "you are not a member of this verkstead's cluster\n",
+    )
+        .into_response()
+}
+
+/// Who is on the far end of a connection: where they dialled from, and the
+/// certificate the handshake took from them, where they showed one.
+///
+/// Read off the connection rather than off the request, and put beside every
+/// request on it by [`Listener::serving`]. What a route wants to know about a
+/// peer is which device it is, and on this listener that is the certificate —
+/// the address is a laptop's and moves between the LAN and the tailnet, which
+/// is why a device advertises all of them.
+#[derive(Debug, Clone)]
+pub struct Caller {
+    /// Where the connection came from. Not what says who this is, and kept for
+    /// the things an address is good for: a dial-back to a device that has just
+    /// asked to join, and a line in a log.
+    dialled_from: SocketAddr,
+
+    /// And what they presented, where they presented anything. `None` is an
+    /// ordinary caller rather than a failure: the handshake asks and does not
+    /// insist, and a device asking *who are you* has nothing to show yet — it
+    /// is asking because it does not know.
+    presented: Option<CertificateDer<'static>>,
+}
+
+impl Caller {
+    /// Where the connection came from.
+    pub fn dialled_from(&self) -> SocketAddr {
+        self.dialled_from
+    }
+
+    /// The certificate itself, which is what a pending join pins: a
+    /// fingerprint says whether two certificates are the same one, and the
+    /// dial-back that answers a join has to check the far end against the
+    /// certificate rather than against a string about it.
+    pub fn presented(&self) -> Option<&CertificateDer<'static>> {
+        self.presented.as_ref()
+    }
+
+    /// And its fingerprint, in the one spelling this tree prints one in — see
+    /// [`Device::fingerprint`]. That is what a member list is keyed by and what
+    /// two people compare by eye, so the caller's is said the same way or the
+    /// comparison is between two strings about the same certificate.
+    pub fn fingerprint(&self) -> Option<String> {
+        self.presented
+            .as_ref()
+            .map(crate::device::fingerprint_of_der)
+    }
+}
+
+impl Connected<IncomingStream<'_, Handshaken>> for Caller {
+    /// Taken off the finished handshake, which is the only place it is: rustls
+    /// hands the peer's chain over once the connection is secured, and the end
+    /// entity — the first of it — is the device.
+    ///
+    /// Nothing in the chain past that is looked at. Every certificate in a
+    /// cluster is self-signed and pinned by fingerprint, so an intermediate
+    /// would be something a caller had appended rather than something a
+    /// membership could ever have recorded.
+    fn connect_info(stream: IncomingStream<'_, Handshaken>) -> Caller {
+        let presented = stream
+            .io()
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(<[CertificateDer<'_>]>::first)
+            .map(|certificate| certificate.clone().into_owned());
+
+        Caller {
+            dialled_from: *stream.remote_addr(),
+            presented,
+        }
+    }
 }
 
 /// What this device says it is.

@@ -60,6 +60,10 @@ rather than to an address: in a cluster what proves the far end is that
 fingerprint compared against the one the other machine printed, and there is no
 certificate authority anywhere in it to check a chain against.
 
+Every other path on that port answers `403` and says so, whatever you present
+and whether or not a route answers it: everything but the identity endpoint is
+behind the member gate, and nothing has made a member yet.
+
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
 account anywhere the server can read, and every path field browses the same
