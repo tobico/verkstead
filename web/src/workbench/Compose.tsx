@@ -135,6 +135,7 @@ import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
 import { Wordmark } from "./Wordmark";
 import {
+  AgentOptions,
   BasePicker,
   BranchField,
   CompanionChoice,
@@ -858,51 +859,72 @@ function Compose(props: {
               pick={(picked) => change({ process: picked })}
             />
 
-            {/* And the accounts, one trigger each — one per role the Process
-                uses, which is [`ROLES`]'s to say and not this page's. The same
-                questions the composer asks, asked before there is a record for
-                an answer to be about: each of them stands on what the repo was
-                last grilled with (or its prefill, where nothing has grilled it)
-                until it is touched, which is what a created draft would have
-                arrived showing — and a picker left on it sends nothing when
-                this is created, so the server's own prefill stands. */}
+            {/* And who runs it, which is one control: the trigger standing in
+                the row, and inside the panel it drops a picker per role the
+                Process uses — [`ROLES`]'s to say and not this page's. The
+                composer's own option drawn over what this device is holding
+                rather than over a record, so the two pages cannot come to ask
+                this question in two shapes.
+
+                Each picker stands on what the repo was last grilled with (or
+                its prefill, where nothing has grilled it) until it is touched,
+                which is what a created draft would have arrived showing — and a
+                picker left on it sends nothing when this is created, so the
+                server's own prefill stands. */}
             <ProfileChoices>
               {(saved) => (
-                <>
-                  {/* Not drawn over a loaded pull request, and by the table
-                      rather than by a test for one: what a take-up makes reads
-                      as a Review, and a Review has no round for a grilling to
-                      open. */}
-                  <Show when={uses(process(), "grilling")}>
-                    <RolePicker
-                      saved={saved()}
-                      role="grilling"
-                      label="Grilling"
-                      away="No grilling"
-                      chosen={showing("grilling")}
-                      pick={(picked) => change({ grilling: picked })}
-                    />
-                  </Show>
-                  <Show when={uses(process(), "implementation")}>
-                    <RolePicker
-                      saved={saved()}
-                      role="implementation"
-                      label="Implementation"
-                      chosen={showing("implementation")}
-                      pick={(picked) => change({ implementation: picked })}
-                    />
-                  </Show>
-                  <Show when={uses(process(), "review")}>
-                    <RolePicker
-                      saved={saved()}
-                      role="review"
-                      label="Review"
-                      away="No review"
-                      chosen={showing("review")}
-                      pick={(picked) => change({ review: picked })}
-                    />
-                  </Show>
-                </>
+                <AgentOptions
+                  process={process()}
+                  saved={saved()}
+                  // Composed off what the pickers are showing rather than off
+                  // what the device is holding, so the trigger and the panel
+                  // read as one thing: a page whose repo memory has not landed
+                  // reads *Not chosen* until it does, and switching repos simply
+                  // reads another memory.
+                  picked={{
+                    grilling: showing("grilling"),
+                    implementation: showing("implementation"),
+                    review: showing("review"),
+                  }}
+                >
+                  {() => (
+                    <>
+                      {/* Not drawn over a loaded pull request, and by the table
+                          rather than by a test for one: what a take-up makes
+                          reads as a Review, and a Review has no round for a
+                          grilling to open. */}
+                      <Show when={uses(process(), "grilling")}>
+                        <RolePicker
+                          saved={saved()}
+                          role="grilling"
+                          label="Grilling"
+                          away="No grilling"
+                          chosen={showing("grilling")}
+                          pick={(picked) => change({ grilling: picked })}
+                        />
+                      </Show>
+                      <Show when={uses(process(), "implementation")}>
+                        <RolePicker
+                          saved={saved()}
+                          role="implementation"
+                          label="Implementation"
+                          chosen={showing("implementation")}
+                          pick={(picked) => change({ implementation: picked })}
+                        />
+                      </Show>
+                      <Show when={uses(process(), "review")}>
+                        <RolePicker
+                          saved={saved()}
+                          role="review"
+                          label="Review"
+                          away="No review"
+                          chosen={showing("review")}
+                          pick={(picked) => change({ review: picked })}
+                        />
+                      </Show>
+                    </>
+                  )}
+                </AgentOptions>
               )}
             </ProfileChoices>
           </section>

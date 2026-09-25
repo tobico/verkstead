@@ -62,11 +62,21 @@ import {
   REPOS,
   drawn,
   mount,
+  openAgent,
   theWorkbench,
 } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
 import { browse, held, listingAt } from "./fields";
-import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
+import {
+  actionRows,
+  offered,
+  opened,
+  pick,
+  picker,
+  press,
+  rows,
+  showing,
+} from "./pickers";
 import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import pulls from "./fixtures/open-pull-requests.json" with { type: "json" };
@@ -199,17 +209,35 @@ async function composing(container: ParentNode): Promise<HTMLTextAreaElement> {
   return drawn<HTMLTextAreaElement>(container, `.${composer.box} textarea`);
 }
 
-/// Wait until all three role pickers are standing on something, which is what
-/// *Start work* waits on as well.
+/// What the Agent trigger is reading while it is shut: the words of its own
+/// value line, and the ` +N` after them.
+function agentReads(): string {
+  return (
+    document.querySelector(
+      `.${setup.agentOption} > button .${setup.optionValue}`,
+    )?.textContent ?? ""
+  );
+}
+
+/// Wait until every role the Process uses is standing on something, which is
+/// what *Start work* waits on as well.
 ///
-/// The press carries a grilling with it, so it draws inert until every role is
-/// answered — and the answer they arrive with is the repo's own memory, which is
-/// a read of its own. A test pressing before it lands would be pressing a button
-/// that has nothing to do but say what is missing.
+/// The press carries a grilling with it, so it draws inert until every one of
+/// them is answered — and the answer they arrive with is the repo's own memory,
+/// which is a read of its own. A test pressing before it lands would be pressing
+/// a button that has nothing to do but say what is missing.
+///
+/// Read off the trigger rather than off the pickers, which is exactly what the
+/// trigger is for: it says *Not chosen* while any role the Process uses is
+/// empty, so the panel does not have to be opened to find out.
 async function rolesAnswered(): Promise<void> {
-  for (const role of ["Grilling", "Implementation", "Review"]) {
-    await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
-  }
+  await waitFor(() => {
+    expect(
+      document.querySelector(`.${setup.agentOption}`),
+      "the Agent option has not been drawn yet",
+    ).toBeTruthy();
+    expect(agentReads()).not.toBe("Not chosen");
+  });
 }
 
 /// Open the Repo panel, which is where the repo is picked and everything under
@@ -638,6 +666,7 @@ describe("the compose page", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
 
     // Nothing to prefill from until a repo is picked: the memory is the repo's.
     await waitFor(() => expect(showing("Grilling")).toBe("Not chosen"));
@@ -667,6 +696,7 @@ describe("the compose page", () => {
 
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
+    await openAgent(container);
 
     await waitFor(() =>
       expect(showing("Grilling")).toBe("Fable 5 — fable"),
@@ -716,6 +746,7 @@ describe("the compose page", () => {
       target: { value: "Make the widget" },
     });
     await pickRepo(container, REPOS[1]!.id);
+    await openAgent(container);
 
     await waitFor(() =>
       expect(showing("Grilling")).toBe("Fable 5 — fable"),
@@ -748,8 +779,9 @@ describe("the compose page", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
 
-    // Waited for: the list of profiles is a read of its own, and the row is
+    // Waited for: the list of profiles is a read of its own, and the panel is
     // drawn once it has arrived.
     await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
@@ -773,23 +805,26 @@ describe("the process a compose page is composing under", () => {
 
   /// Where the row reads it, which is the order the row is read in: the
   /// repository, what kind of work it is, and then who runs it.
-  it("stands between the repo and the roles, on Develop", async () => {
+  it("stands between the repo and the agent, on Develop", async () => {
     theWorkbench();
     const { container } = mount("/compose");
 
     await composing(container);
 
     const row = await drawn(container, `.${setup.options}`);
-    // Waited for: the profiles are a read of their own, and the three pickers
-    // at the far end of the row are drawn once it has landed.
-    await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
+    // Waited for: the profiles are a read of their own, and the Agent option at
+    // the far end of the row is drawn once they have landed.
+    await waitFor(() =>
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
+    );
 
     const at = (selector: string) =>
       [...row.children].findIndex((option) => option.matches(selector));
 
     expect(at(`.${setup.repoSelect}`)).toBe(0);
     expect(at(`.${setup.processChoice}`)).toBe(1);
-    expect(at(`.${setup.profileChoice}`)).toBe(2);
+    expect(at(`.${setup.agentOption}`)).toBe(2);
+    expect(row.children).toHaveLength(3);
 
     // Develop for every repo, remembered nowhere: it is the one thing about a
     // conversation likeliest to differ from the last.
@@ -900,6 +935,7 @@ describe("the pickers a compose page's process draws", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
     await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
@@ -911,6 +947,7 @@ describe("the pickers a compose page's process draws", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
     await waitFor(() =>
       expect(screen.getByLabelText("Implementation")).toBeTruthy(),
     );
@@ -943,6 +980,7 @@ describe("the pickers a compose page's process draws", () => {
 
     const box = await composing(container);
     fireEvent.input(box, { target: { value: "What does the cache do?" } });
+    await openAgent(container);
 
     const start = screen.getByRole("button", { name: "Start work" });
     await waitFor(() =>
@@ -976,6 +1014,7 @@ describe("the pickers a compose page's process draws", () => {
 
     const box = await composing(container);
     fireEvent.input(box, { target: { value: "Make the widget" } });
+    await openAgent(container);
 
     const start = screen.getByRole("button", { name: "Start work" });
     await waitFor(() =>
@@ -996,6 +1035,7 @@ describe("the pickers a compose page's process draws", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
     await waitFor(() =>
       expect(screen.getByLabelText("Implementation")).toBeTruthy(),
     );
@@ -1003,6 +1043,174 @@ describe("the pickers a compose page's process draws", () => {
     expect(
       screen.getByRole("button", { name: "Start work" }).getAttribute("title"),
     ).toBe("Starting needs a brief, and one role picked and working.");
+  });
+});
+
+/// The one **Agent** control, which is the row's last option: a trigger reading
+/// who the work would run under, and behind it the role pickers stacked under
+/// their own names.
+///
+/// What the control *is* is the composer's own and is asked about in
+/// `workbench.test.tsx` — both pages draw the one piece, which is the whole
+/// point of it. What is asked here is the half a compose page owns: that the row
+/// holds it at all, and that its reading is composed off what the pickers are
+/// showing rather than off anything this device has stored.
+describe("the agent control on a compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The row reads Repo, Process, Agent, and the pickers are what the last of
+  /// them drops — one flat card hung off its trigger rather than a dialog over
+  /// the page, exactly as the Repo option beside it is.
+  it("holds the role pickers behind one Agent trigger", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() =>
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
+    );
+
+    // Three labels along the row, and nothing of the pickers until the last of
+    // them is pressed.
+    expect(
+      [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Repo", "Process", "Agent"]);
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(container.querySelector("dialog")).toBeNull();
+
+    const panel = await openAgent(container);
+    await waitFor(() => expect(picker("Grilling")).toBeTruthy());
+
+    // Stacked under their role names, in the order the table says the Process
+    // uses them.
+    expect(
+      [...panel.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Grilling", "Implementation", "Review"]);
+    expect(panel.getAttribute("role")).toBe("group");
+  });
+
+  /// The repo in the bench remembers three genuinely different accounts, which
+  /// is the case the counting is for: the Implementation Pairing is read out and
+  /// the other two are counted, the way the Repo trigger counts the repos the
+  /// work runs alongside.
+  it("reads the implementation pairing and counts the roles beside it", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+  });
+
+  /// And says it once where there is nothing else to say: a role on the same
+  /// Pairing adds nothing, and neither does a role picked away — *No review* is
+  /// an answer rather than another account.
+  it("reads the pairing once where the other roles match or are skipped", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json({
+          ...remembering(PROFILES[1]!, PROFILES[1]!, PROFILES[1]!),
+          review: "Skipped",
+        } satisfies RepoPairingsView),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+  });
+
+  /// One for the one role that is somewhere else — and off what the pickers are
+  /// showing, so a pick inside the panel is read on the trigger the moment it is
+  /// made.
+  it("counts one for a review picked onto a different pairing", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json(remembering(PROFILES[1]!, PROFILES[1]!, PROFILES[1]!)),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+
+    await openAgent(container);
+    // The row reads out in full where the list does; the trigger drops the
+    // backend's name, its mark having said it already.
+    pick("Review", "Claude Code Fable 5 — fable");
+
+    expect(agentReads()).toBe("Opus 5 — opus +1");
+  });
+
+  /// And *Not chosen* while a role the Process uses is empty, which is what the
+  /// start press will refuse on. Nothing is stored for a picker nobody has
+  /// touched, so the trigger stands on the repo's own memory the same way the
+  /// pickers do — and says nothing at all until it lands.
+  it("reads not chosen until the repo's memory has landed", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    // No repo, so no memory to read: there is nothing to prefill a role from.
+    await waitFor(() => expect(agentReads()).toBe("Not chosen"));
+    expect(stored().implementation).toBeNull();
+
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+  });
+
+  /// A role the Process does not use is not one of them, and the table is what
+  /// says which: an Investigate uses Implementation alone, so a repo remembering
+  /// nothing for the other two is nothing the trigger is waiting on.
+  it("says nothing about a role the process does not use", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "Investigate" satisfies Process,
+      }),
+    );
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json({
+          grilling: "Nothing",
+          implementation: {
+            profile: PROFILES[1]!,
+            model: PROFILES[1]!.models[0]!,
+          },
+          review: "Nothing",
+        } satisfies RepoPairingsView),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
   });
 });
 
@@ -1673,8 +1881,10 @@ describe("continuing a roadmap from the compose page", () => {
     expect(container.querySelector("#branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
 
-    // The two that are still the human's to settle.
+    // The two that are still the human's to settle — the roles behind the
+    // Agent trigger, which is where every one of them stands.
     expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    await openAgent(container);
     expect(screen.getByLabelText("Grilling")).toBeTruthy();
   });
 
@@ -1826,6 +2036,7 @@ describe("continuing a roadmap from the compose page", () => {
     await loadRoadmap(container, 2);
     await rolesAnswered();
 
+    await openAgent(container);
     pick("Review", "No review");
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
@@ -2175,10 +2386,12 @@ describe("wrapping up a pull request from the compose page", () => {
     );
     expect(container.querySelector("#branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
-    expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    // The three that are still the human's to settle.
+    // The three that are still the human's to settle, two of them behind the
+    // Agent trigger — and no grilling picker among them.
     expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    await openAgent(container);
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
   });
@@ -2230,10 +2443,9 @@ describe("wrapping up a pull request from the compose page", () => {
     await drawn(container, `.${takeUp.held}`);
     await waitFor(() => expect(showing("Process")).toBe(PROCESS.Review));
 
-    // Both roles the wrap-up runs under, which is what the press waits on.
-    for (const role of ["Implementation", "Review"]) {
-      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
-    }
+    // Both roles the wrap-up runs under, which is what the press waits on —
+    // read off the trigger, which says so for whichever roles the Process has.
+    await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
@@ -2274,6 +2486,7 @@ describe("wrapping up a pull request from the compose page", () => {
     const box = await composing(container);
     fireEvent.input(box, { target: { value: "# Rate limiting\n\nAnd my own note.\n" } });
 
+    await openAgent(container);
     pick("Review", "No review");
 
     fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
@@ -2344,9 +2557,7 @@ describe("wrapping up a pull request from the compose page", () => {
 
     // Both roles the wrap-up runs under, which is the whole of what the press
     // waits on: a pull request has no grilling to answer for.
-    for (const role of ["Implementation", "Review"]) {
-      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
-    }
+    await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
