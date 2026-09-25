@@ -33,7 +33,7 @@ stage has landed, so the picker grows a row per stage — Fix Merge Issues from
 
 - [x] 01: Process on the record — [brief](01-process-on-the-record.md)
 - [x] 02: The Agent control — [brief](02-the-agent-control.md)
-- [ ] 03: Tinker, and No grilling retires — [brief](03-tinker.md)
+- [ ] 03: Tinker, and No grilling retires — [brief](03-tinker.md) *(in progress: `roadmaps/processes/03-tinker`)*
 - [ ] 04: Investigate — [brief](04-investigate.md)
 - [ ] 05: Review — [brief](05-review.md)
 - [ ] 06: Fix Merge Issues — [brief](06-fix-merge-issues.md)
