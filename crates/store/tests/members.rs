@@ -10,7 +10,8 @@
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Linking, forget_member, member_count, member_holding, members, open_database, record_member,
+    Linking, forget_member, member_count, member_holding, member_unreachable, members,
+    open_database, record_member,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -171,6 +172,76 @@ async fn a_device_recorded_again_is_the_same_member() {
     assert!(
         !member_holding(&pool, B_FINGERPRINT).await.unwrap(),
         "and the certificate it has stopped presenting is nobody's again",
+    );
+}
+
+/// A member a dial found nothing at is marked, and nothing else about the row
+/// moves.
+///
+/// Which is what *unreachable* is: the row stays, with the addresses the next
+/// dial will work down and the certificate it will check, and the moment it was
+/// last really heard from. A dial that heard nothing heard nothing.
+#[tokio::test]
+async fn a_member_that_answers_nothing_is_marked_and_left_alone() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let before = members(&pool).await.unwrap().remove(0);
+
+    assert!(
+        before.reachable,
+        "a member is recorded off an exchange that got through, so it starts out \
+         answering",
+    );
+
+    member_unreachable(&pool, B).await.unwrap();
+
+    let after = members(&pool).await.unwrap().remove(0);
+
+    assert!(!after.reachable);
+    assert_eq!(after.addresses, before.addresses);
+    assert_eq!(after.fingerprint, before.fingerprint);
+    assert_eq!(after.name, before.name);
+    assert_eq!(after.last_seen, before.last_seen);
+
+    assert_eq!(
+        member_count(&pool).await.unwrap(),
+        1,
+        "it is still one of this cluster, and the card counts it",
+    );
+    assert!(
+        member_holding(&pool, B_FINGERPRINT).await.unwrap(),
+        "and it is still admitted past the gate: a device nobody can reach can \
+         still reach this one, which is a laptop coming back on the tailnet",
+    );
+
+    // And a device that is not a member is a device no dial has anything to say
+    // about, so marking one is not a thing to fail.
+    member_unreachable(&pool, C).await.unwrap();
+}
+
+/// And the mark comes off the moment it is recorded again, which is the next
+/// dial that got through.
+#[tokio::test]
+async fn a_marked_member_is_answering_again_when_it_is_recorded() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    member_unreachable(&pool, B).await.unwrap();
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    assert!(
+        members(&pool).await.unwrap()[0].reachable,
+        "a recording is an exchange that just got through, which is the whole of \
+         what says a member is answering",
     );
 }
 

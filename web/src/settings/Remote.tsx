@@ -97,6 +97,13 @@
 //! answers. The list holds this device and a row apiece for the devices linked
 //! to it, drawn the same way — what is read off this machine now is what a
 //! member last said of its own. No row offers an Unlink yet.
+//!
+//! **A member the last dial could not reach is the same row, dimmed, reading
+//! *unreachable*.** It is not taken off the list and nothing about it is left
+//! out: a machine with its lid shut is still one of this cluster, and what the
+//! row says is that a press on it would find nobody there. Which is this
+//! device's own finding rather than anything the far end said, so it arrives
+//! beside the identity rather than in it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch as Choose, type JSX } from "solid-js";
@@ -113,6 +120,7 @@ import { loadDevices, loadRemote, pressServe, resetKey } from "../api/client";
 import type {
   DeviceIdentity,
   DevicesView,
+  LinkedDevice,
   RemoteView,
   ServePress,
   ServeView,
@@ -630,6 +638,9 @@ function TheKey(): JSX.Element {
 /// from the Windows it shares a hostname with, and the case a cluster of two
 /// rows is drawn for. *This device* is what marks which of them is this
 /// machine; Unlink is a later stage's.
+///
+/// A member the last dial found nothing at is dimmed and reads *unreachable*,
+/// which is the one other way a row is drawn.
 function Devices(): JSX.Element {
   const devices = useDevices();
 
@@ -662,7 +673,11 @@ function List(props: { of: DevicesView }): JSX.Element {
     <ul class={styles.list}>
       <Row of={props.of.this} here />
 
-      <For each={props.of.members}>{(member) => <Row of={member} />}</For>
+      <For each={props.of.members}>
+        {(member: LinkedDevice) => (
+          <Row of={member.identity} unreachable={!member.reachable} />
+        )}
+      </For>
     </ul>
   );
 }
@@ -680,9 +695,22 @@ function List(props: { of: DevicesView }): JSX.Element {
 /// tailnet nor a network answers with none, which is an answer rather than a
 /// failure — it still has a name and a mark, and an empty line under them would
 /// say something went wrong.
-function Row(props: { of: DeviceIdentity; here?: boolean }): JSX.Element {
+///
+/// *unreachable* stands where *this device* stands on the row above, and dims
+/// the whole of the row with it: the two are the same kind of thing said, a fact
+/// about the row rather than something to press. Everything about the device
+/// stays drawn — the mark, the name and the addresses — because none of it has
+/// stopped being true, and the row is where an Unlink will be pressed.
+function Row(props: {
+  of: DeviceIdentity;
+  here?: boolean;
+  unreachable?: boolean;
+}): JSX.Element {
   return (
-    <li class={styles.device}>
+    <li
+      class={styles.device}
+      classList={{ [styles.unreachable!]: props.unreachable }}
+    >
       <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
 
       <div class={styles.about}>
@@ -691,6 +719,10 @@ function Row(props: { of: DeviceIdentity; here?: boolean }): JSX.Element {
           <Show when={props.here}>
             {" "}
             <span class={styles.here}>this device</span>
+          </Show>
+          <Show when={props.unreachable}>
+            {" "}
+            <span class={styles.away}>unreachable</span>
           </Show>
         </p>
 

@@ -116,17 +116,41 @@ pub struct DevicesView {
     pub this: DeviceIdentity,
 
     /// And every other device in its cluster, each as it last answered for
-    /// itself.
+    /// itself — with whether it is still answering beside it.
     ///
-    /// The same shape as the row above, because it is the same thing said: a
-    /// member is drawn with its name, the mark for its OS and the addresses a
-    /// peer could reach it on, exactly as this device is. What is different is
-    /// where the answer came from — this device reads its own machine as the
-    /// pane is drawn, and a member was read off the far end at the last
-    /// exchange.
+    /// The identity is the same shape as the row above, because it is the same
+    /// thing said: a member is drawn with its name, the mark for its OS and the
+    /// addresses a peer could reach it on, exactly as this device is. What is
+    /// different is where the answer came from — this device reads its own
+    /// machine as the pane is drawn, and a member was read off the far end at
+    /// the last exchange.
     ///
     /// **The count on the Remote access card comes off this**, rather than
     /// being answered beside it: there is one membership, and a number that
-    /// could disagree with the rows would be two answers about it.
-    pub members: Vec<DeviceIdentity>,
+    /// could disagree with the rows would be two answers about it. An
+    /// unreachable member counts like any other — it is linked, and a count
+    /// that left it out would say the cluster had shrunk.
+    pub members: Vec<LinkedDevice>,
+}
+
+/// One device linked to this one: what it says it is, and whether the last dial
+/// to it got through.
+///
+/// **Two things rather than one, because only one of them is the far end's.**
+/// The identity is what that machine said about itself at the last exchange;
+/// whether it is answering is this device's own finding, written by a dial that
+/// worked down its addresses and reached none of them. So it sits beside the
+/// identity rather than inside it — a device does not tell anybody it is
+/// unreachable, and the row a peer reads off [`DeviceIdentity`] is the same
+/// whichever machine is asking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct LinkedDevice {
+    /// The device, as it last answered for itself.
+    pub identity: DeviceIdentity,
+
+    /// And whether the last dial to it got through. False is the row drawn
+    /// dimmed, reading *unreachable* — it stays on the list, with everything
+    /// about it, and an Unlink on it still works.
+    pub reachable: bool,
 }
