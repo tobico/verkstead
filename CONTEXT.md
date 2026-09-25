@@ -72,7 +72,8 @@ the ladder rather than on it, the way Closed does, with two ways in — a Steer,
 the human taking something up about work that is already on a pull request, and
 a **Tinker** Conversation starting there — and lands in the wrap-up when they
 are finished with it, or in Done where nothing was built. **Investigating** sits
-beside it, the one working state of a Process of its own.
+beside it the same way and with the same two ways in, the one working state of a
+Process of its own, and ends where it was entered from.
 *Blocked on you* is a condition of an active state, never a state of its own,
 and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
@@ -153,7 +154,9 @@ Draft to **Investigating** to Done, one session under the Implementation
 Pairing shaped like a follow-up's — rounds of Question Sets, ended by the
 human's **Nothing else** mark and the session's Done signal together — in a
 writable Worktree it is told to commit nothing from, the signal accepted over
-uncommitted scratch here and nowhere else, and no pull request ever asked for.
+uncommitted scratch here and nowhere else, and no pull request ever asked for —
+and a steered Investigating ends in the state it was steered from instead, see
+**Investigating**.
 **Review** is the wrap-up run over a pull request or a branch the Brief names:
 Draft to Wrapping, reviewed under the Review Pairing, which it always has — no
 *No review* row, a Review without a review being the last Process here.
@@ -2050,7 +2053,10 @@ does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
 **Investigating**, **Follow-up** and **Done** — the states the work is done in,
 Investigating among them because a question about the work can arise in any
 state and it takes a brief the way Follow-up does; Draft and Closed are
-not among them, each having a way in of its own. Sources are every state there
+not among them, each having a way in of its own. **What state it was steered
+from is written down beside the Steer**, because one target reads it back:
+Investigating ends in the state it left rather than at Done — see
+**Investigating**. Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather
 than another move along it. So every refusal is about the target instead of the
@@ -2227,6 +2233,39 @@ follow-up decides. A Tinker that ends holding no pull request goes by what its
 branch holds: commits mean Wrapping, the `submitting` step opening the pull
 request first; none mean Done.
 _Avoid_: follow-up task, comment round, reopen, chat, Q&A
+
+**Investigating**:
+Where a Conversation goes when the human wants a question about the code
+answered rather than anything changed: one session, under the Implementation
+Pairing, reading the code and writing and running whatever probes it takes to
+find out, in rounds of Question Sets for as long as the human wants. The one
+working state of the **Investigate** Process, and Follow-up's sibling rather
+than a rung of the ladder — with the same two ways in, a **Steer** and a
+Conversation starting there from its Draft, and the same brief-shaped
+requirement on the steer.
+
+**It commits nothing.** The Worktree is writable because investigation writes
+probes and runs them, and the session is told to leave every one of them
+uncommitted: the scratch is the point, the Diff on every Set shows it, and the
+Worktree goes when the Conversation is closed. Which is why this is the one
+place the **Done signal** is accepted over uncommitted changes, and the one
+working state that never ends on a pull request. The branch is still named — a
+Conversation's title is worth a cheap rename — and it outlives the checkout with
+nothing on it.
+
+**What ends it is the human's mark and the session's Done signal together**,
+exactly as a follow-up: the newest answered round carries **Nothing else**, and
+a signal without the mark is refused. **Where it ends is where it came from.**
+An Investigate Conversation came from its own Draft and ends **Done**, with no
+wrap-up, no watchers and nothing dispatched. One steered into Investigating
+returns to the state it was steered from, nothing else about it changed — so a
+question asked in the middle of a wrap-up leaves the wrap-up where it was rather
+than ending it, which is what a follow-up does too. Draft and Closed are the two
+states nothing returns to, so an Investigating steered from either ends Done as
+well. Which state to go back to is written down beside the **Steer** that made
+it, being a fact of the steer rather than something to read back off the
+Timeline.
+_Avoid_: research, spike, exploration, read-only mode, question state
 
 **Nothing else**:
 The control that ends a follow-up: a checkbox in the closing section of a

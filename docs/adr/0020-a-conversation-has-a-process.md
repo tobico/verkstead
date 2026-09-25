@@ -56,9 +56,19 @@ none of it. The Done signal is accepted over uncommitted changes here and
 nowhere else: the scratch is the point, the Diff on every Set already shows it,
 and the Worktree goes with the close. No pull request is ever asked for. The
 session is still asked to rename the branch, because the branch is the
-Conversation's title and a title is worth a cheap rename. Investigating is a
-Steer target from every state, taking a brief the way Follow-up does, because a
-question about work can arise at any point in it.
+Conversation's title and a title is worth a cheap rename.
+
+Investigating is a Steer target from every state, taking a brief the way
+Follow-up does, because a question about work can arise at any point in it — and
+**a steered Investigating goes back to the state it was steered from**, the way
+a follow-up lands back in the wrap-up it came off. Done is the ending of an
+Investigate Conversation, which came from a Draft; making it the ending of every
+Investigating was considered and rejected, because a Wrapping Conversation
+steered into one to ask a question would come out of it Done, its pull request
+unmerged and its watchers off it. Draft and Closed are the two states nothing
+returns to, so an Investigating steered from either ends Done as well. Which
+state to go back to is written down when the steer is made rather than read off
+the Timeline: it is a fact of the steer, not something to infer from history.
 
 **Review** is *Wrap up a pull request* made a Process. Draft to Wrapping, the
 ordinary wrap-up with its review, on the pull request or branch it is pointed
@@ -157,7 +167,8 @@ already says where the work is.
   form each key off the state, and every new shape has to be recomputable from
   the record alone.
 - **Investigating** is a Lifecycle state, with its own row in Steer, its own
-  Done rules and its own resume.
+  ending rules and its own resume — and the first state whose ending depends on
+  where it was entered from, which is why a steer now records the state it left.
 - The Done signal's evidence table gains a kind: the Nothing-else mark, with
   uncommitted changes allowed, for an Investigate session.
 - Follow-up is no longer the one state with no way in but a Steer: Tinker
