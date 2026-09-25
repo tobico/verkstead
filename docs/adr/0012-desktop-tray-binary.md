@@ -1,5 +1,10 @@
 # A desktop tray binary beside the CLI
 
+**Status: superseded by [ADR-0020](0020-electron-desktop.md)** — the desktop
+app becomes an Electron window over a sidecar server, and the tray app this
+decided ships on each platform only until the roadmap under
+`docs/roadmaps/electron-desktop/` takes that platform's release leg.
+
 Verkstead reaches the desktop as a system-tray app: a second binary, from a new
 `crates/desktop`, that runs the server in-process and puts a tray icon over it —
 **Open** (the default action, double-click where the platform has one) opens the
