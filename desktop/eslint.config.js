@@ -26,8 +26,12 @@ import parser from "@typescript-eslint/parser";
 /// `main.ts` is the app read off the process: `app`, the dialogs, and the one
 /// read of the environment everything below resolves out of. `window.ts` holds a
 /// `BrowserWindow`, which is a thing rather than a value and cannot be handed in
-/// — what it *decides* is elsewhere, in modules vitest runs.
-const EDGE = ["src/main.ts", "src/window.ts"];
+/// — what it *decides* is elsewhere, in modules vitest runs. `menu.ts` is the
+/// application menu, which is a list of the platform's own roles handed to
+/// Electron: there is no behaviour of ours in it to test, and the reason it
+/// exists at all — the shortcuts a hidden menu bar still has to answer — is a
+/// thing only a real window can be asked about.
+const EDGE = ["src/main.ts", "src/menu.ts", "src/window.ts"];
 
 export default [
   {

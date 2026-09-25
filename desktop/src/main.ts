@@ -17,13 +17,16 @@
 //! child is an app that can refuse having made nothing at all.
 
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import { app, dialog, type BrowserWindow } from "electron";
 
+import { FILE } from "./bounds.js";
 import { cli, OVERRIDE } from "./cli.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
+import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
 import { how, start } from "./sidecar.js";
 import { taken } from "./taken.js";
@@ -173,6 +176,11 @@ async function run(): Promise<void> {
 
   await app.whenReady();
 
+  // Before the window, so that it is never briefly a window whose keystrokes do
+  // nothing: the menu is what registers copy, paste, zoom, reload and the
+  // developer tools, and the bar it would be drawn in is hidden by the window.
+  shortcuts(machine.platform);
+
   try {
     const waited = await healthy(HEALTH);
     say(`the server answered after ${waited} ms`);
@@ -200,7 +208,15 @@ async function run(): Promise<void> {
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  onscreen = open({ origin: ORIGIN, secret: () => (data === undefined ? undefined : keyIn(data)) });
+  onscreen = open({
+    origin: ORIGIN,
+    secret: () => (data === undefined ? undefined : keyIn(data)),
+
+    // Electron's own user data, which is this machine's and never the server's:
+    // where the window sits is a fact about the desk in front of the human, so
+    // it is kept beside what Electron keeps here rather than in `config.yaml`.
+    state: join(app.getPath("userData"), FILE),
+  });
 }
 
 // **Started rather than awaited**, and this is not a style. Electron emits
