@@ -5,12 +5,13 @@
 `Verkstead-x86_64.msi` on a Release installs the Electron app per user under
 `%LOCALAPPDATA%\Programs`, with a Start-menu entry and the CLI's own directory
 inside the install on the user's PATH, so `verkstead guide` works from a fresh
-terminal and starts the CLI rather than the app. The
-controls overlay sits at the top-right in the heads' colours; Launch on
-Startup is the Run key through the login-item API; the `desktop-windows` leg
-installs the msi and asserts the install, the record under HKCU, the
-Start-menu entry, the PATH, and the three assertions every leg makes. The
-WiX sources for the Rust msi are gone.
+terminal and starts the CLI rather than the app. The controls overlay sits at
+the top-right in the heads' colours; Launch on Startup is the Run key through
+the login-item API, taking over the tray app's value where there is one; the
+`desktop-windows` leg installs the msi and asserts the install, the record
+under HKCU, the Start-menu entry, the PATH, the upgrade over the package
+before it, and the three assertions every leg makes. The WiX sources for the
+Rust msi are gone, the UpgradeCode carried out of them first.
 
 ## Decisions in force
 
