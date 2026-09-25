@@ -2236,14 +2236,19 @@ nothing on the branch could stand in for it, a follow-up being something the
 human wanted rather than a step of the run. It lands as the Steer Event's own
 body, which is where a session started again reads it back from — along with
 the rounds already answered under it, this follow-up's own rather than the
-Conversation's, both read from the newest steer into Follow-up down.
+Conversation's, both read from the newest steer into Follow-up down. **A
+Tinker's is its own Brief**, no steer having opened it: a session started again
+is read the Brief at the foot of the Timeline, with the rounds answered since
+the move into Follow-up its Start wrote.
 
 **The rounds are ordinary Question Sets.** The session answers what was asked,
-does what was asked for, commits and pushes it — the branch is on a pull
-request already, so the checks run while the human reads — and puts the round
-to them as one Set. Nothing about the state makes its Sets special: the agent
-writes an ordinary Preface, ordinary Questions and an ordinary Postscript, and
-it never asks whether there is anything else.
+does what was asked for, commits it, and pushes where the branch is on a pull
+request, so the checks run while the human reads — a Tinker's is on none until
+its ending opens one, and there the commit is the whole of the round: nothing
+pushed to a branch nothing is tracking, and no pull request opened either way —
+and puts the round to them as one Set. Nothing about the state makes its Sets
+special: the agent writes an ordinary Preface, ordinary Questions and an
+ordinary Postscript, and it never asks whether there is anything else.
 
 **What ends it is the human's mark and the session's Done signal together**: the
 newest round they answered carries **Nothing else**, and the session says it is

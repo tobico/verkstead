@@ -692,6 +692,13 @@ pub(crate) fn instruction(
 /// what is being followed up on are the same words — and they are said once,
 /// under the heading that says act on them, rather than twice under two headings
 /// that would have the session reading the second as news.
+///
+/// **Which is also the one whose branch is on no pull request**, and that is
+/// what the opening line has to be true about. A steered follow-up is about work
+/// that has been submitted, so it is sent to follow the pull request up; a
+/// Tinker's branch was cut a moment ago and has none, so its session is sent to
+/// the branch it is standing on and promised nothing that is not there. What to
+/// do with either is the skill's, which asks the branch rather than assuming.
 pub(crate) fn following_up(
     skills: &Skills,
     brief: &str,
@@ -701,12 +708,15 @@ pub(crate) fn following_up(
 ) -> String {
     let skill = skills.named(FOLLOWING_UP);
 
-    let opening =
-        format!("Read {skill} and follow up on this branch's pull request, the way it says.");
-
     let prompt = match brief.trim().is_empty() {
-        true => alone(&opening),
-        false => on_the_documents(&opening, brief, handoff),
+        true => alone(&format!(
+            "Read {skill} and follow up on the work on this branch, the way it says."
+        )),
+        false => on_the_documents(
+            &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
+            brief,
+            handoff,
+        ),
     };
 
     let prompt = format!(
@@ -3176,8 +3186,8 @@ mod tests {
 
         assert!(
             following_up.contains("git push"),
-            "this branch is already on a pull request, so a round that stayed local \
-             is one nobody can see: {following_up}"
+            "a branch that is on a pull request and stayed local is one nobody \
+             can see: {following_up}"
         );
         assert!(
             following_up.contains("before you ask them anything"),
@@ -3185,7 +3195,47 @@ mod tests {
         );
         assert!(
             !following_up.contains("gh pr create"),
-            "the pull request exists, and this session opens nothing: {following_up}"
+            "and this session opens no pull request, whether or not there is one: \
+             {following_up}"
+        );
+    }
+
+    /// And a branch that is on none is read and committed to all the same: a
+    /// **Tinker**'s follow-up starts on a branch cut a moment ago, so the skill
+    /// asks rather than assumes, and says what a round with nothing to push to
+    /// does instead.
+    #[test]
+    fn the_following_up_skill_says_what_to_do_on_a_branch_with_no_pull_request() {
+        let following_up = skill("following-up/SKILL.md");
+        let flowed = flowed("following-up/SKILL.md");
+
+        assert!(
+            !following_up.contains("already has a pull request open"),
+            "nothing promises one any more: a follow-up may be the start of the \
+             work: {following_up}"
+        );
+        assert!(
+            following_up.contains("gh pr view"),
+            "which one it is is asked rather than assumed: {following_up}"
+        );
+        assert!(
+            flowed.contains("the branch itself is what to read"),
+            "so a round with no pull request reads the branch rather than a diff \
+             that is not there: {following_up}"
+        );
+        assert!(
+            flowed.contains("the commit is the whole of it"),
+            "and commits what it was asked for and carries on: {following_up}"
+        );
+        assert!(
+            flowed.contains("nowhere to push to and no checks to set running"),
+            "with no push to a branch nothing is tracking, and nothing said about \
+             checks: {following_up}"
+        );
+        assert!(
+            flowed.contains("Do not open a pull request either way"),
+            "and it still opens nothing: what becomes of the branch is \
+             Verkstead's: {following_up}"
         );
     }
 
@@ -3253,6 +3303,11 @@ mod tests {
             ),
             "and the follow-up brief is the last thing said, under them: {prompt:?}"
         );
+        assert!(
+            prompt.contains("follow up on this branch's pull request"),
+            "and the work is on one, so that is what it is sent to follow up: \
+             {prompt:?}"
+        );
     }
 
     /// And the one a **Tinker** start opens says the Brief once, under the
@@ -3298,6 +3353,15 @@ mod tests {
         assert!(
             prompt.contains("Nothing else in this session tells you how to reach me."),
             "with the one thing every session is told beside the skill: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("pull request"),
+            "and nothing promising a pull request the branch does not have: \
+             {prompt:?}"
+        );
+        assert!(
+            prompt.contains("follow up on the work on this branch"),
+            "what it is sent to is the branch it is standing on: {prompt:?}"
         );
     }
 

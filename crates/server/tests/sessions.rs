@@ -72,9 +72,10 @@ use verkstead_render::{
     CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
-    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached,
-    Started, SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalClosed,
-    TerminalOpened, TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
+    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, SetReading, SetView, Shown,
+    Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent, TranscriptView,
+    Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -573,6 +574,18 @@ impl Grilling {
 
         if asked.exists() {
             std::fs::remove_file(asked).unwrap();
+        }
+    }
+
+    /// Read one back the way the sheet does, which is where what is drawn
+    /// around a Set is decided — the Nothing-else box included.
+    async fn set(&self, set_id: i64) -> SetView {
+        match get(&self.app, &format!("/api/ui/sets/{set_id}")).await {
+            SetReading::Set(view) => *view,
+            SetReading::Unreadable(unreadable) => panic!(
+                "Set {set_id} came back unreadable, which nothing here asks: {}",
+                unreadable.why
+            ),
         }
     }
 
@@ -23295,6 +23308,152 @@ async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
         prompt.contains("# This branch has no name yet"),
         "with the instruction every first session carries, the branch still \
          being on the name Verkstead invented: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("pull request"),
+        "and with nothing promising one: the branch was cut a moment ago and is \
+         on none, so the opening sends it to the branch it is standing on: \
+         {prompt:?}",
+    );
+}
+
+/// A Tinker's session that does what it was asked for, commits it, and puts the
+/// round — which is a round on a branch nothing is tracking and no pull request
+/// is on.
+///
+/// No push: there is nowhere to push to, and a stub that tried would fail
+/// against a repository with no remote — which is the whole of what the skill
+/// says to do here, held to the one thing a test can see.
+fn a_tinker_round_that_commits() -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'a limiter\\n' >> limiter.md\n\
+         git add -A\n\
+         git commit --quiet -m 'feat: count what the limiter rejects'\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         sleep 300\n",
+    )
+}
+
+/// And one that does its round, is answered, and then finishes without the
+/// human having said there is nothing else — which is the stop a Tinker's
+/// follow-up is picked up again from.
+fn a_tinker_round_then_gone(prompts: &Path) -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         printf 'that is that, then\\n'\n",
+        prompts = quoted(prompts),
+    )
+}
+
+/// A Tinker's round is an ordinary follow-up round on a branch with no pull
+/// request: it commits what it was asked for, opens nothing, and reaches the
+/// human as a Set carrying the **Nothing else** box.
+///
+/// The box is drawn from where the Conversation stands rather than from anything
+/// in the Set — see the server's `ui` module — so a Tinker's rounds carry it for
+/// the reason a steered follow-up's do, which is that they are rounds of a
+/// Conversation in Follow-up. Held to a test rather than taken on trust: it is
+/// the only way the human ends one, and a Tinker that asked without it would be
+/// a Conversation nobody could finish.
+#[tokio::test]
+async fn a_tinkers_round_commits_and_asks_on_a_branch_with_no_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+
+    let fixture = tinkering(spill, &a_tinker_round_that_commits()).await;
+
+    let view = fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the round is being worked where the start left it",
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "on a branch that is on no pull request: nothing has opened one, and \
+         nothing in the round is waiting on one: {:?}",
+        view.pinned,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert!(
+        fixture.set(set).await.follow_up,
+        "and the round reaches the human as an ordinary Set carrying the \
+         Nothing-else box, which is how they say the follow-up is over",
+    );
+}
+
+/// And a Tinker that loses its session is picked up again, on the Brief it is
+/// following up and the rounds it has already been through.
+///
+/// The relaunch a steered follow-up gets, on a Conversation that was never
+/// steered: there is no Steer Event to read the subject off, so the Brief is
+/// what the follow-up is about and the move the start wrote is where its rounds
+/// begin. Without that reading a Tinker whose session died could be neither
+/// resumed nor swept up — a Conversation in Follow-up that nothing could start
+/// anything for.
+#[tokio::test]
+async fn resume_tinkers_again_on_the_brief_and_the_rounds_answered() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("follow-up-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round_then_gone(&written_to)).await;
+
+    fixture.running().await;
+
+    // One round, answered without the mark: the human has more to say, and the
+    // session goes away before they get to say it.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture.stopped().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|_| {
+            let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+            let started = prompts(&written);
+
+            (started.len() > 1).then(|| started[1].to_owned())
+        })
+        .await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/following-up/SKILL.md"),
+        "the press starts the follow-up again rather than anything else: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("# What I want to follow up on")
+            && relaunched.contains("The API has none."),
+        "on the Brief, which is what a Tinker's follow-up is about: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("What you have already asked, and what I said"),
+        "with what has already been said under it: {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
+        "which is the round it asked before it went: {relaunched:?}",
     );
 }
 

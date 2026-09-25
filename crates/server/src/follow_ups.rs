@@ -17,8 +17,9 @@
 //! **This follow-up's own**, which is what the window is for. A Conversation can
 //! be steered into Follow-up more than once, and the round before this one is
 //! finished with: its brief was answered and its Sets belong to it. So both are
-//! read from the newest steer into Follow-up down, exactly as the Nothing-else
-//! mark is read inside that same window — see `store::nothing_else`.
+//! read from the newest way *into* Follow-up down — the steer where one opened
+//! it, and the move the start wrote where the Brief did — which is the window
+//! the Nothing-else mark is read inside as well; see `store::nothing_else`.
 
 use anyhow::Result;
 
@@ -107,7 +108,8 @@ impl FollowUp {
 /// start is the other: that one writes no steer, because it is the press that
 /// starts the work rather than one that takes something up about work already
 /// done — so where there is no steer into Follow-up the Brief is what the
-/// follow-up is about, and the rounds are what has been answered under it.
+/// follow-up is about, and the rounds are what has been answered since the move
+/// that press wrote.
 ///
 /// `None` is a record that cannot be true: both ways in are refused without
 /// something to start from, so a Conversation standing in Follow-up with
@@ -168,20 +170,35 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
         })
 }
 
-/// And where its Brief stands, for the follow-up a **Tinker** start opened.
+/// And the other way in: the move a **Tinker** start wrote, with the Brief that
+/// is what its follow-up is about.
 ///
-/// The newest again, and for the newest's reason: a Conversation gets one Brief
-/// per round, and the one a Tinker is following up on is the one at the bottom
-/// of the Timeline. Read only where there is no steer above it — a Tinker
-/// steered into Follow-up a second time is having the steer's follow-up, not its
-/// first one all over again.
+/// **Two events rather than one**, because the two say different things. The
+/// Brief is the subject — the newest, for the newest's reason: a Conversation
+/// gets one Brief per round, and the one a Tinker is following up on is the one
+/// at the bottom of the Timeline. The move into Follow-up is where the rounds
+/// start being this follow-up's, which is the same place `store::nothing_else`
+/// opens its window at: the Brief was written while the Conversation was still a
+/// Draft, so counting from it would take in whatever stood between the human
+/// writing it and the press that started the work.
+///
+/// Read only where there is no steer above them — a Tinker steered into Follow-up
+/// a second time is having the steer's follow-up, not its first one all over
+/// again.
 fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
-    timeline
+    let brief = timeline.iter().rev().find_map(|event| match &event.event {
+        store::Event::Brief(markdown) => Some(markdown.as_str()),
+        _ => None,
+    })?;
+
+    let opened = timeline
         .iter()
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Brief(markdown) => Some((at, markdown.as_str())),
+            store::Event::Moved(store::Lifecycle::FollowUp) => Some(at),
             _ => None,
-        })
+        })?;
+
+    Some((opened, brief))
 }
