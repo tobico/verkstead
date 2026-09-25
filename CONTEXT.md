@@ -55,21 +55,24 @@ than making a second one.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
-The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
-Everything done about one piece of work hangs off it. Runs through Draft →
-Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
-straight from Grilling to Wrapping, its building belonging to its Stages, and
-one adopting a pull request from Draft straight to Wrapping, its building
-having happened before Verkstead saw it — and can be closed from any of them, a **Steer** being the way back into a
+The core entity: a Repo, a base commit, a Brief, a **Process**, one branch and
+one Worktree. Everything done about one piece of work hangs off it. Which
+states it runs through is its Process's: a **Develop** Conversation runs Draft →
+Grilling → Implementing → Wrapping → Done — a roadmap one passing straight from
+Grilling to Wrapping, its building belonging to its Stages — and the other four
+Processes each take a shorter way through the same states, set out under
+**Process**. Closable from any of them, a **Steer** being the way back into a
 Conversation that is closed and one of the two ways into one that is Done. There
 is one move back down the ladder: a wrap-up whose review split its findings out
 into a backlog returns to Implementing to build it, and its finish step wraps up
 again on the pull request it already had, reviewed afresh. And one back up it: a
 Done Conversation whose pull request has stopped merging returns to Wrapping at
 one press, reviewed no further — see **Mergeable**. **Follow-up** sits beside
-the ladder rather than on it, the way Closed does, and is the one state with no
-way in but a Steer: the human taking something up about work that is already on
-a pull request, and landing back in the wrap-up when they are finished with it.
+the ladder rather than on it, the way Closed does, with two ways in — a Steer,
+the human taking something up about work that is already on a pull request, and
+a **Tinker** Conversation starting there — and lands in the wrap-up when they
+are finished with it, or in Done where nothing was built. **Investigating** sits
+beside it, the one working state of a Process of its own.
 *Blocked on you* is a condition of an active state, never a state of its own,
 and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
@@ -137,6 +140,56 @@ branch is a plan while the Conversation drafts and a fact from the moment it is
 cut, so the field goes when the pane does, whatever the name on it turns out to
 be.
 _Avoid_: task, session, job, thread, ticket
+
+**Process**:
+What kind of work a Conversation is for, and so which states it runs through:
+picked on the composer between **Repo** and **Agent**, frozen when the work
+starts exactly as the Pairings are, and kept in a side table of its own the way
+a Direction is. Five in the first version. **Develop** is the ladder as it has
+always run, the interview included — there is no *No grilling* any more, a
+Brief that wants no interview being a different Process rather than a hole in
+this one. **Investigate** answers questions about the code without changing it:
+Draft to **Investigating** to Done, one session under the Implementation
+Pairing shaped like a follow-up's — rounds of Question Sets, ended by the
+human's **Nothing else** mark and the session's Done signal together — in a
+writable Worktree it is told to commit nothing from, the signal accepted over
+uncommitted scratch here and nowhere else, and no pull request ever asked for.
+**Review** is the wrap-up run over a pull request or a branch the Brief names:
+Draft to Wrapping, reviewed under the Review Pairing, which it always has — no
+*No review* row, a Review without a review being the last Process here.
+**Tinker** is Follow-up entered from a Draft, on a fresh branch and primed with
+the Brief: rounds for as long as the human wants, and on their Nothing-else mark
+commits on the branch mean Wrapping — the pull request opened by the
+`submitting` step — and none mean Done. It is what replaced *No grilling*.
+**Fix Merge Issues** is a wrap-up narrowed to what GitHub refuses a merge for:
+Draft to Wrapping with the review and the comments settled before it looks, so
+only **Mergeable** and the checks are waited on; and it takes a whole stack, the
+server walking the chain on GitHub both ways from what was named, recording
+every pull request and sending one `addressing` session at the ordered list,
+bottom up, synced with `gh stack sync` whatever the **resolution strategy**
+says — a lone pull request follows the strategy as it always has.
+
+**Review and Fix Merge Issues need a target**, and the Brief is where a pull
+request is named: the first pull request URL or `#number` in it is read at
+Start. A bare branch is not readable out of prose, so it goes in the Repo
+panel's Branch field, which for these two reads **Pull request or branch** and
+takes any of the three, filled from the Brief while empty; Start is refused
+while neither names anything. A pull request hides the base picker, GitHub's
+base being the fact; a branch keeps it, and that is what its pull request opens
+against.
+
+**Which roles a Process uses is the Process's**: Develop the three, Review and
+Tinker the Implementation and Review Pairings, Investigate and Fix Merge Issues
+the Implementation Pairing alone. Develop is every new draft's default and is
+never remembered, unlike the Pairings — it is the one thing about a
+Conversation likeliest to differ from the last. Conversations from before this
+read Develop, and one that adopted a pull request reads Review. Drawn on the
+Brief's setup facts beside the Pairings and in the details pane, and nowhere
+else: the state word already says where the work is. Offered on the picker
+only once its stage has landed, as an agent type is offered only once it can
+launch the real thing. See ADR-0020.
+_Avoid_: mode, kind, type, workflow, flow, template, Direction (that is how
+Develop's building is run, and is picked inside it)
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when grilling starts along
@@ -1345,15 +1398,17 @@ A bare verb, because Verkstead knows which session is running in the Worktree
 and what it was sent for. **The repository is read at that moment and only
 then**, and what it is read for is the kind's own — a **Step**'s box ticked and
 committed, the picked **Direction**'s artifact, a new commit for an inline run
-or an instruction, the human's Nothing-else mark for a follow-up. A fix session
-alone is asked for nothing, GitHub's check being what judges a fix; and an
+or an instruction, the human's Nothing-else mark for a follow-up or an
+Investigate session. A fix session alone is asked for nothing, GitHub's check being what judges a fix; and an
 inline run sent again onto a branch that already holds its work has no commit to
 make, so its pull request is what it is asked for instead.
 
 **A signal the evidence does not bear out is refused**: the command exits
 non-zero saying what is missing, the session stays alive, and the agent puts it
 right in the same turn. Refused too over uncommitted changes, in the Worktree or
-in any companion repo the Conversation may write in, naming the files — and, for
+in any companion repo the Conversation may write in, naming the files — except
+for an Investigate session, whose scratch is the point and goes with the
+Worktree — and, for
 a session meant to end on a pull request, while the branch has none open, or any
 companion repo the work committed in has none, GitHub out of reach reading as
 accepted. The companions are asked about here rather than only by the wrap-up
@@ -1546,10 +1601,12 @@ no mark.
 _Avoid_: profile choice, model selection, profile+model, combination
 
 **Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:
-The three Pairings a Conversation fixes before grilling starts — one for the
-grilling session, one for the implementation work, one for the wrap-up's review.
-They are roles a Pairing is used in, not kinds of Pairing: the same Profile,
-even the same model, may fill all three. The first line between them is planning
+The three roles a Pairing is used in — the grilling session, the implementation
+work, the wrap-up's review — of which a Conversation fixes the ones its
+**Process** uses before the work starts: all three for Develop, the second and
+third for Review and Tinker, the second alone for Investigate and Fix Merge
+Issues. They are roles rather than kinds of Pairing: the same Profile, even the
+same model, may fill all three. The first line between them is planning
 against building: the grilling session's tail — writing the handoff, the backlog
 or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
 drives what builds. Distinct accounts are why an inline implementation is a
@@ -1575,23 +1632,20 @@ on a review nothing can start. **No review** is not this and never falls back:
 it settles the review rather than leaving it unpicked, which is the whole
 difference between the row and an empty picker.
 
-Two of the pickers offer a row that is not an account: **No grilling** and **No
-review**. Picking one is a choice like picking a Pairing — it satisfies
-readiness, freezes when the work starts, is remembered per Repo and inherited by
-a stage — and what it settles is that the role runs no session at all. An empty
-picker is not that: the two leave the same thing unchosen and only one of them
-lets the work start.
+One picker offers a row that is not an account: **No review**, on Develop and
+Tinker. Picking it is a choice like picking a Pairing — it satisfies readiness,
+freezes when the work starts, is remembered per Repo and inherited by a stage —
+and what it settles is that the role runs no session at all. An empty picker is
+not that: the two leave the same thing unchosen and only one of them lets the
+work start. The Review Process offers no such row, a Review without a review
+being Fix Merge Issues.
 
-**No grilling** takes the Brief straight to the work. The one press does
-everything a grill start does — fetch, resolve the base, cut the branch, make
-the Worktree and every companion's, freeze the Brief and the Pairings — and
-lands the Conversation Implementing rather than Grilling, with an inline session
-under the Implementation Pairing primed on the Brief alone. Its prompt says
-there was no interview, so a real decision the Brief leaves open is put to the
-human as a Blocking Ask rather than guessed at. Inline only — no backlog and no
-roadmap — and watched out to a pull request and an ordinary wrap-up exactly as
-an inline implementation picked at the end of a grilling is. The button reads
-**Start work** whichever way the Conversation starts.
+**No grilling is retired** (2026-09-25). It took the Brief straight to an inline
+session primed on the Brief alone, and what it was for — work the human wants
+without an interview — is the **Tinker** Process now. A skip a Repo remembers
+for the grilling role is silently not applied, exactly as a remembered Pairing
+whose Profile has broken is not. The button reads **Start work** whichever
+Process the Conversation starts on.
 
 **No review** settles the wrap-up's review the moment it looks, with no
 session and nothing on the Timeline, and everything else runs exactly as it
@@ -1807,11 +1861,12 @@ _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Adopt**:
 Take work the Repo already holds — written by the old tools, by hand, by
-anything that was not this Verkstead — into the pipeline. Two kinds of work are
-adopted, and *adopt* is the code's and this vocabulary's word for both; what the
-human reads is **Continue a roadmap** for the one and **Wrap up a pull
-request** for the other, both levels of the **Other actions** dropdown on the
-compose page.
+anything that was not this Verkstead — into the pipeline. One kind of work is
+adopted now: a roadmap, which the human reads as **Continue a roadmap**, the one
+level of the **Other actions** dropdown on the compose page. A pull request was
+the other, under **Wrap up a pull request**, until 2026-09-25; that is the
+**Review** Process now, and the paragraph below is kept for what it settled
+about taking one up.
 
 **A roadmap is adopted** by starting its next Stage as a Conversation. The
 human's press stands in for the Stage before it that would otherwise have
@@ -1828,27 +1883,24 @@ one from there on. Never stacks: there is no predecessor Conversation to stack
 on, and building on an unmerged branch is the human's move, made by picking
 that branch as the base.
 
-**A pull request is adopted** by starting a Conversation on it at its wrap-up:
-one opened by hand, by a contributor, by anything that was not this Verkstead.
-Read off GitHub rather than the repository — every open pull request of every
-registered Repo with a GitHub remote, through the configured `gh`, when the
-compose page opens and again on each reopen, never kept: any author, and never
-one from a fork, whose head branch is nowhere origin can be pushed to. One a
-Conversation already holds, Closed included, is listed and leads to that
-Conversation instead, the branch being that Conversation's. Taking it up puts
-the Conversation on the pull request's head branch, named for it and never
+**A pull request is taken up** by a **Review** or **Fix Merge Issues**
+Conversation at Start, named in the Brief rather than picked off a list — the
+list of every open pull request read off GitHub when the compose page opened is
+gone with the menu level. One a Conversation already holds, Closed included, is
+refused by name and leads to that Conversation instead, the branch being that
+Conversation's; one from a fork is refused too, its head branch being nowhere
+origin can be pushed to. Taking it up puts the Conversation on the pull
+request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
 one ahead, diverged or checked out anywhere else is refused by name, on the
 composer where the press was — with the head at take-up as its base commit and
 GitHub's base branch beside it, so the Timeline draws only what Verkstead adds
 from here and a conflict merge of the base drags nothing. Recording the pull
 request is the move, from Draft straight into **Wrapping**, and the wrap-up is
-the ordinary one from there: the Review Pairing decides whether the branch is
-read afresh with everything already said on it folded in, or, under *No
-review*, only what stands on it is answered. No grilling and no handoff: the
-pull request's own title and description stand as the Brief, edited or not,
-and nothing about the pull request itself — its draft flag, its description —
-is touched.
+the Process's from there: the ordinary one with its review for Review, and one
+narrowed to Mergeable and the checks for Fix Merge Issues. No grilling and no
+handoff: the human's Brief is the Brief, and nothing about the pull request
+itself — its draft flag, its description — is touched.
 _Avoid_: import, attach, resume, take over, migrate, improve
 
 **Abandoned**:
@@ -1992,8 +2044,9 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 The human saying where the work goes, from wherever it has got to: a row in the
 Conversation's own menu beside **Stop**, and a form over one question — where
 does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
-**Follow-up** and **Done** — the four states the work is done in, and Follow-up
-beside them because a steer is the only way into it at all; Draft and Closed are
+**Investigating**, **Follow-up** and **Done** — the states the work is done in,
+Investigating among them because a question about the work can arise in any
+state and it takes a brief the way Follow-up does; Draft and Closed are
 not among them, each having a way in of its own. Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather
@@ -2138,8 +2191,9 @@ Where a Conversation goes when the human wants something taken up about work
 that is already on a pull request: a session of their own, answering what they
 ask and doing what they want done about it, for as many rounds as they want.
 Not a rung of the ladder — it hangs off the wrap-up rather than following it —
-and the one state with no way in but a **Steer**, offered from Done and from
-Wrapping and only where the record holds a pull request.
+with two ways in: a **Steer**, offered from Done and from Wrapping and only
+where the record holds a pull request, and a **Tinker** Conversation, which
+starts here from its Draft on a fresh branch with nothing on a pull request yet.
 
 **The brief is what it is about**, written into the steer and required there:
 nothing on the branch could stand in for it, a follow-up being something the
@@ -2163,10 +2217,12 @@ nothing to do and nothing to ask. The mark alone would end a follow-up in the
 middle of
 the work the last round asked for, and a signal without the mark is refused —
 whether there is anything else is the human's to say. Then the session is ended
-and the Conversation is
-Wrapping again over the pull request it was opened about, with the checks put
-back to waiting where the follow-up pushed anything — *back to Done* being that
-wrap-up's own settling rule rather than anything a follow-up decides.
+and the Conversation is Wrapping again over the pull request it was opened
+about, with the checks put back to waiting where the follow-up pushed anything —
+*back to Done* being that wrap-up's own settling rule rather than anything a
+follow-up decides. A Tinker that ends holding no pull request goes by what its
+branch holds: commits mean Wrapping, the `submitting` step opening the pull
+request first; none mean Done.
 _Avoid_: follow-up task, comment round, reopen, chat, Q&A
 
 **Nothing else**:
