@@ -72,6 +72,7 @@ import type {
   BriefSaved,
   ConversationView,
   GrillingStarted,
+  Process,
 } from "../api/types";
 import app from "../App.module.css";
 import { attaching, type Attaching, type Shown } from "../Attaching";
@@ -85,6 +86,7 @@ import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
 import { HeldPullRequest, TakingUp } from "./TakeUp";
+import { roles } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -399,8 +401,11 @@ function Written(props: {
   );
 }
 
-/// What an unready start is waiting on, said in its tooltip.
-const MISSING = "This needs a brief, and every role picked and working.";
+/// What an unready start is waiting on, said in its tooltip — the roles named
+/// as the Process has them, which is [`roles`]'s to count rather than a three
+/// written into the sentence.
+const missing = (process: Process): string =>
+  `This needs a brief, and ${roles(process)} picked and working.`;
 
 /// The button that gives a Conversation somewhere to work.
 ///
@@ -462,7 +467,7 @@ function StartGrilling(props: {
           // which is what carries the explanation.
           disabled={start.isPending}
           aria-disabled={!ready()}
-          title={ready() ? undefined : MISSING}
+          title={ready() ? undefined : missing(props.conversation.process)}
           onClick={() => ready() && start.mutate()}
         >
           {start.isPending ? "Starting…" : "Start work"}

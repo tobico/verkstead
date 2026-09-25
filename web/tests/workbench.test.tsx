@@ -184,7 +184,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The words a Process is said in, read here rather than spelled out again: the
 // pane and this assertion about it would otherwise be two opinions about what
 // Develop is called.
-import { OFFERED, PROCESS } from "../src/workbench/processes";
+import { OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -2716,6 +2716,10 @@ describe("the page of a draft holding a pull request", () => {
   /// The two pairings the wrap-up runs under, and nothing that the pull request
   /// has already answered: its branch is the head branch, its base is that
   /// branch's own head at take-up, and there is no round for a grilling to open.
+  ///
+  /// Two rather than three because the Process says so and not because the pane
+  /// tests for the held pull request: a Conversation holding one reads as a
+  /// Review, and Review uses Implementation and Review alone.
   it("offers the two pairings and no branch, base or grilling picker", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
@@ -2725,6 +2729,10 @@ describe("the page of a draft holding a pull request", () => {
     await waitFor(() => screen.getByLabelText("Implementation"));
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    // Which is the record's own reading, and the table's answer to it.
+    expect(HOLDING.process).toBe("Review");
+    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
 
     await openRepo(container);
 
@@ -5778,6 +5786,51 @@ describe("a conversation's pairings", () => {
   });
 });
 
+/// Which of the pickers stand in the setup row, which is the Process's to say
+/// and `processes.ts`'s table to answer: a picker per role the Process uses,
+/// and no others.
+describe("the pickers a conversation's process draws", () => {
+  /// Develop uses all three, and with only Develop landed it is the row every
+  /// draft gets.
+  it("draws all three under Develop", async () => {
+    theWorkbenchWith({ process: "Develop" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => picker("Grilling"));
+    expect(picker("Implementation")).toBeTruthy();
+    expect(picker("Review")).toBeTruthy();
+  });
+
+  /// And a Review draws two. Asked of a conversation holding no pull request at
+  /// all, which is the whole point of it: what takes the grilling picker away
+  /// is the Process, not the thing that happened to settle it.
+  it("draws no grilling picker under Review, pull request or no", async () => {
+    theWorkbenchWith({ process: "Review" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => picker("Implementation"));
+    expect(picker("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    expect(OPEN.adopting_pull_request).toBeNull();
+    expect(uses("Review", "grilling")).toBe(false);
+  });
+
+  /// A Process nothing offers yet, which the wire carries all the same: one
+  /// role, so one picker. Nothing here has landed to pick it — the record is
+  /// read as one, which is what the two lists in `processes.ts` are for.
+  it("draws one picker under a process that uses one role", async () => {
+    theWorkbenchWith({ process: "Investigate" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => picker("Implementation"));
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+
+    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+  });
+});
+
 describe("the panes on a narrow window", () => {
   /// Asked over a record with something on it beyond the Brief, which is what
   /// makes three levels to walk: a Conversation whose record is the one Event
@@ -6678,6 +6731,34 @@ describe("starting the work", () => {
 
     expect(start.getAttribute("title")).toBe(
       "This needs a brief, and every role picked and working.",
+    );
+  });
+
+  /// And the roles it names are the ones the Process uses, counted off the role
+  /// table rather than written into the sentence as three: a Review runs two
+  /// and says *both roles*.
+  it("names two roles where the process has two", async () => {
+    theWorkbenchWith({ process: "Review", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, and both roles picked and working.",
+    );
+  });
+
+  /// And a Process with one role says one, which is asked over a Process
+  /// nothing offers yet: the wire carries all five, and the words are counted
+  /// off the table rather than off what has landed.
+  it("names one role where the process has one", async () => {
+    theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, and one role picked and working.",
     );
   });
 

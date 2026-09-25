@@ -22,6 +22,7 @@ import type {
   Created,
   DirectoryListing,
   OpenPullRequestRepo,
+  Process,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
@@ -40,7 +41,7 @@ import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
-import { OFFERED, PROCESS } from "../src/workbench/processes";
+import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -871,6 +872,137 @@ describe("the process a compose page is composing under", () => {
       ).toEqual({ process: "Develop" }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(1);
+  });
+});
+
+/// Which of the role pickers stand in the row, and what the press waits on:
+/// the Process's to say, and `processes.ts`'s table to answer.
+///
+/// The one-role shape is exercised over a Process nothing offers yet. Only
+/// Develop has landed, so it is reached the one way it can be — a body this
+/// device is holding, which is a word the wire carries and this build has a row
+/// for.
+describe("the pickers a compose page's process draws", () => {
+  beforeEach(() => localStorage.clear());
+
+  /// A page holding a Process and the repo it would be composed against, which
+  /// is where a reload would leave one.
+  function composedAs(process: Process): void {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), repo: REPOS[1]!.id, process }),
+    );
+  }
+
+  it("draws all three under Develop", async () => {
+    composedAs("Develop");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
+    expect(screen.getByLabelText("Implementation")).toBeTruthy();
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+  });
+
+  it("draws one picker under a process that uses one role", async () => {
+    composedAs("Investigate");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Implementation")).toBeTruthy(),
+    );
+
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+  });
+
+  /// And the press waits on exactly those roles. Asked over a repo remembering
+  /// an implementation pairing and nothing else: under Develop that is a start
+  /// still waiting on two roles, and under a Process that uses one it is a
+  /// start with everything it needs.
+  it("waits on the roles the process uses and no others", async () => {
+    const memory: RepoPairingsView = {
+      grilling: "Nothing",
+      implementation: {
+        profile: PROFILES[1]!,
+        model: PROFILES[1]!.models[0]!,
+      },
+      review: "Nothing",
+    };
+
+    composedAs("Investigate");
+    theWorkbench(
+      whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "What does the cache do?" } });
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(showing("Implementation")).toBe("Opus 5 — opus"),
+    );
+
+    // The one role it uses is answered, so there is nothing left to wait on —
+    // and the two it does not use are not drawn to be waited on.
+    await waitFor(() => expect(start.getAttribute("aria-disabled")).toBe("false"));
+    expect(start.getAttribute("title")).toBeNull();
+  });
+
+  /// The same page under Develop, which waits on the two that memory left
+  /// empty — and says so in the words the table counts.
+  it("says what it is waiting on in the roles the process has", async () => {
+    const memory: RepoPairingsView = {
+      grilling: "Nothing",
+      implementation: {
+        profile: PROFILES[1]!,
+        model: PROFILES[1]!.models[0]!,
+      },
+      review: "Nothing",
+    };
+
+    composedAs("Develop");
+    theWorkbench(
+      whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "Make the widget" } });
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(showing("Implementation")).toBe("Opus 5 — opus"),
+    );
+
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, and every role picked and working.",
+    );
+  });
+
+  /// And a Process with one role says one role, which is the whole of what the
+  /// table changes about these words.
+  it("says one role where the process has one", async () => {
+    composedAs("Investigate");
+    theWorkbench(json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Implementation")).toBeTruthy(),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Start work" }).getAttribute("title"),
+    ).toBe("Starting needs a brief, and one role picked and working.");
   });
 });
 

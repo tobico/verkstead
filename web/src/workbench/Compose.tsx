@@ -16,10 +16,10 @@
 //! Which is why they are not pressable on the same things. A repo is the whole
 //! of what creating needs, so *Save as draft* waits on that alone; *Start work*
 //! carries a grilling start as well, and waits on what one has always waited on
-//! — a brief, and the three roles answered. Short of that it draws inert and
-//! does nothing at all when it is pressed, exactly as the composer's own start
-//! does: a press that created the Conversation and then reported the grilling
-//! refused would be doing the opposite of what it promised.
+//! — a brief, and every role the Process uses answered. Short of that it draws
+//! inert and does nothing at all when it is pressed, exactly as the composer's
+//! own start does: a press that created the Conversation and then reported the
+//! grilling refused would be doing the opposite of what it promised.
 //!
 //! **Nothing under the presses says any of that.** What each of them would do
 //! is what its own word says, and why one of them cannot be pressed is a `title`
@@ -84,8 +84,8 @@
 //! the way a held file is. The repo is the pull request's and reads settled, the
 //! branch and the base are not drawn at all — its branch is the head branch and
 //! its base is that branch's own head at take-up — and the grilling picker goes
-//! with them: the work is built, and the take-up moves it straight into the
-//! wrap-up.
+//! with them, the Process reading as a Review and a Review having no round for
+//! a grilling to open.
 //!
 //! The menu is drawn whenever the box is empty and nothing is loaded, and a
 //! level with nothing under it is greyed rather than hidden: what there is to do
@@ -124,7 +124,7 @@ import {
   listRepos,
   loadRepoPairings,
 } from "../api/client";
-import type { OpenPullRequest, RepoEntry } from "../api/types";
+import type { OpenPullRequest, Process, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
@@ -164,6 +164,7 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
+import { ROLES, roles, uses, type Role } from "./processes";
 import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
@@ -375,7 +376,7 @@ function Compose(props: {
   /// back as though somebody had chosen it. Which also means switching repos
   /// simply reads another memory, and a role the human did touch stands through
   /// it.
-  const showing = (role: "grilling" | "implementation" | "review"): string => {
+  const showing = (role: Role): string => {
     const picked = state()[role];
     if (picked !== null) {
       return picked;
@@ -391,6 +392,18 @@ function Compose(props: {
       : pairing.settled(prefill[role]);
   };
 
+  /// What kind of work this page is composing: what the picker was moved to,
+  /// Develop until it is moved at all — and Review over a loaded pull request,
+  /// which settles it the way it settles the repo. What a take-up makes *is* a
+  /// Review, rather than anything a dropdown here chose.
+  ///
+  /// The one reading the row is drawn off, the way [`on`] is the one reading of
+  /// the repo: which pickers stand in it, what the press waits on, and what an
+  /// inert press says it is waiting on all come off this and the table it
+  /// indexes.
+  const process = (): Process =>
+    pull() !== null ? "Review" : state().process ?? "Develop";
+
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
   /// a conversation drafts. A roadmap carries its own repo, so a page loaded
@@ -400,7 +413,7 @@ function Compose(props: {
   /// And whether *Start work* would actually start anything, which is more:
   /// creating a Conversation and kicking the work off are one press here, and
   /// the second half has the conditions it has always had — a brief to grill
-  /// from, and each of the three roles answered.
+  /// from, and every role the Process uses answered.
   ///
   /// The same questions `ready_to_grill` asks, less the one this side cannot
   /// see: whether the account behind a chosen pairing is still where it was
@@ -410,38 +423,32 @@ function Compose(props: {
   ///
   /// A roadmap answers the brief for itself: the stage's own arrives with the
   /// adoption, which is why there is nothing to write in the box while one is
-  /// loaded. Nothing chosen for a role is the empty string on all three pickers
-  /// — the row that runs no session is a choice like any other, and it lets the
+  /// loaded. Nothing chosen for a role is the empty string on every picker —
+  /// the row that runs no session is a choice like any other, and it lets the
   /// work start.
   ///
-  /// A pull request answers the grilling for itself, by never having one: the
-  /// work on it is built, the take-up moves it straight into the wrap-up, and
-  /// the picker is not drawn. Its Brief is a question like any other's — it
-  /// arrives prefilled with the pull request's own words, but the box is a box
-  /// and what is left in it is what the wrap-up reads.
+  /// A pull request answers the grilling for itself, by reading as a Review:
+  /// Review does not use that role, so there is no picker for it and nothing
+  /// waiting on one. Its Brief is a question like any other's — it arrives
+  /// prefilled with the pull request's own words, but the box is a box and what
+  /// is left in it is what the wrap-up reads.
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
-    (pull() !== null || showing("grilling") !== "") &&
-    showing("implementation") !== "" &&
-    showing("review") !== "";
+    ROLES[process()].uses.every((role) => showing(role) !== "");
 
   /// What starting is waiting on, in the words the composer's own start says
-  /// them in — the brief left out where a roadmap answers for it.
+  /// them in — the brief left out where a roadmap answers for it, and the roles
+  /// named as the Process has them.
   ///
   /// A `title` on the press rather than a line under it. It is about a button
   /// rather than about the page, and a sentence standing under the box whether
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
-  const waiting = () => {
-    if (adopting() !== null) {
-      return "Starting needs every role picked and working.";
-    }
-
-    return pull() === null
-      ? "Starting needs a brief, and every role picked and working."
-      : "Starting needs a brief, and both roles picked and working.";
-  };
+  const waiting = () =>
+    adopting() !== null
+      ? `Starting needs ${roles(process())} picked and working.`
+      : `Starting needs a brief, and ${roles(process())} picked and working.`;
 
   const [gone, setGone] = createSignal(false);
 
@@ -846,25 +853,27 @@ function Compose(props: {
                 is: what a take-up makes is a Review, which is what the
                 Conversation *is* rather than anything picked here. */}
             <ProcessPicker
-              chosen={pull() !== null ? "Review" : state().process ?? "Develop"}
+              chosen={process()}
               disabled={make.isPending || pull() !== null}
               pick={(picked) => change({ process: picked })}
             />
 
-            {/* And the three accounts, one trigger each — the same three
-                questions, asked before there is a record for an answer to be
-                about. Each of them stands on what the repo was last grilled
-                with (or its prefill, where nothing has grilled it) until it
-                is touched, which is what a created draft would
-                have arrived showing — and a picker left on it sends nothing
-                when this is created, so the server's own prefill stands. */}
+            {/* And the accounts, one trigger each — one per role the Process
+                uses, which is [`ROLES`]'s to say and not this page's. The same
+                questions the composer asks, asked before there is a record for
+                an answer to be about: each of them stands on what the repo was
+                last grilled with (or its prefill, where nothing has grilled it)
+                until it is touched, which is what a created draft would have
+                arrived showing — and a picker left on it sends nothing when
+                this is created, so the server's own prefill stands. */}
             <ProfileChoices>
               {(saved) => (
                 <>
-                  {/* Not drawn at all over a loaded pull request: the work on
-                      one is built, the take-up moves it straight into the
-                      wrap-up, and there is no round for a grilling to open. */}
-                  <Show when={pull() === null}>
+                  {/* Not drawn over a loaded pull request, and by the table
+                      rather than by a test for one: what a take-up makes reads
+                      as a Review, and a Review has no round for a grilling to
+                      open. */}
+                  <Show when={uses(process(), "grilling")}>
                     <RolePicker
                       saved={saved()}
                       role="grilling"
@@ -874,21 +883,25 @@ function Compose(props: {
                       pick={(picked) => change({ grilling: picked })}
                     />
                   </Show>
-                  <RolePicker
-                    saved={saved()}
-                    role="implementation"
-                    label="Implementation"
-                    chosen={showing("implementation")}
-                    pick={(picked) => change({ implementation: picked })}
-                  />
-                  <RolePicker
-                    saved={saved()}
-                    role="review"
-                    label="Review"
-                    away="No review"
-                    chosen={showing("review")}
-                    pick={(picked) => change({ review: picked })}
-                  />
+                  <Show when={uses(process(), "implementation")}>
+                    <RolePicker
+                      saved={saved()}
+                      role="implementation"
+                      label="Implementation"
+                      chosen={showing("implementation")}
+                      pick={(picked) => change({ implementation: picked })}
+                    />
+                  </Show>
+                  <Show when={uses(process(), "review")}>
+                    <RolePicker
+                      saved={saved()}
+                      role="review"
+                      label="Review"
+                      away="No review"
+                      chosen={showing("review")}
+                      pick={(picked) => change({ review: picked })}
+                    />
+                  </Show>
                 </>
               )}
             </ProfileChoices>

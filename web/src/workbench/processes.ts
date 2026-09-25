@@ -1,5 +1,5 @@
-//! The words a Conversation's Processes are said in, and which of them the
-//! picker offers.
+//! The words a Conversation's Processes are said in, which of them the picker
+//! offers, and which roles each one is run under.
 //!
 //! The wire carries a Process as a name rather than a sentence — the record's
 //! own word for what kind of work this is — and what the human reads is the
@@ -39,3 +39,82 @@ export const PROCESS: Record<Process, string> = {
 /// One row for now. A Process is offered only once its stage has landed, as an
 /// agent type is offered only once it can launch the real thing.
 export const OFFERED: Process[] = ["Develop"];
+
+/// One of the roles a Conversation's sessions are run under, spelled the way
+/// the record's own fields spell it — `grilling_pairing`, and the two beside
+/// it.
+export type Role = "grilling" | "implementation" | "review";
+
+/// And what a Process says about who runs it.
+export type Roles = {
+  /// The roles it uses, in the order a control draws them. A Process draws a
+  /// picker per role here and no others, and the press waits on every one of
+  /// them.
+  uses: Role[];
+  /// Those of them that may be picked away — the picker's row that is no
+  /// account at all. A role not named here has to be answered with one.
+  away: Role[];
+  /// And which shape the one **Agent** control takes: a panel where there are
+  /// several roles to stack under their labels, and the flat Pairing dropdown
+  /// where there is one.
+  control: "panel" | "dropdown";
+};
+
+/// Which roles each Process uses, which of them may be picked away, and which
+/// shape its control takes.
+///
+/// [ADR-0020](../../../docs/adr/0020-a-conversation-has-a-process.md) carries
+/// this table, and this is that table written down where the web reads it: the
+/// two composers draw off it and the start's own waiting text counts off it, so
+/// a Process arriving later is a row added here rather than a branch added in
+/// each of those places.
+///
+/// All five, for [`PROCESS`]'s reason — the wire carries every one of them, and
+/// a record naming a Process this viewer had no roles for would be a composer
+/// with nothing in its setup row.
+export const ROLES: Record<Process, Roles> = {
+  Develop: {
+    uses: ["grilling", "implementation", "review"],
+    away: ["review"],
+    control: "panel",
+  },
+  Investigate: {
+    uses: ["implementation"],
+    away: [],
+    control: "dropdown",
+  },
+  Review: {
+    uses: ["implementation", "review"],
+    away: [],
+    control: "panel",
+  },
+  Tinker: {
+    uses: ["implementation", "review"],
+    away: ["review"],
+    control: "panel",
+  },
+  FixMergeIssues: {
+    uses: ["implementation"],
+    away: [],
+    control: "dropdown",
+  },
+};
+
+/// Whether a Process uses a role — the question each composer asks of each
+/// picker it might draw.
+export function uses(process: Process, role: Role): boolean {
+  return ROLES[process].uses.includes(role);
+}
+
+/// How an inert Start names the roles it is waiting on, in the middle of the
+/// sentence it carries in its `title`: *every role*, *both roles* or *one
+/// role*.
+///
+/// Counted off the table rather than fixed at three, which is the whole of what
+/// this changes about the words: a Review waits on two and says *both roles*,
+/// exactly as the sentence written for a held pull request always did, and a
+/// Process with one role says so.
+export function roles(process: Process): string {
+  const count = ROLES[process].uses.length;
+  return count === 1 ? "one role" : count === 2 ? "both roles" : "every role";
+}

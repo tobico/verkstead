@@ -100,7 +100,7 @@ import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { AUTOMATIC, chosen } from "./naming";
-import { OFFERED, PROCESS } from "./processes";
+import { OFFERED, PROCESS, uses } from "./processes";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -819,18 +819,24 @@ function UncachedCompiles(props: {
     </Show>
   );
 }
-/// The three pairings the work will run under — two of which may be picked
-/// away instead — one option of the row each, the role as the label and the
-/// pairing as the value.
+/// The pairings the work will run under — some of which may be picked away
+/// instead — one option of the row each, the role as the label and the pairing
+/// as the value.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
 /// pairings are made of it here: a row per profile-and-model combination, which
 /// is what a picker offers.
 ///
-/// The three stand in the row rather than in a section of their own, and there
-/// is no heading over them: the role is written on each one, so a word above
-/// all three would be the row saying what its labels already say.
+/// They stand in the row rather than in a section of their own, and there is
+/// no heading over them: the role is written on each one, so a word above all of
+/// them would be the row saying what its labels already say.
+///
+/// **One per role the Process uses**, which is [`ROLES`]'s to say rather than
+/// this pane's. A Conversation holding a pull request reads as a Review, and
+/// Review does not use Grilling — so the picker that was taken away by a test
+/// for the held pull request is taken away by the table instead, and the two
+/// composers stop saying the same thing twice.
 function Profiles(props: { conversation: ConversationView }): JSX.Element {
   return (
     <ProfileChoices>
@@ -838,14 +844,8 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         <>
           {/* One of the two pickers with a row that is not an account: a
               brief can go straight to the work, with no interview between
-              the two.
-
-              Not drawn at all on a conversation holding a pull request. The
-              work on it is built and the take-up moves it straight into the
-              wrap-up, so there is no round for a grilling to open and no later
-              stage to inherit the choice — which is what an adopting
-              conversation's own is carried for. */}
-          <Show when={props.conversation.adopting_pull_request === null}>
+              the two. */}
+          <Show when={uses(props.conversation.process, "grilling")}>
             <PairingPicker
               conversation={props.conversation}
               saved={saved()}
@@ -859,32 +859,36 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
               }
             />
           </Show>
-          <PairingPicker
-            conversation={props.conversation}
-            saved={saved()}
-            role="implementation"
-            label="Implementation"
-            chosen={pairing.chosen(props.conversation.implementation_pairing)}
-            pairing={props.conversation.implementation_pairing}
-            choose={(id, picked) =>
-              chooseImplementationPairing(id, pairing.choice(picked))
-            }
-          />
+          <Show when={uses(props.conversation.process, "implementation")}>
+            <PairingPicker
+              conversation={props.conversation}
+              saved={saved()}
+              role="implementation"
+              label="Implementation"
+              chosen={pairing.chosen(props.conversation.implementation_pairing)}
+              pairing={props.conversation.implementation_pairing}
+              choose={(id, picked) =>
+                chooseImplementationPairing(id, pairing.choice(picked))
+              }
+            />
+          </Show>
           {/* And the other: a conversation can be wrapped up without being
               reviewed at all, and that is picked here rather than anywhere
               else. */}
-          <PairingPicker
-            conversation={props.conversation}
-            saved={saved()}
-            role="review"
-            label="Review"
-            away="No review"
-            chosen={pairing.settled(props.conversation.review_pairing)}
-            pairing={pairing.under(props.conversation.review_pairing)}
-            choose={(id, picked) =>
-              chooseReviewPairing(id, pairing.role(picked))
-            }
-          />
+          <Show when={uses(props.conversation.process, "review")}>
+            <PairingPicker
+              conversation={props.conversation}
+              saved={saved()}
+              role="review"
+              label="Review"
+              away="No review"
+              chosen={pairing.settled(props.conversation.review_pairing)}
+              pairing={pairing.under(props.conversation.review_pairing)}
+              choose={(id, picked) =>
+                chooseReviewPairing(id, pairing.role(picked))
+              }
+            />
+          </Show>
         </>
       )}
     </ProfileChoices>
