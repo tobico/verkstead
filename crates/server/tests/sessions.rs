@@ -640,8 +640,7 @@ impl Grilling {
         self.until(|view| {
             said(view)
                 .into_iter()
-                .filter(|notice| !escalation(notice))
-                .next_back()
+                .rfind(|notice| !escalation(notice))
                 .map(|notice| (*notice).clone())
         })
         .await
@@ -20888,8 +20887,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
     for device in [&phone, &laptop] {
         let push = pushed
             .iter()
-            .filter(|push| push.device == device.name)
-            .next_back()
+            .rfind(|push| push.device == device.name)
             .unwrap_or_else(|| panic!("{} was not told the run had stopped", device.name));
 
         // Decrypted with the device's own keys, which is what says it was
@@ -27661,10 +27659,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     let dispatched = std::fs::read_to_string(&written).unwrap();
 
     assert!(
-        dispatched
-            .lines()
-            .filter(|line| line.starts_with("model="))
-            .next_back()
+        dispatched.lines().rfind(|line| line.starts_with("model="))
             == Some("model=claude-grilling-5"),
         "the last fix session ran under what the steer settled: {dispatched:?}",
     );
@@ -27700,10 +27695,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     let dispatched = std::fs::read_to_string(&written).unwrap();
 
     assert!(
-        dispatched
-            .lines()
-            .filter(|line| line.starts_with("model="))
-            .next_back()
+        dispatched.lines().rfind(|line| line.starts_with("model="))
             == Some("model=claude-grilling-4.8"),
         "and the fix session after it ran on the model the steer settled rather \
          than on the one the Profile was already paired with: {dispatched:?}",

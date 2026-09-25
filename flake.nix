@@ -1,7 +1,7 @@
 {
   description = "Verkstead — a service and CLI through which coding agents put questions to a human";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
   outputs =
     { self, nixpkgs }:

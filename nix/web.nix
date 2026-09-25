@@ -16,6 +16,8 @@
   stdenvNoCC,
   nodejs,
   pnpm,
+  pnpmConfigHook,
+  fetchPnpmDeps,
   # Run the viewer's own suite rather than building it. The output is then a
   # stamp: a check is a thing that either builds or does not.
   runTests ? false,
@@ -68,19 +70,28 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     ];
   };
 
+  # The hook installs the store above into `node_modules`, and `pnpm` itself is
+  # what it does that with: the top-level hook is the package's own `configHook`
+  # without the package behind it, unlike the `pnpm.configHook` it replaced, so
+  # both are named here or the build stops at "'pnpm' binary not found in PATH".
   nativeBuildInputs = [
     nodejs
-    pnpm.configHook
+    pnpm
+    pnpmConfigHook
   ];
 
-  pnpmDeps = pnpm.fetchDeps {
+  pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
     # Named for the build in both cases, so that turning `runTests` on does not ask
     # for a second copy of the same store under a second name.
     pname = "verkstead-web";
     sourceRoot = "${finalAttrs.src.name}/web";
-    fetcherVersion = 2;
-    hash = "sha256-a+JjkJB9f7K3Yrn/6kh82XtXJ1S1wPjeMSgTDpcXvu0=";
+    # Which shape the fetched store is in. Named rather than defaulted because
+    # the hash is of that shape as much as of the lockfile: nixpkgs keeps the
+    # older fetchers around for a release or two and moving between them is a
+    # hash that has to be regenerated, so the number is here where the hash is.
+    fetcherVersion = 4;
+    hash = "sha256-EG0Mu8oBzjkmvYP0mSoXsOEVw171oCJfPqx2p2pGIec=";
   };
 
   sourceRoot = "${finalAttrs.src.name}/web";
