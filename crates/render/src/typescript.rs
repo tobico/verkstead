@@ -22,10 +22,10 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    ConversationUnarchived, ConversationView, Created, Creation, DeviceIdentity, DirectoryListing,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
+    GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
     NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
     PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
@@ -400,6 +400,12 @@ fn the_viewers_types_are_written_from_these() {
     // went wrong in the machine's own words.
     ServeEdit::export_all(&config).unwrap();
     ServePress::export_all(&config).unwrap();
+
+    // And what a device says it is when it is asked: the id every record names
+    // it by and the fingerprint of the certificate it presents. A peer reads it
+    // off the identity endpoint on the peer listener; the Devices section of
+    // that same pane draws this device's own.
+    DeviceIdentity::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

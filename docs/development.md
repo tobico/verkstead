@@ -27,7 +27,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 peer_listen=0.0.0.0:8423 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
 **`workbench=` is how you get in.** Every page of the workbench and the viewer's
@@ -42,6 +42,23 @@ record and URL naming a device will name this one by; the fingerprint is its
 self-signed certificate's, in the spelling two people compare one in. Both are
 in the Data Directory beside the key, as `device.id` and `device.pem`, and they
 are good for ninety days ([ADR 0020](adr/0020-cluster-mode.md)).
+
+**`peer_listen=` is where another Verkstead reaches this one.** A second
+listener, TLS on every interface at port 8423, presenting the certificate
+above and asking a caller for one without insisting on it — `--peer-listen` or
+`VERKSTEAD_PEER_LISTEN` moves it, and a second Verkstead on this machine needs
+its own the way it needs its own `--listen`. Nothing links anything yet: the one
+route on it is the identity endpoint, which anybody may read —
+
+```console
+$ curl -k https://127.0.0.1:8423/api/peer/v1/identity
+{"device":"86f1933fecb070cbee865fbb84819d14","fingerprint":"3F:0A:…"}
+```
+
+`-k` because the certificate is self-signed and made out to the device id
+rather than to an address: in a cluster what proves the far end is that
+fingerprint compared against the one the other machine printed, and there is no
+certificate authority anywhere in it to check a chain against.
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an

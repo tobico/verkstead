@@ -570,6 +570,44 @@ rather than read off the machine: what a device is *called* can change and can
 be shared, and what a device is *named by* can do neither.
 _Avoid_: name (which is the hostname a device is shown under), uuid, serial
 
+**Peer Listener**:
+The second listener, and the one another **Device** dials: TLS on every
+interface, port 8423 by default — `--peer-listen`, `VERKSTEAD_PEER_LISTEN` —
+presenting this device's own certificate and naming its address on the startup
+line beside the workbench's. What a device is reached *on*, where the **Device
+Id** and the certificate are what it is.
+**A listener of its own rather than a share of the workbench's.** The workbench
+stays as it was — loopback, `tailscale serve` in front of it, plain HTTP to the
+browser, the **Workbench Key** over it — and two things ruled out putting this
+on it: the served address carries Tailscale's certificate rather than this
+device's, so a link pinned on a fingerprint could never go through it, and the
+workbench port speaks plain HTTP to the browser and to the serve alike. A
+listener that sniffed the first byte of every connection for a TLS handshake was
+considered and rejected as a trick where a port would do. The
+Conversation-scoped session API is on neither: it answers the loopback and the
+named pipe, which is all a session ever dials.
+**A client certificate is asked for and not insisted on.** The request goes out
+once per connection, before any path is known, so the handshake cannot be what
+decides which endpoints a caller reaches: whatever arrives is taken — or
+nothing — and the routes are what act on it. A verifier that refused every
+non-member outright was the first shape of this and is the shape a join could
+never have got through, the device posting one being a stranger by definition.
+What the handshake does insist on is that a caller presenting a certificate
+holds the key that signed it; what it means is a per-route question.
+**The identity endpoint is the one route nobody has to be anybody to read**, at
+`/api/peer/v1/identity`: the **Device Id** and the fingerprint of the
+certificate the handshake just presented, so that a caller can check the device
+naming itself is the device that presented and a human can compare the
+fingerprint by eye. It asks for no certificate at all, which is what makes
+linking possible — the human types an address, and what comes back is the device
+they are about to link to, before anything has been agreed between the two
+machines.
+**Two Verksteads on one machine want a port each**, as they want a `--listen`
+each: an address somebody else is already on refuses the start rather than
+letting a server come up answering half of what it promised.
+_Avoid_: peer port (which is only the number), mutual TLS listener, cluster
+port, the second socket
+
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.

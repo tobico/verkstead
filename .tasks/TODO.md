@@ -24,7 +24,7 @@ Roadmap stage: [01: Device identity and the peer listener](docs/roadmaps/cluster
 ## Tasks
 
 - [x] 01: Identity on disk — [details](01-identity-on-disk.md)
-- [ ] 02: The peer listener — [details](02-the-peer-listener.md)
+- [x] 02: The peer listener — [details](02-the-peer-listener.md)
 - [ ] 03: The member gate — [details](03-the-member-gate.md)
 - [ ] 04: The machine reading — [details](04-the-machine-reading.md)
 - [ ] 05: The option and the VM test — [details](05-the-option-and-the-vm-test.md)

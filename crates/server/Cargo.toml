@@ -91,6 +91,23 @@ rcgen = { version = "0.14", default-features = false, features = [
 # the text is a stranger's comment, so a backtracking engine would be a way to
 # hang the poll from either end.
 regex = "1"
+# The TLS the peer listener speaks (ADR 0020) — see `src/peer.rs`. A
+# server-side stack is new to this tree: rustls was here only as reqwest's way
+# of *reaching* an https endpoint, and nothing in the workspace ever presented
+# a certificate or asked a caller for one.
+#
+# Default features off and each named back, because the defaults would bring
+# `aws-lc-rs` and its C toolchain into the build for what `ring` — already here
+# under reqwest — is doing already. `std` and `logging` are what the rest of
+# the tree has; `tls12` is the one version below the one every device in a
+# cluster of this build negotiates, kept so that this port is not the reason
+# something older cannot reach it.
+rustls = { version = "0.23", default-features = false, features = [
+    "logging",
+    "ring",
+    "std",
+    "tls12",
+] }
 # Reading the device's certificate back off the disk: the PEM its file holds,
 # parsed into the DER the fingerprint is a hash of — and the private key beside
 # it, parsed for no other reason than that half a pair is not an identity and a
@@ -133,6 +150,15 @@ tokio = { workspace = true, features = [
     "signal",
     "sync",
     "time",
+] }
+# And the handshake itself, run over a tokio socket: what turns an accepted
+# connection into one this server can read and write — see `src/peer.rs`. The
+# same feature set as `rustls` above and for the same reason, so that one
+# cryptographic library is in the build rather than two.
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "logging",
+    "ring",
+    "tls12",
 ] }
 # The Nudge stream is a broadcast channel turned into a `Stream` for axum's SSE
 # response, which is the `sync` feature and nothing else here uses.

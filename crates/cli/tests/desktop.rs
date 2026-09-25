@@ -394,7 +394,16 @@ fn command(opener: Option<&Opener>, home: &Path, env: &[(&str, &str)]) -> Comman
         .env_remove("RUST_LOG")
         .env_remove("VERKSTEAD_LISTEN")
         .env_remove("VERKSTEAD_DATA_DIR")
-        .env_remove("VERKSTEAD_WATCHED_PATHS");
+        .env_remove("VERKSTEAD_WATCHED_PATHS")
+        // And a peer listener on a port the machine picks, for the reason every
+        // one of these is given a workbench port of its own: the default is
+        // `0.0.0.0:8423`, and a dozen apps started at once would be a dozen
+        // starts fighting over one address — and over whatever real Verkstead
+        // this machine is running. `:0` rather than a port found and released
+        // here, because a port found and released is a port something else can
+        // take in between. Before the caller's own, so that a test about the
+        // variable still wins.
+        .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0");
     if let Some(opener) = opener {
         command.env("PATH", &opener.bin);
     }

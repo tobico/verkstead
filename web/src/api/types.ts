@@ -1860,6 +1860,34 @@ export type DependencyView = { dependency: Dependency, state: DependencyState,
 install: InstallState, };
 
 /**
+ * One device, as it answers for itself.
+ */
+export type DeviceIdentity = { 
+/**
+ * The Device Id: sixteen random bytes as lower-case hex, invented at this
+ * device's first start and never changing.
+ *
+ * Spelled `device` rather than `id` because that is what the startup line
+ * calls it and what a URL segment will be — an `id` on a payload that is
+ * about a device could be a Conversation's or a Repo's.
+ */
+device: string, 
+/**
+ * And the fingerprint of the certificate the handshake that carried this
+ * answer presented: the SHA-256 of its own bytes, upper-case hex in
+ * colon-separated pairs.
+ *
+ * Answered rather than left to be worked out from the connection, because
+ * the two are checked against each other: a caller compares what it read
+ * here with what the handshake handed it, and a device that named a
+ * certificate other than the one it presented is not the device it says it
+ * is. And it is what the human compares by eye — one person reading off a
+ * phone while another reads off a screen — which is why it is spelled the
+ * way every other tool spells one.
+ */
+fingerprint: string, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *

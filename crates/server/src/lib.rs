@@ -117,6 +117,15 @@ mod pairing_defaults;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;
+/// The listener devices talk to each other over: TLS on a port of its own,
+/// presenting this device's certificate and asking every caller for one
+/// without insisting on it (ADR-0020).
+///
+/// Public for the reason [`device`] is — what a device is reached *on* is the
+/// product's own surface rather than an implementation detail of an endpoint,
+/// and a suite that proves a handshake completes has to be able to stand one
+/// up and dial it.
+pub mod peer;
 /// The named pipe the server listens on beside its socket, which is what a
 /// sandboxed Windows session asks Verkstead through — the one way in when that
 /// platform's boundary was an AppContainer, and a transport that has stayed
@@ -485,6 +494,26 @@ pub struct Config {
         default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), WORKBENCH_PORT),
     )]
     pub listen: SocketAddr,
+
+    /// Address and port the peer listener binds — the second listener, which is
+    /// the one other devices dial (ADR-0020).
+    ///
+    /// Every interface by default, where the workbench's is the loopback: the
+    /// device calling this one may be on the LAN or on the tailnet, and neither
+    /// of those is the loopback. What stands in front of it is not a secret on
+    /// the address but the handshake — a caller reaches nothing here without
+    /// presenting a certificate this device's cluster holds, the one identity
+    /// endpoint aside.
+    ///
+    /// Two Verksteads on one machine want a port each, the way they want a
+    /// `--listen` each: an address somebody else is already on refuses the
+    /// start rather than coming up with half a server.
+    #[arg(
+        long,
+        env = "VERKSTEAD_PEER_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer::PEER_PORT),
+    )]
+    pub peer_listen: SocketAddr,
 
     /// An extra read-write bind every sandbox gets. Repeat the flag, or separate
     /// several in the environment variable the way the platform writes `PATH`.
@@ -1300,6 +1329,15 @@ pub async fn run_on_keyed(
         )
     })?;
 
+    // And the listener that presents it, taken now: the peer port is the second
+    // address this start claims, and one somebody else is already on is a
+    // misconfiguration to refuse here rather than a Verkstead that comes up
+    // answering the workbench and nothing else (ADR-0020) — see [`peer`]. Right
+    // behind the device, because the certificate it stands behind is the one
+    // that was just read: a start that got an identity it cannot present is one
+    // to stop at the file a human could delete.
+    let peer = peer::Listener::bound(config.peer_listen, &device)?;
+
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
     // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
@@ -1454,8 +1492,14 @@ pub async fn run_on_keyed(
     // another machine's operator checks this one against by eye — the two
     // together are what makes an identity something an operator can see rather
     // than something two servers agree about privately (ADR-0020).
+    //
+    // And `peer_listen=` beside the workbench's own address, because they are
+    // two listeners rather than one: it is what another device dials to link to
+    // this one, said as the socket really landed rather than as it was asked
+    // for.
     tracing::info!(
         listen = %config.listen,
+        peer_listen = %peer.address(),
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
         device = %device.id(),
@@ -1523,24 +1567,34 @@ pub async fn run_on_keyed(
         escalation,
     );
 
-    // Two listeners over one router here, so that everything a request can ask
-    // for over the socket it can ask for over the pipe. Either one ending is
-    // the server ending: there is no graceful shutdown — the process stopping
-    // is the whole of stopping — so a half that has stopped answering is a
-    // Verkstead that has stopped serving.
+    // And what the peer listener answers, which is a router of its own rather
+    // than the one above: this port is other devices' and the workbench's is
+    // the human's browser and its sessions, and the one thing they share so far
+    // is the device they are both about — see [`peer`].
+    let peers = peer::router(device);
+
+    // The workbench and the peer listener together, and on Windows the named
+    // pipe beside them: everything a request can ask for over the socket it can
+    // ask for over the pipe, and a peer asks over neither. Whichever ends first
+    // is the server ending — there is no graceful shutdown, the process
+    // stopping being the whole of stopping — so a listener that has stopped
+    // answering is a Verkstead that has stopped serving.
     #[cfg(windows)]
     {
         tokio::select! {
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
+            served = peer.serving(peers) => served,
         }
     }
 
-    // And the socket on its own everywhere else, there being no pipe to serve.
+    // And the socket beside the peer listener everywhere else, there being no
+    // pipe to serve.
     #[cfg(not(windows))]
     {
-        axum::serve(listener, app)
-            .await
-            .context("serving Verkstead")
+        tokio::select! {
+            served = axum::serve(listener, app) => served.context("serving Verkstead"),
+            served = peer.serving(peers) => served,
+        }
     }
 }
