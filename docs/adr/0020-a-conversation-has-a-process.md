@@ -176,7 +176,9 @@ already says where the work is.
   is Done.
 - The wrap-up learns about stacks, which it never has: a Conversation can hold
   several pull requests in one repository, and one session can be sent at all
-  of them.
+  of them. Which is a schema change — everything about a pull request is keyed
+  one per repository, inline, so five tables rebuild through `migrations.rs` —
+  and so it is a stage after the narrowed wrap-up rather than part of it.
 - Three things retire: the *No grilling* row and the ungrilled start path, the
   *Wrap up a pull request* level and the open-pull-request list behind it, and
   the pull request's title and body standing as a Brief.

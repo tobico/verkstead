@@ -19,8 +19,12 @@ Stage 02 is the Agent control, placed second so that every multi-role Process
 lands with the control that configures it. Stages 03, 04 and 05 depend on 01
 alone and are reorderable among themselves; 03 is the one that retires *No
 grilling*, so until it lands the row stays. Stage 06 depends on 05, whose
-target naming and take-up at Start it reuses. The Process picker offers a
-Process only once its stage has landed, so the picker grows a row per stage.
+target naming and take-up at Start it reuses, and stage 07 on 06: the stack is
+split off because recording several pull requests in one repository rekeys five
+tables through `migrations.rs`, which is a feature beside the narrowed wrap-up
+rather than the tail of it. The Process picker offers a Process only once its
+stage has landed, so the picker grows a row per stage — Fix Merge Issues from
+06, over one pull request, and the stack arriving under it.
 
 ## Stages
 
@@ -30,3 +34,4 @@ Process only once its stage has landed, so the picker grows a row per stage.
 - [ ] 04: Investigate — [brief](04-investigate.md)
 - [ ] 05: Review — [brief](05-review.md)
 - [ ] 06: Fix Merge Issues — [brief](06-fix-merge-issues.md)
+- [ ] 07: A stack of pull requests — [brief](07-a-stack-of-pull-requests.md)
