@@ -523,8 +523,16 @@ privilege to raise, so a refused press hands back `sudo tailscale set
 --operator=<user>` for this machine's own user and the next press is the
 re-try. The desktop app has somebody at the machine to ask and a daemon has
 not, so where the app started the server that press goes through the platform's
-own password dialog first; the NixOS module makes the grant itself, so nobody
-on a host is shown a command they are also the one to run.
+own password dialog first — the app in-process, and the sidecar
+`verkstead serve --desktop` starts as on its own word, which is the only thing
+either of them is told about who is at the machine. **And only where there is
+somewhere to draw one**: a run over SSH or in a container is the app with no
+display, and a dialog nobody can see is a press waiting on a dismissal that
+cannot arrive, so there the line is shown as a daemon's is. A `serve` with no
+flag on it never asks, whatever the machine has on it — the flag is said rather
+than guessed, a display being no answer to who started this. The NixOS module
+makes the grant itself, so nobody on a host is shown a command they are also the
+one to run.
 **And the address by itself lets nobody in**, which is why the pane draws the
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
@@ -607,12 +615,13 @@ The last Next clears the mode and lands on the compose page.
 
 **The first step installs what it names** (2026-09-11). An absent row carries
 a checkbox where its tick would be, the gating rows ticked by default, and Next
-installs what is ticked: one elevated package-manager run through the platform
-dialog the desktop app hands the server — a server with no way to ask sends
-every ticked row to the hint screen without asking — then the vendor installers
-as the user. A directory Verkstead installs into is written to `session_path`
-in `config.yaml` and composed ahead of the server's own `PATH`, the one thing
-added that the `PATH` did not name. Three screens: the checkboxes, an install
+installs what is ticked: one elevated package-manager run through the same
+platform dialog the operator grant goes through, which an app install has and a
+daemon has not — a server with no way to ask sends every ticked row to the hint
+screen without asking — then the vendor installers as the user. A directory
+Verkstead installs into is written to `session_path` in `config.yaml` and
+composed ahead of the server's own `PATH`, the one thing added that the `PATH`
+did not name. Three screens: the checkboxes, an install
 screen with a progress bar and a status line that moves on by itself, and a
 **hint screen** drawing only the ticked rows still absent with their
 instructions, its Next held with an *n/m detected* counter until every one is

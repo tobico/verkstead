@@ -22,4 +22,4 @@ Roadmap stage: [01: The sidecar flag](docs/roadmaps/electron-desktop/01-sidecar-
 
 - [x] 01: The flag, and the line without the key — [details](01-the-flag-and-the-line.md)
 - [x] 02: The grant and the screen probe, in the server crate — [details](02-the-grant-in-the-server-crate.md)
-- [ ] 03: The flag turns the grant on — [details](03-the-flag-turns-the-grant-on.md)
+- [x] 03: The flag turns the grant on — [details](03-the-flag-turns-the-grant-on.md)
