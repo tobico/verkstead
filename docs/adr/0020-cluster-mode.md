@@ -160,7 +160,23 @@ they belong to, and writes it to the owning device alone. So the order reads
 the same from every device. The keys are fractional-indexing strings — a key
 between any two always exists, they grow only where one keeps inserting in one
 spot, and there is no bucket to rebalance — over Jira-style lexorank with its
-rebalance pass. A migration ranks every existing row in its present order,
+rebalance pass.
+
+**Every rank carries the device that issued it**, as a suffix after the key
+itself, because a device computes its keys knowing only its own list: two
+devices each ranking a new Conversation above their own top produce the *same*
+key, and on a fresh device that is the first few rows rather than a rare
+coincidence. Two rows that sorted equal would leave the merged order ambiguous
+— it would read differently on different hubs, which is the one thing ranks are
+here to prevent — and fractional indexing has no key strictly between two equal
+ones, so a drag between them could not be expressed at all. Suffixed, the keys
+are distinct cluster-wide by construction, a key between any two still exists
+because they are still strings over the same alphabet, and the merge needs no
+tiebreaker of its own. A tiebreak on device id at the merge alone was the other
+way and was rejected: it settles the order and leaves the drag with nothing to
+compute between.
+
+A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule
 goes: a new Conversation is simply ranked above everything.
 

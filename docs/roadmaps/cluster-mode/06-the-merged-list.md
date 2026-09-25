@@ -19,7 +19,9 @@ refused by name. Demonstrable end to end with two devices and a phone.
   member's nudges, and merges with its own. Fanning out per load was rejected.
 - **Merged by rank** (stage 05): a drag computes one key between its
   neighbours whichever devices they belong to, and writes it to the owning
-  device through the relay.
+  device through the relay. Stage 05's suffix is what makes that safe across
+  devices — every key is distinct cluster-wide, so the merge has a total order
+  without a tiebreaker and there is always a key to compute between two rows.
 - **The row** reads OS icon, device, repo on the second line once anything is
   linked, on every row; the Brief's *before the branch name* was read as the
   second line since the branch is the first. The header and the spoken row
@@ -43,6 +45,8 @@ refused by name. Demonstrable end to end with two devices and a phone.
 4. **Cross-device drag** — the rank computed on the merged neighbours and
    written to `/api/ui/devices/{device}/…` for a remote row.
    - Reloading either device shows the same order.
+   - Two rows created on two devices at the same moment sort in one order, and
+     a row dragged between them lands between them.
 5. **Push relay and the archived switch** — member news heard over the link
    and pushed locally with the device name leading; the archived flag passed
    to each member's list read.
