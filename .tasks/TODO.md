@@ -30,5 +30,5 @@ Roadmap stage: [03: Tray, close policy and the Desktop page](docs/roadmaps/elect
 - [x] 03: The bridge — [details](03-the-bridge.md)
 - [x] 04: The Desktop page — [details](04-the-desktop-page.md)
 - [x] 05: Launch on Startup, and the hidden login start — [details](05-launch-on-startup.md)
-- [ ] 06: COSMIC and the late panel — [details](06-cosmic-and-the-late-panel.md)
+- [x] 06: COSMIC and the late panel — [details](06-cosmic-and-the-late-panel.md)
 - [ ] 07: The words — [details](07-the-words.md)

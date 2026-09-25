@@ -63,7 +63,9 @@ Linux's and proven in 07.
   list-less compose page.
 - Which pages exist with no pane head at that time.
 - Whether Electron's overlay on the pinned major supports Linux as it does
-  Windows, and what `navigator.windowControlsOverlay` reports there.
+  Windows, and what `navigator.windowControlsOverlay` reports there. Stage 03
+  saw the app come up on COSMIC as a Wayland client the compositor decorates
+  itself, which is the case the overlay has to land in there.
 - The head's first-row height in both themes, which the overlay's height has
   to match.
 
