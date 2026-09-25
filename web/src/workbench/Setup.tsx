@@ -12,10 +12,10 @@
 //! one box — so the whole of the setup is three dropdowns inside that box's
 //! bottom edge, each a dimmed label over its value, and what a reader takes off
 //! them at a glance is the sentence *this repo, this kind of work, this
-//! account*. Two of the three drop a panel rather than a list, which is where
-//! the rest of it lives: the branch, the base and the companion repos are all
-//! answers to *which code*, and the role pickers are all answers to *who runs
-//! it*, so each is one trigger rather than four. See
+//! account*. The first of them drops a panel rather than a list, which is where
+//! the rest of it lives — the branch, the base and the companion repos are all
+//! answers to *which code*, so it is one trigger rather than four — and so does
+//! the last, wherever the Process puts *who runs it* in more than one role. See
 //! [`Composer`](./Composer.tsx) for the box, and [`SetupNotes`] for what the
 //! setup has to say that is not a control.
 //!
@@ -41,9 +41,11 @@
 //! all: a conversation can be built without being grilled and wrapped up
 //! without being reviewed. They are one **Agent** control all the same, because
 //! *who runs this* is one question however many roles a Process puts it in:
-//! which roles those are is [`ROLES`](./processes.ts)'s to say, and the trigger
-//! over them reads the Implementation Pairing and counts the rest — see
-//! [`AgentOptions`] and [`./agent.ts`](./agent.ts).
+//! which roles those are is [`ROLES`](./processes.ts)'s to say, and so is the
+//! shape the control takes over them: a panel under a trigger reading the
+//! Implementation Pairing and counting the rest, or — where the Process is run
+//! under one role — that one picker standing in the row as the control itself.
+//! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
@@ -107,7 +109,7 @@ import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
-import { OFFERED, PROCESS, uses } from "./processes";
+import { label, OFFERED, PROCESS, ROLES, uses } from "./processes";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -874,7 +876,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   conversation={props.conversation}
                   saved={saved()}
                   role="grilling"
-                  label="Grilling"
+                  label={label(props.conversation.process, "grilling")}
                   away="No grilling"
                   chosen={pairing.settled(props.conversation.grilling_pairing)}
                   pairing={pairing.under(props.conversation.grilling_pairing)}
@@ -888,7 +890,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   conversation={props.conversation}
                   saved={saved()}
                   role="implementation"
-                  label="Implementation"
+                  label={label(props.conversation.process, "implementation")}
                   chosen={pairing.chosen(
                     props.conversation.implementation_pairing,
                   )}
@@ -906,7 +908,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   conversation={props.conversation}
                   saved={saved()}
                   role="review"
-                  label="Review"
+                  label={label(props.conversation.process, "review")}
                   away="No review"
                   chosen={pairing.settled(props.conversation.review_pairing)}
                   pairing={pairing.under(props.conversation.review_pairing)}
@@ -923,19 +925,31 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The option itself: the trigger standing in the row, and the panel of role
-/// pickers that comes down behind it.
+/// The option itself, in whichever of its two shapes the Process asks for: the
+/// trigger standing in the row with the panel of role pickers behind it, or —
+/// where the Process is run under one role — that one picker standing in the row
+/// where the trigger would have stood, with no panel drawn at all.
 ///
-/// Presentational, for [`RepoOptions`]'s reason and drawn the same way — a
-/// `Menu` with `panel`, one flat card, because the Repo option beside it is
+/// **Which shape is the table's third column** rather than a count taken here,
+/// so a Process arriving later is a row added to [`ROLES`](./processes.ts)
+/// rather than a branch added in each of the two places this is drawn. A panel
+/// over one picker would be a press to reach a press.
+///
+/// Presentational, for [`RepoOptions`]'s reason, and the panel drawn its way —
+/// a `Menu` with `panel`, one flat card, because the Repo option beside it is
 /// exactly this and two shapes in one row would be two things to learn. What a
 /// pick *does* belongs to whoever draws the pickers inside: a request on a
-/// Conversation, a field of the draft the compose page's device holds.
+/// Conversation, a field of the draft the compose page's device holds. Which is
+/// also why the dropdown's one picker is the caller's own rather than something
+/// drawn here — it is the Implementation picker whichever shape asks for it, and
+/// a role is a role rather than a place.
 ///
 /// **The label is *Agent* and the labels inside the panel are the roles'.** The
 /// tests, the Brief's setup facts and the Steer form all speak Grilling,
 /// Implementation and Review, and a panel that renamed them would be the one
-/// place they are called something else.
+/// place they are called something else. Under the dropdown there is no panel
+/// and nothing to tell apart, so the one picker wears the row's own label — see
+/// [`label`](./processes.ts).
 export function AgentOptions(props: {
   /// Which Process the control is shaped by, which is what says how many roles
   /// the reading counts over.
@@ -950,34 +964,43 @@ export function AgentOptions(props: {
   const shown = () => reading(props.process, props.picked, props.saved);
 
   return (
-    <Menu
-      panel
-      class={styles.agentOption!}
-      name="Agent setup"
-      trigger={
-        <>
-          <span class={styles.optionLabel}>Agent</span>
-          <span class={styles.optionLine}>
-            {/* The mark in front of the words, as every reading of who runs a
-                session is drawn — and as the pickers inside draw the same
-                choice, so the trigger and the panel read as one thing. */}
-            <HarnessMark of={shown().mark} />
-            <span class={styles.optionValue}>
-              {shown().words}
-              {/* The other roles counted rather than named, which is the Repo
-                  trigger's own convention for the companions beside it: the row
-                  is one line, and what each role is on is inside the panel. */}
-              <Show when={shown().also}>{(many) => <> +{many()}</>}</Show>
-            </span>
-          </span>
-          {/* Which way the panel comes down, beside the label and the value
-              both — [`RepoOptions`]'s caret, for its reason. */}
-          <Icon of={faChevronDown} class={styles.optionArrow!} />
-        </>
-      }
+    <Show
+      when={ROLES[props.process].control === "panel"}
+      // The dropdown shape: what the caller drew *is* the control, so there is
+      // nothing over it and nothing around it — the row holds the one picker the
+      // way it held three of them before they became one option.
+      fallback={props.children()}
     >
-      {props.children}
-    </Menu>
+      <Menu
+        panel
+        class={styles.agentOption!}
+        name="Agent setup"
+        trigger={
+          <>
+            <span class={styles.optionLabel}>Agent</span>
+            <span class={styles.optionLine}>
+              {/* The mark in front of the words, as every reading of who runs a
+                  session is drawn — and as the pickers inside draw the same
+                  choice, so the trigger and the panel read as one thing. */}
+              <HarnessMark of={shown().mark} />
+              <span class={styles.optionValue}>
+                {shown().words}
+                {/* The other roles counted rather than named, which is the Repo
+                    trigger's own convention for the companions beside it: the
+                    row is one line, and what each role is on is inside the
+                    panel. */}
+                <Show when={shown().also}>{(many) => <> +{many()}</>}</Show>
+              </span>
+            </span>
+            {/* Which way the panel comes down, beside the label and the value
+                both — [`RepoOptions`]'s caret, for its reason. */}
+            <Icon of={faChevronDown} class={styles.optionArrow!} />
+          </>
+        }
+      >
+        {props.children}
+      </Menu>
+    </Show>
   );
 }
 

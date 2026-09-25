@@ -6000,18 +6000,98 @@ describe("the pickers a conversation's process draws", () => {
   });
 
   /// A Process nothing offers yet, which the wire carries all the same: one
-  /// role, so one picker. Nothing here has landed to pick it — the record is
-  /// read as one, which is what the two lists in `processes.ts` are for.
+  /// role, so one picker — and one picker is the control drawn as the picker
+  /// itself, which the describe below is about. Nothing here has landed to pick
+  /// it: the record is read as one, which is what the two lists in
+  /// `processes.ts` are for.
   it("draws one picker under a process that uses one role", async () => {
     theWorkbenchWith({ process: "Investigate" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-    await openAgent(container);
+    mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => picker("Implementation"));
+    await waitFor(() => picker("Agent"));
     expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
 
     expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+  });
+});
+
+/// The other shape the one control takes: where the table says the Process is
+/// run under one role, the **Agent** is the flat Pairing dropdown itself —
+/// standing in the row where the trigger would have stood, with no trigger over
+/// it and no panel behind it.
+///
+/// Asked over a Process nothing offers yet, which is the only way to ask it
+/// until Investigate lands: the wire carries all five, the picker draws a chosen
+/// Process it cannot offer, and the shape is read off the table rather than off
+/// what has landed.
+describe("the agent dropdown on a conversation", () => {
+  /// The record under a one-role Process, on the account the fixture implements
+  /// under.
+  const INVESTIGATING: Partial<ConversationView> = { process: "Investigate" };
+
+  it("stands in the row as the picker itself, with no panel anywhere", async () => {
+    theWorkbenchWith(INVESTIGATING);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    // The row still reads Repo, Process, Agent — the last of the three drawn as
+    // a listbox rather than as a panel's trigger.
+    expect(
+      [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Repo", "Process", "Agent"]);
+    expect(container.querySelector(`.${setup.agentOption}`)).toBeNull();
+    expect(
+      row.querySelectorAll(`.${setup.profileChoice}`),
+      "the one picker stands in the row itself",
+    ).toHaveLength(1);
+
+    expect(ROLES.Investigate.control).toBe("dropdown");
+  });
+
+  /// The Implementation role, whichever shape asks for it: the same picker on
+  /// the same rows, showing what the record chose. Which the id says as plainly
+  /// as anything can — it is the implementation picker with the row's own label
+  /// over it.
+  it("is the implementation picker, wearing the row's label", async () => {
+    theWorkbenchWith(INVESTIGATING);
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    expect(picker("Agent").id).toBe("implementation-pairing");
+    expect(showing("Agent")).toBe(showsAs(OPEN.implementation_pairing!));
+
+    // The pairings and nothing else: Implementation is the one role that cannot
+    // be picked away, there being no work without something building it.
+    expect(offers("Agent")).toEqual(READINGS);
+  });
+
+  /// And a pick through it settles that role and no other, on the route the
+  /// picker inside the panel writes to.
+  it("sends a pick to the implementation role and nothing else", async () => {
+    const fetching = theWorkbenchWith(INVESTIGATING, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+    pick("Agent", READINGS[0]!);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+      ).toEqual({ profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! }),
+    );
+
+    for (const role of ["grilling", "review"]) {
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/${role}-pairing`),
+      ).toBe(0);
+    }
   });
 });
 

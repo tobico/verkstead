@@ -236,6 +236,11 @@ export function drawn<T extends Element>(
 ///
 /// Idempotent, for the reason `opened` in `pickers.ts` is: a test that asks for
 /// two of the pickers is not asking to shut the panel between them.
+///
+/// The panel shape alone. Where the table says the Process is run under one role
+/// there is no trigger to press and no panel to drop — the picker stands in the
+/// row as the control itself, labelled *Agent*, and a test reaches it through
+/// `pickers.ts` by that name.
 export async function openAgent(container: ParentNode): Promise<HTMLElement> {
   const trigger = await drawn<HTMLButtonElement>(
     container,

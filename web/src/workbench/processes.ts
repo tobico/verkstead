@@ -118,3 +118,25 @@ export function roles(process: Process): string {
   const count = ROLES[process].uses.length;
   return count === 1 ? "one role" : count === 2 ? "both roles" : "every role";
 }
+
+/// What each role's picker is called, which is the role's own name: the tests,
+/// the Brief's setup facts and the Steer form all speak Grilling,
+/// Implementation and Review, and a control that renamed them would be the one
+/// place they are called something else.
+export const ROLE: Record<Role, string> = {
+  grilling: "Grilling",
+  implementation: "Implementation",
+  review: "Review",
+};
+
+/// And what one of them is labelled under a Process, which is the table's third
+/// column asked of a picker.
+///
+/// Inside the panel it is the role's own name, there being several of them
+/// stacked and a name apiece being the whole of what tells them apart. Where the
+/// table says a dropdown there is no panel and no trigger over it: the picker
+/// *is* the one **Agent** control, standing in the row where the trigger would
+/// have stood, so the row's own label is what names it.
+export function label(process: Process, role: Role): string {
+  return ROLES[process].control === "dropdown" ? "Agent" : ROLE[role];
+}

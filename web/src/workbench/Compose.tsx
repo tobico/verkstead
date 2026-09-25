@@ -165,7 +165,7 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
-import { ROLES, roles, uses, type Role } from "./processes";
+import { label, ROLES, roles, uses, type Role } from "./processes";
 import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
@@ -859,12 +859,13 @@ function Compose(props: {
               pick={(picked) => change({ process: picked })}
             />
 
-            {/* And who runs it, which is one control: the trigger standing in
-                the row, and inside the panel it drops a picker per role the
-                Process uses — [`ROLES`]'s to say and not this page's. The
-                composer's own option drawn over what this device is holding
-                rather than over a record, so the two pages cannot come to ask
-                this question in two shapes.
+            {/* And who runs it, which is one control: a picker per role the
+                Process uses, in the shape the Process asks for — a panel behind
+                one trigger where there are several, and the one picker itself
+                where there is one. Both of those are [`ROLES`]'s to say and not
+                this page's. The composer's own option drawn over what this
+                device is holding rather than over a record, so the two pages
+                cannot come to ask this question in two shapes.
 
                 Each picker stands on what the repo was last grilled with (or
                 its prefill, where nothing has grilled it) until it is touched,
@@ -897,7 +898,7 @@ function Compose(props: {
                         <RolePicker
                           saved={saved()}
                           role="grilling"
-                          label="Grilling"
+                          label={label(process(), "grilling")}
                           away="No grilling"
                           chosen={showing("grilling")}
                           pick={(picked) => change({ grilling: picked })}
@@ -907,7 +908,7 @@ function Compose(props: {
                         <RolePicker
                           saved={saved()}
                           role="implementation"
-                          label="Implementation"
+                          label={label(process(), "implementation")}
                           chosen={showing("implementation")}
                           pick={(picked) => change({ implementation: picked })}
                         />
@@ -916,7 +917,7 @@ function Compose(props: {
                         <RolePicker
                           saved={saved()}
                           role="review"
-                          label="Review"
+                          label={label(process(), "review")}
                           away="No review"
                           chosen={showing("review")}
                           pick={(picked) => change({ review: picked })}

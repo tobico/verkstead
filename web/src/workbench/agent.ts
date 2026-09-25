@@ -7,6 +7,11 @@
 //! standing where the role pickers stood. So it says the one role the work is
 //! really run under, and counts the rest.
 //!
+//! Which is why there is nothing here for the control's other shape: where the
+//! table says the Process is run under one role there is no panel and no
+//! trigger over it, and a picker showing its own choice needs nobody to compose
+//! a reading of it.
+//!
 //! **The Repo trigger's own convention**, which is the reason the counting reads
 //! this way rather than some other: that trigger says the repository's name and
 //! ` +1`, ` +2` for the repos the work runs alongside, because the row is one

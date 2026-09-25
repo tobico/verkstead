@@ -24,4 +24,4 @@ Roadmap stage: [02: The Agent control](docs/roadmaps/processes/02-the-agent-cont
 - [x] 01: The role table, and the roles a Process draws — [details](01-the-role-table.md)
 - [x] 02: The Agent panel on a Draft's composer — [details](02-the-agent-panel.md)
 - [x] 03: The Agent panel on the compose page — [details](03-the-compose-page.md)
-- [ ] 04: The Agent dropdown, where a Process uses one role — [details](04-the-agent-dropdown.md)
+- [x] 04: The Agent dropdown, where a Process uses one role — [details](04-the-agent-dropdown.md)

@@ -1,6 +1,7 @@
 //! The role table, away from the two composers that draw off it: which roles
 //! each Process uses, which of them may be picked away, which shape its control
-//! takes, and the words an inert start counts off it.
+//! takes, what each of their pickers is labelled, and the words an inert start
+//! counts off it.
 //!
 //! Asked of the module rather than of a rendered row, for the reason it is a
 //! module at all: it is the one place the table is written down, and a page
@@ -11,8 +12,10 @@ import { describe, expect, it } from "vitest";
 
 import type { Process } from "../src/api/types";
 import {
+  label,
   OFFERED,
   PROCESS,
+  ROLE,
   ROLES,
   roles,
   uses,
@@ -124,5 +127,35 @@ describe("the roles themselves", () => {
     const drawn = new Set(EVERY.flatMap((process) => ROLES[process].uses));
 
     expect([...drawn].sort()).toEqual([...every].sort());
+  });
+});
+
+describe("what a role's picker is labelled", () => {
+  /// Inside a panel it is the role's own name: several pickers stacked, and a
+  /// name apiece is the whole of what tells them apart. The tests, the Brief's
+  /// setup facts and the Steer form all speak these three.
+  it("names the role where the control is a panel", () => {
+    expect(label("Develop", "grilling")).toBe("Grilling");
+    expect(label("Develop", "implementation")).toBe("Implementation");
+    expect(label("Develop", "review")).toBe("Review");
+    expect(label("Review", "review")).toBe(ROLE.review);
+  });
+
+  /// And where the table says a dropdown there is no panel to tell anything
+  /// apart in: the picker *is* the one **Agent** control, so it wears the row's
+  /// own label.
+  it("says Agent where the control is the picker itself", () => {
+    expect(label("Investigate", "implementation")).toBe("Agent");
+    expect(label("FixMergeIssues", "implementation")).toBe("Agent");
+  });
+
+  /// One or the other for every role every Process draws: a picker with no
+  /// label is a control a screen reader cannot name.
+  it("labels every picker any process draws", () => {
+    for (const process of EVERY) {
+      for (const role of ROLES[process].uses) {
+        expect(label(process, role)).not.toBe("");
+      }
+    }
   });
 });
