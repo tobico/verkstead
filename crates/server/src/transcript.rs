@@ -767,8 +767,7 @@ fn latest(lines: &[String]) -> Option<String> {
         .last()?
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()
+        .rfind(|line| !line.is_empty())
         .map(str::to_owned)
 }
 

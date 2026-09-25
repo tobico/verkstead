@@ -14,21 +14,21 @@ runs:
   using: composite
   steps:
     # pnpm before node, because the node cache below asks pnpm where its store
-    # is. 10.28.0 is the flake's, and `web/pnpm-lock.yaml` is
+    # is. 11.27.0 is the flake's, and `web/pnpm-lock.yaml` is
     # `lockfileVersion: 9.0` — whatever pnpm the runner image happens to ship
     # is not a version we have agreed to.
-    - name: Install pnpm 10.28.0
+    - name: Install pnpm 11.27.0
       uses: pnpm/action-setup@v6.0.10
       with:
-        version: 10.28.0
+        version: 11.27.0
 
     # Also the flake's, down to the patch. `cache: pnpm` caches the pnpm store
     # keyed on the lockfile, so an unchanged lockfile means an install that
     # unpacks rather than downloads.
-    - name: Install Node 22.22.2
+    - name: Install Node 24.21.0
       uses: actions/setup-node@v7.0.0
       with:
-        node-version: 22.22.2
+        node-version: 24.21.0
         cache: pnpm
         cache-dependency-path: web/pnpm-lock.yaml
 

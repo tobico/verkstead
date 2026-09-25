@@ -348,11 +348,11 @@ jobs:
           sudo apt-get install -y musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
-      # The version branch _is_ the pin, as in `ci.yml`: 1.91.1 is what the
+      # The version branch _is_ the pin, as in `ci.yml`: 1.95.0 is what the
       # flake's nixpkgs carries, so a release binary is compiled by the rustc
       # the dev shell and CI both use.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: ${{ matrix.target }}
 
@@ -611,8 +611,8 @@ jobs:
       # the runner it is on. The toolkit is linked rather than compiled in, so
       # there is nothing here to cross-compile towards — which is why this is a
       # Linux runner and the artifact is the Linux one.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       # A cache key of its own, for the reason the matrix legs have theirs: this
       # is a fifth dependency tree — the host target, with the GUI crates in it
@@ -878,8 +878,8 @@ jobs:
       # here as well as its own. `tools/build-macos-dmg.sh` looks for both
       # before it compiles either, so a target that was never installed is said
       # in a moment rather than after the long half of the build.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
@@ -1195,8 +1195,8 @@ jobs:
       # the runner it is on. MSVC and the Windows SDK are the image's own — the
       # C in the dependency tree is compiled with the first, and the shim's icon
       # and version information with the second's `rc.exe`.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       # A cache key of its own, as every leg has, and not the `windows` key
       # `ci.yml` uses: that one holds a whole workspace built with

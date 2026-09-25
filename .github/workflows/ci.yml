@@ -32,12 +32,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      # The version branch _is_ the pin: `@1.91.1` installs exactly that
-      # toolchain, where `@stable` would move whenever Rust released. 1.91.1 is
-      # what the flake's nixpkgs (nixos-25.11) carries, so CI and the dev shell
+      # The version branch _is_ the pin: `@1.95.0` installs exactly that
+      # toolchain, where `@stable` would move whenever Rust released. 1.95.0 is
+      # what the flake's nixpkgs (nixos-26.05) carries, so CI and the dev shell
       # compile with the same rustc.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: clippy, rustfmt
 
@@ -184,8 +184,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
 
       # The same pin as every other job, for the same reason.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       # A key of its own: this is an Apple dependency tree, and one shared with
       # the Linux job would have the two evicting each other.
@@ -277,8 +277,8 @@ jobs:
       # The same pin as every other job, for the same reason. MSVC and the
       # Windows SDK are the runner image's own — SQLite and ring are C, and this
       # is the host that can compile them for this target.
-      - name: Install Rust 1.91.1
-        uses: dtolnay/rust-toolchain@1.91.1
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
