@@ -10,11 +10,19 @@
 //! listener up on the loopback, and A presses Add through the same workbench
 //! route the browser presses.
 //!
-//! **The press stops at B.** Allow records A as a member over here and settles
-//! the question, and nothing goes back over the wire: A's pending row still
-//! reads *waiting*, because the dial back that closes the link is the next
-//! task's. So a join in this file ends one of four ways — cancelled, expired,
-//! allowed or denied — and in none of them is there a link.
+//! **A is not answering here, so the press stops at B.** Allow records A as a
+//! member over here and settles the question, and the dial back that would
+//! close the link finds nothing at the addresses A advertised — which are two
+//! addresses this file chose and nothing is at. That is the point of the
+//! arrangement rather than a gap in it: what this file is about is the question
+//! and the press, and what a press does when it *can* reach the far end is
+//! `tests/exchange.rs`'s, where both devices are listening. So a join in this
+//! file ends one of four ways — cancelled, expired, allowed or denied — and in
+//! none of them is there a link.
+//!
+//! Which is also why the presses go through a workbench in a hurry: a dial back
+//! to two addresses nobody is at costs the real deadline twice, and what is
+//! being asked has nothing to do with how long that takes.
 //!
 //! **And the Nudge is read off the stream a page really listens on.** A join
 //! lands on B's *peer* listener and the modal it raises is drawn on a page B's
@@ -81,9 +89,9 @@ const PORT: u16 = 8422;
 /// How long a dial in this suite gives one address, rather than the two seconds
 /// a running server gives one.
 ///
-/// Spent only by the test about an address nobody is at — what that one is
-/// asking is what the press *says* when nobody is home, and waiting out the real
-/// deadline would be time spent on the clock rather than on the question.
+/// Spent by the test about an address nobody is at, and by every press: a dial
+/// back in this file reaches none of the two addresses A advertises, and what
+/// each of those tests is asking has nothing to do with how long that takes.
 const PATIENCE: Duration = Duration::from_millis(300);
 
 /// A moment well behind any test run: the far side of *has this run out*.
@@ -432,6 +440,7 @@ async fn an_expired_request_reads_so_and_is_dismissed() {
             fingerprint: "AA:BB:CC".to_owned(),
             asked_at: LONG_AGO.to_owned(),
             expires_at: LONG_AGO.to_owned(),
+            refused: false,
         },
     )
     .await
@@ -851,8 +860,11 @@ async fn the_modal_reads_the_device_asking_by_name_os_address_and_fingerprint() 
 /// Allow records the device that asked as a member of this one, and settles the
 /// request.
 ///
-/// And nothing goes back to the device that asked, which is still drawing
-/// *waiting*: half a link, and the dial back that closes it is the next task's.
+/// **And a dial back that reaches nobody does not undo the press.** A is not
+/// answering in this file, so what B tells it goes nowhere at all — the human
+/// pressed Allow and A is a member of B for it, which is the whole of what the
+/// press means. What is left over there is a row that runs out, and an Add to
+/// press again once that machine is up.
 #[tokio::test]
 async fn allow_records_the_device_asking_and_settles_the_request() {
     let asked = Verkstead::answering().await;
@@ -860,7 +872,7 @@ async fn allow_records_the_device_asking_and_settles_the_request() {
 
     let request = a_join_asked_of(&asked, &asking).await;
 
-    let over_here = asked.workbench();
+    let over_here = asked.workbench_in_a_hurry();
     let (_, left) = press(&over_here, &request, "allow").await;
 
     assert!(
@@ -900,7 +912,8 @@ async fn allow_records_the_device_asking_and_settles_the_request() {
     );
     assert!(
         there.members.is_empty(),
-        "the dial back that would make this a link is the next task's",
+        "the dial back that would have made this a link reached none of the \
+         addresses A advertised, so nothing of B is recorded over there",
     );
 }
 
@@ -912,7 +925,7 @@ async fn deny_settles_the_request_and_records_nothing() {
 
     let request = a_join_asked_of(&asked, &asking).await;
 
-    let over_here = asked.workbench();
+    let over_here = asked.workbench_in_a_hurry();
     let (_, left) = press(&over_here, &request, "deny").await;
 
     assert!(
@@ -939,13 +952,13 @@ async fn neither_press_can_be_made_twice_to_any_effect() {
     let asking = Verkstead::asking().await;
 
     let request = a_join_asked_of(&asked, &asking).await;
-    let over_here = asked.workbench();
+    let over_here = asked.workbench_in_a_hurry();
 
     press(&over_here, &request, "allow").await;
 
     // The second workbench, which is a router built afresh over the same store —
     // and pressing on it is what the human who did not see the first press does.
-    let over_there = asked.workbench();
+    let over_there = asked.workbench_in_a_hurry();
 
     let (_, left) = press(&over_there, &request, "allow").await;
     assert!(left.is_empty(), "there is nothing left to be asked about");
@@ -1048,7 +1061,7 @@ async fn a_press_tells_the_workbench_that_did_not_press() {
     let over_there = asked.workbench();
     let mut page = Listening::open(&over_there).await;
 
-    press(&asked.workbench(), &request, "allow").await;
+    press(&asked.workbench_in_a_hurry(), &request, "allow").await;
 
     assert_eq!(page.nudge().await, Nudge::Joins);
     assert!(

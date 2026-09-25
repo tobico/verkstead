@@ -107,7 +107,7 @@ pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
 pub use joins::{
     AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
-    held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
+    held_joins, hold_join, let_go_of_expired_joins, let_go_of_join, refuse_asked_join,
 };
 pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
 pub use members::{

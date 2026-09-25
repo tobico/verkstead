@@ -2,16 +2,19 @@
 //! sends back, and what the pending row it leaves behind says (ADR-0020, *The
 //! join*).
 //!
-//! **Four types across two wires.** [`NewJoin`] goes from the browser to the
+//! **Five types across two wires.** [`NewJoin`] goes from the browser to the
 //! workbench — one typed address, which is the one thing on the Remote access
 //! pane that is configured rather than read. What goes over the *peer* listener
 //! from there is a [`DeviceIdentity`](crate::DeviceIdentity), the asking device
 //! saying what it is to a device that has never met it, and [`JoinHeld`] is what
 //! comes back: what the far end is calling this request, when it lets go of it,
-//! and what the far end itself is. And the last two are the two sides of the
-//! waiting, each read by a browser: [`PendingJoin`] is the row the asking device
-//! draws, and [`AskingDevice`] is the question the device that was asked is
-//! holding, which is what its modal is drawn from.
+//! and what the far end itself is. [`JoinSettled`] is what comes back *after*
+//! that, on the dial the far end makes when its human has pressed something —
+//! the roster on an Allow, and the word that there is nothing coming on a Deny
+//! or an expiry. And the last two are the two sides of the waiting, each read by
+//! a browser: [`PendingJoin`] is the row the asking device draws, and
+//! [`AskingDevice`] is the question the device that was asked is holding, which
+//! is what its modal is drawn from.
 //!
 //! **The asking device says what it is with the same type it would answer a
 //! stranger with**, rather than with a shape of its own. A join is a device
@@ -83,6 +86,58 @@ pub struct JoinHeld {
     pub identity: DeviceIdentity,
 }
 
+/// And what it says when its human has settled the question: the dial back
+/// (ADR-0020, *A cluster is a membership*, *The join*).
+///
+/// **Not a viewer type either.** This crosses the peer listener in the opposite
+/// direction to everything else about a join — the device that was *asked*
+/// dials the device that asked it, at the addresses the request is holding and
+/// pinned on the certificate it pinned. Which is the third and last route
+/// outside the member gate: it arrives before the asker has recorded anybody,
+/// so it is matched against that pending request rather than against a
+/// membership.
+///
+/// **Three arms rather than two, because a refusal and an expiry are not one
+/// thing.** A Deny is a press nothing on the asking end could ever have worked
+/// out, so it is recorded there and the row reads it; an expiry is the far
+/// end's own word for a moment the asking end already holds, so nothing is
+/// recorded for it and the call is worth making only because it takes the row
+/// from *waiting* to *expired* the moment it happens rather than whenever the
+/// page next asks. A call that never arrives costs nothing: the asker's clock
+/// reaches the same answer on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "settled", rename_all = "snake_case")]
+pub enum JoinSettled {
+    /// **Allow**: the roster, which is the whole of what a newcomer is given.
+    Joined {
+        /// The device that was asked, as it answers for itself — checked by the
+        /// asker against the certificate it met when it posted the join, which
+        /// is the other half of the pinning.
+        introducer: DeviceIdentity,
+
+        /// And every device that one is already linked to, so that a newcomer
+        /// joining a cluster of three lands holding all three.
+        ///
+        /// **Carried even where it is empty**, which in a cluster of two it is:
+        /// the handover is one shape whatever the cluster's size, and a
+        /// newcomer that had to be told about the others in some second call
+        /// would be a link that was half made until that call got through.
+        ///
+        /// A member arriving this way needs no press of its own. It came over a
+        /// link the asker has just proved against a certificate it pinned
+        /// itself, which is the same vouching that lets the introducer announce
+        /// the newcomer to each of them.
+        members: Vec<DeviceIdentity>,
+    },
+
+    /// **Deny**: the human at the far end said no, and nothing is recorded on
+    /// either side.
+    Denied,
+
+    /// And the ten minutes running out with nobody having pressed anything.
+    Expired,
+}
+
 /// One device asking to be let into this one's cluster, as the modal draws it.
 ///
 /// **The other side of [`PendingJoin`].** That one is the row the *asking*
@@ -149,4 +204,19 @@ pub struct PendingJoin {
     /// on this device's say-so — somebody pressed Add and is owed the answer
     /// that nobody pressed anything back.
     pub expired: bool,
+
+    /// And whether the far end came back and said no.
+    ///
+    /// **The one thing on this row that was told to this device rather than
+    /// read off it**, which is why it sits beside the flag above rather than
+    /// being folded into it: an expiry is a clock and a refusal is a press, and
+    /// a row that said only *this did not happen* would leave the human unable
+    /// to tell a machine nobody was at from a human who said no.
+    ///
+    /// It outranks the expiry when the page draws the row, because it is the
+    /// thing that really happened: a request refused three minutes in is a
+    /// refusal for as long as it is drawn, whatever the clock goes on to say.
+    /// And it ends at the same press — Dismiss, which is Cancel under another
+    /// word.
+    pub refused: bool,
 }

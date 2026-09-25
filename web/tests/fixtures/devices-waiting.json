@@ -5,13 +5,22 @@
       "address": "laptop.tailnet-name.ts.net",
       "expired": false,
       "name": "laptop",
+      "refused": false,
       "request": "1122334455667788"
     },
     {
       "address": "192.168.1.31",
       "expired": true,
       "name": "desk",
+      "refused": false,
       "request": "8877665544332211"
+    },
+    {
+      "address": "100.64.0.9",
+      "expired": false,
+      "name": "studio",
+      "refused": true,
+      "request": "5566778811223344"
     }
   ],
   "this": {

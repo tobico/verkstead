@@ -72,7 +72,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::{AskingDevice, DevicesView};
+use verkstead_render::{AskingDevice, DevicesView, JoinSettled};
 use verkstead_store::{AskedJoin, Linking};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
@@ -732,6 +732,11 @@ impl Devices {
                 // The far end's own word for when it lets go, rather than this
                 // device's reckoning — see [`verkstead_render::JoinHeld`].
                 expires_at: held.expires,
+
+                // And nobody has said no, this being the moment the question
+                // was asked: what writes that is the dial back the far end
+                // makes if its human presses Deny.
+                refused: false,
             })
             .await
     }
@@ -792,17 +797,27 @@ impl Devices {
 
     /// **Allow**: let the device that asked into this one's cluster.
     ///
-    /// **The membership's first real row.** What it comes to is two writes: the
-    /// asker is recorded as a member out of what it said about itself in the
-    /// join post, and the request is let go of. In that order, because the
-    /// order is what a failure between them decides — a member recorded with
-    /// the request still held is an Allow the human can press again, and a
-    /// request let go of with no member written is a join that has to be made
-    /// from the beginning.
+    /// **The membership's first real row, and the call that makes it a link.**
+    /// Three things happen: the asker is recorded as a member out of what it
+    /// said about itself in the join post, the request is let go of, and the
+    /// asker is dialled back and handed this device and every member it holds
+    /// — see [`Peers::settle`]. In that order, because the order is what a
+    /// failure between them decides: a member recorded with the request still
+    /// held is an Allow the human can press again, and a request let go of with
+    /// no member written is a join that has to be made from the beginning.
     ///
-    /// **And nothing goes back to the device that asked.** It is still drawing
-    /// *waiting*, and what closes that is the dial back in the task after this
-    /// one. Half a link, deliberately.
+    /// **And a dial back that cannot be made does not undo the press.** The
+    /// human pressed Allow and the asker is a member; a laptop that was shut
+    /// between the question and the answer is that machine's problem rather
+    /// than this press's, and what is left over there is a row that runs out
+    /// and an Add to press again. So the failure is a line in this machine's
+    /// log, which is where a peer that could not be reached is said.
+    ///
+    /// **The roster rather than this device alone.** Every member goes over in
+    /// the one call, so that a newcomer joining a cluster of three lands
+    /// holding all three — in a cluster of two the list is empty, and it is
+    /// carried all the same, the handover being one shape whatever the
+    /// cluster's size.
     ///
     /// **A second press is not a second thing happening**, which is the whole
     /// of what two workbenches showing one modal need: the first settles the
@@ -815,21 +830,33 @@ impl Devices {
             return Ok(());
         };
 
+        // What goes over, read before the asker is written down so that the
+        // roster is the cluster as it was asked to be joined: this device as it
+        // answers for itself, and everybody it was already linked to.
+        let introducer = self.reading.identity(&self.device).await;
+        let members = self
+            .members
+            .listed()
+            .await?
+            .into_iter()
+            .map(|linked| linked.identity)
+            .collect();
+
         self.members
             .refreshed(&Linking {
                 device: held.device.clone(),
                 name: held.name.clone(),
-                os: held.os,
+                os: held.os.clone(),
 
                 // Every address it advertised, in the order it advertised them,
                 // which is the order a dial to it will work down — see
                 // [`crate::peer::dialling`].
-                addresses: held.addresses,
+                addresses: held.addresses.clone(),
 
                 // And the certificate the handshake took from it, which is the
                 // whole of what will prove it at this device's gate from now
                 // on: a member *is* a fingerprint.
-                fingerprint: held.fingerprint,
+                fingerprint: held.fingerprint.clone(),
             })
             .await?;
 
@@ -842,10 +869,30 @@ impl Devices {
             "a device has been let into this one's cluster",
         );
 
+        if let Err(why) = self
+            .peers
+            .settle(
+                &held,
+                &JoinSettled::Joined {
+                    introducer,
+                    members,
+                },
+            )
+            .await
+        {
+            tracing::info!(
+                %why,
+                device = %held.device,
+                request = %request,
+                "a device that was let in could not be told, so it is a member here and \
+                 is still waiting over there until its own request runs out",
+            );
+        }
+
         Ok(())
     }
 
-    /// **Deny**: settle the request and record nothing.
+    /// **Deny**: settle the request, record nothing, and say so.
     ///
     /// The same shrug at a second press, and for the same reason: a request
     /// that is not held is one somebody has already answered or one whose ten
@@ -855,6 +902,13 @@ impl Devices {
     /// membership rather than a list of verdicts, and a device turned away is
     /// free to ask again — which is what somebody who pressed the wrong button
     /// would have it do.
+    ///
+    /// **But it is told.** The ADR spelled the dial back out on an Allow and
+    /// left this one, and without it the device that asked reads *waiting*
+    /// until somebody over there gets bored and cancels; the human settled that
+    /// a refusal comes back the same way. What it carries is that there is
+    /// nothing coming and nothing else — a refusal is not a fact about this
+    /// cluster to be handed to a stranger.
     pub(crate) async fn deny(&self, request: &str) -> Result<()> {
         let Some(held) = self.joins.held(request, OffsetDateTime::now_utc()).await? else {
             return Ok(());
@@ -868,6 +922,16 @@ impl Devices {
             request = %request,
             "a device asking to be let into this one's cluster was refused",
         );
+
+        if let Err(why) = self.peers.settle(&held, &JoinSettled::Denied).await {
+            tracing::info!(
+                %why,
+                device = %held.device,
+                request = %request,
+                "a device that was refused could not be told, and its own row runs out \
+                 inside the ten minutes",
+            );
+        }
 
         Ok(())
     }

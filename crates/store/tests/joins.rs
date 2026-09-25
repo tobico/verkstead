@@ -17,7 +17,7 @@
 use sqlx::SqlitePool;
 use verkstead_store::{
     AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
-    hold_join, let_go_of_expired_joins, let_go_of_join, open_database,
+    hold_join, let_go_of_expired_joins, let_go_of_join, open_database, refuse_asked_join,
 };
 
 /// The device asking, named by the id a cluster names one by.
@@ -59,6 +59,10 @@ fn asking(request: &str, address: &str) -> AskedJoin {
         fingerprint: C_FINGERPRINT.to_owned(),
         asked_at: "2026-09-25T10:00:00Z".to_owned(),
         expires_at: LONG_HENCE.to_owned(),
+
+        // Nobody has said no: that is written by the dial back the far end
+        // makes, and a request just asked has not been answered at all.
+        refused: false,
     }
 }
 
@@ -205,6 +209,48 @@ async fn letting_go_twice_is_not_a_failure() {
     assert!(asked_joins(&pool).await.unwrap().is_empty());
 
     let_go_of_join(&pool, ANOTHER_REQUEST).await.unwrap();
+}
+
+/// A refusal is written on to the row rather than taking it away: somebody
+/// pressed Add and is owed the answer, and it is the press on Dismiss that
+/// clears it.
+///
+/// And it stands on the row this device asked for and on no other, a cluster
+/// being a place where two requests are in flight at once often enough.
+#[tokio::test]
+async fn a_refusal_is_written_on_to_the_row_it_names() {
+    let (_dir, pool) = fresh_pool().await;
+
+    ask_join(&pool, &asking(A_REQUEST, "192.168.1.31"))
+        .await
+        .unwrap();
+    ask_join(&pool, &asking(ANOTHER_REQUEST, "100.64.0.9"))
+        .await
+        .unwrap();
+
+    refuse_asked_join(&pool, A_REQUEST).await.unwrap();
+
+    let refused = asked_join(&pool, A_REQUEST).await.unwrap().unwrap();
+
+    assert!(refused.refused, "the far end said no");
+    assert_eq!(
+        refused.address, "192.168.1.31",
+        "and nothing else about the row moved: it is still the request somebody \
+         pressed Add for",
+    );
+
+    assert!(
+        !asked_join(&pool, ANOTHER_REQUEST)
+            .await
+            .unwrap()
+            .unwrap()
+            .refused,
+        "and the request beside it is untouched",
+    );
+
+    // A request this device is no longer waiting on is one it has already
+    // stopped waiting on, which is not a thing to fail over.
+    refuse_asked_join(&pool, "nosuchrequest0000").await.unwrap();
 }
 
 /// And the two tables are two: what one side is holding says nothing about what

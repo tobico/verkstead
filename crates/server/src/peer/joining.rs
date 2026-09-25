@@ -111,6 +111,16 @@ pub(crate) struct Holding {
     /// both routers. Nothing is carried on it but the word that the joins moved:
     /// the page reads them back, as it does for every other kind.
     pub(crate) nudges: crate::nudge::Nudges,
+
+    /// And how this device dials another, which is what an expiry is told over.
+    ///
+    /// **Here because the one thing that happens to a question without anybody
+    /// pressing anything is that it runs out**, and the device that asked is
+    /// owed that: without it a pending row reads *waiting* until somebody over
+    /// there gets bored. The two presses are dialled back from the workbench
+    /// side — see [`crate::device::Devices`] — and this is the third way a
+    /// question ends, which is the one nobody is standing in front of.
+    pub(crate) peers: super::dialling::Peers,
 }
 
 /// The joins in flight, as the things that ask after them do: the post that
@@ -200,6 +210,21 @@ impl Joins {
         Ok((!run_out(&held.expires_at, now)).then_some(held))
     }
 
+    /// And one of them whether or not its ten minutes have run out, which is
+    /// the one question the expiry itself asks.
+    ///
+    /// **Because what the ten minutes running out means is that nobody pressed
+    /// anything**, and the only thing that says so is the row still being
+    /// there: a request that was allowed, denied or cancelled was let go of at
+    /// the press, and [`Joins::held`] cannot tell that from a request that ran
+    /// out under the human's nose. So the timer reads it this way, and what it
+    /// finds is what it tells the device that asked.
+    pub(crate) async fn holding(&self, request: &str) -> Result<Option<HeldJoin>> {
+        verkstead_store::held_join(self.store()?, request)
+            .await
+            .with_context(|| format!("reading the join held under {request}"))
+    }
+
     /// And every one of them the human still has time to answer, as the modal
     /// draws it.
     ///
@@ -264,6 +289,20 @@ impl Joins {
             .with_context(|| format!("reading the join asked under {request}"))
     }
 
+    /// Write down that the far end refused one of those, which is what a Deny
+    /// dialled back comes to over here.
+    ///
+    /// The row stays: somebody pressed Add and is owed the answer, and the
+    /// press that clears it is the same Dismiss an expired row carries — see
+    /// [`verkstead_store::refuse_asked_join`].
+    pub(crate) async fn refuse(&self, request: &str) -> Result<()> {
+        verkstead_store::refuse_asked_join(self.store()?, request)
+            .await
+            .with_context(|| {
+                format!("writing down that the join asked under {request} was refused")
+            })
+    }
+
     /// Take one off this device's own list, which is what Cancel and a dismissed
     /// expiry both come down to.
     pub(crate) async fn forget(&self, request: &str) -> Result<()> {
@@ -288,6 +327,7 @@ impl Joins {
             .into_iter()
             .map(|asked| PendingJoin {
                 expired: run_out(&asked.expires_at, now),
+                refused: asked.refused,
                 request: asked.request,
                 address: asked.address,
                 name: asked.name,
@@ -388,7 +428,7 @@ pub(crate) async fn join(
     // phone subscribed to it. Both after the row, and neither able to fail the
     // request — a push service that cannot be reached costs a notification, and
     // a browser nobody has open costs nothing at all.
-    asked(&holding.nudges);
+    asked(&holding, held.request.clone());
 
     if let Ok(pool) = holding.joins.store() {
         crate::push::mentioned(
@@ -468,8 +508,8 @@ pub(crate) async fn cancel(
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// Tell the open workbenches the joins moved, now and again when this one's ten
-/// minutes are up.
+/// Tell the open workbenches the joins moved, and set the one timer a request
+/// is worth: the moment its ten minutes are up.
 ///
 /// **Two announcements for one request, because a modal has to go by itself.**
 /// The first raises it; the second is what takes it down where nobody pressed
@@ -477,19 +517,59 @@ pub(crate) async fn cancel(
 /// see [`Joins::asking`], which is where a request that has run out stops being
 /// answered.
 ///
+/// **And the device that asked is told, which is the third way a join ends.**
+/// The two presses are dialled back from the workbench side; this is the one
+/// nobody is standing in front of, and without it a pending row over there
+/// reads *waiting* long after there is anything to wait for. Told rather than
+/// left to be worked out even so — the row's expiry is this device's own word
+/// for the moment, written when the request was made, so what the call is worth
+/// is the row redrawing as it happens.
+///
 /// A timer rather than a sweep on a schedule, because there is exactly one
 /// moment worth waking for and this is the call that knows it. A restart inside
 /// the ten minutes loses it and costs nothing that matters: every page reads the
-/// world back whole when its stream comes back, and a request that has run out
-/// is not in what it reads.
-fn asked(nudges: &crate::nudge::Nudges) {
-    nudges.announce(Nudge::Joins);
+/// world back whole when its stream comes back, a request that has run out is
+/// not in what it reads, and the clock on the asking device's own row reaches
+/// the same answer with nobody telling it.
+fn asked(holding: &Holding, request: String) {
+    holding.nudges.announce(Nudge::Joins);
 
-    let nudges = nudges.clone();
+    let holding = holding.clone();
 
     tokio::spawn(async move {
         tokio::time::sleep(HELD).await;
-        nudges.announce(Nudge::Joins);
+
+        // Still there is what says nobody pressed anything: an Allow, a Deny
+        // and a cancel each let go of the row, and each has already dialled
+        // whatever it had to dial.
+        match holding.joins.holding(&request).await {
+            Ok(Some(held)) => {
+                if let Err(why) = holding
+                    .peers
+                    .settle(&held, &verkstead_render::JoinSettled::Expired)
+                    .await
+                {
+                    tracing::info!(
+                        %why,
+                        device = %held.device,
+                        %request,
+                        "a device that asked to link could not be told its request ran \
+                         out, which its own row says in ten minutes anyway",
+                    );
+                }
+            }
+
+            Ok(None) => {}
+
+            Err(why) => tracing::warn!(
+                %why,
+                %request,
+                "a request that was running out could not be looked up, so the device \
+                 that asked is not told",
+            ),
+        }
+
+        holding.nudges.announce(Nudge::Joins);
     });
 }
 

@@ -119,7 +119,10 @@
 //! for one person reading a phone and another reading a screen to compare by
 //! eye. Nothing has been agreed while that row is drawn, so it is not a member
 //! and does not count as one. A request nobody answered inside ten minutes reads
-//! expired and is dismissed by the same press that cancels a live one.
+//! expired, and one the far end came back and said no to reads refused; both are
+//! dismissed by the same press that cancels a live one. What ends a row the
+//! other way is the far end saying yes, which arrives as a member and takes the
+//! pending row with it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -778,11 +781,16 @@ function Row(props: {
 /// screens; a row that showed the far end's would be each of them reading the
 /// other's back.
 ///
-/// **Cancel, and Dismiss on one that has run out**, which are the same press:
-/// the human is done with a request nobody answered, and which word it wears is
-/// a fact about the row. A request that ran out leaves the row drawn rather than
-/// taken away — somebody pressed Add and is owed the answer that nobody pressed
-/// anything back.
+/// **Three things a row can say, and two of them are over.** It is waiting; or
+/// the human at the other machine said no, which came back over the link the
+/// join was posted on; or nobody answered inside ten minutes. A refusal outranks
+/// an expiry, because it is the thing that really happened — a request refused
+/// three minutes in stays a refusal however long the row is left up.
+///
+/// **Cancel, and Dismiss on one that is over**, which are the same press: the
+/// human is done with a request that came to nothing, and which word it wears is
+/// a fact about the row. A row that is over is left drawn rather than taken away
+/// — somebody pressed Add and is owed the answer.
 function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
   const queries = useQueryClient();
 
@@ -792,10 +800,16 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
       queries.setQueryData(["devices"], reading),
   }));
 
+  /// Whether there is anything left to wait for, which is the one question the
+  /// whole row is drawn off: the fingerprint is worth comparing only while
+  /// somebody is standing in front of it, and the press reads Dismiss once
+  /// nobody is.
+  const over = () => props.on.refused || props.on.expired;
+
   return (
     <li
       class={styles.device}
-      classList={{ [styles.unreachable!]: props.on.expired }}
+      classList={{ [styles.unreachable!]: over() }}
     >
       <Icon
         of={faHourglassHalf}
@@ -805,19 +819,26 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
 
       <div class={styles.about}>
         <p class={styles.deviceName}>
-          <Show
-            when={!props.on.expired}
-            fallback={<>The request to {props.on.name} expired.</>}
-          >
-            Waiting for confirmation on {props.on.name}.
-          </Show>
+          <Choose>
+            <Match when={props.on.refused}>
+              {props.on.name} refused the request.
+            </Match>
+
+            <Match when={props.on.expired}>
+              The request to {props.on.name} expired.
+            </Match>
+
+            <Match when={true}>
+              Waiting for confirmation on {props.on.name}.
+            </Match>
+          </Choose>
         </p>
 
         <p class={styles.addresses}>{props.on.address}</p>
 
         {/* Drawn only while somebody could still be comparing it: a request
-            that has run out is one nobody is standing in front of any more. */}
-        <Show when={!props.on.expired}>
+            that is over is one nobody is standing in front of any more. */}
+        <Show when={!over()}>
           <p class={styles.addresses}>{props.fingerprint}</p>
         </Show>
 
@@ -827,7 +848,7 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
           disabled={take.isPending}
           onClick={() => take.mutate()}
         >
-          {props.on.expired ? "Dismiss" : "Cancel"}
+          {over() ? "Dismiss" : "Cancel"}
         </button>
 
         <Show when={take.isError}>
