@@ -275,6 +275,25 @@
   color: var(--ink-soft);
 }
 
+/* And *unreachable*, which stands in the same place on a member's row and is the
+   same kind of thing said — the last dial found nobody there. Set exactly as the
+   word above rather than as a warning: nothing has gone wrong, and a machine
+   with its lid shut is not an error to draw in red. */
+.away {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* And the row it is on, dimmed whole. What it says is that a press on this row
+   would find nobody — so the name, the mark and the addresses all go quiet
+   together, rather than the row growing a mark of its own to be read beside
+   them. Not `display: none` and nothing left out: the device is still one of
+   this cluster, and this is the row an Unlink will be pressed on. */
+.unreachable {
+  opacity: 0.55;
+}
+
 /* And every address a peer could reach it on, set the way the tailnet name
    above is: exact strings, to be read character by character and typed into
    another machine. */

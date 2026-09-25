@@ -63,6 +63,14 @@
 //! workbench traffic — sockets for the Screen and the file watcher included —
 //! and a WebSocket over HTTP/2 is a different mechanism on both sides for
 //! nothing gained here.
+//!
+//! **And the outbound half is [`dialling`]**, which is how this device reaches
+//! one of these rather than answers on one. Everything above is what a caller
+//! meets; that is what this end *is* when it is the caller — the certificate
+//! presented, the far end's checked against the fingerprint a member row holds,
+//! and every address that row carries tried in the order it was advertised.
+
+pub mod dialling;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -90,7 +98,8 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
-use verkstead_render::DeviceIdentity;
+use verkstead_render::{DeviceIdentity, LinkedDevice};
+use verkstead_store::Member;
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
@@ -303,10 +312,11 @@ pub fn members_only(routes: Router, members: Members) -> Router {
     routes.layer(axum::middleware::from_fn_with_state(members, gate))
 }
 
-/// The devices this one is linked to, as the three things that ask after them
-/// do: the gate over every route a membership admits, the changeover a
-/// re-issued certificate is in the middle of, and the Devices section of the
-/// Remote access pane.
+/// The devices this one is linked to, as the things that ask after them do: the
+/// gate over every route a membership admits, the changeover a re-issued
+/// certificate is in the middle of, the Devices section of the Remote access
+/// pane — and a dial, which is the one of them that writes, recording what it
+/// found of a member at the far end of one.
 ///
 /// **Rows, read at the moment each question is asked.** A join writes one and
 /// an unlink takes one away — see [`verkstead_store::Member`] — and nothing
@@ -314,9 +324,9 @@ pub fn members_only(routes: Router, members: Members) -> Router {
 /// be a device that went on being admitted after the human unlinked it, which
 /// is the one thing an unlink has to mean.
 ///
-/// A handle over the store rather than the pool itself, so that the three
-/// callers ask a membership their own question rather than each writing its own
-/// query — and so that a suite can state one.
+/// A handle over the store rather than the pool itself, so that each caller
+/// asks a membership its own question rather than writing its own query — and
+/// so that a suite can state one.
 #[derive(Debug, Clone)]
 pub struct Members {
     recorded: Recorded,
@@ -443,22 +453,79 @@ impl Members {
     /// A stated membership draws nothing. It is a number and not a set of
     /// devices, and a row invented to make the count come out would be a row
     /// naming a machine that does not exist.
-    pub(crate) async fn listed(&self) -> Result<Vec<DeviceIdentity>> {
-        match &self.recorded {
-            Recorded::InTheStore(pool) => Ok(verkstead_store::members(pool)
-                .await
-                .context("reading the devices this one is linked to")?
-                .into_iter()
-                .map(|member| DeviceIdentity {
+    pub(crate) async fn listed(&self) -> Result<Vec<LinkedDevice>> {
+        Ok(self
+            .rows()
+            .await?
+            .into_iter()
+            .map(|member| LinkedDevice {
+                reachable: member.reachable,
+                identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,
                     name: member.name,
                     os: member.os,
                     addresses: member.addresses,
-                })
-                .collect()),
+                },
+            })
+            .collect())
+    }
+
+    /// Every member as the table holds one: the identity above, and the two
+    /// things that are this device's own findings rather than the far end's —
+    /// when it was last heard from, and whether the last dial got through.
+    ///
+    /// What [`Members::listed`] is drawn from, and what a dial is handed one of:
+    /// the addresses and the fingerprint are the whole of how a member is
+    /// reached — the list in the order it was advertised, and the certificate
+    /// the far end has to turn out to be presenting. See
+    /// [`dialling::Peers::identity`].
+    pub(crate) async fn rows(&self) -> Result<Vec<Member>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::members(pool)
+                .await
+                .context("reading the devices this one is linked to"),
 
             Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Write down what a member said about itself at an exchange that has just
+    /// got through — see [`verkstead_store::record_member`], which is where the
+    /// moment and the un-dimming come from.
+    ///
+    /// One of the two things here that write, the mark below being the other. A
+    /// membership is read at every question so that an unlink means something,
+    /// and this is the other half of that: a row is what a dial found rather
+    /// than what a start remembered, so a device that moved or was renamed is
+    /// right again on the next call to it.
+    ///
+    /// A stated membership has no rows to write, so nothing is written. It is a
+    /// number, and a suite standing on one is asking about a changeover rather
+    /// than about a member.
+    pub(crate) async fn refreshed(&self, linking: &verkstead_store::Linking) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::record_member(pool, linking)
+                .await
+                .with_context(|| format!("recording what device {} says it is", linking.device)),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And mark one as answering nothing, which is what a dial that reached none
+    /// of its addresses does — see [`verkstead_store::member_unreachable`].
+    ///
+    /// Nothing else about the row moves: it stays on the list, dimmed, with its
+    /// addresses and its fingerprint exactly as they were, and the next dial
+    /// that gets through puts it back.
+    pub(crate) async fn unreachable(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_unreachable(pool, device)
+                .await
+                .with_context(|| format!("marking device {device} as answering nothing")),
+
+            Recorded::Stated(_) => Ok(()),
         }
     }
 }

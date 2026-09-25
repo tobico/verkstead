@@ -25,7 +25,7 @@ use crate::{
     ConversationUnarchived, ConversationView, Created, Creation, DeviceIdentity, DevicesView,
     DirectoryListing, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    FolderListing, GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
     NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
     PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
     ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
@@ -410,7 +410,10 @@ fn the_viewers_types_are_written_from_these() {
     // And the same device as the workbench draws it, which is that identity
     // whole with a count of the devices linked to it beside it: the Devices
     // section of that pane reads this, and the card above it says the count.
+    // Each member carries whether the last dial to it got through, which is
+    // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
+    LinkedDevice::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

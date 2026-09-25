@@ -90,6 +90,10 @@ const WSL = devicesWsl as DevicesView;
 /// that answers to the same hostname this one does. Which is the case the whole
 /// of cluster mode was written for — the two rows read *workbench*, and the OS
 /// word and the mark beside it are the only things that tell them apart.
+///
+/// The WSL is the one the last dial found nothing at, which is the second way a
+/// member's row is drawn: dimmed, reading *unreachable*, with everything about
+/// it still on it.
 const LINKED = devicesLinked as DevicesView;
 
 /// The login link the serving machine hands out, which is the address with the
@@ -719,6 +723,36 @@ describe("the devices section", () => {
     await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
 
     expect(screen.queryByText("Unlink")).toBeNull();
+  });
+
+  /// A member the last dial found nothing at reads *unreachable*, and only that
+  /// one does: the fixture's Mac is answering and its WSL is not.
+  it("says which member is not answering", async () => {
+    mountPane(SERVING, LINKED);
+
+    const away = await waitFor(() => screen.getByText("unreachable"));
+
+    expect(
+      away.closest("li")?.textContent,
+      "the word is on the row of the member that is not answering, which is the \
+one on the LAN",
+    ).toContain("172.29.0.14");
+    expect(
+      screen.getAllByText("unreachable").length,
+      "and the member that is answering says nothing of the kind",
+    ).toBe(1);
+  });
+
+  /// And it is still the whole row: the mark, the name and the addresses are all
+  /// drawn, because none of them has stopped being true and the row is where an
+  /// Unlink will be pressed.
+  it("leaves everything on an unreachable member's row", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("unreachable")).toBeTruthy());
+
+    expect(theMark("Linux (WSL)")).toBeTruthy();
+    expect(screen.getByText("172.29.0.14")).toBeTruthy();
   });
 
   /// The case the whole of cluster mode was written for: a Windows machine and

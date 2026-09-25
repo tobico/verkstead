@@ -103,7 +103,8 @@ pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
 pub use members::{
-    Linking, Member, forget_member, member_count, member_holding, members, record_member,
+    Linking, Member, forget_member, member_count, member_holding, member_unreachable, members,
+    record_member,
 };
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;

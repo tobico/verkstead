@@ -3549,12 +3549,16 @@ async fn devices_app_over_a_store(
 }
 
 /// The same router with two devices written down as members of this one's
-/// cluster: a Mac on a tailnet and a WSL on the LAN.
+/// cluster: a Mac on a tailnet, and a WSL on the LAN that is answering nothing.
 ///
 /// A WSL among them deliberately — a Windows machine and the WSL on it share a
 /// hostname, and the OS word beside the name is the only thing that tells two
 /// such rows apart, which is the case the whole of cluster mode was written
 /// for. Written straight into the table, the join being a later task's.
+///
+/// And one of the two unreachable, because that is the second way the pane draws
+/// a member: dimmed, reading *unreachable*, with everything about it still on the
+/// row. A fixture where both were answering could only ever draw the one of them.
 #[cfg(unix)]
 async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
     let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
@@ -3586,6 +3590,10 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
         .await
         .unwrap();
     }
+
+    verkstead_store::member_unreachable(&pool, ANOTHER_MEMBER)
+        .await
+        .unwrap();
 
     (dir, app)
 }

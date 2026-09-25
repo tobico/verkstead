@@ -33,6 +33,16 @@
 //! an exchange that has just got through: there is no way to learn a device's
 //! certificate but to have met it. What moves it afterwards is a dial that
 //! answered.
+//!
+//! **And whether it answered at all is a column beside it.** A dial that found
+//! nothing at any of a member's addresses marks it on that first failure, and
+//! the row is drawn dimmed, reading *unreachable*, from then until a dial gets
+//! through. A mark rather than a reading of how old `last_seen` is, because the
+//! human settled that over a grace period: a laptop with its lid shut is a
+//! machine that is not there, whatever o'clock it stopped being there at.
+//! Nothing else about the row moves — it is not removed, and its addresses and
+//! its fingerprint are exactly what they were, which is what the next dial
+//! works down.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
@@ -74,6 +84,15 @@ pub struct Member {
     /// recording, because a member is recorded off an exchange that has just
     /// got through.
     pub last_seen: String,
+
+    /// And whether the last dial to it got through: false is the row the pane
+    /// draws dimmed, reading *unreachable*.
+    ///
+    /// True as a member is recorded, because a recording is an exchange that
+    /// has just got through — see [`record_member`], which is also what puts a
+    /// dimmed row back. What clears it is [`member_unreachable`], on the first
+    /// dial that answers at none of the addresses above.
+    pub reachable: bool,
 }
 
 /// A device about to be written down as a member: everything it said about
@@ -98,12 +117,35 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              name        TEXT NOT NULL,
              os          TEXT NOT NULL,
              fingerprint TEXT NOT NULL,
-             last_seen   TEXT NOT NULL
+             last_seen   TEXT NOT NULL,
+             reachable   INTEGER NOT NULL DEFAULT 1
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the members table")?;
+
+    // And whether the last dial got through, through `ALTER TABLE` as well as in
+    // the declaration above — [`super::companions::apply_schema`]'s rule, for
+    // its reason: a database made this morning and one written before the mark
+    // existed take the same path and end with the same shape.
+    //
+    // Arriving true, which is what was true of every row before it: a member
+    // recorded by an exchange and never dialled since is a member nothing has
+    // found out anything bad about.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('members') WHERE name = ?")
+            .bind("reachable")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column that says whether a member is answering")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE members ADD COLUMN reachable INTEGER NOT NULL DEFAULT 1")
+            .execute(pool)
+            .await
+            .context("adding the column that says whether a member is answering")?;
+    }
 
     // The gate asks one question of this table on every call a member makes —
     // is there a member holding this fingerprint — so the column it asks by is
@@ -147,18 +189,22 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// And the moment is this device's own reading rather than anything the far end
 /// said: a member is recorded off an exchange that has just got through, and
-/// there is no way to learn a device's certificate but to have met it.
+/// there is no way to learn a device's certificate but to have met it. Which is
+/// why this is also what puts a dimmed row back: the exchange behind it *is*
+/// the member answering, so a row that was marked unreachable is reachable
+/// again by the same fact that moves the moment.
 pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     let mut tx = writing(pool, "recording a member").await?;
 
     sqlx::query(
-        "INSERT INTO members (device, name, os, fingerprint, last_seen)
-         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1)
          ON CONFLICT (device) DO UPDATE
            SET name        = excluded.name,
                os          = excluded.os,
                fingerprint = excluded.fingerprint,
-               last_seen   = excluded.last_seen",
+               last_seen   = excluded.last_seen,
+               reachable   = 1",
     )
     .bind(&linking.device)
     .bind(&linking.name)
@@ -208,8 +254,8 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
 /// hostname — a Windows and the WSL on it, which is the case the whole of
 /// cluster mode was written for.
 pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
-    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-        "SELECT device, name, os, fingerprint, last_seen
+    let rows: Vec<(String, String, String, String, String, bool)> = sqlx::query_as(
+        "SELECT device, name, os, fingerprint, last_seen, reachable
          FROM members
          ORDER BY name, device",
     )
@@ -235,14 +281,17 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
 
     Ok(rows
         .into_iter()
-        .map(|(device, name, os, fingerprint, last_seen)| Member {
-            addresses: addresses.remove(&device).unwrap_or_default(),
-            device,
-            name,
-            os,
-            fingerprint,
-            last_seen,
-        })
+        .map(
+            |(device, name, os, fingerprint, last_seen, reachable)| Member {
+                addresses: addresses.remove(&device).unwrap_or_default(),
+                device,
+                name,
+                os,
+                fingerprint,
+                last_seen,
+                reachable,
+            },
+        )
         .collect())
 }
 
@@ -279,6 +328,39 @@ pub async fn member_count(pool: &SqlitePool) -> Result<usize> {
         .context("counting the devices this one is linked to")?;
 
     Ok(counted as usize)
+}
+
+/// Mark a member as answering nothing, which is what a dial that found it at
+/// none of its addresses does.
+///
+/// **The row is left exactly as it stands otherwise.** Nothing is forgotten and
+/// nothing is removed: the name, the OS, the addresses and the fingerprint are
+/// what was last true of that device, the moment it was last heard from is when
+/// it really was, and the whole of what this writes is that the last dial did
+/// not get through. The Devices list goes on drawing it, dimmed, and an unlink
+/// still works on it.
+///
+/// **On the first failure**, because that is what the mark means — the human
+/// chose this over a grace period, a row that dims the moment a machine stops
+/// answering being a row that tells the truth about what a press on it would
+/// do. What puts it back is [`record_member`], which is the next dial that got
+/// through.
+///
+/// Nothing is refused. A device that is not a member is a device no dial has
+/// anything to say about, and marking one that has just been unlinked is not a
+/// thing to fail.
+pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
+    let mut tx = writing(pool, "marking a member unreachable").await?;
+
+    sqlx::query("UPDATE members SET reachable = 0 WHERE device = ?")
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("marking device {device} as answering nothing"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("marking device {device} as answering nothing"))
 }
 
 /// Take a device out of the membership, with the addresses it advertised.

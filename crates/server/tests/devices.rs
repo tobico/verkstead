@@ -27,7 +27,7 @@ use verkstead_server::peer::Members;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{open_database, router, router_answering_devices};
-use verkstead_store::{Linking, forget_member, record_member};
+use verkstead_store::{Linking, forget_member, member_unreachable, record_member};
 
 /// Where the pane reads this device from.
 const DEVICES: &str = "/api/ui/devices";
@@ -185,18 +185,48 @@ async fn a_member_is_a_row_beside_this_device() {
 
     let member = &listing.members[0];
 
-    assert_eq!(member.device, A_MEMBER);
-    assert_eq!(member.name, "laptop");
+    assert_eq!(member.identity.device, A_MEMBER);
+    assert_eq!(member.identity.name, "laptop");
     assert_eq!(
-        member.os, "macOS",
+        member.identity.os, "macOS",
         "the OS word is what draws the mark beside the name, and it is the far \
          end's rather than this machine's",
     );
     assert_eq!(
-        member.addresses,
+        member.identity.addresses,
         vec!["laptop.tailnet-name.ts.net", "192.168.1.31"],
         "in the order the far end advertised them, which is the order a peer \
          dials them in",
+    );
+    assert!(
+        member.reachable,
+        "a member recorded off an exchange that got through is a member that was \
+         answering, which is what the row is drawn as until a dial finds otherwise",
+    );
+}
+
+/// And a member no dial has been able to reach is the same row, drawn dimmed: it
+/// stays on the list with everything about it, which is what an unreachable
+/// member is.
+#[tokio::test]
+async fn a_member_that_answers_nothing_is_still_a_row() {
+    let (_dir, pool, app) = app(plainly()).await;
+
+    linked(&pool, A_MEMBER, "laptop", "macOS", &["192.168.1.31"]).await;
+    member_unreachable(&pool, A_MEMBER).await.unwrap();
+
+    let listing = listing(&app).await;
+
+    assert_eq!(listing.members.len(), 1, "it is not taken off the list");
+
+    let member = &listing.members[0];
+
+    assert!(!member.reachable, "and the row says the dial found nothing");
+    assert_eq!(
+        member.identity.addresses,
+        vec!["192.168.1.31"],
+        "with everything about it still there, which is what the next dial works \
+         down and what an Unlink is pressed on",
     );
 }
 
