@@ -141,6 +141,12 @@ workbench's own stays shut, because what reaches it from another device is
 `tailscale serve` on the tailnet. A host that declares its open ports somewhere
 of its own sets `openFirewall = false;` and opens the peer port there instead.
 
+What device this install is reads in the **Devices** list at the foot of that
+same **Remote access** section: its name with an icon for its OS, and the
+addresses another device could dial it on. It holds this device alone — nothing
+links anything yet — and the same two facts are on the startup line as `device=`
+and `fingerprint=` for anybody reading a journal rather than a screen.
+
 A Rust build cache is not one of them, and there is nothing to configure for
 one. The **Build Cache** is the server's own: the module makes
 `/var/cache/verkstead`, puts `sccache` on the service's path, and every Sandbox

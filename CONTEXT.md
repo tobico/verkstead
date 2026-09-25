@@ -476,13 +476,15 @@ _Avoid_: password, login, token, API key, session
 **Remote Access**:
 The settings section that puts this workbench in front of a phone: what this
 machine's Tailscale is doing, the checkbox that puts the tailnet name in front
-of the port Verkstead is listening on, and the **Workbench Key** handed over as
-something a camera can read. A card and a pane like every other section, and
+of the port Verkstead is listening on, the **Workbench Key** handed over as
+something a camera can read, and the **Devices** this workbench is one of. A
+card and a pane like every other section, and
 the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
 terminal. **The pane is the controls and nothing around them**: the box with the
-one line that is its own, the code, the link with its copy beside it, and
-**Reset key** with the one line that is its own. Which of the four states the
-machine is in is the card's line; the pane says what the machine said only where
+one line that is its own, the code, the link with its copy beside it,
+**Reset key** with the one line that is its own, and the Devices list. Which of
+the four states the machine is in is the card's line, with how many devices are
+linked after it; the pane says what the machine said only where
 somebody has something to do about it.
 **Everything on it is read off the machine rather than configured**: two
 commands at the moment the pane opens, so a tailnet joined in a terminal and a
@@ -594,6 +596,31 @@ having an id and a fingerprint, which is what somebody typing an address by
 hand is looking at. The address typed at link time is only the first one ever
 known: this list is what keeps a device that moved reachable.
 _Avoid_: device info, device metadata, machine details, the device's profile
+
+**Devices**:
+The list of every **Device** this workbench is one of, and the third section of
+the **Remote Access** pane. One row each: the OS icon, the name, and the
+addresses under them — with *this device* on this machine's own row, where
+another's carries an Unlink.
+**A section of that pane rather than a settings section of its own**, because
+linking is how this machine is reached as much as the serve and the key are.
+There is no word of its own in the settings' openings, no card and no route: the
+pane grows a section and a reading. A section of its own was considered — the
+pane is long already and this list brings an Add, a Discovered list and a
+pending row with it — and was not taken.
+**It reads off the machine rather than out of the settings**, as the two
+sections beside it do and for their reason: nothing about a device is
+configured, so what it draws is the **Device Reading** answered fresh — the same
+answer a stranger reads off the **Peer Listener**, told to the browser instead,
+that listener presenting a certificate no browser has a reason to trust.
+**It is drawn whatever Tailscale is doing.** A machine that has never heard of
+a tailnet has an identity all the same, and a list that vanished on one would be
+a cluster feature that appeared to need Tailscale.
+**And the card above it says how many devices are linked** — *other* devices,
+this one being the row the list already holds — after whichever of its sentences
+the machine's Tailscale earned.
+_Avoid_: linked devices pane, cluster list, machines, the device list (it is
+**Devices**, as **Repos** is)
 
 **Peer Listener**:
 The second listener, and the one another **Device** dials: TLS on every

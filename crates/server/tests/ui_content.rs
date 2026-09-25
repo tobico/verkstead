@@ -36,10 +36,15 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
 use verkstead_server::key::WorkbenchKey;
+use verkstead_server::peer::Members;
+use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
-    Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
+    Gh, open_database, router, router_answering_devices, router_asking_github,
+    router_reading_tailscale, store,
 };
 
 /// The Conversation every Set in this file is asked from.
@@ -3448,6 +3453,83 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )
         .await,
     );
+
+    // And what the third section of that same pane reads: this device, and how
+    // many others are linked to it. Two of them, because the row is drawn two
+    // ways — an ordinary machine, and a WSL, which is the one case the OS word
+    // exists for and the one the whole of cluster mode was written for.
+    //
+    // The machine is stated rather than read, for the reason the four above go
+    // through a shell script: what platform the box writing these happens to be
+    // is a fact about that box, and a fixture the viewer's tests are drawn over
+    // has to read the same wherever it was written.
+    let (_dir, ordinary) = devices_app(Platform::Linux, None).await;
+    write(
+        "devices.json",
+        &a_stated_machine(&get(&ordinary, "/api/ui/devices").await),
+    );
+
+    let (_dir, wsl) = devices_app(Platform::Linux, Some(WSL_KERNEL)).await;
+    write(
+        "devices-wsl.json",
+        &a_stated_machine(&get(&wsl, "/api/ui/devices").await),
+    );
+}
+
+/// What a WSL kernel calls itself, which is the one thing that tells one apart
+/// from the Linux it is in every other way.
+const WSL_KERNEL: &str = "5.15.167.4-microsoft-standard-WSL2";
+
+/// The id the device in those two fixtures is stated as, and the fingerprint
+/// and hostname written over the ones this run really had — see
+/// [`a_stated_machine`].
+const A_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+const A_FINGERPRINT: &str = "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16";
+const A_MACHINE_NAME: &str = "workbench";
+
+/// A router answering for a device on a stated machine, and the directory
+/// holding that device's files alive.
+///
+/// No Tailscale — `verkstead-no-such-tailscale` is a program that is not there
+/// — so the addresses are the stated LAN alone: what the tailnet half would add
+/// is the Remote access reading's own subject, and a device is reachable on
+/// what it can say it is reachable on.
+async fn devices_app(platform: Platform, kernel: Option<&str>) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        platform,
+        kernel.map(str::to_owned),
+        vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
+    );
+
+    let device = Device::stated(dir.path(), A_DEVICE).unwrap();
+
+    (
+        dir,
+        router_answering_devices(pool, Devices::of(device, reading, Members::none())),
+    )
+}
+
+/// One Devices reading with the two things in it that are this run's own
+/// written back out as a machine anybody would recognise.
+///
+/// The fingerprint is the SHA-256 of a certificate made fresh in a temporary
+/// directory, so it is different every run; the name is the hostname of the box
+/// the suite is on. Both are committed fixtures' enemies, and neither is
+/// anything the Devices section draws differently — the row shows the name, the
+/// OS icon and the addresses, and the fingerprint is the next stage's.
+fn a_stated_machine(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    payload["this"]["fingerprint"] = A_FINGERPRINT.into();
+    payload["this"]["name"] = A_MACHINE_NAME.into();
+
+    serde_json::to_string(&payload).unwrap()
 }
 
 /// A machine on a tailnet with the workbench served on its tailnet name.

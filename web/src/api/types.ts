@@ -1929,6 +1929,39 @@ os: string,
 addresses: Array<string>, };
 
 /**
+ * The **Devices** list, as the Remote access pane reads it off this machine.
+ *
+ * The other side of [`DeviceIdentity`]: that one is what this device tells a
+ * *peer* over the peer listener, and this is what it tells the browser over
+ * the workbench. The same device described twice rather than two descriptions
+ * of it — the identity is carried whole inside this, so the row the pane draws
+ * and the answer a stranger reads cannot come to disagree about a name, an OS
+ * or an address.
+ *
+ * **Read off the machine rather than out of the settings.** Nothing here is
+ * configured, which is why the pane's Devices section reads this rather than
+ * the settings query the rest of the page shares — the two sections beside it
+ * are read the same way and for the same reason.
+ */
+export type DevicesView = { 
+/**
+ * This device, which is the whole of the list until something is linked to
+ * it: the one row, marked *this device* and offering no Unlink.
+ */
+this: DeviceIdentity, 
+/**
+ * And how many other devices are linked to it, which is the clause the
+ * Remote access card's line carries beside what Tailscale is doing.
+ *
+ * A count rather than the devices themselves, because a count is the whole
+ * of what anything in this build can draw: a member is made by a join, and
+ * the join is the next stage's — so this is nought on every Verkstead that
+ * can be built from here, and it is nought because there is nothing to
+ * count rather than because nobody looked.
+ */
+linked: number, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *

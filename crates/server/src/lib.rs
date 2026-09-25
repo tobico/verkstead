@@ -367,6 +367,17 @@ pub(crate) struct AppState {
     /// on the next load rather than on the next restart — see [`remote`].
     remote: remote::Tailscale,
 
+    /// What this Verkstead is, as the Devices section of that same pane reads
+    /// it — see [`device::Devices`]. A handle for the reason the one above it
+    /// is: the id and the certificate are off the disk and do not move, and
+    /// the machine around them is read at the moment the pane asks.
+    ///
+    /// `None` is a router stood up without a Data Directory to have invented
+    /// an identity in, which is every router but the served one — the section
+    /// is refused there rather than answered about a device that does not
+    /// exist, the way **Reset key** is refused where there is no key.
+    devices: Option<device::Devices>,
+
     /// The Workbench Key the gate in front of this router stands on, where it
     /// stands on one — see [`key`].
     ///
@@ -654,6 +665,7 @@ pub fn router(pool: SqlitePool) -> Router {
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -674,6 +686,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -701,6 +714,7 @@ pub fn router_installed(
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -733,6 +747,7 @@ pub fn router_running_sessions(
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -755,6 +770,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -831,6 +847,7 @@ pub fn router_onboarding_elevating(
         key::Gate::open(),
         machine,
         escalation,
+        no_device(),
     )
 }
 
@@ -854,6 +871,7 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -883,6 +901,33 @@ pub fn router_reading_tailscale_keyed(
         key::Gate::keyed(key),
         onboarding::Machine::here(),
         None,
+        no_device(),
+    )
+}
+
+/// A router answering for `devices`: what this Verkstead is, and the machine it
+/// is on.
+///
+/// What the Devices section of that same pane is stood up over — a third
+/// reading beside the serve and the key, and a parameter for the reason the
+/// Tailscale above is one. The id and the certificate are made in a directory
+/// the test owns, and the hostname, the OS and the addresses are the box the
+/// suite happens to be running on unless they are stated — see
+/// [`device::reading::Reading::stated`], which is what puts a WSL in front of
+/// this on a machine that is not one.
+pub fn router_answering_devices(pool: SqlitePool, devices: device::Devices) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
     )
 }
 
@@ -930,6 +975,20 @@ fn nowhere() -> PathBuf {
     PathBuf::new()
 }
 
+/// And the identity of a router that was never given one.
+///
+/// A device is invented in a Data Directory and read back out of it at every
+/// start, so a router handed [`nowhere`] to keep anything in has none to draw —
+/// and the Devices section of the Remote access pane is refused there rather
+/// than answered about a device that was never made, the way **Reset key** is
+/// refused on a router standing behind no gate.
+///
+/// What a suite asking about that section stands up is
+/// [`router_answering_devices`].
+fn no_device() -> Option<device::Devices> {
+    None
+}
+
 /// The same, with the update check running against `releases` — where to ask
 /// about the latest release, which is GitHub in the running server and a server
 /// the test stood up itself under test. `None` is the check turned off: nothing
@@ -950,12 +1009,13 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
-/// Ten, because the state a router holds is what a router is built out of: each
-/// of these is one thing the served router was given and every other one stands
-/// in for. A struct of them would be this list with a name on it.
+/// Eleven, because the state a router holds is what a router is built out of:
+/// each of these is one thing the served router was given and every other one
+/// stands in for. A struct of them would be this list with a name on it.
 #[allow(clippy::too_many_arguments)]
 fn routed(
     pool: SqlitePool,
@@ -968,6 +1028,7 @@ fn routed(
     gate: key::Gate,
     machine: onboarding::Machine,
     escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: Option<device::Devices>,
 ) -> Router {
     let state = AppState {
         pool,
@@ -997,6 +1058,12 @@ fn routed(
         // And the host's `tailscale`, which is the whole of what the Remote access
         // pane reads — see [`remote`].
         remote,
+
+        // And what this Verkstead is, which the Devices section of that same
+        // pane draws — see [`device::Devices`]. `None` on every router that was
+        // not stood up over a Data Directory: an identity is invented in one,
+        // and a router with nowhere to have invented it has no device to draw.
+        devices,
 
         // And the key the gate below stands on, so that the one press that
         // re-issues it goes through the very handle every request is checked
@@ -1147,6 +1214,13 @@ async fn health() -> &'static str {
 /// wizard's install run raises — see [`remote::Elevate`], which both of them go
 /// through. `None` is a server started from a shell or a unit file, with nobody
 /// at that machine to put a dialog in front of.
+///
+/// And `devices` is what this Verkstead is — the id and the certificate this
+/// Data Directory holds, the machine they are on, and who it is linked to. It
+/// is required here where it is optional inside, because this is the router
+/// with the Remote access pane on it and the Devices section is a third of
+/// that pane: a served workbench that could not say what device it was would
+/// be the one Verkstead where that section is refused.
 #[allow(clippy::too_many_arguments)]
 pub fn router_with_ui(
     pool: SqlitePool,
@@ -1157,6 +1231,7 @@ pub fn router_with_ui(
     remote: remote::Tailscale,
     key: key::WorkbenchKey,
     escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: device::Devices,
 ) -> Router {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
@@ -1174,6 +1249,7 @@ pub fn router_with_ui(
         gate.clone(),
         onboarding::Machine::here(),
         escalation,
+        Some(devices),
     )
     .fallback_service(guarded_viewer::<viewer::Built>(&gate))
 }
@@ -1201,6 +1277,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         key::Gate::keyed(key),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -1532,6 +1609,27 @@ pub async fn run_on_keyed(
     #[cfg(windows)]
     let reachable = reachable.piped(pipe.asked_through());
 
+    // And the machine this device is on, read at each answer rather than held
+    // from here: the hostname it is shown under, the word for its OS, and every
+    // address a peer could reach it on — see [`device::reading`]. Its own
+    // `tailscale` handle, because the tailnet half of those addresses is the
+    // same `status --json` the Remote access pane stands on; the port it is
+    // built with is the one the workbench bound, which is nothing this reading
+    // asks about.
+    //
+    // One handle rather than one per listener, because the two listeners
+    // describe one machine: what a peer reads off the identity endpoint and
+    // what the Devices section of the Remote access pane draws are the same
+    // answer told to two different askers.
+    let reading =
+        device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
+
+    // And who this device is linked to, which is nobody: a member is made by a
+    // join and there is no join to make one with yet — see [`peer::Members`].
+    // The peer listener's gate asks it whether a caller is one, and the Devices
+    // section asks it how many there are.
+    let members = peer::Members::none();
+
     let app = router_with_ui(
         pool,
         config.releases(),
@@ -1565,6 +1663,13 @@ pub async fn run_on_keyed(
         // — see [`onboarding::install`]. One handle rather than two, because it
         // is one dialog on one machine.
         escalation,
+        // And what this Verkstead is, which the Devices section of the Remote
+        // access pane draws: the same device, machine and membership the peer
+        // listener below answers a stranger out of — see [`device::Devices`].
+        // The browser cannot read the identity endpoint itself, that listener
+        // presenting a certificate nothing but another Verkstead has a reason
+        // to trust, so the answer is assembled over here as well.
+        device::Devices::of(device.clone(), reading.clone(), members.clone()),
     );
 
     // And what the peer listener answers, which is a router of its own rather
@@ -1574,18 +1679,7 @@ pub async fn run_on_keyed(
     // gated on is empty and read from nowhere: this build has no join to make
     // a member with, so the identity endpoint is the whole of what anybody
     // reaches and everything else is refused for not being a member's.
-    let peers = peer::router(
-        device,
-        // And the machine it is on, read at each answer rather than held from
-        // here: the hostname this device is shown under, the word for its OS,
-        // and every address a peer could reach it on — see [`device::reading`].
-        // Its own `tailscale` handle, because the tailnet half of those
-        // addresses is the same `status --json` the Remote access pane stands
-        // on; the port it is built with is the one the workbench bound, which
-        // is nothing this reading asks about.
-        device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port())),
-        peer::Members::none(),
-    );
+    let peers = peer::router(device, reading, members);
 
     // The workbench and the peer listener together, and on Windows the named
     // pipe beside them: everything a request can ask for over the socket it can

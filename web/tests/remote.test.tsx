@@ -26,9 +26,16 @@
 //! encoding: a grid written out transposed encodes perfectly and scans as
 //! nothing.
 //!
+//! **And Devices is the third section of the same pane**, which is a reading of
+//! its own rather than another field of the machine: what device this is, and
+//! how many others are linked to it. It is drawn on every state of the pane —
+//! a machine with no Tailscale at all still has an identity — and the clause
+//! the card carries follows every one of the six sentences above it.
+//!
 //! The reads are fixtures the server's own tests wrote, so what the page is
 //! drawn from is the shape the endpoint really answers with — see
-//! `crates/server/tests/remote.rs`, whose subject those shapes are.
+//! `crates/server/tests/remote.rs` and `crates/server/tests/devices.rs`, whose
+//! subject those shapes are.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
@@ -36,8 +43,17 @@ import jsQR from "jsqr";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RemoteView, ServePress } from "../src/api/types";
+import {
+  faApple,
+  faLinux,
+  faWindows,
+} from "@fortawesome/free-brands-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
+
+import type { DevicesView, RemoteView, ServePress } from "../src/api/types";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
+import devices from "./fixtures/devices.json" with { type: "json" };
+import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
 import absent from "./fixtures/remote-absent.json" with { type: "json" };
 import down from "./fixtures/remote-down.json" with { type: "json" };
 import off from "./fixtures/remote-off.json" with { type: "json" };
@@ -62,6 +78,12 @@ const UNREADABLE_SERVE = unreadableServe as RemoteView;
 const DONE = done as ServePress;
 const UNGRANTED = ungranted as ServePress;
 
+/// And what this Verkstead is: one device, on a Linux, with nothing linked to
+/// it — and the same device on a WSL, which is the case the OS word exists for
+/// and the one the row is told apart by.
+const DEVICES = devices as DevicesView;
+const WSL = devicesWsl as DevicesView;
+
 /// The login link the serving machine hands out, which is the address with the
 /// key on the end of it.
 const LINK = "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key";
@@ -80,18 +102,27 @@ function mounting(what: () => JSX.Element) {
   ));
 }
 
-/// A server answering the one read this section makes.
-function theMachine(told: RemoteView) {
-  return stubbing(whenever("/api/ui/remote", json(told)));
+/// What this Verkstead is, held for its own path.
+///
+/// A second read beside the machine's, because the pane makes two: the serve
+/// and the key are read off Tailscale and the Devices section is read off the
+/// device, and neither of them waits on the other.
+function theDevice(listed: DevicesView = DEVICES) {
+  return whenever("/api/ui/devices", json(listed));
 }
 
-function mountCard(told: RemoteView) {
-  theMachine(told);
+/// A server answering the two reads this section makes.
+function theMachine(told: RemoteView, listed: DevicesView = DEVICES) {
+  return stubbing(whenever("/api/ui/remote", json(told)), theDevice(listed));
+}
+
+function mountCard(told: RemoteView, listed: DevicesView = DEVICES) {
+  theMachine(told, listed);
   return mounting(() => <RemoteCard open={false} press={vi.fn()} />);
 }
 
-function mountPane(told: RemoteView) {
-  theMachine(told);
+function mountPane(told: RemoteView, listed: DevicesView = DEVICES) {
+  theMachine(told, listed);
   return mounting(() => <RemotePane back={vi.fn()} />);
 }
 
@@ -246,6 +277,7 @@ describe("the serve checkbox", () => {
   function theMachinePressed(told: RemoteView, ...answers: Array<ServePress>) {
     return stubbing(
       whenever("/api/ui/remote", json(told)),
+      theDevice(),
       ...answers.map((answer) => json(answer)),
     );
   }
@@ -485,7 +517,12 @@ describe("the login link", () => {
 
     await waitFor(() => expect(theBox().checked).toBe(false));
 
-    expect(screen.queryByRole("img")).toBeNull();
+    // Named rather than counted, because the pane draws another image: the mark
+    // for this device's operating system, which stands whatever Tailscale is
+    // doing.
+    expect(
+      screen.queryByRole("img", { name: "The login link for this workbench" }),
+    ).toBeNull();
     expect(screen.getByText("Reset key")).toBeTruthy();
   });
 
@@ -524,6 +561,7 @@ describe("the login link", () => {
 
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
       whenever("/api/ui/remote/key", json(fresh), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -564,6 +602,7 @@ describe("the login link", () => {
   it("says so when a reset was refused", async () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
       whenever(
         "/api/ui/remote/key",
         () =>
@@ -589,6 +628,178 @@ describe("the login link", () => {
     // And nothing on the page moved: the key that was there is still the key,
     // and the code above it still opens the workbench.
     expect(screen.getByText(LINK)).toBeTruthy();
+  });
+});
+
+describe("the devices section", () => {
+  /// The mark standing beside a device's name, found by the word it is labelled
+  /// with — which is the OS word itself, so a screen reader hears what the
+  /// drawing says.
+  function theMark(os: string): Element {
+    return screen.getByRole("img", { name: os });
+  }
+
+  /// And which icon that mark turned out to be, compared against the shape
+  /// rather than against a class name: the icons are drawn as the paths Font
+  /// Awesome ships, so the path *is* the identity of the drawing.
+  function drawnAs(icon: IconDefinition): string {
+    return [icon.icon[4]].flat().filter((path) => typeof path === "string")[0]!;
+  }
+
+  /// The one row the list holds, whole: the mark, the name, *this device* and
+  /// the addresses a peer could reach it on.
+  it("holds this device, with its mark, its name and its addresses", async () => {
+    mountPane(SERVING);
+
+    await waitFor(() => expect(screen.getByText("workbench")).toBeTruthy());
+
+    expect(theMark("Linux")).toBeTruthy();
+    expect(screen.getByText("this device")).toBeTruthy();
+    expect(screen.getByText("192.168.1.24, 10.0.0.7")).toBeTruthy();
+  });
+
+  /// And nothing to press on it. There is nothing yet to unlink this device
+  /// from, and a device could not be unlinked from itself in any case — *this
+  /// device* is what stands where another row will carry the press.
+  it("offers no Unlink", async () => {
+    mountPane(SERVING);
+
+    await waitFor(() => expect(screen.getByText("workbench")).toBeTruthy());
+
+    expect(screen.queryByText("Unlink")).toBeNull();
+  });
+
+  /// The case the whole of cluster mode was written for: a Windows machine and
+  /// the WSL on it share a hostname, so the word and the mark together are what
+  /// tell the two rows apart — the Linux mark, and *Linux (WSL)* beside it.
+  it("draws a WSL with the Linux mark and Linux (WSL) beside it", async () => {
+    mountPane(SERVING, WSL);
+
+    const mark = await waitFor(() => theMark("Linux (WSL)"));
+
+    expect(mark.querySelector("path")?.getAttribute("d")).toBe(
+      drawnAs(faLinux),
+    );
+  });
+
+  /// And the other two platforms wear their own marks, off the same word.
+  it("draws a Mac and a Windows with their own marks", async () => {
+    for (const [os, icon] of [
+      ["macOS", faApple],
+      ["Windows", faWindows],
+    ] as const) {
+      const { unmount } = mountPane(SERVING, {
+        ...DEVICES,
+        this: { ...DEVICES.this, os },
+      });
+
+      const mark = await waitFor(() => theMark(os));
+
+      expect(mark.querySelector("path")?.getAttribute("d"), os).toBe(
+        drawnAs(icon),
+      );
+
+      unmount();
+    }
+  });
+
+  /// The section stands on a machine with no Tailscale at all, which is the
+  /// whole reason it is outside the choice the serve and the code are inside: a
+  /// device identity is not a tailnet's, and a list that vanished on such a
+  /// machine would be a cluster feature that appeared to need one.
+  it("draws on every state of the pane, Tailscale or none", async () => {
+    for (const [named, told] of [
+      ["with no Tailscale", ABSENT],
+      ["with the daemon down", DOWN],
+      ["whose serve could not be read", UNREADABLE_SERVE],
+      ["serving nothing", OFF],
+    ] as const) {
+      const { unmount } = mountPane(told);
+
+      expect(
+        await waitFor(() => screen.getByText("this device")),
+        `the machine ${named}`,
+      ).toBeTruthy();
+
+      unmount();
+    }
+  });
+
+  /// And it reads its own answer rather than anything of the settings query
+  /// the rest of the page shares — for the reason the two sections beside it
+  /// read nothing of it either: a device is not configured, so there is nothing
+  /// of it in either settings file to read.
+  it("reads the device rather than the settings", async () => {
+    const fetching = theMachine(SERVING);
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("this device")).toBeTruthy());
+
+    expect(askedFor(fetching, "/api/ui/devices")).toBeGreaterThan(0);
+    expect(
+      fetching.mock.calls.filter(([path]) =>
+        String(path).startsWith("/api/ui/settings"),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("the devices clause on the card", () => {
+  /// It reads right after every one of the six sentences the card says about
+  /// Tailscale, rather than being written into one of them: what it says is
+  /// true of a machine in any of those states.
+  it("follows whatever the card said about Tailscale", async () => {
+    for (const [named, told] of [
+      ["with no Tailscale", ABSENT],
+      ["with the daemon down", DOWN],
+      ["whose Tailscale could not be read", UNREADABLE_SERVE],
+      ["serving nothing", OFF],
+      ["serving the workbench", SERVING],
+    ] as const) {
+      const { unmount } = mountCard(told);
+
+      const standing = await waitFor(() =>
+        screen.getByText(/No other devices are linked\./),
+      );
+
+      // In the one line rather than under it, so that the card reads as one
+      // sentence about this machine.
+      expect(standing.textContent, `the machine ${named}`).toMatch(
+        /\. No other devices are linked\.$/,
+      );
+
+      unmount();
+    }
+  });
+
+  /// And the number is the devices linked to this one rather than the rows the
+  /// list holds: this device is a row and is not linked to itself, so a
+  /// Verkstead that has never met another says none.
+  it("counts the devices linked rather than the rows drawn", async () => {
+    mountCard(SERVING);
+
+    await waitFor(() =>
+      expect(screen.getByText(/No other devices are linked/)).toBeTruthy(),
+    );
+
+    expect(screen.queryByText(/1 other device/)).toBeNull();
+  });
+
+  /// One reads as a sentence rather than as a figure, and more than one counts.
+  it("says one and says many", async () => {
+    const { unmount } = mountCard(SERVING, { ...DEVICES, linked: 1 });
+
+    await waitFor(() =>
+      expect(screen.getByText(/One other device is linked\./)).toBeTruthy(),
+    );
+
+    unmount();
+
+    mountCard(SERVING, { ...DEVICES, linked: 3 });
+
+    await waitFor(() =>
+      expect(screen.getByText(/3 other devices are linked\./)).toBeTruthy(),
+    );
   });
 });
 
