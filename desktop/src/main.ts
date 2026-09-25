@@ -21,8 +21,9 @@ import { join } from "node:path";
 
 import { app, dialog, type BrowserWindow } from "electron";
 
+import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
-import { cli, OVERRIDE } from "./cli.js";
+import { cli, type Install, OVERRIDE } from "./cli.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
@@ -30,6 +31,7 @@ import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import { taken } from "./taken.js";
+import { lower, raise } from "./tray.js";
 import { forward, open } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
 
@@ -124,7 +126,7 @@ async function run(): Promise<void> {
   // on its way out. Where it went it says for itself, on the terminal as well
   // as in the file; a machine with nowhere to put one says that instead, and
   // goes on running.
-  keep(logDir(machine));
+  const kept = keep(logDir(machine));
 
   // First of the app's own steps, and before anything is started: a second
   // launch of the app is this one's window brought forward, and the launch
@@ -151,10 +153,10 @@ async function run(): Promise<void> {
     forward(onscreen);
   });
 
-  // Closing the window quits, on every platform including the Mac. Stage 03 is
-  // what makes it a choice, with a tray to keep running in and the Dock
-  // behaviour that goes with it; until there is one, a window closed with the
-  // app still running would be a Verkstead with no way back to itself.
+  // Closing the window quits, on every platform including the Mac. There is a
+  // tray to keep running in now, but nothing yet that says whether the human
+  // wants to — the choice is the app's own settings' to make (ADR-0020) and
+  // those arrive next, with the Dock behaviour that goes with them.
   app.on("window-all-closed", () => app.quit());
 
   if (await taken(HOST, PORT)) {
@@ -164,12 +166,17 @@ async function run(): Promise<void> {
     return;
   }
 
-  const path = cli({
+  // Where this app is running from, which is what both of the files it ships
+  // beside itself are a function of: the CLI it starts, and the artwork the
+  // tray draws.
+  const install: Install = {
     packaged: app.isPackaged,
     entry: import.meta.dirname,
     resources: process.resourcesPath,
     ...machine,
-  });
+  };
+
+  const path = cli(install);
 
   // The directory the server is about to resolve for itself, and so the one the
   // **Workbench Key** is in.
@@ -200,11 +207,13 @@ async function run(): Promise<void> {
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 
-  // The app quitting is the sidecar stopping. `will-quit` rather than
-  // `before-quit` so that a quit which something else has since cancelled does
-  // not take the server with it.
+  // The app quitting is the sidecar stopping, and the icon leaving the panel
+  // — the two things this app has outside its own process. `will-quit` rather
+  // than `before-quit` so that a quit which something else has since cancelled
+  // takes neither with it.
   app.on("will-quit", () => {
     leaving = true;
+    lower();
     sidecar.stop();
   });
 
@@ -262,7 +271,7 @@ async function run(): Promise<void> {
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  onscreen = open({
+  const window = open({
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
 
@@ -271,12 +280,25 @@ async function run(): Promise<void> {
     // it is kept beside what Electron keeps here rather than in `config.yaml`.
     state: join(app.getPath("userData"), FILE),
   });
+  onscreen = window;
+
+  // And then the icon, which is the other way to this window — and, once the
+  // close policy arrives, the only one while it is off the screen. Shown
+  // unconditionally here: **Show tray icon** is a setting that comes with the
+  // page it lives on, and a switch with nothing behind it would be worse than a
+  // tray that is honestly always on.
+  raise({
+    icon: artwork(install),
+    kept,
+    open: () => forward(window),
+    quit: () => app.quit(),
+  });
 
   // And the launch that asked for the window while there was not one yet, which
   // is a press of the icon over a Verkstead still coming up.
   if (wanted) {
     say("the launch that asked while this one was starting gets the window now");
-    forward(onscreen);
+    forward(window);
   }
 }
 
