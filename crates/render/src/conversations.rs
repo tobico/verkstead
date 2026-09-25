@@ -531,11 +531,11 @@ pub struct ConversationView {
     /// than by id: the pane says what they are, and whether the Profile is
     /// still runnable.
     ///
-    /// One of the two roles the picker offers a row that runs no session for,
-    /// so this says which of three the human picked rather than whether they
-    /// picked at all. A Conversation that picked *no grilling* is not grilled:
-    /// its Brief goes straight to an inline implementation.
-    pub grilling_pairing: PickedView,
+    /// A Pairing or nothing, the picker having no row that runs no session:
+    /// *No grilling* is retired, and a record written while it was there reads
+    /// as nothing picked — see [`crate::PickedView`], which the two roles that
+    /// do have one still use.
+    pub grilling_pairing: Option<PairingView>,
 
     /// And the ones the implementation will run under. Chosen separately
     /// because it is genuinely a separate account and model.

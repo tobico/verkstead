@@ -630,10 +630,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     assert_eq!(companions[0].repo.path, "");
 
     // And which account wrote it.
-    assert_eq!(
-        conversation.grilling_pairing,
-        verkstead_render::PickedView::Nothing,
-    );
+    assert_eq!(conversation.grilling_pairing, None);
     assert!(conversation.implementation_pairing.is_none());
     assert_eq!(
         conversation.review_pairing,

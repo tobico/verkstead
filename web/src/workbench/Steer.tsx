@@ -867,11 +867,9 @@ export function Steer(props: {
   // to wrapping up would be the form answering a question they had not been
   // asked.
   //
-  // The Pairing behind the grilling pick rather than the pick itself: a
-  // conversation whose human chose "No grilling" has no account to prefill this
-  // with, and steering into a grilling is asking for an interview — so that row
-  // is not one this picker offers, and the field opens empty for them to pick
-  // who runs it.
+  // Neither picker offers a row that is not an account, steering into a state
+  // being asking for the session that state runs — so a conversation with no
+  // Pairing on the role opens the field empty for them to pick who runs it.
   const [grilling, setGrilling] = createSignal<string | null>(null);
   const [implementation, setImplementation] = createSignal<string | null>(null);
 
@@ -908,7 +906,7 @@ export function Steer(props: {
     }
 
     return settling === "grilling"
-      ? pairing.chosen(pairing.under(props.conversation.grilling_pairing))
+      ? pairing.chosen(props.conversation.grilling_pairing)
       : pairing.chosen(props.conversation.implementation_pairing);
   });
 

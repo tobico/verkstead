@@ -375,39 +375,6 @@ pub(crate) fn implementing(skills: &Skills, brief: &str, handoff: Option<&str>) 
     )
 }
 
-/// And what an inline session on a Conversation that was never grilled is
-/// started on: the Brief alone, under the same line, and the paragraph that says
-/// there was no grilling.
-///
-/// Said rather than left to be inferred from an absent handoff, because the two
-/// are different situations and only one of them is a plan. A grilling that died
-/// before writing its handoff leaves a session that should build what the
-/// interview settled and cannot read it; this is a human who chose not to be
-/// interviewed, and the Brief is the whole of what they decided.
-///
-/// Which is why the paragraph says what to do with what the Brief leaves open. A
-/// session that guesses at a real decision builds the wrong thing quietly; one
-/// that asks reaches the human on their phone and builds the right thing.
-///
-/// The skill is the same implementation skill an ordinary inline run reads, and
-/// it knows this run happens: it says a Conversation can be started with no
-/// grilling, that the Brief is the whole of the agreement where one was, and
-/// that the instruction about what the Brief leaves open is here rather than
-/// there. The split is deliberate — the skill is where a session learns what
-/// kind of run this is, and the prompt is where it is told what to do about it,
-/// because only the prompt knows which kind this one is.
-pub(crate) fn ungrilled(skills: &Skills, brief: &str) -> String {
-    format!(
-        "{}\n# Nothing was grilled\n\nThis work was not put through a grilling: \
-         the Brief above is the whole of the plan, and there is no handoff \
-         because there was no interview to write one. Build what it describes. \
-         Where it leaves a real decision open — one that changes what gets built \
-         rather than how it is spelled — put that to me as an ordinary ask rather \
-         than guessing at it.\n",
-        implementing(skills, brief, None),
-    )
-}
-
 /// What a roadmap Conversation's own work is started on where Resume launches it:
 /// the Brief, under the line that sends the agent into the staging fork.
 ///
@@ -3037,36 +3004,6 @@ mod tests {
         );
     }
 
-    /// And a Conversation whose human picked *No grilling* is told so, which is
-    /// a different thing from a handoff that failed to arrive: the Brief is the
-    /// plan, and what it leaves open is asked about rather than guessed at.
-    #[test]
-    fn an_ungrilled_implementation_is_told_the_brief_is_the_whole_plan() {
-        let prompt = ungrilled(&mounted(), "# Rate limiting\n\nThe API has none.\n");
-
-        assert!(
-            prompt.contains(&at(IMPLEMENTING)),
-            "the same skill an ordinary inline run reads: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none."),
-            "primed with the Brief, whole: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("What the grilling settled"),
-            "and with no handoff, there having been no interview: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("Nothing was grilled") && prompt.contains("ordinary ask"),
-            "said in words, along with what to do about what the Brief leaves \
-             open: {prompt:?}"
-        );
-        assert!(
-            prompt.find("The API has none.") < prompt.find("Nothing was grilled"),
-            "under the Brief, which is what it is about"
-        );
-    }
-
     /// What the instruction skill has to say that no other working skill here
     /// does: the pipeline carries on from here.
     ///
@@ -3534,7 +3471,7 @@ mod tests {
     /// rename is read off the checkout, so there is nobody to ask.
     #[test]
     fn the_naming_instruction_asks_for_nothing_back() {
-        let prompt = naming(&ungrilled(&mounted(), "# Rate limiting\n"), true);
+        let prompt = naming(&implementing(&mounted(), "# Rate limiting\n", None), true);
 
         assert!(
             prompt.contains("There is nobody to ask and nothing to report"),

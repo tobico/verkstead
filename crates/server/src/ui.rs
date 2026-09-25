@@ -1349,7 +1349,7 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::picked(conversation.grilling_pairing).await {
+    let grilling_pairing = match crate::profiles::pairing(conversation.grilling_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1556,7 +1556,7 @@ pub(crate) async fn conversation_view(
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        &grilling_pairing,
+        grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
         &review_pairing,
         brief,
@@ -4468,12 +4468,11 @@ async fn show_archived(
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
-/// the grilling session runs under, or the row that says there is to be no
-/// grilling at all.
+/// the grilling session runs under.
 async fn choose_grilling_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(choice): Json<RoleChoice>,
+    Json(choice): Json<ProfileChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();

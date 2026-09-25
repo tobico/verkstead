@@ -439,7 +439,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     let paired = conversation
         .implementation_pairing
         .clone()
-        .or_else(|| conversation.grilling_pairing.pairing().cloned());
+        .or_else(|| conversation.grilling_pairing.clone());
 
     let Some(pairing) = paired else {
         return Ok(TerminalOpened::NoProfile);

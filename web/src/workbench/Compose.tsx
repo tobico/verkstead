@@ -388,9 +388,11 @@ function Compose(props: {
       return "";
     }
 
-    return role === "implementation"
-      ? pairing.chosen(prefill.implementation)
-      : pairing.settled(prefill[role]);
+    // The review is the one role whose memory can say *no session at all*; the
+    // other two are an account or nothing.
+    return role === "review"
+      ? pairing.settled(prefill.review)
+      : pairing.chosen(prefill[role]);
   };
 
   /// What kind of work this page is composing: what the picker was moved to,
@@ -899,7 +901,6 @@ function Compose(props: {
                           saved={saved()}
                           role="grilling"
                           label={label(process(), "grilling")}
-                          away={away(process(), "grilling")}
                           chosen={showing("grilling")}
                           pick={(picked) => change({ grilling: picked })}
                         />

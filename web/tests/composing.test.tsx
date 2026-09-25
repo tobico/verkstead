@@ -159,7 +159,7 @@ const remembering = (
   implementation: ProfileEntry,
   review: ProfileEntry,
 ): RepoPairingsView => ({
-  grilling: { Under: { profile: grilling, model: grilling.models[0]! } },
+  grilling: { profile: grilling, model: grilling.models[0]! },
   implementation: {
     profile: implementation,
     model: implementation.models[0]!,
@@ -704,8 +704,8 @@ describe("the compose page", () => {
 
     // One of the three made the human's own, which is what the switch must not
     // touch.
-    pick("Grilling", "No grilling");
-    expect(showing("Grilling")).toBe("No grilling");
+    pick("Grilling", "Claude Code Sonnet 5 — sonnet");
+    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
 
     await pickRepo(container, REPOS[0]!.id);
 
@@ -715,7 +715,7 @@ describe("the compose page", () => {
       expect(showing("Review")).toBe("Fable 5 — fable"),
     );
     expect(showing("Implementation")).toBe("Sonnet 5 — sonnet");
-    expect(showing("Grilling")).toBe("No grilling");
+    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
   });
 
   it("sends nothing for a role left showing the prefill", async () => {
@@ -963,7 +963,7 @@ describe("the pickers a compose page's process draws", () => {
   /// start with everything it needs.
   it("waits on the roles the process uses and no others", async () => {
     const memory: RepoPairingsView = {
-      grilling: "Nothing",
+      grilling: null,
       implementation: {
         profile: PROFILES[1]!,
         model: PROFILES[1]!.models[0]!,
@@ -996,7 +996,7 @@ describe("the pickers a compose page's process draws", () => {
   /// empty — and says so in the words the table counts.
   it("says what it is waiting on in the roles the process has", async () => {
     const memory: RepoPairingsView = {
-      grilling: "Nothing",
+      grilling: null,
       implementation: {
         profile: PROFILES[1]!,
         model: PROFILES[1]!.models[0]!,
@@ -1191,7 +1191,7 @@ describe("the agent control on a compose page", () => {
       whenever(
         `/api/ui/repos/${REPOS[1]!.id}/pairings`,
         json({
-          grilling: "Nothing",
+          grilling: null,
           implementation: {
             profile: PROFILES[1]!,
             model: PROFILES[1]!.models[0]!,

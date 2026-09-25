@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked,
+    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
     ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
     any_archived, archive_conversation, archived, close_conversation, conversation_branch,
     conversations, create_profile, follow_branch, load_conversation, open_database, register_repo,
     reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
-    settle_naming, show_archived, showing_archived, start_adoption, start_building,
-    start_conversation, start_grilling, start_pull_request_adoption, start_unnamed_conversation,
-    switch_repo, timeline, unarchive_conversation,
+    settle_naming, show_archived, showing_archived, start_adoption, start_conversation,
+    start_grilling, start_pull_request_adoption, start_unnamed_conversation, switch_repo, timeline,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -308,32 +308,6 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
             .naming,
         "a name the human typed has nothing to wait for",
     );
-}
-
-/// A start with no grilling in it leaves the same job to the session it starts,
-/// there being nothing different about it but which state it lands in.
-#[tokio::test]
-async fn a_start_with_no_grilling_leaves_the_branch_to_be_named_too() {
-    let (_dir, pool) = fresh_pool().await;
-    let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
-        .await
-        .unwrap()
-        .unwrap();
-
-    start_building(
-        &pool,
-        id,
-        "c0ffee",
-        Path::new("/data/worktrees/amber-kestrel"),
-        &[],
-    )
-    .await
-    .unwrap();
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Implementing);
-    assert!(conversation.naming);
 }
 
 /// The rename the instruction asked for is the end of the waiting, and so is a
@@ -748,7 +722,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     );
     assert_eq!(conversation.branch, "rate-limiting");
     assert!(conversation.branch_named);
-    assert!(matches!(conversation.grilling_pairing, Picked::Under(_)));
+    assert!(conversation.grilling_pairing.is_some());
 }
 
 /// The freeze: a checkout is of one repository, so from the moment there is one

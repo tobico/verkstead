@@ -1038,14 +1038,14 @@ testers.runNixOSTest {
             f"the file was answered {uploaded}"
         )
 
-        # The two roles that can be picked away — the grilling and the review —
-        # are chosen inside a wrapper naming the Pairing, because the absence of
-        # one there is the picker's own "no grilling" row rather than a choice
-        # nobody has made yet. The implementation has no such row: something has
-        # to build the work.
+        # The one role that can be picked away — the review — is chosen inside a
+        # wrapper naming the Pairing, because the absence of one there is the
+        # picker's own "no review" row rather than a choice nobody has made yet.
+        # The other two have no such row: something has to build the work, and
+        # every Develop Conversation is grilled.
         pairing = {"profile_id": profile_id, "model": model}
         for which, choice in [
-            ("grilling-pairing", {"pairing": pairing}),
+            ("grilling-pairing", pairing),
             ("implementation-pairing", pairing),
             ("review-pairing", {"pairing": pairing}),
         ]:

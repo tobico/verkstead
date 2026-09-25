@@ -2203,27 +2203,8 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
     .await
 }
 
-/// And the same with the *Grilling* picker moved onto its own such row, which is
-/// the Conversation whose press starts the work rather than an interview: it
-/// lands Implementing with a session on the Brief alone.
-async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_however_started(
-        spill,
-        stub,
-        gh,
-        *BRISKLY,
-        &[],
-        NOTHING_ATTACHED,
-        Pickers::Ungrilled,
-        Origin::None,
-        Seeded::Nothing,
-        None,
-    )
-    .await
-}
-
 /// How the Conversation a fixture builds was left on the setup card: every
-/// picker under a Pairing, one of them moved onto its *no session* row, or the
+/// picker under a Pairing, the review one moved onto its *no session* row, or the
 /// grilling one moved onto an account of the second agent type.
 ///
 /// The one thing the builders below differ over, and all of it is settled while
@@ -2233,9 +2214,6 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
 enum Pickers {
     /// Every role under a Pairing of its own.
     UnderEveryPairing,
-
-    /// The human picked *No grilling*, so the press starts the work.
-    Ungrilled,
 
     /// The human picked *No review*, so the wrap-up runs none.
     Unreviewed,
@@ -2452,7 +2430,6 @@ async fn grilling_however_started(
 
     match pickers {
         Pickers::UnderEveryPairing => {}
-        Pickers::Ungrilled => bench.ungrilled(id).await,
         Pickers::Unreviewed => bench.unreviewed(id).await,
         Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
@@ -2591,11 +2568,11 @@ impl Bench {
                 "model": format!("claude-{role}-5"),
             });
 
-            // Two of the pickers offer a row that is no account at all, so what
-            // they send is which of their rows was picked — see
-            // [`Bench::ungrilled`] and [`Bench::unreviewed`].
+            // The review picker offers a row that is no account at all, so what
+            // it sends is which of its rows was picked — see
+            // [`Bench::unreviewed`].
             let picked = match role {
-                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                "review" => serde_json::json!({ "pairing": pairing }),
                 _ => pairing,
             };
 
@@ -2777,11 +2754,11 @@ impl Bench {
         for (role, model) in roles {
             let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
 
-            // The two pickers that offer a row which is no account at all send
+            // The one picker that offers a row which is no account at all sends
             // which row was picked, exactly as [`Bench::under_every_pairing`]
             // does.
             let picked = match *role {
-                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                "review" => serde_json::json!({ "pairing": pairing }),
                 _ => pairing,
             };
 
@@ -2793,22 +2770,6 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
-    }
-
-    /// And pick the Grilling picker's other row instead: this Conversation is
-    /// not to be grilled at all, so the press starts the work rather than an
-    /// interview.
-    ///
-    /// Pressed after [`Bench::under_every_pairing`] for the reason
-    /// [`Bench::unreviewed`] is.
-    async fn ungrilled(&self, id: i64) {
-        let chosen: verkstead_render::ProfileChosen = post(
-            &self.app,
-            &format!("/api/ui/conversations/{id}/grilling-pairing"),
-            &serde_json::json!({ "pairing": null }),
-        )
-        .await;
-        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
     /// And pick the Review picker's other row instead: this Conversation is not
@@ -3992,7 +3953,7 @@ async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_run
 
     assert_eq!(
         fixture.view().await.grilling_pairing,
-        PickedView::Nothing,
+        None,
         "the Conversation is nulled out of while its session runs",
     );
 
@@ -16455,11 +16416,11 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
     assert_eq!(
         after
             .grilling_pairing
-            .pairing()
+            .as_ref()
             .map(|pairing| pairing.profile.id),
         before
             .grilling_pairing
-            .pairing()
+            .as_ref()
             .map(|pairing| pairing.profile.id),
     );
     assert_eq!(
@@ -17482,6 +17443,15 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
+    );
+    assert_eq!(
+        stage
+            .grilling_pairing
+            .as_ref()
+            .and_then(|pairing| pairing.profile.name.clone()),
+        Some("grilling".to_owned()),
+        "the grilling one among them — a stage steered into a second round is \
+         grilled by whatever the roadmap's work has been grilled by all along",
     );
 
     let brief = stage
@@ -30365,189 +30335,6 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
-    );
-}
-
-/// The stub a Conversation started with *No grilling* runs: one session, on the
-/// implementation skill, which writes down what it was told and does the work.
-///
-/// Cased on the skill for the sake of what comes after it — the wrap-up's review
-/// session runs on this stub too, and a second `git commit` with nothing to
-/// commit would be a failure inside the thing under test.
-fn an_ungrilled_run(prompts: &Path) -> String {
-    format!(
-        r#"
-case "$2" in
-*implementing/SKILL.md*)
-    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
-    printf 'building it\n'
-    printf 'a limiter\n' > limiter.md
-    git add limiter.md
-    git commit --quiet -m 'feat: rate limiting'
-    : > /tmp/verkstead/done
-    ;;
-*)
-    printf 'nothing to do\n'
-    sleep 300
-    ;;
-esac
-"#,
-        prompts = quoted(prompts),
-    )
-}
-
-/// A Conversation whose human picked *No grilling*, end to end: the press makes
-/// the branch and the worktree as it always does and lands the Conversation
-/// Implementing, and what runs is one session under the Implementation Pairing,
-/// inside the implementation skill, primed with the Brief and told there was no
-/// interview.
-///
-/// The run from there is an inline implementation and nothing else: the session
-/// commits, carries the branch to a pull request on its way out, and the
-/// Conversation wraps that up exactly as a run the human picked *inline* on at
-/// the end of a grilling does.
-#[tokio::test]
-async fn no_grilling_builds_from_the_brief_alone_and_carries_it_to_a_pull_request() {
-    let spill = tempfile::tempdir().unwrap();
-    let prompts = spill.path().join("implementing-prompts");
-
-    let fixture = building_ungrilled(spill, &an_ungrilled_run(&prompts), PULL_REQUEST).await;
-
-    let worktree = PathBuf::from(fixture.until(|view| view.worktree.clone()).await.path);
-
-    let sent = until_written(&prompts).await;
-
-    assert!(
-        sent.contains("model=claude-implementation-5"),
-        "the work runs under the Implementation Pairing, there being no other: {sent}",
-    );
-    assert!(
-        sent.contains("implementing/SKILL.md"),
-        "and inside the bundled implementation skill: {sent}",
-    );
-    assert!(
-        sent.contains(BRIEF),
-        "primed with the Brief, which is the whole of the plan: {sent}",
-    );
-    assert!(
-        sent.contains("Nothing was grilled"),
-        "and told so, rather than left to infer it from a handoff that is not \
-         there: {sent}",
-    );
-    assert!(
-        sent.contains("ordinary ask"),
-        "with what to do about what the Brief leaves open: {sent}",
-    );
-
-    let opened = fixture
-        .until(|view| {
-            (view.state == Lifecycle::Wrapping)
-                .then(|| pull_request(view).cloned())
-                .flatten()
-        })
-        .await;
-
-    assert_eq!(opened.number, 41);
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        view.timeline
-            .iter()
-            .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
-                _ => None,
-            })
-            .collect::<Vec<_>>(),
-        [Lifecycle::Implementing, Lifecycle::Wrapping],
-        "with no Grilling on the way at all: the press that would have started \
-         an interview started the work",
-    );
-    assert!(
-        git(&worktree, &["log", "--oneline"]).contains("feat: rate limiting"),
-        "which committed what it built",
-    );
-    assert!(
-        notices(&view).is_empty(),
-        "and nothing stopped on the way: {:?}",
-        notices(&view),
-    );
-}
-
-/// The stub for the ask: a session that builds, then waits on the human the way
-/// one holding a Blocking Ask does.
-fn an_ungrilled_run_that_asks(prompts: &Path) -> String {
-    format!(
-        r#"
-case "$2" in
-*implementing/SKILL.md*)
-    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
-    printf 'reading the brief\n'
-    while [ ! -f /tmp/verkstead/asked ]; do sleep 0.1; done
-    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
-    sleep 300
-    ;;
-*)
-    sleep 300
-    ;;
-esac
-"#,
-        prompts = quoted(prompts),
-    )
-}
-
-/// And a Blocking Ask works from such a session, which is what the prompt tells
-/// it to do with a decision the Brief left open.
-///
-/// The Set lands on this Conversation's Timeline and waits there, and the
-/// session holding it is left alone for as long as it takes — the same condition
-/// a step session's ask puts a run in, which is the point: nothing downstream of
-/// the press knows the interview was skipped.
-#[tokio::test]
-async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
-    let spill = tempfile::tempdir().unwrap();
-    let prompts = spill.path().join("implementing-prompts");
-
-    let fixture =
-        building_ungrilled(spill, &an_ungrilled_run_that_asks(&prompts), PULL_REQUEST).await;
-
-    until_written(&prompts).await;
-
-    let set = fixture.ask(A_STEP_QUESTION).await;
-
-    fixture
-        .until(|view| (!sets(view).is_empty()).then_some(()))
-        .await;
-
-    // Several of the rescue's graces of silence, which is what waiting on a human
-    // looks like from outside — and the session is neither spoken to nor ended.
-    tokio::time::sleep(BRISKLY.proposing * 4).await;
-
-    assert!(
-        anything_told(&fixture).is_empty(),
-        "nothing was typed into a session waiting on the human: {:?}",
-        anything_told(&fixture),
-    );
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
-        "the run is where the press left it, with the ask open on it",
-    );
-    assert!(
-        notices(&view).is_empty(),
-        "and nothing stopped over it: {:?}",
-        notices(&view),
-    );
-
-    assert_eq!(
-        fixture
-            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
-            .await,
-        Submitted::Accepted,
-        "and the human answers it the way they answer any other",
     );
 }
 

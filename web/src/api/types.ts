@@ -1360,12 +1360,12 @@ companions: Array<CompanionView>, state: Lifecycle,
  * than by id: the pane says what they are, and whether the Profile is
  * still runnable.
  *
- * One of the two roles the picker offers a row that runs no session for,
- * so this says which of three the human picked rather than whether they
- * picked at all. A Conversation that picked *no grilling* is not grilled:
- * its Brief goes straight to an inline implementation.
+ * A Pairing or nothing, the picker having no row that runs no session:
+ * *No grilling* is retired, and a record written while it was there reads
+ * as nothing picked — see [`crate::PickedView`], which the two roles that
+ * do have one still use.
  */
-grilling_pairing: PickedView, 
+grilling_pairing: PairingView | null, 
 /**
  * And the ones the implementation will run under. Chosen separately
  * because it is genuinely a separate account and model.
@@ -2999,10 +2999,10 @@ form: SteerForm, };
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
  *
- * Three rather than a nullable Pairing, because a picker offers *no grilling*
- * or *no review* as a row of its own: a Conversation that picked one is as
- * ready to start as one that picked a Pairing, and a page that could not tell
- * it from an empty picker would draw the placeholder over a settled choice.
+ * Three rather than a nullable Pairing, because the review picker offers *no
+ * review* as a row of its own: a Conversation that picked it is as ready to
+ * start as one that picked a Pairing, and a page that could not tell it from an
+ * empty picker would draw the placeholder over a settled choice.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -3665,16 +3665,18 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
  */
 export type RepoPairingsView = { 
 /**
- * One of the two roles whose memory can hold the row that runs no session,
- * so this says which of three rather than whether anything is remembered.
+ * A Pairing, or nothing: the grilling role has no row that runs no session,
+ * so a skip some Repo remembers from before *No grilling* retired is read
+ * as nothing remembered and never handed over as a choice.
  */
-grilling: PickedView, 
+grilling: PairingView | null, 
 /**
- * The one role that has no such row: a Pairing, or nothing.
+ * And the other role with no such row.
  */
 implementation: PairingView | null, 
 /**
- * And the other role that has one.
+ * The one whose memory can hold it, so this says which of three rather than
+ * whether anything is remembered.
  */
 review: PickedView, };
 

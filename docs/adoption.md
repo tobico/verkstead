@@ -827,10 +827,9 @@ together as one row. The same Profile may fill all three, and separate ones are
 how the parts bill to separate accounts. The review one runs the wrap-up's
 review and nothing else, reviewing being a fresh set of eyes on what was built —
 and its picker offers **No review** beside the accounts, for work you would
-rather have wrapped up without one. The grilling picker offers **No grilling**
-the same way, for work whose Brief is already the whole plan. All of them are
-settled while the Conversation is drafting, and the work starting is what fixes
-them.
+rather have wrapped up without one — the one row on any of the pickers that is
+not an account. All of them are settled while the Conversation is drafting, and
+the work starting is what fixes them.
 
 **Then, per piece of work:**
 
@@ -840,9 +839,7 @@ them.
 2. **Start work.** The branch and the **Worktree** are made here, and a
    grilling session opens in the Sandbox. What it wants to know arrives as
    Question Sets on the Timeline and, if you have subscribed, on your phone.
-   Answer from wherever you are; the session waits. On **No grilling** the same
-   press skips to step 5 instead: one session builds from the Brief alone, and
-   what the Brief leaves genuinely open comes back to you as a Question Set.
+   Answer from wherever you are; the session waits.
 3. **The Proposal.** The grilling ends by proposing a **Direction** — inline,
    task list or roadmap — on a Set carrying the chooser. Picking one accepts
    the Proposal, and the pick is delivered back to the grilling session rather

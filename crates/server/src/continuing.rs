@@ -1215,24 +1215,21 @@ async fn settle(
     conversation: &store::Conversation,
     stage: &Stage,
 ) -> anyhow::Result<()> {
-    // Whichever of the three the predecessor picked, the rows that run no
+    // Whichever of the three the predecessor picked, the row that runs no
     // session included: a stage inherits what its roadmap was settled with, and
-    // *not grilled* and *not reviewed* are as much settled choices as an
-    // account.
-    match &conversation.grilling_pairing {
-        store::Picked::Nothing => {}
-        store::Picked::Skipped => {
-            store::skip_grilling(&state.pool, id).await?;
-        }
-        store::Picked::Under(grilling) => {
-            store::set_grilling_pairing(
-                &state.pool,
-                id,
-                grilling.profile.id,
-                grilling.model.as_deref(),
-            )
-            .await?;
-        }
+    // *not reviewed* is as much a settled choice as an account. Nothing is
+    // inherited for the grilling role where the predecessor has no Pairing on it
+    // — a roadmap Conversation started before *No grilling* retired can be
+    // carrying a skip, and a stage of it is grilled by an account or by nobody
+    // it could have inherited.
+    if let Some(grilling) = &conversation.grilling_pairing {
+        store::set_grilling_pairing(
+            &state.pool,
+            id,
+            grilling.profile.id,
+            grilling.model.as_deref(),
+        )
+        .await?;
     }
 
     if let Some(implementation) = &conversation.implementation_pairing {

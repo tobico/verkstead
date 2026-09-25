@@ -56,10 +56,10 @@ export type Roles = {
   /// account at all. A role not named here has to be answered with one.
   ///
   /// **What the picker draws today**, which is what makes it worth reading
-  /// rather than a claim nothing checks: the two rows the ADR retires — *No
-  /// grilling* when Tinker lands, *No review* on a Review when that stage does
-  /// — come out of this table in the stage that takes them out of the app, so
-  /// the row and the control never say different things in the meantime.
+  /// rather than a claim nothing checks: the row the ADR still retires — *No
+  /// review* on a Review, when that stage lands — comes out of this table in
+  /// the stage that takes it out of the app, so the row and the control never
+  /// say different things in the meantime.
   away: Role[];
   /// And which shape the one **Agent** control takes: a panel where there are
   /// several roles to stack under their labels, and the flat Pairing dropdown
@@ -81,11 +81,11 @@ export type Roles = {
 /// with nothing in its setup row.
 export const ROLES: Record<Process, Roles> = {
   Develop: {
-    // Both of the rows that are no account: *No grilling* goes when Tinker
-    // lands and takes the ungrilled path with it, and until then it is a row
-    // the picker offers.
+    // One row that is no account, the review's: *No grilling* is retired, a
+    // Brief that wants no interview being a Tinker rather than a hole in this
+    // Process.
     uses: ["grilling", "implementation", "review"],
-    away: ["grilling", "review"],
+    away: ["review"],
     control: "panel",
   },
   Investigate: {
@@ -122,14 +122,14 @@ export function uses(process: Process, role: Role): boolean {
 }
 
 /// The words a role's picker says the row that runs no session in, where it
-/// offers one: *No grilling* above the grilling Pairings, *No review* above
-/// the review ones.
+/// offers one: *No review* above the review Pairings, and nowhere else.
 ///
 /// No entry for the implementation role, which has no such row anywhere —
 /// there is no work without something building it, which is why every
-/// Process's `uses` names it and no Process's `away` can.
+/// Process's `uses` names it and no Process's `away` can. And none for the
+/// grilling role any more: *No grilling* is retired, and what it was for is the
+/// Tinker Process.
 const AWAY: Partial<Record<Role, string>> = {
-  grilling: "No grilling",
   review: "No review",
 };
 

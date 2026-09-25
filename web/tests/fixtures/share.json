@@ -79,7 +79,7 @@
     "compiles_uncached": false,
     "direction": "inline",
     "driven": false,
-    "grilling_pairing": "Nothing",
+    "grilling_pairing": null,
     "id": 4,
     "implementation_pairing": null,
     "naming": false,

@@ -297,10 +297,11 @@ pub struct Conversation {
     /// The Profile and model the grilling session runs under, once they are
     /// chosen.
     ///
-    /// One of the two roles that can be picked away altogether — see
-    /// [`super::Picked`]. A Conversation whose human picked *no grilling* is
-    /// never grilled: its Brief goes straight to an inline implementation.
-    pub grilling_pairing: super::Picked,
+    /// A Pairing or nothing, there being no row to pick this role away with:
+    /// *No grilling* is retired, and a record written while it was there is read
+    /// as nothing chosen — exactly as a Repo's remembered skip is. Which is the
+    /// only way a skip can still be on one, nothing having written one since.
+    pub grilling_pairing: Option<super::Pairing>,
 
     /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
@@ -2033,7 +2034,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         base_ref: base_ref.filter(|named| !named.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
+        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
         review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
@@ -2530,16 +2531,6 @@ pub async fn set_review_pairing(
 /// will launch.
 pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
     skip(pool, id, Role::Review).await
-}
-
-/// And the row that says there is to be no grilling at all.
-///
-/// The same choice one role along, and it says more than the review one does:
-/// what a Conversation that picked it starts is an inline implementation on the
-/// Brief, so the press that would have begun an interview begins the work — see
-/// [`start_building`].
-pub async fn skip_grilling(pool: &SqlitePool, id: i64) -> Result<Chosen> {
-    skip(pool, id, Role::Grilling).await
 }
 
 /// Record that a role runs no session at all.
@@ -3720,6 +3711,11 @@ impl<'a> From<&'a String> for Base<'a> {
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
+/// **One landing**, which is the whole of what the press behind this can do.
+/// There were two while a Conversation could be started with no grilling at all
+/// — the same cut, the same freeze and an inline Direction written down, landing
+/// it Implementing — and what that was for is the **Tinker** Process, which
+/// starts somewhere else again rather than giving this a second meaning.
 pub async fn start_grilling<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -3727,61 +3723,8 @@ pub async fn start_grilling<'a>(
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
-    start(pool, id, base.into(), worktree, companions, None).await
-}
-
-/// And the same start on a Conversation whose human picked *no grilling*: the
-/// branch, the worktree, the base commit and the memory exactly as above, and
-/// the Conversation lands Implementing rather than Grilling.
-///
-/// One press, two landings, and which of them is a fact about what was picked
-/// rather than a second kind of start — see [`skip_grilling`]. Everything the
-/// server did against git before calling either is the same work, so the record
-/// of it is the same record.
-///
-/// The direction goes down with the move, because there is no grilling left to
-/// propose one: what a Brief taken straight to the work is, is an inline
-/// implementation, and a Conversation implementing with no direction is a record
-/// nothing could resume — see [`pick_direction`], which is how the other way in
-/// writes the same row.
-pub async fn start_building<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(
-        pool,
-        id,
-        base.into(),
-        worktree,
-        companions,
-        Some(Direction::Inline),
-    )
-    .await
-}
-
-/// What the two of them do, which is the same thing but for where it leaves the
-/// Conversation.
-///
-/// `building` is the direction a start that skips the grilling records, and its
-/// being there is also what says which state to land in: a start with a
-/// direction has nothing to grill and is already building.
-async fn start(
-    pool: &SqlitePool,
-    id: i64,
-    base: Base<'_>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-    building: Option<Direction>,
-) -> Result<Grilling> {
+    let base = base.into();
     let worktree = super::repos::text(worktree)?;
-
-    let landing = match building {
-        Some(_) => Lifecycle::Implementing,
-        None => Lifecycle::Grilling,
-    };
 
     let mut tx = super::writing(pool, "starting a Conversation's work").await?;
 
@@ -3811,23 +3754,11 @@ async fn start(
     )
     .bind(base.commit)
     .bind(base.named)
-    .bind(landing.stored())
+    .bind(Lifecycle::Grilling.stored())
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("moving Conversation {id} to {landing:?}"))?;
-
-    if let Some(direction) = building {
-        sqlx::query(
-            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
-             ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
-        )
-        .bind(id)
-        .bind(direction_stored(direction))
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("recording how Conversation {id}'s work is being built"))?;
-    }
+    .with_context(|| format!("moving Conversation {id} to grilling"))?;
 
     // Written over whatever is there rather than inserted: a record that somehow
     // holds a worktree already is corrected to the one just made, where an
@@ -3844,7 +3775,7 @@ async fn start(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    moved(&mut tx, id, landing).await?;
+    moved(&mut tx, id, Lifecycle::Grilling).await?;
 
     // And what it is being started with, against its Repo, so the next
     // Conversation started on that Repo arrives with every picker filled. In
