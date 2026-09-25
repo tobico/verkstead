@@ -734,7 +734,7 @@ of it:
 
 | Artwork | Cut into | Where it comes from |
 | --- | --- | --- |
-| `tools/hammer/verkstead-hammer.png` | `icon-32`, `icon-192`, `icon-512`, `apple-touch-icon`, and every icon under `packaging/` | A 1024 square rendered out of [`tools/hammer/verkstead-hammer.blend`](../tools/hammer/verkstead-hammer.blend) by [`tools/hammer/render.py`](../tools/hammer/render.py). The blend file is the mark's source of truth; the render is what the two cut scripts read. Blender is the one tool here that comes from the machine rather than the dev shell |
+| `tools/hammer/verkstead-hammer.png` | `icon-32`, `icon-192`, `icon-512`, `apple-touch-icon`, and every icon under `packaging/` | A 1024 square rendered out of [`tools/hammer/verkstead-hammer.blend`](../tools/hammer/verkstead-hammer.blend) by [`tools/hammer/render.py`](../tools/hammer/render.py). The blend file is the mark's source of truth; the render is what the two cut scripts read. Blender comes from the machine rather than the dev shell — see below, where `uv` does too |
 
 It sits in `tools/hammer/` rather than beside the icons it is cut into, because
 `assets/` is vite's `publicDir`: everything under it is served at the site root
@@ -775,6 +775,17 @@ configuration with its own servers taken out
 ([ADR 0011](adr/0011-agent-backends.md)), so the repository's own files are
 the only route: drop them and the next session that has to re-render the icon
 has no Blender.
+
+**Two tools here come from the machine rather than the dev shell**, and
+`flake.nix` carries neither: `blender`, which renders, and `uv`, which
+`.mcp.json` runs the server through as `uvx` and which
+[`tools/hammer/serve.py`](../tools/hammer/serve.py) shells out to again for the
+bundled addon. A `nix develop` with Blender installed and no `uv` gets an MCP
+server that never connects and a `serve.py` that dies in `subprocess.run` —
+which is a confusing way to find out, so it is said here rather than left to be
+discovered. Neither is in the shell because neither is wanted by a build or a
+test: the icons are committed, and only a session re-cutting the artwork needs
+either.
 
 The server connects to Blender lazily, on the first tool call, and what it
 connects to is [`tools/hammer/serve.py`](../tools/hammer/serve.py) — the addon
