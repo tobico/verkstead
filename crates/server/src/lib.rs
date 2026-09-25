@@ -56,8 +56,28 @@ mod conversations;
 mod deferrals;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+/// Whether this process has a display to draw on — a window station somebody is
+/// looking at, or a Linux session that names one.
+///
+/// Not the **Screen** — `crate::screen`, the terminal grid a session's Capture is
+/// held as. That is the word this crate and CONTEXT.md's glossary already spend
+/// on the other sense, so this one is a display.
+///
+/// Public because what asks it is whatever started this server and means to draw
+/// on that display: the tray app's icon and its dialogs, and the graphical grant
+/// below, which is installed only where the answer is yes.
+pub mod display;
 mod done;
 mod drivers;
+/// The one implementation of [`remote::Elevate`]: the platform's own password
+/// dialog, put in front of the one command Verkstead ever asks for a privilege
+/// for.
+///
+/// Public for the reason [`display`] is — it is what a starting binary hands the
+/// server as it starts it, and the three arms are spawned commands with no
+/// toolkit behind them, so they live with the server rather than with the tray
+/// app that was the first to hand one over.
+pub mod elevate;
 mod exchanges;
 /// The Worktrees Code reads: the roots its tree stands on, and one folder of
 /// one of them at a time.

@@ -444,9 +444,9 @@ fn profile(command: &mut Command, home: &Path) {
 /// `verkstead_server::platform`. So a profile of the test's own is those three,
 /// laid out under `home` the way a real one is laid out under a real profile.
 ///
-/// There is no screen to take away, and none is taken: what says whether a
+/// There is no display to take away, and none is taken: what says whether a
 /// Windows session has one is the window station rather than anything in the
-/// environment — see `verkstead_desktop::screen`.
+/// environment — see `verkstead_server::display`.
 #[cfg(windows)]
 fn profile(command: &mut Command, home: &Path) {
     command
@@ -936,12 +936,12 @@ fn the_startup_line_carries_no_workbench_key() {
 /// the environment — there is no tray under a test there — so this is asked of
 /// the line that says so.
 ///
-/// **Not on Windows**, where a screen is asked of the window station rather than
-/// read off the environment: a test on a logged-in runner is on `WinSta0` like
-/// any other process, raises a tray, and never reaches the line. Nothing about
-/// the fallback is Windows's own — it is the same branch of the same function —
-/// so what is lost by leaving it to the other platforms is the premise, not the
-/// coverage. See `crate::screen`.
+/// **Not on Windows**, where a display is asked of the window station rather
+/// than read off the environment: a test on a logged-in runner is on `WinSta0`
+/// like any other process, raises a tray, and never reaches the line. Nothing
+/// about the fallback is Windows's own — it is the same branch of the same
+/// function — so what is lost by leaving it to the other platforms is the
+/// premise, not the coverage. See `verkstead_server::display`.
 #[cfg(not(windows))]
 #[test]
 fn a_run_with_no_tray_says_the_link_itself() {

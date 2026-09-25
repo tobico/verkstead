@@ -35,7 +35,7 @@
 /// about, wherever it happened.
 ///
 /// **Nothing here is reported and nothing here fails.** A machine with no
-/// screen to draw on has already had the same words on stderr and in the log,
+/// display to draw on has already had the same words on stderr and in the log,
 /// and a failure to tell somebody something is not itself something to tell
 /// them.
 pub fn refusal(message: &str) {
@@ -73,11 +73,11 @@ enum Level {
 /// binary's callers are: `main`, before there is a tray, and a menu item's
 /// handler, which runs on the loop's own thread.
 fn draw(level: Level, message: &str) {
-    // Asked before the toolkit is, because a session with no screen is one that
+    // Asked before the toolkit is, because a session with no display is one that
     // has already had these words somewhere it can read them, and starting a
     // toolkit to find that out would only put its own complaint on the same
     // stderr.
-    if !crate::screen::there_is_one() {
+    if !verkstead_server::display::there_is_one() {
         return;
     }
 

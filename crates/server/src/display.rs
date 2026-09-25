@@ -1,16 +1,23 @@
-//! Whether this process has a screen to draw on.
+//! Whether this process has a display to draw on.
+//!
+//! **Not the Screen**, which in this crate is the terminal grid a session's
+//! Capture is held as and the workbench draws — `crate::screen`, and the word
+//! CONTEXT.md's glossary gives to that. This is the other sense of the word
+//! entirely, whether there is anywhere for a window to appear, so it is a
+//! *display* here and the two are never read for each other.
 //!
 //! **Asked rather than risked**, and asked before anything is drawn — the tray
-//! as much as the dialogs. GTK will not start without a screen, and a Verkstead
-//! run over SSH, in a container or under a test has none: what starting the
-//! toolkit anyway would buy is GTK's own complaint on the standard error nobody
-//! launched from an icon is reading, printed underneath the very message that
-//! was being reported.
+//! app's icon as much as its dialogs, and the password dialog
+//! [`crate::elevate`] raises before that. GTK will not start without a display,
+//! and a Verkstead run over SSH, in a container or under a test has none: what
+//! starting the toolkit anyway would buy is GTK's own complaint on the standard
+//! error nobody launched from an icon is reading, printed underneath the very
+//! message that was being reported.
 //!
-//! What says there is a screen on Linux is `$DISPLAY` or `$WAYLAND_DISPLAY`, so
-//! that is what is read. A screen that is *named* and is not there is a
-//! different question and one only GTK can answer — see [`crate::tray::show`],
-//! which is where the answer arrives.
+//! What says there is one on Linux is `$DISPLAY` or `$WAYLAND_DISPLAY`, so that
+//! is what is read. A display that is *named* and is not there is a different
+//! question and one only GTK can answer — see `verkstead_desktop::tray::show`,
+//! which is where that answer arrives.
 //!
 //! Windows says it nowhere in the environment and is asked instead: a process
 //! belongs to a **window station**, and only one of a session's stations is the
@@ -22,7 +29,7 @@
 #[cfg(target_os = "linux")]
 use std::ffi::OsStr;
 
-/// Whether there is a screen, read from the process environment.
+/// Whether there is a display, read from the process environment.
 ///
 /// The read is made where drawing is asked for and nowhere below it — see
 /// [`there_is_one_with`], which is the same question of the values themselves.
@@ -51,11 +58,11 @@ pub fn there_is_one() -> bool {
 /// a dismissal that cannot arrive, and a tray icon is an icon in a
 /// notification area no shell is drawing.
 ///
-/// **A question that could not be asked is a screen.** Every reason this call
+/// **A question that could not be asked is a display.** Every reason this call
 /// fails is about this process rather than about the station, and the answer
 /// that costs least when it is wrong is the one that leaves the tray to
-/// [`crate::tray::show`] to fail at — which is where a tray that cannot be
-/// raised is already handled, and already logged.
+/// `verkstead_desktop::tray::show` to fail at — which is where a tray that
+/// cannot be raised is already handled, and already logged.
 #[cfg(windows)]
 pub fn there_is_one() -> bool {
     use windows_sys::Win32::System::StationsAndDesktops::{
@@ -94,10 +101,10 @@ pub fn there_is_one() -> bool {
 }
 
 /// Whether `display` and `wayland` — `$DISPLAY` and `$WAYLAND_DISPLAY` as they
-/// were read — name a screen.
+/// were read — name one.
 ///
 /// Set and empty is unset: a shell that exported the name without a value has
-/// no more of a screen than one that never mentioned it, and GTK is no happier
+/// no more of a display than one that never mentioned it, and GTK is no happier
 /// with it.
 #[cfg(target_os = "linux")]
 fn there_is_one_with(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
@@ -112,17 +119,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_screen_is_either_variable_naming_one() {
+    fn a_display_is_either_variable_naming_one() {
         assert!(there_is_one_with(Some(OsStr::new(":0")), None));
         assert!(there_is_one_with(None, Some(OsStr::new("wayland-0"))));
     }
 
     /// The case the dialog would hang on, which is the whole reason this is
-    /// asked at all: a session with no screen — over SSH, in a container, under
+    /// asked at all: a session with no display — over SSH, in a container, under
     /// a test — where the message has already gone to stderr and the tray has
     /// nowhere to be.
     #[test]
-    fn nothing_said_and_nothing_in_it_is_no_screen() {
+    fn nothing_said_and_nothing_in_it_is_no_display() {
         assert!(!there_is_one_with(None, None));
         assert!(!there_is_one_with(
             Some(OsStr::new("")),

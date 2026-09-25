@@ -1,30 +1,38 @@
-//! Asking this desktop for a privilege the app has not got, the way this
+//! Asking this desktop for a privilege the process has not got, the way this
 //! desktop asks for one.
 //!
 //! One command is ever raised: the operator grant, which is what Tailscale wants
 //! before it will take a `tailscale serve` from anybody but root (ADR-0015). The
 //! press is made in a browser, the server that runs it has no privilege to
 //! raise, and the line it hands back — `sudo tailscale set --operator=<user>` —
-//! was a line somebody had to find a terminal for. What this module is, is the
+//! was a line somebody had to find a terminal for. What this module is, is an
 //! app answering that press with the platform's own password dialog instead.
 //!
-//! **The seam is the server's.** The desktop crate depends on the server crate
-//! rather than the other way round, so what crosses is a handle handed in as the
-//! server starts — [`verkstead_server::remote::Elevate`] — and a server this app
-//! did not start is handed none and shows the line as it always did.
+//! **The seam is [`crate::remote::Elevate`], and this is its one
+//! implementation.** What crosses it is a handle handed in as the server starts,
+//! so a server that was handed none — a daemon, with nobody at the machine to
+//! ask — shows the line as it always did. Whatever starts a server with somebody
+//! in front of it installs this: the Rust tray app hands it over in-process, and
+//! it is [`Graphical::here`](crate::elevate::Graphical::here) however it is
+//! reached.
 //!
 //! **Three arms, and each of them a command.** `pkexec` on Linux, `osascript`
 //! running the command *with administrator privileges* on macOS, and a
 //! UAC-elevated process through PowerShell's `Start-Process -Verb RunAs` on
-//! Windows. Nothing here is a dialog this app draws: each of the three is the
-//! platform's own asking, put in front of a command by starting a program, so
-//! this crate's own toolkit is not involved and neither is the thread it holds
-//! — see [`crate::dialog`], which is the opposite case.
+//! Windows. Nothing here is a dialog Verkstead draws: each of the three is the
+//! platform's own asking, put in front of a command by starting a program, so no
+//! toolkit is involved and neither is the thread one would hold — which is why
+//! this module is the server crate's rather than the tray app's, and why
+//! `verkstead_desktop::dialog`, the opposite case, is not.
+//!
+//! **Whether there is anybody to ask is a question of its own**, and it is asked
+//! before this is installed rather than here — see [`crate::display`], which is
+//! what every caller reads the answer off.
 //!
 //! **Which arm is a value rather than a `cfg`**, for the reason
-//! [`Platform`] is one: the arm a machine will never run is still an arm a test
-//! on that machine can build the command of, and what these three are is
-//! precisely a command each.
+//! [`Platform`](crate::platform::Platform) is one: the arm a machine will never
+//! run is still an arm a test on that machine can build the command of, and what
+//! these three are is precisely a command each.
 //!
 //! **A cancelled dialog exits non-zero**, which is the one thing all three agree
 //! on: `pkexec` exits 126 for a dismissal, `osascript` fails on the AppleScript
@@ -35,9 +43,9 @@
 
 use std::process::{Command, Output, Stdio};
 
-use verkstead_server::platform::Platform;
-use verkstead_server::remote::{Elevate, Raised};
-use verkstead_server::unseen::Unseen;
+use crate::platform::Platform;
+use crate::remote::{Elevate, Raised};
+use crate::unseen::Unseen;
 
 /// The platform's own password dialog, in front of one command.
 #[derive(Debug, Clone, Copy)]
@@ -73,9 +81,9 @@ impl Elevate for Graphical {
             .expect("every arm builds a command with a program to run");
 
         // And nothing drawn for the asking itself: the dialog is the platform's,
-        // and the program that raises it is a console program this app would
-        // otherwise put a black window behind it — see
-        // [`verkstead_server::unseen`].
+        // and the program that raises it is a console program an app started
+        // from an icon would otherwise put a black window behind it — see
+        // [`crate::unseen`].
         let told = Command::new(program)
             .args(arguments)
             .unseen()
