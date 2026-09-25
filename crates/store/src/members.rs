@@ -64,6 +64,29 @@
 //! both — the pair is the key, so the later telling replaces the earlier, which
 //! is exactly what that member would have ended up holding had it been
 //! answering all along.
+//!
+//! **And a renewal is two columns on the member row besides**, because a
+//! changeover is a state two devices are in together and each of them holds one
+//! half of it.
+//!
+//! *What this member has said it holds of us* is [`Member::acknowledged`]: the
+//! fingerprint of *this* device's own certificate that member last answered an
+//! announcement of. It is what the changeover counts — a member holding anything
+//! but the certificate coming in is a member the old one is still going out for
+//! — and it is a positive record rather than the absence of a debt on purpose: a
+//! device that joined in the middle of a changeover has no debt row and has
+//! acknowledged nothing, and a count read off the debts would have let the
+//! changeover finish behind its back.
+//!
+//! *And what this device still accepts of it* is [`Member::renewing_from`]: the
+//! fingerprint this member was recorded against before it announced a renewal of
+//! its own. A member in the middle of a changeover goes on presenting the
+//! certificate it was presenting until the last of *its* members has
+//! acknowledged, so a device that had recorded the new fingerprint and nothing
+//! else would refuse every call from it — which is the one thing a changeover
+//! exists not to cost. So both are accepted, at the gate and at a dial alike,
+//! and the one being changed from is let go of at the moment this device meets
+//! the new one.
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
@@ -114,6 +137,41 @@ pub struct Member {
     /// dimmed row back. What clears it is [`member_unreachable`], on the first
     /// dial that answers at none of the addresses above.
     pub reachable: bool,
+
+    /// And the fingerprint this member was recorded against before it announced
+    /// a renewal of its own certificate, where it is in the middle of one.
+    ///
+    /// **Accepted beside the one above for as long as it is here**, at the gate
+    /// and at a dial both. A device in the middle of a changeover goes on
+    /// presenting the certificate every one of *its* members holds until the
+    /// last of them has acknowledged the new one, so a member that had recorded
+    /// the new fingerprint and nothing else would refuse every call it made —
+    /// which is the one thing a changeover exists not to cost.
+    ///
+    /// `None` is the ordinary state, and it is two of them: a member that has
+    /// never renewed, and one whose changeover this device has seen the end of.
+    /// What ends it is meeting the new certificate, which is the only
+    /// unambiguous sign that the far end has stopped presenting the old — see
+    /// [`changeover_over`]. Left standing it costs nothing anyway: the
+    /// certificate it names runs out on its own, and an expired one is refused
+    /// at the handshake.
+    pub renewing_from: Option<String>,
+
+    /// And the other direction: the fingerprint of *this* device's own
+    /// certificate that this member last said it holds.
+    ///
+    /// **What the changeover counts.** A device that has re-issued its
+    /// certificate presents the outgoing one until every member has
+    /// acknowledged the incoming one, and this is where each acknowledgement is
+    /// written down — see [`renewal_acknowledged`]. A member holding anything
+    /// but the certificate coming in is a member that is still owed the
+    /// announcement.
+    ///
+    /// `None` is a member that has answered no announcement of this device's
+    /// certificate, which is every member of a device that has never renewed —
+    /// and a device that joined in the middle of a changeover, which is why this
+    /// is a record of what *was* acknowledged rather than the absence of a debt.
+    pub acknowledged: Option<String>,
 }
 
 /// What a member has yet to be told about a device.
@@ -135,6 +193,16 @@ pub enum Telling {
 
     /// And that it is not any more: the unlink, broadcast to every member.
     Removed,
+
+    /// And that the device this debt is owed *about* — which for this one is the
+    /// device doing the telling — has made its certificate again, so the
+    /// fingerprint to hold against its id has changed.
+    ///
+    /// The third thing a cluster has to say about a device, and the reason it is
+    /// a word on this same pair rather than a record of its own: a member that
+    /// was away for a week may have missed a join, an unlink and a renewal, and
+    /// three records would be three things to walk when it came back.
+    Renewed,
 }
 
 impl Telling {
@@ -143,6 +211,7 @@ impl Telling {
         match self {
             Telling::Joined => "joined",
             Telling::Removed => "removed",
+            Telling::Renewed => "renewed",
         }
     }
 
@@ -154,6 +223,7 @@ impl Telling {
         match said {
             "joined" => Ok(Telling::Joined),
             "removed" => Ok(Telling::Removed),
+            "renewed" => Ok(Telling::Renewed),
             _ => bail!("{said} is not something a member can be owed"),
         }
     }
@@ -173,16 +243,45 @@ pub struct Linking {
     pub fingerprint: String,
 }
 
+/// And a member that has made its certificate again, saying so: the same five
+/// things, with the *two* certificates a device in the middle of a changeover
+/// has.
+///
+/// A shape of its own rather than a [`Linking`] with a field added, because the
+/// one field that matters is the one they cannot share. A linking carries the
+/// certificate the device presents, which is what proves it; a renewal carries
+/// that one *and* the one coming in, and which of the two is which is the whole
+/// of what the call is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Renewal {
+    pub device: String,
+    pub name: String,
+    pub os: String,
+    pub addresses: Vec<String>,
+
+    /// The certificate it is still presenting, which is the one this device has
+    /// recorded for it and the one the handshake carrying the announcement
+    /// handed over. Kept beside the one below for as long as the changeover
+    /// lasts — see [`Member::renewing_from`].
+    pub presenting: String,
+
+    /// And the one it is changing over to, which is what the row is keyed on
+    /// from now on: a member *is* a fingerprint, and this is the one it will be.
+    pub incoming: String,
+}
+
 /// The members table, and the addresses hanging off it.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS members (
-             device      TEXT PRIMARY KEY,
-             name        TEXT NOT NULL,
-             os          TEXT NOT NULL,
-             fingerprint TEXT NOT NULL,
-             last_seen   TEXT NOT NULL,
-             reachable   INTEGER NOT NULL DEFAULT 1
+             device        TEXT PRIMARY KEY,
+             name          TEXT NOT NULL,
+             os            TEXT NOT NULL,
+             fingerprint   TEXT NOT NULL,
+             last_seen     TEXT NOT NULL,
+             reachable     INTEGER NOT NULL DEFAULT 1,
+             renewing_from TEXT,
+             acknowledged  TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -209,6 +308,33 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .execute(pool)
             .await
             .context("adding the column that says whether a member is answering")?;
+    }
+
+    // And the two halves of a changeover, by the same rule and for the same
+    // reason — see [`Member::renewing_from`] and [`Member::acknowledged`].
+    //
+    // Both arriving null, which is what was true of every row before them: no
+    // member was in the middle of a renewal of its own, and none had
+    // acknowledged one of this device's. A database written by the stage that
+    // made the changeover and read by this one is a device that is owed every
+    // announcement it never made, which is the right answer to have arrived at.
+    for column in ["renewing_from", "acknowledged"] {
+        let there: Option<(String,)> =
+            sqlx::query_as("SELECT name FROM pragma_table_info('members') WHERE name = ?")
+                .bind(column)
+                .fetch_optional(pool)
+                .await
+                .with_context(|| format!("looking for the members table's {column} column"))?;
+
+        if there.is_none() {
+            // Interpolated rather than bound, because a column name is not a
+            // value and `ALTER TABLE` takes no parameters. The two names are
+            // written above rather than passed in from anywhere.
+            sqlx::query(&format!("ALTER TABLE members ADD COLUMN {column} TEXT"))
+                .execute(pool)
+                .await
+                .with_context(|| format!("adding the members table's {column} column"))?;
+        }
     }
 
     // The gate asks one question of this table on every call a member makes —
@@ -360,6 +486,25 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
         .with_context(|| format!("recording device {} as a member", linking.device))
 }
 
+/// One member row as the query hands it back, in the order the `SELECT` names the
+/// columns: the device, its name, its OS, the fingerprint it is keyed on, when it
+/// was last heard from, whether the last dial got through, what it is changing over
+/// from, and what it has acknowledged of this device.
+///
+/// Named because eight columns written out at the call site is a type nobody reads
+/// — and the two nullable ones at the end are exactly the pair it would be easiest
+/// to read the wrong way round.
+type Row = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    bool,
+    Option<String>,
+    Option<String>,
+);
+
 /// Every member, with the addresses each advertised in the order it advertised
 /// them.
 ///
@@ -369,8 +514,8 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
 /// hostname — a Windows and the WSL on it, which is the case the whole of
 /// cluster mode was written for.
 pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
-    let rows: Vec<(String, String, String, String, String, bool)> = sqlx::query_as(
-        "SELECT device, name, os, fingerprint, last_seen, reachable
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged
          FROM members
          ORDER BY name, device",
     )
@@ -397,16 +542,43 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     Ok(rows
         .into_iter()
         .map(
-            |(device, name, os, fingerprint, last_seen, reachable)| Member {
-                addresses: addresses.remove(&device).unwrap_or_default(),
-                device,
-                name,
-                os,
-                fingerprint,
-                last_seen,
-                reachable,
+            |(device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged)| {
+                Member {
+                    addresses: addresses.remove(&device).unwrap_or_default(),
+                    device,
+                    name,
+                    os,
+                    fingerprint,
+                    last_seen,
+                    reachable,
+                    renewing_from,
+                    acknowledged,
+                }
             },
         )
+        .collect())
+}
+
+/// Every member that has yet to say it holds the certificate with this
+/// fingerprint, which is the question a changeover asks.
+///
+/// **The whole rows rather than a count**, because both things that ask this
+/// want them: the announcement works down the list dialling each of them, and how
+/// many there are is that list's length. Two readings of one table would be two
+/// answers to *is the changeover over*.
+///
+/// A member that has acknowledged nothing is on the list, which is what a
+/// changeover starting finds and what a device that joined during one is — see
+/// [`Member::acknowledged`].
+pub async fn members_yet_to_acknowledge(
+    pool: &SqlitePool,
+    fingerprint: &str,
+) -> Result<Vec<Member>> {
+    Ok(members(pool)
+        .await
+        .context("reading which members have yet to acknowledge a certificate")?
+        .into_iter()
+        .filter(|member| member.acknowledged.as_deref() != Some(fingerprint))
         .collect())
 }
 
@@ -420,13 +592,22 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
 /// Asked of the table at every call rather than of anything held, so a member
 /// taken out of it is refused on the next one — a membership that was cached
 /// would be a device that went on being admitted after it was unlinked.
+///
+/// **Either of the two a member in the middle of a changeover has.** A device
+/// that has re-issued its certificate goes on presenting the outgoing one until
+/// the last of its own members has acknowledged the new one, so the certificate
+/// this end has just recorded for it is not the certificate it is calling with —
+/// see [`Member::renewing_from`]. Both get through, and the changeover costs no
+/// call.
 pub async fn member_holding(pool: &SqlitePool, fingerprint: &str) -> Result<bool> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT device FROM members WHERE fingerprint = ? LIMIT 1")
-            .bind(fingerprint)
-            .fetch_optional(pool)
-            .await
-            .context("asking whether a caller's certificate is a member's")?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT device FROM members WHERE fingerprint = ? OR renewing_from = ? LIMIT 1",
+    )
+    .bind(fingerprint)
+    .bind(fingerprint)
+    .fetch_optional(pool)
+    .await
+    .context("asking whether a caller's certificate is a member's")?;
 
     Ok(row.is_some())
 }
@@ -476,6 +657,166 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
     tx.commit()
         .await
         .with_context(|| format!("marking device {device} as answering nothing"))
+}
+
+/// Write down that a member has made its certificate again: the fingerprint to
+/// hold against its id from now on, and the one it is still presenting.
+///
+/// **Keyed by the id, which is what a renewal is *about*.** A device keeps its
+/// id for as long as its Data Directory lasts and it is the certificate that is
+/// renewed, so this is one member said again rather than a member leaving and
+/// another arriving — everything else in a cluster that names that device goes
+/// on naming it.
+///
+/// **Both fingerprints are written, because both are accepted.** The incoming
+/// one becomes what the row is keyed on; the one still going out is kept beside
+/// it, and every call that arrives under either gets through — see
+/// [`Member::renewing_from`] and [`member_holding`]. The far end switches only
+/// when the last of *its* members has acknowledged, and this device is in no
+/// position to know when that was.
+///
+/// **And the same call made twice writes the same two strings**, which it has to:
+/// an announcement whose answer went missing is announced again, and a second
+/// one that took the old fingerprint for a third certificate would leave a
+/// member refusing the device it had just recorded.
+///
+/// The name, the OS and the addresses are written afresh with them, for the
+/// reason [`record_member`] writes them afresh: every device advertises all of
+/// them on every exchange, and this is one. So is the moment, and so is the
+/// un-dimming — an announcement is an exchange that has just got through.
+///
+/// `false` is a renewal about a device this membership does not hold, which is
+/// nothing to write and nothing to fail: the caller has something to say about
+/// it and the row is the only thing that could have been changed.
+pub async fn record_renewal(pool: &SqlitePool, renewal: &Renewal) -> Result<bool> {
+    let mut tx = writing(pool, "recording a member's renewed certificate").await?;
+
+    let changed = sqlx::query(
+        "UPDATE members
+            SET name          = ?,
+                os            = ?,
+                fingerprint   = ?,
+                renewing_from = ?,
+                last_seen     = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                reachable     = 1
+          WHERE device = ?",
+    )
+    .bind(&renewal.name)
+    .bind(&renewal.os)
+    .bind(&renewal.incoming)
+    .bind(&renewal.presenting)
+    .bind(&renewal.device)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "recording the certificate device {} is changing over to",
+            renewal.device,
+        )
+    })?
+    .rows_affected();
+
+    if changed == 0 {
+        return Ok(false);
+    }
+
+    sqlx::query("DELETE FROM member_addresses WHERE device = ?")
+        .bind(&renewal.device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "clearing the addresses device {} was last advertising",
+                renewal.device,
+            )
+        })?;
+
+    for (position, address) in renewal.addresses.iter().enumerate() {
+        sqlx::query("INSERT INTO member_addresses (device, position, address) VALUES (?, ?, ?)")
+            .bind(&renewal.device)
+            .bind(position as i64)
+            .bind(address)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "recording the addresses device {} advertised",
+                    renewal.device,
+                )
+            })?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| {
+            format!(
+                "recording the certificate device {} is changing over to",
+                renewal.device,
+            )
+        })
+        .map(|()| true)
+}
+
+/// And let go of the certificate a member was changing over *from*, which is
+/// what meeting the new one says is safe.
+///
+/// **The only unambiguous sign that a changeover is over.** The far end presents
+/// the outgoing certificate until the last of its own members has acknowledged,
+/// and it tells nobody when that was — so what says it has stopped is a call or
+/// an answer that actually came under the new certificate.
+///
+/// Nothing is refused, and a member that was changing over from nothing is one
+/// that has already stopped. Left undone this costs nothing either: the
+/// certificate named runs out on its own, and an expired one is refused at the
+/// handshake.
+pub async fn changeover_over(pool: &SqlitePool, device: &str) -> Result<()> {
+    let mut tx = writing(pool, "letting go of a member's outgoing certificate").await?;
+
+    sqlx::query("UPDATE members SET renewing_from = NULL WHERE device = ?")
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("letting go of what device {device} was changing over from"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("letting go of what device {device} was changing over from"))
+}
+
+/// Write down that a member has said it holds *this* device's certificate with
+/// this fingerprint.
+///
+/// **What takes a member off the list a changeover is waiting on** — see
+/// [`members_yet_to_acknowledge`], which is the same fact read the other way
+/// round. Written when an announcement of the new fingerprint was answered,
+/// because the answer is the acknowledgement: nothing else says that a member
+/// holds a certificate.
+///
+/// The fingerprint rather than a flag, so that the next renewal needs nothing
+/// cleared: every member is holding the certificate before the one coming in,
+/// and a row saying so is a row that is owed the announcement.
+///
+/// Nothing is refused. A device that is not a member has nothing to acknowledge
+/// and no row to say so on.
+pub async fn renewal_acknowledged(
+    pool: &SqlitePool,
+    device: &str,
+    fingerprint: &str,
+) -> Result<()> {
+    let mut tx = writing(pool, "recording an acknowledged certificate").await?;
+
+    sqlx::query("UPDATE members SET acknowledged = ? WHERE device = ?")
+        .bind(fingerprint)
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("recording that device {device} holds this device's new certificate")
+        })?;
+
+    tx.commit().await.with_context(|| {
+        format!("recording that device {device} holds this device's new certificate")
+    })
 }
 
 /// Write down that `device` has yet to be told `telling` about `about`.

@@ -78,6 +78,7 @@ pub mod announcing;
 pub mod dialling;
 pub mod exchange;
 pub mod joining;
+pub mod renewing;
 pub mod unlinking;
 
 use std::net::SocketAddr;
@@ -344,6 +345,15 @@ pub fn router(
                     Router::new()
                         .route(unlinking::MEMBER, delete(unlinking::dropped))
                         .with_state(unlinking::Dropping {
+                            device: device.clone(),
+                            members: members.clone(),
+                            nudges: nudges.clone(),
+                        }),
+                )
+                .merge(
+                    Router::new()
+                        .route(renewing::CERTIFICATE, post(renewing::renewed))
+                        .with_state(renewing::Renewing {
                             device,
                             members: members.clone(),
                             nudges,
@@ -376,10 +386,11 @@ struct Answering {
 /// that reads as working code. So there is one call, and everything that goes
 /// through it is gated.
 ///
-/// Two routes on this listener so far, and they are one membership said both
-/// ways: the announcement in [`announcing`], which puts a device on this one's
-/// list, and the unlink in [`unlinking`], which takes one off it — with the
-/// renewal to follow them. It is public all the same, because
+/// Three routes on this listener, and they are one membership said three ways:
+/// the announcement in [`announcing`], which puts a device on this one's list,
+/// the unlink in [`unlinking`], which takes one off it, and the renewal in
+/// [`renewing`], which changes the certificate one of them stands under. It is
+/// public all the same, because
 /// the suite stands its own one-line route behind the real gate: what is being
 /// asked of the gate is which callers get *through* it, and the path no route
 /// answers is what tells a refusal from a miss.
@@ -495,24 +506,103 @@ impl Members {
     /// How many of them have yet to acknowledge `fingerprint`, which is the
     /// question a changeover asks — see [`crate::device::Changeover`].
     ///
-    /// **All of them, whatever the fingerprint is**, and now read off the rows
-    /// rather than off a number nobody wrote. An acknowledgement is a member
-    /// answering an announcement, the announcement is this stage's last task,
-    /// and there is nowhere yet to record one — so every member is owed, and a
-    /// membership with nobody in it owes nought. Nought is what completes a
-    /// changeover at the start that began it, which is what a Verkstead that
-    /// has never been linked to anything still does.
+    /// Nought is what completes a changeover at the start that began it, which
+    /// is what a Verkstead that has never been linked to anything does: a
+    /// membership with nobody in it owes nothing to anybody.
     ///
-    /// What the task that adds the announcement fills in is the other half:
-    /// this becomes the members that have not yet said they hold the new
-    /// fingerprint, and each acknowledgement takes one off the list.
-    pub(crate) async fn unacknowledged(&self, _fingerprint: &str) -> Result<usize> {
+    /// The length of the list below rather than a count of its own, because two
+    /// readings of one table would be two answers to *is the changeover over* —
+    /// and the thing that acts on this reads the list.
+    pub(crate) async fn unacknowledged(&self, fingerprint: &str) -> Result<usize> {
         match &self.recorded {
-            Recorded::InTheStore(pool) => verkstead_store::member_count(pool)
-                .await
-                .context("asking how many members are owed an announcement"),
-
+            // A stated membership holds no rows to acknowledge anything, so
+            // every one of them is owed — which is what the suite about the
+            // changeover stands on, and what was true of every member before
+            // there was anywhere to record an acknowledgement.
             Recorded::Stated(linked) => Ok(*linked),
+
+            Recorded::InTheStore(_) => Ok(self.yet_to_acknowledge(fingerprint).await?.len()),
+        }
+    }
+
+    /// And which of them they are, which is who the announcement of a renewed
+    /// certificate is made to — see
+    /// [`verkstead_store::members_yet_to_acknowledge`].
+    ///
+    /// A member that has acknowledged nothing is on this list, which is both a
+    /// changeover that has just begun and a device that joined in the middle of
+    /// one: what is recorded is what a member *has* said it holds, so a row
+    /// nobody has written an acknowledgement on is owed the telling rather than
+    /// quietly taken for told.
+    pub(crate) async fn yet_to_acknowledge(&self, fingerprint: &str) -> Result<Vec<Member>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                verkstead_store::members_yet_to_acknowledge(pool, fingerprint)
+                    .await
+                    .context("reading which members are owed an announcement of a certificate")
+            }
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Write down that a member has made its certificate again — see
+    /// [`verkstead_store::record_renewal`], which keeps the one it is still
+    /// presenting beside the one it is changing to.
+    ///
+    /// `false` is a renewal about a device this membership does not hold, which
+    /// is an unlink that arrived between the gate and this write rather than
+    /// anything to fail.
+    ///
+    /// A stated membership has no rows to renew. It is a number, and a suite
+    /// standing on one is asking about a changeover rather than about a member.
+    pub(crate) async fn renewing(&self, renewal: &verkstead_store::Renewal) -> Result<bool> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::record_renewal(pool, renewal)
+                .await
+                .with_context(|| {
+                    format!(
+                        "recording the certificate device {} is changing over to",
+                        renewal.device,
+                    )
+                }),
+
+            Recorded::Stated(_) => Ok(false),
+        }
+    }
+
+    /// And write down that a member has said it holds *this* device's new
+    /// certificate — see [`verkstead_store::renewal_acknowledged`].
+    ///
+    /// Which is what takes it off the list above, and so what a changeover is
+    /// worked off one member at a time by. The answer to the announcement is the
+    /// acknowledgement: nothing else says that a member holds a certificate.
+    pub(crate) async fn acknowledged(&self, device: &str, fingerprint: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                verkstead_store::renewal_acknowledged(pool, device, fingerprint)
+                    .await
+                    .with_context(|| {
+                        format!("recording that device {device} holds this device's certificate")
+                    })
+            }
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And let go of the certificate a member was changing over *from*, which is
+    /// what meeting the new one says is safe — see
+    /// [`verkstead_store::changeover_over`].
+    pub(crate) async fn changed_over(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::changeover_over(pool, device)
+                .await
+                .with_context(|| {
+                    format!("letting go of what device {device} was changing over from")
+                }),
+
+            Recorded::Stated(_) => Ok(()),
         }
     }
 

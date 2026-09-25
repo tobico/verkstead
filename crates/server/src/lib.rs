@@ -1764,6 +1764,36 @@ pub async fn run_on_keyed(
     let reading =
         device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
 
+    // And this device's cluster as something to *do* things to rather than to
+    // read: the Devices section's presses go through it, and so does the one thing
+    // in a cluster that nobody presses at all — the announcement of a certificate
+    // this start made again, below.
+    let devices = device::Devices::of(
+        device.clone(),
+        reading.clone(),
+        members.clone(),
+        joins.clone(),
+    );
+
+    // Which is where the changeover above is picked up. A start that re-issued the
+    // certificate owes every member the new fingerprint, and until they hold it
+    // the old one is what goes out — so without this the day this device began
+    // presenting the new one would be the day every link it holds stopped working
+    // (ADR-0020) — see [`device::Devices::announce_renewal`], which does nothing
+    // at all at every other start.
+    //
+    // **In a task rather than waited on**, and before the serve rather than after
+    // it: a member that is switched off costs a dial's patience apiece down its
+    // addresses, and a start that would not finish coming up until somebody's
+    // laptop had answered would be a changeover costing exactly the call it exists
+    // not to cost. The serve below never returns, so anything after it would never
+    // run.
+    tokio::spawn({
+        let devices = devices.clone();
+
+        async move { devices.announce_renewal().await }
+    });
+
     let app = router_with_ui(
         pool,
         config.releases(),
@@ -1803,12 +1833,7 @@ pub async fn run_on_keyed(
         // The browser cannot read the identity endpoint itself, that listener
         // presenting a certificate nothing but another Verkstead has a reason
         // to trust, so the answer is assembled over here as well.
-        device::Devices::of(
-            device.clone(),
-            reading.clone(),
-            members.clone(),
-            joins.clone(),
-        ),
+        devices,
         nudges.clone(),
     );
 
@@ -1818,10 +1843,11 @@ pub async fn run_on_keyed(
     // is the device they are both about — see [`peer`]. The member list it is
     // gated on is the rows above: a caller presenting a recorded certificate
     // reaches what a membership admits, and everything else is refused for not
-    // being a member's. There is nothing inside the gate yet — the routes a
-    // membership admits arrive with the tasks that need them — so what this
-    // build answers is the identity endpoint and the two routes a join is made
-    // of, which stand outside it because a join comes from a non-member.
+    // being a member's. Inside the gate is one membership said three ways — a
+    // device put on this one's list, one taken off it, and the certificate one of
+    // them stands under changed; outside it are the identity endpoint and the two
+    // routes a join is made of, which stand there because a join comes from a
+    // non-member.
     let peers = peer::router(device, reading, members, joins, nudges);
 
     // The workbench and the peer listener together, and on Windows the named

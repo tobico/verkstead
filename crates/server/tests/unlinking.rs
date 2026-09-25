@@ -665,5 +665,7 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         fingerprint: listening.device.fingerprint().to_owned(),
         last_seen: "2099-01-01T00:00:00Z".to_owned(),
         reachable: true,
+        renewing_from: None,
+        acknowledged: None,
     }
 }

@@ -647,17 +647,37 @@ Directory**: `device.pem`, which is what the **Peer Listener** presents, and
 `device.next.pem`, which is what is coming.
 **The outgoing one goes on being presented** until every member has
 acknowledged the new fingerprint, so a changeover never costs a call — what a
-member holds is what it is answered with. A member that was unreachable is
-announced to again when it next answers, and one that never answers is a member
-the human unlinks anyway.
+member holds is what it is answered with.
+**Every member is told over the link this device already holds**, presenting the
+outgoing certificate, because that is the only one any of them holds and so the
+only one that gets through a **Member Gate**. A member records the new
+fingerprint against the same **Device Id** and answers, and that answer is the
+acknowledgement — one member fewer to wait on. Nobody over there confirms
+anything: the call arrives down a link that device verified, and the id it
+arrives under is one its human allowed once already.
+**And a member holds both certificates while one is in flight.** The incoming
+fingerprint is what its row is keyed on from then, and the outgoing one is kept
+beside it and goes on being accepted — a member that let go the moment it
+acknowledged would be refusing the device it had just acknowledged, for as long
+as the last machine in the cluster stayed switched off. It lets go of the old one
+when it meets the new, that being the only unambiguous sign the far end has
+stopped presenting it.
+**The last acknowledgement completes it**: the new certificate is written over
+the old and the file it was waiting in goes — by the same path a re-issue with
+nobody to tell takes at the start that began it. What a running process presents
+does not change then; the next start reads the file, and every member has both by
+then.
+**A member that was unreachable is owed the telling**, on the one record a join
+and an unlink are owed on, and is told by the next call that gets through to it —
+which is also when the changeover it was holding up finishes. One that never
+answers leaves it in flight rather than failing anything, and is a member the
+human unlinks; that press is what lets the changeover finish.
 **Both fingerprints are printable while one is in flight**, on a startup line
 of its own, because that is the only way anybody tells which of the two a peer
 met.
 **With no member there is nobody to announce to**, and then it completes at the
-start that began it: the new certificate is written over the old, the file it
-was waiting in goes, and the line says it had nobody to tell. Which is every
-re-issue a Verkstead of this build can make — a member is made by a join, and
-the join is the linking stage's.
+start that began it, and the line says it had nobody to tell. Which is every
+re-issue on a Verkstead that has never been linked to anything.
 **A device keeps its id through one.** It is the certificate that is renewed —
 the **Device Id** was invented once and lasts as long as the **Data Directory**
 does.
@@ -780,9 +800,18 @@ what two machines agreed between themselves.
 and its addresses first, then the LAN — because a peer dials them in the order
 the far end advertised them, and the address typed at link time is only the
 first one ever known.
+**And a Changeover puts two more things on the row, one for each direction it
+runs in.** What that member is changing over *from* is a second fingerprint this
+device goes on accepting, because a device in the middle of one presents the
+certificate it was presenting until the last of *its* members has acknowledged —
+so both get through the **Member Gate** and both satisfy a dial. And what it has
+*acknowledged* is the fingerprint of this device's own certificate it last said it
+holds, which is what this device's changeover counts: a positive record rather
+than the absence of a debt, because a device that joined in the middle of one has
+no debt and has heard nothing.
 **Three things read it**: the **Member Gate**, which asks whether a caller's
-certificate is a member's; the **Changeover**, which asks how many are owed an
-announcement of a new fingerprint; and **Devices**, which draws a row apiece.
+certificate is a member's; the **Changeover**, which asks which of them have yet
+to acknowledge a new fingerprint; and **Devices**, which draws a row apiece.
 Each asks at the moment it asks — a membership read once and held would be a
 device that went on being admitted after the human unlinked it.
 _Avoid_: peer (which is what a device is to another device), linked device,

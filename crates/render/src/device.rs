@@ -97,6 +97,39 @@ pub struct DeviceIdentity {
     pub addresses: Vec<String>,
 }
 
+/// What a device tells each of its members when it has made its certificate
+/// again (ADR-0020, *The certificate is renewed before it runs out*).
+///
+/// **Not a viewer type.** This one crosses the peer listener rather than the
+/// workbench — it is one Verkstead telling another what it is becoming, and no
+/// browser ever reads it.
+///
+/// **The identity whole, and the incoming fingerprint beside it.** A renewal is
+/// the one call in a cluster where a device has two certificates at once, and
+/// the two have to be told apart by the machine reading this or the reading is
+/// worthless. So [`DeviceIdentity`] keeps the meaning it has everywhere else —
+/// the fingerprint in it is the certificate this call was *made* under, which
+/// the receiver checks against what its own handshake handed over, exactly as it
+/// would on any other exchange — and the one being changed to is a field of its
+/// own. A single fingerprint field that meant something different here would be
+/// a payload the receiver had to know which call it had arrived on to read.
+///
+/// **And the addresses ride along**, because every device advertises all of them
+/// on every exchange and this is one: a laptop that moved and renewed is reached
+/// at its new addresses on the next call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewedCertificate {
+    /// What this device is, as it answers anybody — with the certificate it is
+    /// still *presenting* named in it, which over a changeover is the outgoing
+    /// one.
+    pub identity: DeviceIdentity,
+
+    /// And the fingerprint of the certificate it is changing over to: what the
+    /// receiver records against the same Device Id, and what it answers to say
+    /// that it holds.
+    pub incoming: String,
+}
+
 /// The **Devices** list, as the Remote access pane reads it off this machine.
 ///
 /// The other side of [`DeviceIdentity`]: that one is what this device tells a

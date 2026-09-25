@@ -108,9 +108,10 @@ pub use joins::{
     held_joins, hold_join, let_go_of_expired_joins, let_go_of_join, refuse_asked_join,
 };
 pub use members::{
-    Linking, Member, Telling, announcement_made, announcements_owed, announcements_owed_to,
-    forget_every_member, forget_member, member_count, member_holding, member_unreachable, members,
-    owe_announcement, record_member,
+    Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
+    announcements_owed_to, changeover_over, forget_every_member, forget_member, member_count,
+    member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
+    record_member, record_renewal, renewal_acknowledged,
 };
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;

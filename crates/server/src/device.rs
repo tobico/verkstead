@@ -49,11 +49,14 @@
 //! acknowledged its fingerprint, so a re-issue never costs a call; with no
 //! member to acknowledge anything the changeover completes at the start that
 //! began it, and says it had nobody to tell. How many are owed is read off the
-//! members this device keeps — see [`Members`]; the announcement that takes
-//! them off that list one at a time is still to come, so every member there is
-//! is owed. The announcement of a *newcomer* is here already — see
-//! [`Devices::allow`] — and the record of what a member has yet to be told is
-//! the one the renewal will be taken off.
+//! members this device keeps — see [`Members`] — and the telling that works that
+//! list off one member at a time is [`Devices::announce_renewal`], made
+//! presenting the outgoing certificate because that is the only one any member
+//! holds. The last acknowledgement finishes the changeover, by the same two
+//! writes the start that had nobody to tell makes — see
+//! [`Device::changed_over`]. A member that was switched off is owed the telling
+//! on the record a newcomer and an unlink are owed on, and is told by the next
+//! dial that gets through to it — see [`Devices::caught_up`].
 //!
 //! **And [`Devices`] is what the human's own browser reads of all this**: this
 //! device and every other device in its cluster, a row apiece, which is the
@@ -74,7 +77,9 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView, JoinSettled};
+use verkstead_render::{
+    AskingDevice, DeviceIdentity, DevicesView, JoinSettled, RenewedCertificate,
+};
 use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
@@ -165,10 +170,9 @@ pub const RENEW_WITHIN: time::Duration = time::Duration::days(30);
 /// What a start did about the expiry: whether a re-issue was due, and whether
 /// anybody is owed an announcement of the certificate it made (ADR-0020).
 ///
-/// Read off the handle rather than logged and forgotten, because it is where
-/// the linking stage picks the announcement up: a changeover still owed one is
-/// a changeover with a member to tell, and telling them is the whole of what
-/// that stage adds to what is here.
+/// Read off the handle rather than logged and forgotten, because it is where the
+/// announcement is picked up: a changeover still owed one is a changeover with a
+/// member to tell, and [`Devices::announce_renewal`] is what tells them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Changeover {
     /// Nothing was due: the certificate has more than [`RENEW_WITHIN`] left, so
@@ -452,15 +456,11 @@ impl Device {
             .map_err(|why| std::io::Error::other(format!("{why:#}")))?
         {
             // Nobody is owed an announcement, so the changeover completes at
-            // once: the new certificate becomes the presented one and the file
-            // it was waiting in goes. In that order, so that a machine losing
-            // power between the two leaves a start holding two copies of one
-            // certificate rather than none — which is a changeover that
-            // completes again and comes out where this one did.
+            // once — by the same two writes the last acknowledgement makes, this
+            // being one path rather than two things that have to stay in step:
+            // see [`Device::changed_over`].
             0 => {
-                write_atomically(&self.certificate_path(), &incoming.certificate, DEVICE_MODE)?;
-
-                taken_away(&self.incoming_path())?;
+                self.changed_over(&incoming)?;
 
                 Ok(Device {
                     presenting: incoming,
@@ -485,6 +485,51 @@ impl Device {
                     ..self
                 })
             }
+        }
+    }
+
+    /// The changeover finished, on disk: the certificate that was waiting becomes
+    /// the one this Data Directory holds, and the file it was waiting in goes.
+    ///
+    /// **In that order**, so that a machine losing power between the two leaves a
+    /// start holding two copies of one certificate rather than none — which is a
+    /// changeover that completes again and comes out where this one did. Taking
+    /// the file away counts one that is already gone as taken away, for the same
+    /// reason.
+    ///
+    /// **Two callers and one path.** A re-issue with nobody to tell finishes at
+    /// the start that began it — see [`Device::renewed`] — and one with members
+    /// finishes at the last acknowledgement, in
+    /// [`Devices::changeover_settled`]. They are the same two writes, so they are
+    /// the same function: a second copy of them beside this one would be two
+    /// changeovers that ended in subtly different states.
+    ///
+    /// **What it does *not* do is change what this process presents.** The
+    /// certificate a running listener stands behind was built into its TLS
+    /// configuration at the start, and the handle every dial is made with is a
+    /// clone of this one — so a changeover that completes under a running server
+    /// goes on presenting the outgoing certificate until the next start, which is
+    /// where this file is read. That costs nothing: every member holds both by
+    /// then, having acknowledged the new one and kept the old beside it precisely
+    /// against this — see [`verkstead_store::Member::renewing_from`] — and it is
+    /// what keeps a completing changeover from having to rebuild a listener and a
+    /// client under live traffic.
+    fn changed_over(&self, incoming: &Held) -> std::io::Result<()> {
+        write_atomically(&self.certificate_path(), &incoming.certificate, DEVICE_MODE)?;
+
+        taken_away(&self.incoming_path())
+    }
+
+    /// The same, for the changeover that finishes while this process is running:
+    /// the last member has acknowledged, so the certificate waiting in
+    /// [`INCOMING_FILE`] is the one this Data Directory holds from now on.
+    ///
+    /// Nothing at all where no changeover is in flight, which is a caller that
+    /// counted nobody owed on a device that never re-issued anything.
+    pub(crate) fn changeover_complete(&self) -> std::io::Result<()> {
+        match &self.incoming {
+            Some(incoming) => self.changed_over(incoming),
+            None => Ok(()),
         }
     }
 
@@ -854,17 +899,7 @@ impl Devices {
         // about itself.
         let introducer = self.reading.identity(&self.device).await;
         let already = self.members.rows().await?;
-        let members = already
-            .iter()
-            .cloned()
-            .map(|member| DeviceIdentity {
-                device: member.device,
-                fingerprint: member.fingerprint,
-                name: member.name,
-                os: member.os,
-                addresses: member.addresses,
-            })
-            .collect();
+        let members = already.iter().map(presenting).collect();
 
         self.members
             .refreshed(&Linking {
@@ -930,6 +965,15 @@ impl Devices {
         )
         .await;
 
+        // And where this device is in the middle of a changeover of its own, the
+        // newcomer is one more member that has not acknowledged the certificate
+        // coming in — it has just met the one going out and written *that* down,
+        // which is the only one it could have met. Told here rather than left for
+        // the next start, because until it holds both it is a member the
+        // changeover is waiting on and the whole cluster would be waiting with it.
+        // Nothing at all where no changeover is in flight, which is every join.
+        self.announce_renewal().await;
+
         Ok(())
     }
 
@@ -991,6 +1035,181 @@ impl Devices {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// Tell every member that has yet to acknowledge it about the certificate
+    /// this device is changing over to, and finish the changeover if that was the
+    /// last of them (ADR-0020, *The certificate is renewed before it runs out*).
+    ///
+    /// **Run at a start, because a start is when a certificate is made again.**
+    /// The re-issue happens as the identity is read — see [`Device::renewed`] —
+    /// and this is the other half of it: without the telling, the day this device
+    /// began presenting the new certificate would be the day every link it holds
+    /// stopped working, which is the failure the whole changeover exists to
+    /// prevent. Nothing at all where no changeover is in flight, which is all but
+    /// one start in a certificate's life.
+    ///
+    /// **A task of its own rather than something the start waits on.** A member
+    /// that is switched off costs a dial's patience apiece down its addresses, and
+    /// a Verkstead that would not finish coming up until somebody's laptop had
+    /// been answered for would be a changeover costing exactly what it is for.
+    ///
+    /// **Made presenting the outgoing certificate**, which is not a choice: it is
+    /// the only one of the two any member holds, so it is the only one that gets
+    /// through a member's gate — see [`Peers::announce_renewal`].
+    ///
+    /// **And a member that could not be told is owed the telling**, exactly as one
+    /// that could not be told about a newcomer or an unlink is, on the same record
+    /// and in the same words — see [`Devices::caught_up`], which is what pays it
+    /// the moment that member is found answering. Nothing here retries and nothing
+    /// here fails: a machine that never answers leaves the changeover in flight,
+    /// the old certificate going out, and the startup line naming both
+    /// fingerprints, which is a device the human unlinks.
+    pub async fn announce_renewal(&self) {
+        let Some(incoming) = self.device.incoming_fingerprint() else {
+            return;
+        };
+
+        let owed = match self.members.yet_to_acknowledge(incoming).await {
+            Ok(owed) => owed,
+
+            Err(why) => {
+                tracing::error!(%why, "which members are owed a new fingerprint could not be read");
+
+                return;
+            }
+        };
+
+        if owed.is_empty() {
+            // Which is a changeover the start that read the identity already
+            // finished, or one this start found nobody owed: either way there is
+            // nothing to tell and nothing to settle.
+            return;
+        }
+
+        tracing::info!(
+            fingerprint = %incoming,
+            owed = owed.len(),
+            "telling the members that have yet to hold this device's new certificate",
+        );
+
+        let saying = self.renewing(incoming).await;
+
+        for member in &owed {
+            match self.peers.announce_renewal(member, &saying).await {
+                Ok(()) => self.acknowledged(member, incoming).await,
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        "a member could not be told this device's certificate has been made \
+                         again, so it is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, self.device.id(), Telling::Renewed)
+                        .await
+                    {
+                        tracing::error!(
+                            %why,
+                            "a renewal that was not announced could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
+
+        self.changeover_settled().await;
+    }
+
+    /// What an announcement of the renewal carries: this device as it answers
+    /// anybody, and the fingerprint of the certificate it is changing to.
+    ///
+    /// The identity keeps the meaning it has everywhere else — the fingerprint in
+    /// it is the certificate this call is *made* under, which the receiver checks
+    /// against its own handshake exactly as it would on any other exchange — and
+    /// the incoming one is beside it. See
+    /// [`verkstead_render::RenewedCertificate`].
+    async fn renewing(&self, incoming: &str) -> RenewedCertificate {
+        RenewedCertificate {
+            identity: self.reading.identity(&self.device).await,
+            incoming: incoming.to_owned(),
+        }
+    }
+
+    /// Write down that `member` holds the certificate coming in, and clear the
+    /// debt that said it did not.
+    ///
+    /// Both, because they are one fact told to the two things that ask after it:
+    /// the changeover counts what a member has acknowledged, and a member coming
+    /// back after a week reads what it is owed. And a member that is answering has
+    /// earned the rest of what it missed, which is the third thing here.
+    async fn acknowledged(&self, member: &verkstead_store::Member, incoming: &str) {
+        tracing::info!(
+            device = %member.device,
+            fingerprint = %incoming,
+            "a member holds this device's new certificate",
+        );
+
+        if let Err(why) = self.members.acknowledged(&member.device, incoming).await {
+            tracing::error!(%why, "an acknowledgement that was given could not be written down");
+        }
+
+        if let Err(why) = self.members.told(&member.device, self.device.id()).await {
+            tracing::error!(%why, "an announcement that was made could not be cleared as made");
+        }
+
+        self.caught_up(member).await;
+    }
+
+    /// And finish the changeover where the last member has acknowledged: the
+    /// certificate that was waiting becomes the one this Data Directory holds, and
+    /// the file it was waiting in goes.
+    ///
+    /// **By the same path a re-issue with nobody to tell takes at the start that
+    /// began it** — see [`Device::changed_over`]. One changeover ends one way.
+    ///
+    /// **What it does not do is switch what this process presents.** The listener
+    /// stands behind the certificate it was built with and every dial is made with
+    /// a clone of the handle that was read at the start, so the outgoing one goes
+    /// on going out until the next start reads the file this just wrote. Which
+    /// costs nothing, because every member has acknowledged the new one and kept
+    /// the old beside it for exactly this — a member that had let go of it the
+    /// moment it acknowledged would be a member refusing the device it had just
+    /// acknowledged, for as long as the last machine in the cluster stayed
+    /// switched off.
+    async fn changeover_settled(&self) {
+        let Some(incoming) = self.device.incoming_fingerprint() else {
+            return;
+        };
+
+        match self.members.unacknowledged(incoming).await {
+            Ok(0) => match self.device.changeover_complete() {
+                Ok(()) => tracing::info!(
+                    fingerprint = %incoming,
+                    "every member holds this device's new certificate, so the changeover is \
+                     over and the next start presents it",
+                ),
+
+                Err(why) => tracing::error!(
+                    %why,
+                    "the changeover could not be finished, so the next start finishes it",
+                ),
+            },
+
+            Ok(owed) => tracing::info!(
+                fingerprint = %incoming,
+                owed,
+                "this device's certificate is still changing over, so the old one goes on \
+                 going out",
+            ),
+
+            Err(why) => {
+                tracing::error!(%why, "how many members are owed a new fingerprint could not be read")
             }
         }
     }
@@ -1089,6 +1308,13 @@ impl Devices {
             }
         }
 
+        // And the device that has just gone may have been the one a changeover was
+        // waiting on — which is the case the changeover has no other answer to: a
+        // machine that never comes back is announced to for ever otherwise, and
+        // what the task file says about it is that the human unlinks it. So this is
+        // where that press finishes the changeover it was holding up.
+        self.changeover_settled().await;
+
         Ok(())
     }
 
@@ -1102,11 +1328,20 @@ impl Devices {
     /// all, so a device whose members are all quiet is a device with nothing
     /// owed that matters yet.
     ///
-    /// **Whichever of the two it is**, because a member that was away for a
-    /// week may have missed a join and an unlink both — see
-    /// [`verkstead_store::Telling`]. A join is said again out of this device's
-    /// own membership, which is where the newcomer's addresses and certificate
-    /// are; a removal carries nothing but the id.
+    /// **Whichever of the three it is**, because a member that was away for a
+    /// week may have missed a join, an unlink and a renewal all — see
+    /// [`verkstead_store::Telling`], and the reason those are one record rather
+    /// than three. A join is said again out of this device's own membership, which
+    /// is where the newcomer's addresses and certificate are; a removal carries
+    /// nothing but the id; and a renewal is this device's own changeover, which is
+    /// read off the handle rather than off a row — a debt naming a changeover this
+    /// device is no longer in the middle of is nothing left to say.
+    ///
+    /// **And a renewal paid here is what finishes a changeover for a member that
+    /// was switched off.** The acknowledgement is the answer to the call, so the
+    /// member that has just come back may have been the last one owed — which is
+    /// the moment the certificate that has been waiting becomes this device's, and
+    /// nothing but a dial getting through was ever going to say so.
     ///
     /// **And a member that stops answering part way through keeps the rest.**
     /// The walk stops at the first telling that did not get through, so what is
@@ -1141,9 +1376,44 @@ impl Devices {
             }
         };
 
+        // Whether one of the debts paid below was a renewal, which is the one of
+        // the three that leaves something to settle afterwards: the member that
+        // has just come back may have been the last one the changeover was
+        // waiting on.
+        let mut renewed = false;
+
         for (about, telling) in owed {
             let said = match telling {
                 Telling::Removed => self.peers.unlink(member, &about).await,
+
+                // This device's own changeover, read off the handle rather than
+                // out of a row — the certificate coming in is a file in the Data
+                // Directory and not a thing any membership holds. A debt naming a
+                // changeover that is over is nothing left to say, and the telling
+                // below takes it away.
+                Telling::Renewed => match self.device.incoming_fingerprint() {
+                    None => Ok(()),
+
+                    Some(incoming) => {
+                        let saying = self.renewing(incoming).await;
+                        let said = self.peers.announce_renewal(member, &saying).await;
+
+                        if said.is_ok() {
+                            renewed = true;
+
+                            if let Err(why) =
+                                self.members.acknowledged(&member.device, incoming).await
+                            {
+                                tracing::error!(
+                                    %why,
+                                    "an acknowledgement that was given could not be written down",
+                                );
+                            }
+                        }
+
+                        said
+                    }
+                },
 
                 Telling::Joined => {
                     let Some(newcomer) = held.iter().find(|held| held.device == about) else {
@@ -1155,18 +1425,7 @@ impl Devices {
                         continue;
                     };
 
-                    self.peers
-                        .announce(
-                            member,
-                            &DeviceIdentity {
-                                device: newcomer.device.clone(),
-                                fingerprint: newcomer.fingerprint.clone(),
-                                name: newcomer.name.clone(),
-                                os: newcomer.os.clone(),
-                                addresses: newcomer.addresses.clone(),
-                            },
-                        )
-                        .await
+                    self.peers.announce(member, &presenting(newcomer)).await
                 }
             };
 
@@ -1191,6 +1450,13 @@ impl Devices {
             if let Err(why) = self.members.told(&member.device, &about).await {
                 tracing::error!(%why, "a telling that was made could not be cleared as made");
             }
+        }
+
+        // And where one of them was a renewal, the changeover may have just had
+        // its last acknowledgement — which is the whole of what it was waiting on,
+        // and what a member coming back after a week finishes.
+        if renewed {
+            self.changeover_settled().await;
         }
     }
 
@@ -1236,6 +1502,40 @@ impl Devices {
         }
 
         Ok(())
+    }
+}
+
+/// A member as it is described to another device: what it said about itself, with
+/// **the certificate it is presenting** rather than the one this device has
+/// recorded against it.
+///
+/// **Those are two different strings for exactly as long as that member is in the
+/// middle of a changeover of its own.** A device that has re-issued its
+/// certificate presents the outgoing one until the last of its own members has
+/// acknowledged the new one, so the fingerprint a row is keyed on can be a
+/// certificate nothing on that machine is offering yet — see
+/// [`verkstead_store::Member::renewing_from`], which is the one it *is* offering.
+///
+/// And a roster or an announcement is read by a device that has met neither: what
+/// it does with this is complete a handshake against it. Handed the one that is
+/// not being presented, a newcomer would hold a fingerprint that refused every
+/// call the device it names made, until that device restarted — where handed the
+/// one going out it can talk at once, and the renewal is announced to it like any
+/// other member's, because it has acknowledged nothing.
+///
+/// One function rather than the mapping written at each place that hands a member
+/// over, because it is one judgement and the places are two: the roster an Allow
+/// hands to a newcomer, and the announcement made to each member about it.
+fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
+    DeviceIdentity {
+        device: member.device.clone(),
+        fingerprint: member
+            .renewing_from
+            .clone()
+            .unwrap_or_else(|| member.fingerprint.clone()),
+        name: member.name.clone(),
+        os: member.os.clone(),
+        addresses: member.addresses.clone(),
     }
 }
 
