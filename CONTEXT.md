@@ -712,6 +712,61 @@ its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Join**:
+One **Device** asking another to let it into its cluster, and the whole of what
+follows the press on **Add**. The asking device dials the address somebody
+typed, takes whatever certificate that address presents for the one call, and
+posts what it is — its **Device Id**, that certificate's fingerprint, and its
+**Device Reading**. The device asked writes the question down, pinning the
+certificate the handshake took from the caller, and asks its human: a modal in
+every open workbench, and a push to every phone. The asking device is left a
+**pending row** reading *waiting for confirmation on* that device, with **its
+own** fingerprint under it — the same string the modal over there draws, so
+that two people at two screens compare one certificate by eye — and a Cancel.
+**Held for ten minutes, written down as the moment it runs out at** rather than
+as a length, so a restart inside them is a question still being held rather than
+ten fresh minutes. Both sides keep a row, and the two are not one record: one
+knows the address that was typed and the certificate it met, the other the whole
+of what a stranger said about itself.
+**The certificate pinned into the request is what everything after it is matched
+against**, which is why the post may stand outside the **Member Gate** without
+being un-authenticated: the cancel has to come under it, and so does the
+**Exchange** that answers it.
+**A join asks for a membership rather than taking one.** Nothing is agreed while
+the row is drawn — it is not a **Member** and does not count as one — and a
+device turned away is free to ask again, a cluster being a membership rather
+than a list of verdicts.
+_Avoid_: pairing, invitation, handshake (which is the TLS one), link request
+
+**Exchange**:
+How a **Join** ends: the device that was asked dials the device that asked it,
+at the addresses that device advertised and pinned on the certificate the
+request is holding, and says what came of the question.
+**On Allow it hands over the roster** — itself and every **Member** it holds, in
+the one call — and the asking device checks the certificate it is dialled under
+is the one it met when it posted, then records the lot. A member arriving that
+way needs no press of its own: it came over a link that has just been proved
+against a certificate this device pinned itself, which is the same vouching that
+lets the introducer announce the newcomer to each of them. The roster is one
+shape whatever the cluster's size — empty beside the introducer in a cluster of
+two — so that a newcomer is never half linked while some second call is made.
+**On Deny it says so**, and the pending row reads *refused* until it is
+dismissed. The ADR spelled the dial back out on an Allow and left this one; the
+human settled that a refusal comes back the same way, without it the asking
+device reading *waiting* until somebody over there gets bored. **An expiry is
+told the same way and records nothing**: the moment it is about is already
+written on the asking device's own row, so what that call is worth is the row
+redrawing as it happens — and one that never arrives costs nothing, the clock
+reaching the same answer alone.
+**It is the third route outside the Member Gate and the last of them.** It
+arrives before the asking device has recorded anybody, so it cannot be a
+member's call; what stands in the gate's place is the request — its certificate
+and its ten minutes — and a call failing either is refused with nothing written.
+**A dial back that reaches nobody does not undo the press.** The human pressed
+Allow and the device is a member for it; what is left over there is a row that
+runs out and an **Add** to press again.
+_Avoid_: the callback, the confirmation call, the handshake, the reply
+
 **Member**:
 A **Device** this one is linked to, as a row this one keeps: its **Device Id**,
 the name and the OS and the addresses it last advertised, the fingerprint of the

@@ -83,6 +83,16 @@ pub struct AskedJoin {
     /// request: a row here that read *waiting* after that moment would be a
     /// Cancel pressed on something there is no longer anything to cancel.
     pub expires_at: String,
+
+    /// And whether the far end has come back and said no.
+    ///
+    /// **Written by the dial back rather than reckoned here**, which is the
+    /// whole of why it is a column at all: an expiry is a moment this end can
+    /// read off `expires_at` for itself, and a refusal is a press on the other
+    /// machine that nothing over here could ever work out. The row stays drawn
+    /// either way — somebody pressed Add and is owed the answer — and the same
+    /// Dismiss that clears one clears the other.
+    pub refused: bool,
 }
 
 /// And a join this device is holding: the whole of what a stranger said about
@@ -133,12 +143,35 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              name        TEXT NOT NULL,
              fingerprint TEXT NOT NULL,
              asked_at    TEXT NOT NULL,
-             expires_at  TEXT NOT NULL
+             expires_at  TEXT NOT NULL,
+             refused     INTEGER NOT NULL DEFAULT 0
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the table of joins this device has asked for")?;
+
+    // And whether the far end said no, through `ALTER TABLE` as well as in the
+    // declaration above — the rule `members::apply_schema` follows beside it,
+    // for its reason: a database made this morning and one written before the
+    // dial back existed take the same path and end with the same shape.
+    //
+    // Arriving false, which is what was true of every row written before it: a
+    // request made when nothing could come back was a request nobody had
+    // refused.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('joins_asked') WHERE name = ?")
+            .bind("refused")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column that says whether a join was refused")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE joins_asked ADD COLUMN refused INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await
+            .context("adding the column that says whether a join was refused")?;
+    }
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS joins_held (
@@ -180,8 +213,8 @@ pub async fn ask_join(pool: &SqlitePool, asked: &AskedJoin) -> Result<()> {
 
     sqlx::query(
         "INSERT INTO joins_asked
-             (request, address, device, name, fingerprint, asked_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (request, address, device, name, fingerprint, asked_at, expires_at, refused)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&asked.request)
     .bind(&asked.address)
@@ -190,6 +223,7 @@ pub async fn ask_join(pool: &SqlitePool, asked: &AskedJoin) -> Result<()> {
     .bind(&asked.fingerprint)
     .bind(&asked.asked_at)
     .bind(&asked.expires_at)
+    .bind(asked.refused)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("writing down the join asked of {}", asked.address))?;
@@ -199,11 +233,31 @@ pub async fn ask_join(pool: &SqlitePool, asked: &AskedJoin) -> Result<()> {
         .with_context(|| format!("writing down the join asked of {}", asked.address))
 }
 
+/// One row of `joins_asked` as both readings below select it: the columns in
+/// one order, so that what a row is made of is said once — see [`asking`].
+type AskedRow = (String, String, String, String, String, String, String, bool);
+
+/// And that row as an [`AskedJoin`].
+fn asking(
+    (request, address, device, name, fingerprint, asked_at, expires_at, refused): AskedRow,
+) -> AskedJoin {
+    AskedJoin {
+        request,
+        address,
+        device,
+        name,
+        fingerprint,
+        asked_at,
+        expires_at,
+        refused,
+    }
+}
+
 /// Every join this device is waiting on, oldest first — which is the order they
 /// were pressed in, and the order the pending rows are drawn in.
 pub async fn asked_joins(pool: &SqlitePool) -> Result<Vec<AskedJoin>> {
-    let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT request, address, device, name, fingerprint, asked_at, expires_at
+    let rows: Vec<AskedRow> = sqlx::query_as(
+        "SELECT request, address, device, name, fingerprint, asked_at, expires_at, refused
          FROM joins_asked
          ORDER BY asked_at, request",
     )
@@ -211,27 +265,14 @@ pub async fn asked_joins(pool: &SqlitePool) -> Result<Vec<AskedJoin>> {
     .await
     .context("listing the joins this device is waiting on")?;
 
-    Ok(rows
-        .into_iter()
-        .map(
-            |(request, address, device, name, fingerprint, asked_at, expires_at)| AskedJoin {
-                request,
-                address,
-                device,
-                name,
-                fingerprint,
-                asked_at,
-                expires_at,
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(asking).collect())
 }
 
 /// One of them by the name the far end gave it, or nothing where this device is
 /// waiting on no such thing.
 pub async fn asked_join(pool: &SqlitePool, request: &str) -> Result<Option<AskedJoin>> {
-    let row: Option<(String, String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT request, address, device, name, fingerprint, asked_at, expires_at
+    let row: Option<AskedRow> = sqlx::query_as(
+        "SELECT request, address, device, name, fingerprint, asked_at, expires_at, refused
          FROM joins_asked
          WHERE request = ?",
     )
@@ -240,17 +281,30 @@ pub async fn asked_join(pool: &SqlitePool, request: &str) -> Result<Option<Asked
     .await
     .with_context(|| format!("reading the join asked under {request}"))?;
 
-    Ok(row.map(
-        |(request, address, device, name, fingerprint, asked_at, expires_at)| AskedJoin {
-            request,
-            address,
-            device,
-            name,
-            fingerprint,
-            asked_at,
-            expires_at,
-        },
-    ))
+    Ok(row.map(asking))
+}
+
+/// Mark one of them as refused by the device it was asked of.
+///
+/// **What the dial back leaves behind on a Deny.** The row is not taken away:
+/// somebody pressed Add and is owed the answer that the human at the other
+/// machine said no, and it is the press on Dismiss that clears it — the stance
+/// an expired row is drawn under, for its reason.
+///
+/// Nothing is refused here either. A request this device is no longer waiting
+/// on is one it has already stopped waiting on, and saying so changes nothing.
+pub async fn refuse_asked_join(pool: &SqlitePool, request: &str) -> Result<()> {
+    let mut tx = writing(pool, "writing down that a join was refused").await?;
+
+    sqlx::query("UPDATE joins_asked SET refused = 1 WHERE request = ?")
+        .bind(request)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("writing down that the join asked under {request} was refused"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("writing down that the join asked under {request} was refused"))
 }
 
 /// Take a join this device asked for off its own list, which is what Cancel and

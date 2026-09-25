@@ -40,9 +40,11 @@
 //! the join post, which comes from a non-member by definition and whose
 //! certificate is pinned into the pending request it creates; and the dial-back
 //! answering a join, matched against the certificate that pending request is
-//! holding. The first two are here — see [`joining`], which carries the post and
-//! the cancel that takes a question back, both of them matched against that same
-//! pinned certificate — and the dial-back is still to come. [`gate`] stands over
+//! holding. The first two are [`joining`]'s — the post and the cancel that takes
+//! a question back, both matched against that same pinned certificate — and the
+//! third is [`exchange`]'s, answered by the device that *asked* rather than by
+//! the one that was. That list is closed: everything the stages after this one
+//! put on this listener is a member's own call. [`gate`] stands over
 //! everything else — asking [`Members`] of every caller,
 //! which is rows now rather than a number nobody wrote. The refusal says what
 //! it is: a caller this device holds no membership for, rather than a path that
@@ -73,6 +75,7 @@
 //! and every address that row carries tried in the order it was advertised.
 
 pub mod dialling;
+pub mod exchange;
 pub mod joining;
 
 use std::net::SocketAddr;
@@ -265,14 +268,17 @@ impl Listener {
 /// Everything this listener answers: the un-gated surface, with everything
 /// else behind [`gate`].
 ///
-/// Three routes stand outside it. The identity endpoint, which is nobody's,
-/// which is why a device nothing has heard of can read it; the join post, which
-/// comes from a device this one holds no membership for, that being what a join
-/// is; and the cancel that takes a join back, which comes from the same device
-/// and is matched against the same pinned certificate — see [`joining`]. The
-/// dial-back that answers an Allow comes out here beside them in the task that
-/// adds it. A member's relayed traffic goes the other way, inside
-/// [`members_only`] with the gate over it.
+/// Three routes stand outside it, and they are the whole of the un-gated
+/// surface. The identity endpoint, which is nobody's, which is why a device
+/// nothing has heard of can read it; the join post, which comes from a device
+/// this one holds no membership for, that being what a join is — and the cancel
+/// beside it, which is that same post's own request taken back under the same
+/// pinned certificate rather than a surface of its own (see [`joining`]); and
+/// the dial back that answers one, which arrives before this device has
+/// recorded anybody and is matched against the request it is answering — see
+/// [`exchange`]. Nothing grows that list afterwards: a member's relayed traffic
+/// goes the other way, inside [`members_only`] with the gate over it, and so
+/// does every call the stages after this one add.
 ///
 /// **What is not a route is refused rather than missed**, because the gate is
 /// the fallback: a path nothing here answers is one this caller has no
@@ -302,8 +308,23 @@ pub fn router(
                 .route(joining::JOIN, post(joining::join))
                 .route(joining::CANCEL, post(joining::cancel))
                 .with_state(joining::Holding {
-                    device,
+                    device: device.clone(),
                     reading,
+                    joins: joins.clone(),
+                    nudges: nudges.clone(),
+
+                    // How a question that nobody answered tells the device that
+                    // asked it — see [`joining::asked`], which is the one place
+                    // a join ends with nobody standing in front of it.
+                    peers: dialling::Peers::of(device.clone(), members.clone()),
+                }),
+        )
+        .merge(
+            Router::new()
+                .route(exchange::SETTLED, post(exchange::settled))
+                .with_state(exchange::Settling {
+                    device,
+                    members: members.clone(),
                     joins,
                     nudges,
                 }),

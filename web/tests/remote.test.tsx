@@ -1013,7 +1013,28 @@ describe("a join waiting to be confirmed", () => {
     );
 
     expect(screen.getByText("Cancel")).toBeTruthy();
-    expect(screen.getByText("Dismiss")).toBeTruthy();
+    expect(screen.getAllByText("Dismiss").length).toBe(2);
+  });
+
+  /// And one the far end came back and refused says *that* rather than reading
+  /// expired: a human said no, which is a different thing from nobody being
+  /// there, and the row is owed the difference.
+  it("says when the far end refused, and offers Dismiss", async () => {
+    mountPane(SERVING, WAITING);
+
+    const said = await waitFor(() =>
+      screen.getByText("studio refused the request."),
+    );
+
+    expect(
+      said.closest("li")?.textContent,
+      "a refused row is over, so it carries Dismiss rather than Cancel",
+    ).toContain("Dismiss");
+
+    expect(
+      said.closest("li")?.textContent,
+      "and nobody is comparing a fingerprint on a request that is over",
+    ).not.toContain(WAITING.this.fingerprint);
   });
 
   /// And Cancel takes it back, with the section redrawn out of the press's own

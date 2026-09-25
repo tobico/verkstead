@@ -71,7 +71,7 @@ pub use files::{
     FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView, FileStatus, FileStatusView,
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
-pub use joining::{AskingDevice, JoinHeld, NewJoin, PendingJoin};
+pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,

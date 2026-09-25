@@ -3488,9 +3488,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &a_stated_machine(&get(&linked, "/api/ui/devices").await),
     );
 
-    // And a fourth, with two joins asked for and neither answered: the section
-    // draws a pending row apiece under the members, and the two ways such a row
-    // is drawn — still waiting, and run out — are two rows on one reading.
+    // And a fourth, with three joins asked for and none of them a link: the
+    // section draws a pending row apiece under the members, and the three ways
+    // such a row is drawn — still waiting, run out, and refused by the far end
+    // — are three rows on one reading.
     //
     // Written straight into the table, the way the members above are: what is
     // being fed to the viewer is the shape a Verkstead answers with while
@@ -3636,35 +3637,57 @@ const A_MEMBER: &str = "0011223344556677889900aabbccddee";
 #[cfg(unix)]
 const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 
-/// The same router with two joins asked for and neither answered: one still
-/// inside its ten minutes, and one whose ten minutes ran out.
+/// And a third, for the pending row that was refused rather than being made a
+/// member: a device that asked and was told no is a device nothing links to.
+#[cfg(unix)]
+const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
+
+/// The same router with three joins asked for and none of them a link: one
+/// still inside its ten minutes, one whose ten minutes ran out, and one the far
+/// end came back and refused.
 ///
-/// Both, because those are the two ways a pending row is drawn and a fixture
-/// holding one could only ever draw that one. Neither is a member — nothing has
-/// been agreed until somebody at the far end presses — so this device's list is
-/// itself and two rows that are not devices.
+/// All three, because those are the three ways a pending row is drawn and a
+/// fixture holding one could only ever draw that one. None is a member —
+/// nothing has been agreed until somebody at the far end presses Allow — so
+/// this device's list is itself and three rows that are not devices.
 ///
 /// The moments are far enough either side of any run to stay what they are in a
 /// committed file: a fixture whose *waiting* row expired the week after it was
-/// written would be a test that passed once.
+/// written would be a test that passed once. And the refused one is asked a
+/// couple of minutes later than the other two, so that the order the rows are
+/// drawn in is the order they were pressed in rather than an accident of the
+/// names the far ends invented.
 #[cfg(unix)]
 async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
     let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
 
-    for (request, address, device, name, expires_at) in [
+    for (request, address, device, name, asked_at, expires_at, refused) in [
         (
             "1122334455667788",
             "laptop.tailnet-name.ts.net",
             A_MEMBER,
             "laptop",
+            "2026-09-25T10:00:00Z",
             "2099-01-01T00:00:00Z",
+            false,
         ),
         (
             "8877665544332211",
             "192.168.1.31",
             ANOTHER_MEMBER,
             "desk",
+            "2026-09-25T10:00:00Z",
             "2020-01-01T00:00:00Z",
+            false,
+        ),
+        (
+            "5566778811223344",
+            "100.64.0.9",
+            A_THIRD_DEVICE,
+            "studio",
+            "2026-09-25T10:02:00Z",
+            "2099-01-01T00:00:00Z",
+            true,
         ),
     ] {
         verkstead_store::ask_join(
@@ -3675,8 +3698,9 @@ async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
                 device: device.to_owned(),
                 name: name.to_owned(),
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
-                asked_at: "2026-09-25T10:00:00Z".to_owned(),
+                asked_at: asked_at.to_owned(),
                 expires_at: expires_at.to_owned(),
+                refused,
             },
         )
         .await

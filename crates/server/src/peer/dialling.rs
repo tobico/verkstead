@@ -62,10 +62,11 @@ use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_t
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::{DeviceIdentity, JoinHeld};
-use verkstead_store::{Linking, Member};
+use verkstead_render::{DeviceIdentity, JoinHeld, JoinSettled};
+use verkstead_store::{HeldJoin, Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
+use crate::peer::exchange::settling;
 use crate::peer::joining::{JOIN, cancelling};
 use crate::peer::{IDENTITY, Members, PEER_PORT};
 
@@ -400,6 +401,97 @@ impl Peers {
         }
 
         Ok(())
+    }
+
+    /// And the dial back: tell the device that asked what came of its request,
+    /// handing over the roster where it was let in.
+    ///
+    /// **Pinned on the certificate the request is holding**, which is what
+    /// makes this safe to make to a device that is not a member yet. The join
+    /// post arrived over a handshake and the certificate it presented was
+    /// written into the request; whatever is at those addresses now has to turn
+    /// out to be presenting the same one, or the handshake does not complete
+    /// and nothing of this cluster is said to it. A device that answers on the
+    /// asker's address with some other certificate is not the device that
+    /// asked, and the exchange stops here rather than at the far end.
+    ///
+    /// **Every address the request holds, in the order they were advertised**,
+    /// exactly as a dial to a member works down that member's — see
+    /// [`Peers::identity`]. A laptop that moved between posting the join and
+    /// its human's opposite number pressing Allow is reached at the next
+    /// address on the list, and the ten minutes are long enough for that to be
+    /// an ordinary thing to happen.
+    ///
+    /// Nothing is recorded here and nothing is dimmed. The device at the far
+    /// end is not a member — it is the thing this call is about to make one, or
+    /// about to tell there will be none — so there is no row to write a finding
+    /// on to.
+    pub async fn settle(&self, held: &HeldJoin, settled: &JoinSettled) -> Result<()> {
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(&held.fingerprint, &met)?;
+        let path = settling(&held.request);
+        let mut nothing_at = Vec::new();
+
+        for address in &held.addresses {
+            let at = reaching(address, &path);
+
+            match dialling.post(&at).json(settled).send().await {
+                Ok(answered) => {
+                    let status = answered.status();
+
+                    if !status.is_success() {
+                        let said = answered.text().await.unwrap_or_default();
+
+                        bail!(
+                            "device {} answered {status} to being told what came of its \
+                             request to link: {}",
+                            held.device,
+                            said.trim(),
+                        );
+                    }
+
+                    return Ok(());
+                }
+
+                Err(why) => {
+                    tracing::debug!(
+                        device = %held.device,
+                        %address,
+                        %why,
+                        "a device that asked to link did not answer at one of the addresses \
+                         it advertised, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        // A certificate met that was not the one the request pinned is a
+        // machine answering at that address rather than the device that asked,
+        // and it is worth saying apart from silence: one is somebody else on an
+        // address a laptop has left, and the other is a laptop that is off.
+        if let Some(met) = met.lock().expect("nothing panics holding this").take() {
+            bail!(
+                "device {} asked under {}, and the machine answering at its addresses \
+                 presented {met} instead",
+                held.device,
+                held.fingerprint,
+            );
+        }
+
+        if nothing_at.is_empty() {
+            bail!(
+                "device {} advertised no address to answer it at",
+                held.device
+            );
+        }
+
+        bail!(
+            "device {} answered at none of the addresses it advertised ({})",
+            held.device,
+            nothing_at.join(", "),
+        );
     }
 
     /// The client a dial is made with: this device's certificate to present, the

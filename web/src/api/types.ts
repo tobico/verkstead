@@ -3188,7 +3188,23 @@ name: string,
  * on this device's say-so — somebody pressed Add and is owed the answer
  * that nobody pressed anything back.
  */
-expired: boolean, };
+expired: boolean, 
+/**
+ * And whether the far end came back and said no.
+ *
+ * **The one thing on this row that was told to this device rather than
+ * read off it**, which is why it sits beside the flag above rather than
+ * being folded into it: an expiry is a clock and a refusal is a press, and
+ * a row that said only *this did not happen* would leave the human unable
+ * to tell a machine nobody was at from a human who said no.
+ *
+ * It outranks the expiry when the page draws the row, because it is the
+ * thing that really happened: a request refused three minutes in is a
+ * refusal for as long as it is drawn, whatever the clock goes on to say.
+ * And it ends at the same press — Dismiss, which is Cancel under another
+ * word.
+ */
+refused: boolean, };
 
 /**
  * A pending steer as the page receives it: when the press was made, and the
