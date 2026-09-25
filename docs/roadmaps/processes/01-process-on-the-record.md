@@ -18,13 +18,22 @@ about how Develop runs changes.
   anything runs, frozen at Start, kept in a 1:1 side table keyed by the
   Conversation with the `conversations` table left alone — the pattern
   `directions`, `adoptions` and `pull_request_adoptions` already follow, with a
-  stored-word pair the way Direction has one. A column was not chosen because
+  stored-word pair the way `Lifecycle` has one. A column was not chosen because
   the table is `STRICT` and every per-Conversation scalar since has gone beside
   it rather than into it.
-- **The enum has all five variants from this stage**, in the schema crate
-  beside `Direction` so the generated TypeScript carries it, even though only
-  Develop can start: the store reads and writes every one, and what a stage
-  after this adds is a start path and a row on the picker, never a variant.
+- **The enum is `Lifecycle`'s pair, not `Direction`'s home**: a store enum in
+  `crates/store/src/conversations.rs` with its stored words, and a render enum
+  in `crates/render/src/conversations.rs` with the viewer's, which is what
+  emits the TypeScript — `verkstead-render` owns that export, so a render enum
+  is carried across the wire exactly as a schema one is. Not the schema crate:
+  `Direction` is there because it rides a Question Set, as a field of
+  `Proposal`, and that crate is the Set and Response grammar the agents write
+  and is compiled to wasm for the browser. A Process is on no Set, and
+  `Lifecycle` — the per-Conversation fact this is shaped like — is deliberately
+  not there either.
+- **All five variants from this stage**, even though only Develop can start:
+  the store reads and writes every one, and what a stage after this adds is a
+  start path and a row on the picker, never a variant.
 - **Conversations from before read Develop; one holding a pull-request
   adoption reads Review.** Read rather than backfilled, so nothing is written
   into old rows: the reading is the same rule whichever a row lacks.
@@ -43,9 +52,10 @@ about how Develop runs changes.
 
 ## Proposed tasks (provisional)
 
-1. **The `Process` enum and its table** — schema variant with its stored
-   words, the side table, a read that answers Develop or Review where no row
-   is, and the loaded Conversation carrying it. AC: a fresh Conversation reads
+1. **The `Process` enum and its table** — the store enum with its stored
+   words, the render enum with the viewer's, the side table, a read that
+   answers Develop or Review where no row is, and the loaded Conversation
+   carrying it. AC: a fresh Conversation reads
    Develop; one with a pull-request adoption and no row reads Review; a written
    Process reads back.
 2. **The API** — a per-field endpoint beside the Pairing ones that sets a
@@ -71,5 +81,10 @@ about how Develop runs changes.
   composer through `web/src/workbench/Setup.tsx`, drawn twice.
 - The compose page's create is still a replay through per-field endpoints with
   no batched create, so a new field is a new endpoint and a new replay step.
-- The generated TypeScript types are still checked up to date in CI, so a new
-  schema enum regenerates them.
+- `Lifecycle` is still a pair — a store enum with its stored words in
+  `crates/store/src/conversations.rs`, and a render enum with the viewer's in
+  `crates/render/src/conversations.rs` — and `Direction` is still the schema
+  crate's, reached through a Question Set's `Proposal`.
+- The generated TypeScript types are still checked up to date in CI, and
+  `verkstead-render` is still what emits them, so a new render enum regenerates
+  them.
