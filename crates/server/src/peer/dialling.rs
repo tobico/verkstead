@@ -177,7 +177,7 @@ impl Peers {
         // apart down at the foot of this.
         let met = Arc::new(Mutex::new(None));
 
-        let dialling = self.dialling(&member.fingerprint, &met)?;
+        let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
         for address in &member.addresses {
@@ -267,7 +267,15 @@ impl Peers {
             .await
             .with_context(|| format!("reading what device {} says it is", member.device))?;
 
-        if identity.fingerprint != member.fingerprint {
+        // Either of the two a member in the middle of a changeover has, which is
+        // the same pair its handshake was just accepted against — see
+        // [`accepted`]. What is being asked is that the machine naming itself is
+        // the machine that presented, and both of those certificates are that
+        // machine's.
+        if !accepted(member)
+            .iter()
+            .any(|accepted| accepted == &identity.fingerprint)
+        {
             bail!(
                 "device {} presented {} and named {} as its certificate, which is a device \
                  that is not the one it says it is",
@@ -300,6 +308,16 @@ impl Peers {
                 fingerprint: member.fingerprint.clone(),
             })
             .await?;
+
+        // And where this member was in the middle of a changeover and has
+        // answered under the certificate it was changing *to*, that changeover is
+        // over as far as this device is concerned: the far end has stopped
+        // presenting the other one, which is the only thing that was ever going
+        // to say so. Written here because this is the one call that reads what a
+        // member says it is — see [`verkstead_store::Member::renewing_from`].
+        if member.renewing_from.is_some() && identity.fingerprint == member.fingerprint {
+            self.members.changed_over(&member.device).await?;
+        }
 
         Ok(identity)
     }
@@ -368,8 +386,54 @@ impl Peers {
         .await
     }
 
-    /// What both of those are: one call made to a member, at every address the
-    /// row holds and in the order it holds them, until one answers.
+    /// And tell `member` that this device has made its certificate again, which
+    /// is what a start that re-issued one owes every one of them.
+    ///
+    /// **Made presenting the outgoing certificate, which is not a choice.** The
+    /// certificate this device presents over a changeover *is* the outgoing one —
+    /// see [`Device::certificate`] — and it has to be: the new one is a
+    /// certificate no member holds, so a call made under it would be refused at
+    /// every gate in the cluster, including by the very device being told about
+    /// it. Which is the whole reason the changeover has two certificates and not
+    /// one.
+    ///
+    /// **And a member's own call like the two above it.** It goes down a link the
+    /// far end has verified and nobody over there presses anything: the id it
+    /// arrives under is one that end's human allowed once already, and what is
+    /// changing is which certificate stands against it — see
+    /// [`crate::peer::renewing`], which is what answers.
+    ///
+    /// The same walk down the addresses and the same reading of a member that
+    /// answers nowhere. What is not here is a retry: the failure is handed back to
+    /// the caller, which writes the telling down as owed — a member that was off
+    /// when the certificate was made again is told when it next answers, and the
+    /// changeover waits for it rather than costing a call in the meantime.
+    ///
+    /// **The answer is the acknowledgement**, so `Ok(())` is what takes this
+    /// member off the list the changeover is waiting on. Nothing is read out of
+    /// the body: what this end needed to know is that the call landed.
+    pub async fn announce_renewal(
+        &self,
+        member: &Member,
+        renewed: &verkstead_render::RenewedCertificate,
+    ) -> Result<()> {
+        self.telling(
+            member,
+            &format!(
+                "being told this device is changing over to certificate {}",
+                renewed.incoming,
+            ),
+            |dialling, at| {
+                dialling
+                    .post(reaching(at, crate::peer::renewing::CERTIFICATE))
+                    .json(renewed)
+            },
+        )
+        .await
+    }
+
+    /// What all three of those are: one call made to a member, at every address
+    /// the row holds and in the order it holds them, until one answers.
     ///
     /// **One walk rather than one per thing said.** What differs between an
     /// announcement and an unlink is the request built and the words a refusal
@@ -393,7 +457,7 @@ impl Peers {
         build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
     ) -> Result<()> {
         let met = Arc::new(Mutex::new(None));
-        let dialling = self.dialling(&member.fingerprint, &met)?;
+        let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
         for address in &member.addresses {
@@ -539,7 +603,7 @@ impl Peers {
     /// which link this device was in the middle of making.
     pub async fn cancel(&self, address: &str, request: &str, expecting: &str) -> Result<()> {
         let met = Arc::new(Mutex::new(None));
-        let dialling = self.dialling(expecting, &met)?;
+        let dialling = self.dialling(vec![expecting.to_owned()], &met)?;
         let at = reaching(address, &cancelling(request));
 
         let answered = dialling
@@ -587,7 +651,7 @@ impl Peers {
     /// on to.
     pub async fn settle(&self, held: &HeldJoin, settled: &JoinSettled) -> Result<()> {
         let met = Arc::new(Mutex::new(None));
-        let dialling = self.dialling(&held.fingerprint, &met)?;
+        let dialling = self.dialling(vec![held.fingerprint.clone()], &met)?;
         let path = settling(&held.request);
         let mut nothing_at = Vec::new();
 
@@ -663,12 +727,12 @@ impl Peers {
     /// two members could only ever be pinned to one of them.
     fn dialling(
         &self,
-        expecting: &str,
+        expecting: Vec<String>,
         met: &Arc<Mutex<Option<String>>>,
     ) -> Result<reqwest::Client> {
         self.client(|algorithms| {
             Arc::new(ThePinnedOne {
-                expecting: expecting.to_owned(),
+                expecting,
                 met: Arc::clone(met),
                 algorithms,
             })
@@ -729,6 +793,29 @@ impl Peers {
             .build()
             .context("building the client a peer is dialled with")
     }
+}
+
+/// The certificates a dial to `member` will accept: the one recorded for it, and
+/// the one it is changing over *from* where it is in the middle of a renewal.
+///
+/// **Two rather than one for exactly as long as a changeover lasts.** A device
+/// that has re-issued its certificate announces the new fingerprint and then goes
+/// on presenting the old one until the last of *its own* members has acknowledged
+/// — which it has to, that being the only certificate every one of them holds —
+/// and it tells nobody when that moment came. So a dial pinned on the fingerprint
+/// this end recorded a second ago would be refused by the device that sent it, and
+/// the renewal would cost every call it exists not to cost. Both are accepted, as
+/// both get through this end's own gate; the one being changed from is let go of
+/// when this device meets the new one, in [`Peers::took`].
+///
+/// The recorded one first, because it is the one a settled cluster has and the one
+/// a changeover ends on: the order is what a reader of this list sees rather than
+/// anything a handshake cares about.
+fn accepted(member: &Member) -> Vec<String> {
+    let mut accepted = vec![member.fingerprint.clone()];
+
+    accepted.extend(member.renewing_from.clone());
+    accepted
 }
 
 /// Where a call goes: `path` on the peer listener of whatever is at `address`.
@@ -799,9 +886,22 @@ fn authority(address: &str) -> String {
 /// tailnet name, neither of which is in anybody's certificate.
 #[derive(Debug)]
 struct ThePinnedOne {
-    /// The fingerprint recorded for this member, which is the one certificate
-    /// that gets through.
-    expecting: String,
+    /// The fingerprints recorded for this member, which are the only
+    /// certificates that get through.
+    ///
+    /// **Usually one, and two while that member is in the middle of a changeover
+    /// of its own.** A device that has re-issued its certificate goes on
+    /// presenting the outgoing one until the last of *its* members has
+    /// acknowledged the new one, and it tells nobody when that was — so a dial
+    /// pinned on the fingerprint this end has just recorded would be refused by
+    /// the very device that announced it. Both are accepted, exactly as both get
+    /// through this end's own gate — see
+    /// [`verkstead_store::Member::renewing_from`].
+    ///
+    /// Never empty: what would be pinned on nothing is a dial that accepts
+    /// anything, and there is one call in this module that means to do that and
+    /// it has a verifier of its own — see [`WhateverIsThere`].
+    expecting: Vec<String>,
 
     /// And where the one that turned up is left when it was not that: what tells
     /// *somebody else answered* from *nobody answered*, which are two different
@@ -835,7 +935,7 @@ impl ServerCertVerifier for ThePinnedOne {
     ) -> Result<ServerCertVerified, rustls::Error> {
         let met = fingerprint_of_der(end_entity);
 
-        if met != self.expecting {
+        if !self.expecting.iter().any(|expecting| expecting == &met) {
             *self.met.lock().expect("nothing panics holding this") = Some(met);
 
             return Err(rustls::Error::InvalidCertificate(

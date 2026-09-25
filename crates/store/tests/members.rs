@@ -11,9 +11,10 @@
 use sqlx::SqlitePool;
 
 use verkstead_store::{
-    Linking, Telling, announcement_made, announcements_owed, announcements_owed_to,
-    forget_every_member, forget_member, member_count, member_holding, member_unreachable, members,
-    open_database, owe_announcement, record_member,
+    Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
+    changeover_over, forget_every_member, forget_member, member_count, member_holding,
+    member_unreachable, members, members_yet_to_acknowledge, open_database, owe_announcement,
+    record_member, record_renewal, renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -25,11 +26,21 @@ const C: &str = "ffeeddccbbaa00998877665544332211";
 /// what a debt names is a device rather than a member of this one.
 const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
+/// And a fourth, for the third thing a member can be owed: a renewal names the
+/// device doing the telling, which is this machine and so on nobody's list
+/// either.
+const D: &str = "1122334455667788990011aabbccddff";
+
 /// And the certificates they present, spelled the way this tree spells a
 /// fingerprint: what a member *is* on the peer listener is this string, so a
 /// test about a membership compares one.
 const B_FINGERPRINT: &str = "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88";
 const C_FINGERPRINT: &str = "5E:6D:92:C8:04:1F:7B:3A:88:2E:3D:9C:47:B0:11:AA";
+
+/// And one more certificate, which is the one being changed *to*: a renewal is a
+/// device keeping its id and presenting something else, so a test about one needs
+/// a third string that is nobody's yet.
+const RENEWED: &str = "C8:04:3A:7B:6D:92:1F:5E:47:B0:88:2E:AA:11:9C:3D";
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -54,6 +65,38 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
         ],
         fingerprint: fingerprint.to_owned(),
     }
+}
+
+/// And the same device saying it has made its certificate again: the one it is
+/// still presenting, and the one it is changing to.
+fn renewing(device: &str, name: &str, presenting: &str, incoming: &str) -> Renewal {
+    let advertising = advertising(device, name, presenting);
+
+    Renewal {
+        device: advertising.device,
+        name: advertising.name,
+        os: advertising.os,
+        addresses: advertising.addresses,
+        presenting: presenting.to_owned(),
+        incoming: incoming.to_owned(),
+    }
+}
+
+/// Who is owed an announcement of [`RENEWED`], by id — which is what a changeover
+/// is waiting on.
+async fn owed_the_new_one(pool: &SqlitePool) -> Vec<String> {
+    owed_the_new_one_after(pool, RENEWED).await
+}
+
+/// And the same of any certificate, for the question about the renewal *after*
+/// this one.
+async fn owed_the_new_one_after(pool: &SqlitePool, fingerprint: &str) -> Vec<String> {
+    members_yet_to_acknowledge(pool, fingerprint)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|member| member.device)
+        .collect()
 }
 
 /// A device written down is a device the membership holds, said by everything
@@ -407,14 +450,15 @@ async fn an_unlinked_member_is_owed_nothing_and_owed_about_by_nobody() {
     );
 }
 
-/// A debt says *what* is owed, and the two a cluster makes are opposites.
+/// A debt says *what* is owed, and the three a cluster makes are a device
+/// arriving, a device leaving, and a device's certificate changing.
 ///
-/// **Which is what an unlink needed the word for.** A member that was away is
-/// told what it missed when it comes back, and *a device joined* and *a device
-/// left* are the same pair of ids with the whole of the meaning in the word
-/// beside them.
+/// **Which is what an unlink needed the word for, and what a renewal reuses.** A
+/// member that was away is told what it missed when it comes back, and three
+/// records to walk instead of one would be three chances to walk only two of
+/// them.
 #[tokio::test]
-async fn a_debt_says_which_of_the_two_tellings_it_is() {
+async fn a_debt_says_which_of_the_three_tellings_it_is() {
     let (_dir, pool) = fresh_pool().await;
 
     owe_announcement(&pool, B, A, Telling::Joined)
@@ -423,15 +467,20 @@ async fn a_debt_says_which_of_the_two_tellings_it_is() {
     owe_announcement(&pool, B, C, Telling::Removed)
         .await
         .unwrap();
+    owe_announcement(&pool, B, D, Telling::Renewed)
+        .await
+        .unwrap();
 
     assert_eq!(
         announcements_owed_to(&pool, B).await.unwrap(),
         vec![
+            (D.to_owned(), Telling::Renewed),
             (A.to_owned(), Telling::Joined),
             (C.to_owned(), Telling::Removed),
         ],
         "read the other way round: not who has not heard, but what this one \
-         has yet to be told",
+         has yet to be told — in one order, by the device named, so that a \
+         member coming back after a busy week is caught up the same way twice",
     );
 
     assert!(
@@ -514,4 +563,279 @@ async fn a_device_told_it_has_left_forgets_everybody() {
     // And being told twice is not a thing to fail: a device that holds no
     // members has already forgotten everybody.
     forget_every_member(&pool).await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// A member's own changeover
+// ---------------------------------------------------------------------------
+
+/// A member that has made its certificate again is the same member under a new
+/// fingerprint, and *both* of them get through the gate.
+///
+/// **Which is the whole of what a changeover needs of this end.** The far end goes
+/// on presenting the certificate every one of its own members holds until the last
+/// of them has acknowledged the new one, and it tells nobody when that was — so a
+/// device that recorded the new fingerprint and let go of the old would be refusing
+/// the very device that had just announced it.
+#[tokio::test]
+async fn a_renewed_member_is_the_same_member_under_two_certificates() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    assert!(
+        record_renewal(&pool, &renewing(B, "workbench", B_FINGERPRINT, RENEWED))
+            .await
+            .unwrap(),
+        "a renewal about a device this membership holds is a row it changed",
+    );
+
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(
+        listed.len(),
+        1,
+        "one member rather than two: the id is the key"
+    );
+    assert_eq!(listed[0].device, B);
+    assert_eq!(
+        listed[0].fingerprint, RENEWED,
+        "the row is keyed on the certificate coming in from here",
+    );
+    assert_eq!(
+        listed[0].renewing_from.as_deref(),
+        Some(B_FINGERPRINT),
+        "and the one still going out is kept beside it",
+    );
+
+    assert!(
+        member_holding(&pool, RENEWED).await.unwrap(),
+        "a call under the new certificate gets through",
+    );
+    assert!(
+        member_holding(&pool, B_FINGERPRINT).await.unwrap(),
+        "and so does one under the old, which is the only one that device is \
+         presenting yet",
+    );
+}
+
+/// And the same renewal announced twice keeps the certificate that is still going
+/// out, rather than taking it for a third one.
+///
+/// **Which the call has to survive**, because it is made again: an answer that went
+/// missing is a call worth making a second time, and a member that was switched off
+/// is told when it comes back.
+#[tokio::test]
+async fn the_same_renewal_twice_keeps_the_certificate_still_going_out() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        record_renewal(&pool, &renewing(B, "workbench", B_FINGERPRINT, RENEWED))
+            .await
+            .unwrap();
+    }
+
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(listed[0].fingerprint, RENEWED);
+    assert_eq!(
+        listed[0].renewing_from.as_deref(),
+        Some(B_FINGERPRINT),
+        "the second call wrote the same two strings, rather than taking the \
+         certificate it had just recorded for the one being changed from",
+    );
+}
+
+/// A renewal carries the addresses with it, as every exchange does.
+#[tokio::test]
+async fn a_renewal_advertises_the_addresses_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let mut moved = renewing(B, "studio", B_FINGERPRINT, RENEWED);
+    moved.addresses = vec![
+        "studio.tailnet-name.ts.net".to_owned(),
+        "192.168.1.40".to_owned(),
+    ];
+
+    record_renewal(&pool, &moved).await.unwrap();
+
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(listed[0].name, "studio", "and what it is now called");
+    assert_eq!(
+        listed[0].addresses,
+        vec![
+            "studio.tailnet-name.ts.net".to_owned(),
+            "192.168.1.40".to_owned(),
+        ],
+        "in the order they were advertised, which is the order a dial works down",
+    );
+}
+
+/// And a renewal about a device this membership does not hold writes nothing and
+/// fails nothing.
+#[tokio::test]
+async fn a_renewal_about_a_stranger_changes_no_row() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert!(
+        !record_renewal(&pool, &renewing(B, "workbench", B_FINGERPRINT, RENEWED))
+            .await
+            .unwrap(),
+        "there is no row for a fingerprint to stand against",
+    );
+
+    assert!(members(&pool).await.unwrap().is_empty());
+    assert!(!member_holding(&pool, RENEWED).await.unwrap());
+}
+
+/// A changeover this device has seen the end of lets go of the certificate that
+/// was going out.
+///
+/// What says it has ended is meeting the new one, which is the only unambiguous
+/// sign the far end has stopped presenting the other.
+#[tokio::test]
+async fn a_changeover_this_device_has_seen_the_end_of_lets_go_of_the_old_one() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_renewal(&pool, &renewing(B, "workbench", B_FINGERPRINT, RENEWED))
+        .await
+        .unwrap();
+
+    changeover_over(&pool, B).await.unwrap();
+
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(listed[0].fingerprint, RENEWED);
+    assert_eq!(listed[0].renewing_from, None);
+
+    assert!(
+        member_holding(&pool, RENEWED).await.unwrap(),
+        "the certificate it is presenting now",
+    );
+    assert!(
+        !member_holding(&pool, B_FINGERPRINT).await.unwrap(),
+        "and the one it has stopped presenting is nobody's",
+    );
+
+    // And being told twice is not a thing to fail: a member changing over from
+    // nothing has already stopped.
+    changeover_over(&pool, B).await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// This device's own changeover
+// ---------------------------------------------------------------------------
+
+/// Every member is owed an announcement of a certificate none of them has
+/// acknowledged, and each acknowledgement takes one off that list.
+///
+/// **Which is what a changeover counts.** A device presents the outgoing
+/// certificate for as long as this list has anybody on it, so the count is read off
+/// what a member has *said* it holds rather than off the absence of a debt: a
+/// device that joined in the middle of a changeover has no debt and has heard
+/// nothing.
+#[tokio::test]
+async fn a_member_that_has_acknowledged_is_off_the_list_a_changeover_waits_on() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(&pool, &advertising(C, "laptop", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        owed_the_new_one(&pool).await,
+        vec![C.to_owned(), B.to_owned()],
+        "a member that has acknowledged nothing is owed the telling, which is \
+         every member at the start of a changeover",
+    );
+
+    renewal_acknowledged(&pool, B, RENEWED).await.unwrap();
+
+    assert_eq!(
+        owed_the_new_one(&pool).await,
+        vec![C.to_owned()],
+        "and the one that answered is off the list",
+    );
+
+    renewal_acknowledged(&pool, C, RENEWED).await.unwrap();
+
+    assert!(
+        members_yet_to_acknowledge(&pool, RENEWED)
+            .await
+            .unwrap()
+            .is_empty(),
+        "nobody owed is the changeover over",
+    );
+
+    // And a member holding the certificate before the one coming in is owed the
+    // next renewal without anything having to be cleared first.
+    assert_eq!(
+        owed_the_new_one_after(&pool, "11:22:33:44:55:66:77:88").await,
+        vec![C.to_owned(), B.to_owned()],
+        "the acknowledgement names a certificate rather than being a flag, so \
+         the renewal after this one starts with everybody owed",
+    );
+}
+
+/// And a member that has acknowledged is still owed the *rest* of what it missed:
+/// the acknowledgement is a column on the row, and the debts are their own record.
+#[tokio::test]
+async fn an_acknowledged_certificate_is_not_a_debt_paid() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+    renewal_acknowledged(&pool, B, RENEWED).await.unwrap();
+
+    assert_eq!(
+        announcements_owed_to(&pool, B).await.unwrap(),
+        vec![(A.to_owned(), Telling::Joined)],
+        "what a member holds of this device and what it has yet to be told are \
+         two different questions about it",
+    );
+}
+
+/// And an unlinked member is off both: it has nothing to acknowledge and nothing
+/// left to be owed.
+#[tokio::test]
+async fn an_unlinked_member_is_owed_no_certificate() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    forget_member(&pool, B).await.unwrap();
+
+    assert!(
+        members_yet_to_acknowledge(&pool, RENEWED)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a device that is not a member is a device this one owes nothing — which \
+         is how a changeover finishes when the machine that never answered is \
+         the one the human unlinks",
+    );
 }
