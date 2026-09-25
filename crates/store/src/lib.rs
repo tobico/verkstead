@@ -108,8 +108,8 @@ pub use joins::{
     held_joins, hold_join, let_go_of_expired_joins, let_go_of_join, refuse_asked_join,
 };
 pub use members::{
-    Linking, Member, forget_member, member_count, member_holding, member_unreachable, members,
-    record_member,
+    Linking, Member, announcement_made, announcements_owed, forget_member, member_count,
+    member_holding, member_unreachable, members, owe_announcement, record_member,
 };
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;

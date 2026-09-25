@@ -304,6 +304,101 @@ impl Peers {
         Ok(identity)
     }
 
+    /// Tell `member` about `newcomer`, which is what an introducer does the
+    /// moment its human has pressed Allow.
+    ///
+    /// **An ordinary member's call, pinned like every other.** The far end is
+    /// a device this one has confirmed and holds a certificate for, so the
+    /// route answering this stands behind that end's own member gate — see
+    /// [`crate::peer::announcing`]. What makes the claim worth recording over
+    /// there is precisely that it came down a link the receiver has verified:
+    /// the newcomer itself could say the same words and be refused for a
+    /// stranger, which is what the announcement being the introducer's is for.
+    ///
+    /// **Every address in the order the row holds them**, until one answers, as
+    /// [`Peers::identity`] works down the same list — and the member that
+    /// answered nowhere is marked unreachable by the same judgement: a dial that
+    /// reached none of a device's addresses is a machine that is not there.
+    ///
+    /// What is *not* here is a retry. The failure is handed back to the caller,
+    /// which writes the telling down as owed and carries on: a human pressed
+    /// Allow, and a laptop with its lid shut is that machine's problem rather
+    /// than the press's.
+    pub async fn announce(&self, member: &Member, newcomer: &DeviceIdentity) -> Result<()> {
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(&member.fingerprint, &met)?;
+        let mut nothing_at = Vec::new();
+
+        for address in &member.addresses {
+            let at = reaching(address, crate::peer::announcing::MEMBERS);
+
+            match dialling.post(&at).json(newcomer).send().await {
+                Ok(answered) => {
+                    let status = answered.status();
+
+                    if !status.is_success() {
+                        let said = answered.text().await.unwrap_or_default();
+
+                        bail!(
+                            "device {} answered {status} to being told about device {}: {}",
+                            member.device,
+                            newcomer.device,
+                            said.trim(),
+                        );
+                    }
+
+                    return Ok(());
+                }
+
+                Err(why) => {
+                    tracing::debug!(
+                        device = %member.device,
+                        %address,
+                        %why,
+                        "a member did not answer at one of its addresses, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        // A certificate met that was not the one recorded is a machine that
+        // answered rather than a member that is not there — the same reading
+        // [`Peers::identity`] makes of one, and the same refusal to dim a row
+        // over it.
+        if let Some(met) = met.lock().expect("nothing panics holding this").take() {
+            bail!(
+                "device {} is recorded against {}, and the machine answering for it presented \
+                 {met} instead",
+                member.device,
+                member.fingerprint,
+            );
+        }
+
+        self.members.unreachable(&member.device).await?;
+
+        if nothing_at.is_empty() {
+            bail!(
+                "device {} advertised no address to dial it at",
+                member.device
+            );
+        }
+
+        tracing::info!(
+            device = %member.device,
+            addresses = %nothing_at.join(", "),
+            "a member answered at none of its addresses, so it is drawn unreachable until \
+             one of them does",
+        );
+
+        bail!(
+            "device {} answered at none of the addresses it advertised ({})",
+            member.device,
+            nothing_at.join(", "),
+        );
+    }
+
     /// Ask the device at `address` to let this one into its cluster, saying
     /// `saying` of itself — which is the press on **Add**.
     ///

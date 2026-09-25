@@ -74,6 +74,7 @@
 //! presented, the far end's checked against the fingerprint a member row holds,
 //! and every address that row carries tried in the order it was advertised.
 
+pub mod announcing;
 pub mod dialling;
 pub mod exchange;
 pub mod joining;
@@ -278,7 +279,8 @@ impl Listener {
 /// recorded anybody and is matched against the request it is answering — see
 /// [`exchange`]. Nothing grows that list afterwards: a member's relayed traffic
 /// goes the other way, inside [`members_only`] with the gate over it, and so
-/// does every call the stages after this one add.
+/// does every call the stages after this one add — the first of which is the
+/// announcement in [`announcing`], where a member names a newcomer to this one.
 ///
 /// **What is not a route is refused rather than missed**, because the gate is
 /// the fallback: a path nothing here answers is one this caller has no
@@ -323,13 +325,22 @@ pub fn router(
             Router::new()
                 .route(exchange::SETTLED, post(exchange::settled))
                 .with_state(exchange::Settling {
-                    device,
+                    device: device.clone(),
                     members: members.clone(),
                     joins,
-                    nudges,
+                    nudges: nudges.clone(),
                 }),
         )
-        .fallback_service(members_only(Router::new(), members))
+        .fallback_service(members_only(
+            Router::new()
+                .route(announcing::MEMBERS, post(announcing::announced))
+                .with_state(announcing::Told {
+                    device,
+                    members: members.clone(),
+                    nudges,
+                }),
+            members,
+        ))
 }
 
 /// What the identity endpoint answers out of: what this device *is*, and the
@@ -355,11 +366,12 @@ struct Answering {
 /// that reads as working code. So there is one call, and everything that goes
 /// through it is gated.
 ///
-/// Empty on this listener until the stages that need routes arrive — the
-/// announcement, the unlink broadcast and the renewal. It is public all the
-/// same, because the suite stands its own one-line route behind the real gate:
-/// what is being asked of the gate is which callers get *through* it, and a
-/// gate with nothing behind it can only ever be asked who is refused.
+/// One route on this listener so far — the announcement in [`announcing`],
+/// which is the first call a member makes to another — with the unlink
+/// broadcast and the renewal to follow it. It is public all the same, because
+/// the suite stands its own one-line route behind the real gate: what is being
+/// asked of the gate is which callers get *through* it, and the path no route
+/// answers is what tells a refusal from a miss.
 pub fn members_only(routes: Router, members: Members) -> Router {
     routes.layer(axum::middleware::from_fn_with_state(members, gate))
 }
@@ -576,6 +588,46 @@ impl Members {
             Recorded::InTheStore(pool) => verkstead_store::member_unreachable(pool, device)
                 .await
                 .with_context(|| format!("marking device {device} as answering nothing")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// Write down that `device` has yet to be told about `about` — see
+    /// [`verkstead_store::owe_announcement`].
+    ///
+    /// **What an announcement that reached nobody leaves behind.** The thing
+    /// being announced happened whatever some third machine made of it — a
+    /// human pressed Allow, and the newcomer is a member here — so a member
+    /// that was off is owed the telling rather than the join being undone. What
+    /// pays it is the next thing that finds that member answering, which is the
+    /// task after this one's to build.
+    ///
+    /// A stated membership has no rows and no debts. It is a number, and a
+    /// suite standing on one is asking about a changeover rather than about a
+    /// member.
+    pub(crate) async fn owed(&self, device: &str, about: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::owe_announcement(pool, device, about)
+                .await
+                .with_context(|| {
+                    format!("writing down that device {device} has not heard about {about}")
+                }),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And take that away, which is what an announcement that got through does
+    /// — see [`verkstead_store::announcement_made`].
+    ///
+    /// Made whether or not anything was owed, the ordinary case being an
+    /// announcement that got through the first time and was never written down.
+    pub(crate) async fn told(&self, device: &str, about: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::announcement_made(pool, device, about)
+                .await
+                .with_context(|| format!("clearing what device {device} was owed about {about}")),
 
             Recorded::Stated(_) => Ok(()),
         }
