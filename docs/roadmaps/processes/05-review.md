@@ -3,10 +3,11 @@
 ## Goal
 
 A draft whose Process is **Review** takes a pull request or a branch and wraps
-it up. The Brief is scanned for the first pull request URL or `#number`; the
-Repo panel's Branch field reads *Pull request or branch* for this Process,
-accepts any of the three, and fills from the Brief while empty; Start is
-refused, saying so on the composer, while neither names anything. Start runs
+it up. The Brief is scanned for the first pull request URL or `#number`; a
+**Target** field of its own, drawn in the Repo panel for this Process, reads
+*Pull request or branch*, accepts any of the three, and fills from the Brief
+while empty; Start is refused, saying so on the composer, while neither names
+anything. Start runs
 today's take-up — fetch, the head cut or fast-forwarded and a head that is
 ahead, diverged, checked out elsewhere or from a fork refused by name, the head
 at take-up as the base commit and GitHub's base beside it — and records the
@@ -32,12 +33,22 @@ with no *No review* row.
   `github.com/<owner>/<repo>/pull/<n>` URL or bare `#<n>`, resolved through
   the configured `gh` against the Repo's origin; a URL naming another
   repository is refused by name.
-- **The field is the Branch field with a different reading**, not a new
-  control: for Review the label reads *Pull request or branch*, the automatic
-  placeholder is gone, and the value is a pull request or a branch. Which of
-  the two it holds is decided at Start: a URL or `#n` is a pull request, and
-  anything else is a branch that must exist on origin. The Brief's URL fills
-  the field while empty and never overwrites what the human typed.
+- **The target is a field of its own**, labelled *Target* and reading *Pull
+  request or branch*, drawn in the Repo panel under the Branch field for Review
+  and Fix Merge Issues and for no other Process. Which of the three it holds is
+  decided at Start: a URL or `#n` is a pull request, and anything else is a
+  branch that must exist on origin. The Brief's URL fills it while empty and
+  never overwrites what the human typed. It is a Draft's to change, refused past
+  drafting on the Branch field's own rule, and it is read once, at Start.
+- **Not the Branch field re-read**, which was the shape ADR-0020 first took and
+  does not work: that field is a rename, saving through
+  `POST /api/ui/conversations/<id>/branch`, which runs
+  `git check-ref-format refs/heads/<value>` and answers `NotABranchName` —
+  `crates/server/src/conversations.rs:891` — and git refuses a pull request URL
+  over its colon, on the composer and in the compose page's create replay both
+  (`web/src/workbench/composing.ts:379`). The two are not the same fact either:
+  the Branch field says what the Conversation's branch is called, and take-up
+  decides that from the pull request's head.
 - **A bare branch is a take-up with no pull request**: the same fetch and the
   same refusals, the head at take-up as the base commit, the base picker's
   base as `base_ref`, and Wrapping entered with no pull request recorded — the
@@ -60,11 +71,12 @@ with no *No review* row.
 
 ## Proposed tasks (provisional)
 
-1. **Naming the target** — the Brief scanned for the first URL or `#n`; the
-   Branch field re-labelled and re-read for Review, filled from the Brief while
-   empty; Start refused on the composer while nothing is named. AC: a Brief
-   with a URL fills the field; a typed branch survives a URL arriving in the
-   Brief; Start on an empty pair is inert and says why.
+1. **Naming the target** — a Target field on the record and in the Repo panel,
+   drawn for Review alone, with its own endpoint and its own refusals; the Brief
+   scanned for the first URL or `#n` to fill it while empty; Start refused on
+   the composer while nothing is named. AC: a Brief with a URL fills the field;
+   a URL saves where the Branch field would refuse it; a typed branch survives a
+   URL arriving in the Brief; Start on an empty pair is inert and says why.
 2. **Take-up at Start** — the Review start resolves a pull request through
    `gh`, runs the existing take-up and records it, landing Wrapping; every
    existing refusal keeps its name. AC: a Review draft naming an open pull
@@ -87,8 +99,12 @@ with no *No review* row.
 
 ## Re-verify at start
 
-- Stages 01 and 02 landed; the Branch field is still the shared setup row's
-  and still reads the automatic placeholder for a Develop draft.
+- Stages 01 and 02 landed; the Repo panel is still where the Branch field and
+  the base picker live, in `web/src/workbench/Setup.tsx`, so the Target field
+  goes beside them.
+- `POST /api/ui/conversations/<id>/branch` still answers `NotABranchName` off
+  `is_branch_name`, which still asks `git check-ref-format` — which is why the
+  target is not that field.
 - The take-up in `crates/server/src/conversations.rs` still runs fetch,
   `settled`, companions, `store::take_up` and `record_pull_request` in that
   order with the refusals named there.

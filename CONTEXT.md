@@ -171,12 +171,15 @@ says — a lone pull request follows the strategy as it always has.
 
 **Review and Fix Merge Issues need a target**, and the Brief is where a pull
 request is named: the first pull request URL or `#number` in it is read at
-Start. A bare branch is not readable out of prose, so it goes in the Repo
-panel's Branch field, which for these two reads **Pull request or branch** and
-takes any of the three, filled from the Brief while empty; Start is refused
-while neither names anything. A pull request hides the base picker, GitHub's
-base being the fact; a branch keeps it, and that is what its pull request opens
-against.
+Start. A bare branch is not readable out of prose, so it goes in the **Target**
+field, which the Repo panel draws for these two alone, reading **Pull request or
+branch** and taking any of the three — filled from the Brief while empty and
+never over what the human typed; Start is refused while neither names anything.
+A field of its own rather than the Branch field re-read, that one being a rename
+and git refusing a URL as a ref: what the Conversation's branch is called is
+take-up's to decide from the head, and what to take up is this. A pull request
+hides the base picker, GitHub's base being the fact; a branch keeps it, and that
+is what its pull request opens against.
 
 **Which roles a Process uses is the Process's**: Develop the three, Review and
 Tinker the Implementation and Review Pairings, Investigate and Fix Merge Issues

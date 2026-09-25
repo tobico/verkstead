@@ -61,14 +61,14 @@ Steer target from every state, taking a brief the way Follow-up does, because a
 question about work can arise at any point in it.
 
 **Review** is *Wrap up a pull request* made a Process. Draft to Wrapping, the
-ordinary wrap-up with its review, on a pull request or a branch the Brief names.
-The pull request's own title and body no longer stand in for the Brief; the
-human writes one and puts the target in it. Two roles, Implementation and
-Review, and no *No review* row: a Review without a review is Fix Merge Issues
-with the comments answered, which is a different thing to ask for. The *Wrap up
-a pull request* level under Other actions goes, and with it the list of open
-pull requests read off GitHub when the compose page opens; the Brief carries the
-target instead.
+ordinary wrap-up with its review, on the pull request or branch it is pointed
+at. The pull request's own title and body no longer stand in for the Brief; the
+human writes one, and names the target in it or in the Target field. Two roles,
+Implementation and Review, and no *No review* row: a Review without a review is
+Fix Merge Issues with the comments answered, which is a different thing to ask
+for. The *Wrap up a pull request* level under Other actions goes, and with it
+the list of open pull requests read off GitHub when the compose page opens; the
+Brief and the Target field carry the target instead.
 
 **Tinker** is the ungrilled path made interactive. Draft straight to
 Follow-up on a fresh branch, under the following-up skill primed with the
@@ -99,15 +99,28 @@ follows the strategy as it always has.
 
 Review and Fix Merge Issues need a target. A pull request URL or `#number` is
 unambiguous anywhere in prose, so the Brief is scanned for the first one. A
-bare branch name is not, so it goes in the Repo panel's Branch field, which for
-these two Processes reads **Pull request or branch** and accepts all three — a
-URL found in the Brief fills it while it is empty. Start is refused while
-neither names anything. A bare branch keeps the base picker, and that base is
-what the wrap-up's `submitting` step opens the pull request against; a pull
+bare branch name is not, so it goes in a **Target** field of its own in the Repo
+panel, drawn for these two Processes and reading **Pull request or branch**: it
+takes a URL, a `#number` or a branch, and a URL found in the Brief fills it
+while it is empty and never overwrites what the human typed. Start is refused
+while neither names anything. A bare branch keeps the base picker, and that base
+is what the wrap-up's `submitting` step opens the pull request against; a pull
 request hides it, GitHub's base being the fact. Reading the Brief's first line
 as the target, and a field with nothing read from the Brief, were both
-considered: the first makes the Brief's shape load-bearing, and the second
-makes the human type a URL twice.
+considered: the first makes the Brief's shape load-bearing, and the second makes
+the human type a URL twice.
+
+**A field of its own rather than the Branch field re-read**, which was the first
+shape and does not work. The Branch field is a rename: it saves through
+`POST /api/ui/conversations/<id>/branch`, which runs
+`git check-ref-format refs/heads/<value>` and answers `NotABranchName`, and git
+refuses a pull request URL over its colon — so the shape this section leads
+with, a URL out of the Brief filling the field, is the one value that field
+cannot hold, on the composer and in the compose page's create replay alike.
+Underneath that the two are not the same fact: the Branch field says what the
+Conversation's branch is called, and take-up decides that from the pull
+request's head. The Target field says which work to take up, and is read once,
+at Start.
 
 ## The composer: Repo, Process, Agent
 
