@@ -157,9 +157,13 @@ a Process is the one thing about a Conversation most likely to differ from the
 last. The per-Repo Pairing memory stays keyed by role and shared across
 Processes.
 
-The Process is drawn on the Brief's setup facts beside the Pairings and in the
-details pane, and nowhere else: the state word on the sidebar and the card
-already says where the work is.
+The Process is drawn on the Brief's setup facts and nowhere else: the state word
+on the sidebar and the card already says where the work is. Beside the Repo, the
+branch and the base rather than beside the Pairings (*amended 2026-09-25,
+planning stage 01*): those facts come in two halves, and the half holding the
+worktree path and the three Pairings is the half a published share does not
+draw. A Process is a fact about the work rather than about the machine it was
+worked on, so it belongs in the half a share says.
 
 ## Consequences
 
