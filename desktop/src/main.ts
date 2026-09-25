@@ -8,12 +8,14 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
-//! **And it is what answers the page**, over the three channels
+//! **And it is what answers the page**, over the five channels
 //! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
-//! run it arrives in, and the log file opened. Each of them is something only
-//! this process can do — a file under Electron's user data, an icon on
-//! somebody's panel, a file handed to whatever the desktop reads text with —
-//! while what a set *means* is [`changed`](./settings.js)'s, which vitest runs.
+//! run it arrives in, the log file opened, and the startup registration read and
+//! written. Each of them is something only this process can do — a file under
+//! Electron's user data, an icon on somebody's panel, a file handed to whatever
+//! the desktop reads text with, a login item registered — while what a set
+//! *means* is [`changed`](./settings.js)'s and what a registration *is* is
+//! [`startup.ts`](./startup.js)'s, both of which vitest runs.
 //!
 //! **The order at the top of [`run`] is the lifecycle**, and it is an order
 //! rather than a sequence of conveniences: the log file, so that every line
@@ -22,6 +24,13 @@
 //! sidecar; then the address, which the lock is what makes an unambiguous
 //! question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
+//!
+//! **And a launch may be a login's rather than a human's.** The flag
+//! [`HIDDEN`](./startup.js) is what says so, written into the registration this
+//! app makes of itself, and what it comes to is a window that stays off the
+//! screen while there is an icon to reach the app by — [`hidden`](./startup.js)
+//! is that whole reading, and the registration it was written into is rewritten
+//! here at every launch while there is one.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +39,7 @@ import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 
 import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
-import { ASKED, LOGS, PRELOAD, SET } from "./bridge.js";
+import { ASKED, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { healthy, NeverCameUp } from "./health.js";
@@ -40,6 +49,15 @@ import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
+import {
+  HIDDEN,
+  hidden,
+  type LoginItem,
+  type Registering,
+  type Registration,
+  startup,
+  type Startup,
+} from "./startup.js";
 import { taken } from "./taken.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { forward, open } from "./window.js";
@@ -182,6 +200,32 @@ function enact(desk: string, trayed: Trayed, sent: unknown): Settings {
   }
 
   return now;
+}
+
+/// Enact a tick of **Launch on Startup** that arrived over the bridge, and
+/// answer with how it stands once it has been.
+///
+/// **The registration is the state** (Set 846 Q9a), so there is nothing to write
+/// anywhere else and nothing to keep in step: what comes back is read off the
+/// platform again, which is a box that says what is true rather than what was
+/// pressed. A platform that refused the registration says so in the answer — see
+/// [`Registration`](./startup.js) — rather than throwing at a renderer.
+///
+/// **And what is not a yes or a no is nothing at all.** The same reading
+/// [`enact`] makes of a set: a bridge is not to be trusted with the shape just
+/// because the window is the app's own.
+function ticked(starts: Startup, asked: unknown): Registration {
+  if (typeof asked !== "boolean") {
+    say(
+      "a tick came over the bridge for Launch on Startup that is neither yes nor no, " +
+        "so nothing is registered",
+    );
+    return starts.standing();
+  }
+
+  say(`the Desktop page asked for Launch on Startup ${asked ? "on" : "off"}`);
+
+  return starts.set(asked);
 }
 
 async function run(): Promise<void> {
@@ -381,14 +425,51 @@ async function run(): Promise<void> {
     quit: () => app.quit(),
   };
 
-  // The bridge's three acts, enacted here because here is the process that can
-  // — the file is read and written, the icon is raised and lowered, and the log
-  // file is handed to whatever the desktop reads text with. Registered before
-  // the window is opened, because the page is loaded the moment there is one
-  // and a page that asked before this would be asking nobody.
+  // **Launch on Startup**, which is the one setting on the Desktop page that is
+  // not in that file at all: the platform's own registration is the state (Set
+  // 846 Q9a), and what is read off this process for it is whether this is a
+  // packed app, where its executable is and what `$APPIMAGE` says. The
+  // login-item API is handed in rather than reached for, so that the two arms
+  // this machine will never take are still arms vitest runs.
+  const registering: Registering = {
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    ...machine,
+  };
+
+  const login: LoginItem = {
+    registered: () => app.getLoginItemSettings().openAtLogin,
+    register: (asked) => app.setLoginItemSettings(asked),
+  };
+
+  const starts = startup(registering, login);
+
+  // And the registration rewritten while there is one, which is what heals an
+  // app that was moved: the entry a login reads names where the app used to be,
+  // and a launch by hand is the moment that can be put right. A machine nobody
+  // asked to be started on is left exactly as it is.
+  starts.refresh();
+
+  // The bridge's five acts, enacted here because here is the process that can
+  // — the file is read and written, the icon is raised and lowered, the log
+  // file is handed to whatever the desktop reads text with, and the platform is
+  // asked about its startup registration. Registered before the window is
+  // opened, because the page is loaded the moment there is one and a page that
+  // asked before this would be asking nobody.
   ipcMain.handle(ASKED, () => settings(desk));
   ipcMain.handle(SET, (_event, sent: unknown) => enact(desk, trayed, sent));
   ipcMain.handle(LOGS, () => logs(kept));
+  ipcMain.handle(STARTUP, () => starts.standing());
+  ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
+
+  // Whether this launch is a login's: the flag the registration writes, read
+  // against the tray, because the icon is the whole of what makes a hidden app
+  // reachable (ADR-0020). Read before the window is opened, that being the one
+  // thing it decides.
+  const unseen = hidden(process.argv, settings(desk));
+  if (unseen) {
+    say(`this launch carries ${HIDDEN} and there is an icon in the tray, so no window comes up`);
+  }
 
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
@@ -408,6 +489,11 @@ async function run(): Promise<void> {
     // would be a radio nobody could see the effect of without a restart. A quit
     // already under way is not a press at all.
     closing: () => (quitting ? "quit" : closing(settings(desk), machine.platform)),
+
+    // A login start with an icon to come back from opens no window over
+    // whatever the human is doing — see [`hidden`](./startup.js), which is what
+    // `--no-open` meant for the tray app.
+    hidden: unseen,
   });
   onscreen = window;
 

@@ -15,20 +15,23 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { ASKED, LOGS, NAME, PRELOAD, SET } from "../src/bridge.js";
+import { ASKED, LOGS, NAME, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
+
+/// Every channel the bridge crosses on, which is the list both tests below read.
+const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER];
 
 /// This project's own directory, which is what `src/` is under.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
 
 describe("the channels", () => {
   it("names each act once", () => {
-    expect(new Set([ASKED, SET, LOGS]).size).toBe(3);
+    expect(new Set(CHANNELS).size).toBe(CHANNELS.length);
   });
 
   /// A channel is a name in a renderer's whole namespace of them, so the app's
   /// own say whose they are.
   it("carries the app's name", () => {
-    for (const channel of [ASKED, SET, LOGS]) {
+    for (const channel of CHANNELS) {
       expect(channel, channel).toMatch(/^verkstead:/);
     }
   });

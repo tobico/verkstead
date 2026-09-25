@@ -123,7 +123,15 @@ function xdg(variable: string | undefined, home: string | undefined, under: stri
 /// by the host's rules, so `/home/you` put through it on a Windows runner comes
 /// back relative and a Linux arm this module exists to test resolves to
 /// nowhere. See [`set`], which is the same crossing read from the Windows side.
-function absolute(value: string | undefined): string | undefined {
+///
+/// **Exported, because it is not only these directories' question.** The
+/// autostart directory a **Launch on Startup** entry goes in and the
+/// `$APPIMAGE` that entry names in preference to the running executable are read
+/// by the same rule, out of the same environment — see
+/// [`startup.ts`](./startup.js). Not one of Verkstead's own directories either
+/// way, which is why that module resolves its own rather than asking here for a
+/// path.
+export function absolute(value: string | undefined): string | undefined {
   return value !== undefined && value.startsWith("/") ? value : undefined;
 }
 

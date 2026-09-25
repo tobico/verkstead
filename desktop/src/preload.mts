@@ -4,11 +4,12 @@
 //! The fourth file at the edge, and the only one that is not the main process:
 //! it imports `electron` for `contextBridge` and `ipcRenderer`, so the lint
 //! wall in `eslint.config.js` names it. What it puts on the window is
-//! [`bridge.ts`](./bridge.js)'s shape and nothing else — four things, each of
-//! them a message to the main process, which is where the file is read, the
-//! icon is raised and the log is opened.
+//! [`bridge.ts`](./bridge.js)'s shape and nothing else — one value and five
+//! calls, each of them a message to the main process, which is where the file is
+//! read, the icon is raised, the log is opened and the platform is asked about
+//! its startup registration.
 //!
-//! **Nothing is exposed but the four.** `contextBridge` is what makes that
+//! **Nothing is exposed but the six.** `contextBridge` is what makes that
 //! true: the page runs in a world of its own with no Node in it, and what
 //! crosses is this object rather than a process, a filesystem or an
 //! `ipcRenderer`. A set arriving on the other side is checked against the shape
@@ -30,8 +31,9 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-import { ASKED, type Bridge, LOGS, NAME, SET } from "./bridge.js";
+import { ASKED, type Bridge, LOGS, NAME, REGISTER, SET, STARTUP } from "./bridge.js";
 import type { Settings } from "./settings.js";
+import type { Registration } from "./startup.js";
 
 /// What `window.verkstead` is inside the app.
 ///
@@ -46,6 +48,9 @@ const bridge: Bridge = {
   settings: () => ipcRenderer.invoke(ASKED) as Promise<Settings>,
   set: (changed) => ipcRenderer.invoke(SET, changed) as Promise<Settings>,
   logs: () => ipcRenderer.invoke(LOGS) as Promise<void>,
+
+  startup: () => ipcRenderer.invoke(STARTUP) as Promise<Registration>,
+  register: (on) => ipcRenderer.invoke(REGISTER, on) as Promise<Registration>,
 };
 
 contextBridge.exposeInMainWorld(NAME, bridge);
