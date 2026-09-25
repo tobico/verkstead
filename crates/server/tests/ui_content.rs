@@ -3474,6 +3474,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "devices-wsl.json",
         &a_stated_machine(&get(&wsl, "/api/ui/devices").await),
     );
+
+    // And a third, with two devices written down as members of this one's
+    // cluster: the list draws a row apiece and the card's count comes off
+    // them, so a fixture with nothing linked could only ever draw the one row
+    // the two above hold. The members are a fixture, the join being a later
+    // task's — what is being fed to the viewer is the shape a linked Verkstead
+    // answers with.
+    let (_dir, linked) = a_linked_devices_app().await;
+    write(
+        "devices-linked.json",
+        &a_stated_machine(&get(&linked, "/api/ui/devices").await),
+    );
 }
 
 /// What a WSL kernel calls itself, which is the one thing that tells one apart
@@ -3506,6 +3518,18 @@ const A_MACHINE_NAME: &str = "workbench";
 /// machine writing the same bytes.
 #[cfg(unix)]
 async fn devices_app(platform: Platform, kernel: Option<&str>) -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = devices_app_over_a_store(platform, kernel).await;
+
+    (dir, app)
+}
+
+/// The same, with the pool its membership is read out of handed back: what the
+/// linked fixture writes its members into.
+#[cfg(unix)]
+async fn devices_app_over_a_store(
+    platform: Platform,
+    kernel: Option<&str>,
+) -> (tempfile::TempDir, sqlx::SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -3519,12 +3543,60 @@ async fn devices_app(platform: Platform, kernel: Option<&str>) -> (tempfile::Tem
     );
 
     let device = Device::stated(dir.path(), A_DEVICE).unwrap();
+    let devices = Devices::of(device, reading, Members::recorded(pool.clone()));
 
-    (
-        dir,
-        router_answering_devices(pool, Devices::of(device, reading, Members::none())),
-    )
+    (dir, pool.clone(), router_answering_devices(pool, devices))
 }
+
+/// The same router with two devices written down as members of this one's
+/// cluster: a Mac on a tailnet and a WSL on the LAN.
+///
+/// A WSL among them deliberately — a Windows machine and the WSL on it share a
+/// hostname, and the OS word beside the name is the only thing that tells two
+/// such rows apart, which is the case the whole of cluster mode was written
+/// for. Written straight into the table, the join being a later task's.
+#[cfg(unix)]
+async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+
+    for (device, name, os, addresses) in [
+        (
+            A_MEMBER,
+            "laptop",
+            "macOS",
+            vec!["laptop.tailnet-name.ts.net", "100.64.0.2"],
+        ),
+        (
+            ANOTHER_MEMBER,
+            "workbench",
+            "Linux (WSL)",
+            vec!["172.29.0.14"],
+        ),
+    ] {
+        verkstead_store::record_member(
+            &pool,
+            &verkstead_store::Linking {
+                device: device.to_owned(),
+                name: name.to_owned(),
+                os: os.to_owned(),
+                addresses: addresses.into_iter().map(str::to_owned).collect(),
+                fingerprint: format!("AA:BB:CC:DD:{device}"),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    (dir, app)
+}
+
+/// And the ids those two are written down under, for the reason this device's
+/// own is stated: a fixture committed to the tree names its rows by strings
+/// somebody chose.
+#[cfg(unix)]
+const A_MEMBER: &str = "0011223344556677889900aabbccddee";
+#[cfg(unix)]
+const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 
 /// One Devices reading with the two things in it that are this run's own
 /// written back out as a machine anybody would recognise.

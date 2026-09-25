@@ -40,12 +40,12 @@
 //! the join post, which comes from a non-member by definition and whose
 //! certificate is pinned into the pending request it creates; and the dial-back
 //! answering a join, matched against the certificate that pending request is
-//! holding. The last two are the next stage's, so the list has one entry today
-//! and [`gate`] stands over everything else — and with nothing in [`Members`]
-//! yet, refused is what everything else is. The refusal says that much: a
-//! caller this device holds no membership for, rather than a path that is not
-//! there. A device posting a join has to be able to tell a Verkstead that will
-//! not have it from one too old to have the route at all.
+//! holding. The last two are still to come, so the list has one entry today and
+//! [`gate`] stands over everything else — asking [`Members`] of every caller,
+//! which is rows now rather than a number nobody wrote. The refusal says what
+//! it is: a caller this device holds no membership for, rather than a path that
+//! is not there. A device posting a join has to be able to tell a Verkstead that
+//! will not have it from one too old to have the route at all.
 //!
 //! **The accept loop never waits on a handshake, and no handshake waits for
 //! ever.** Each connection's is run in a task of its own and the completed ones
@@ -85,6 +85,7 @@ use rustls::{
 };
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
+use sqlx::SqlitePool;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
@@ -267,7 +268,7 @@ pub fn router(device: Device, reading: Reading, members: Members) -> Router {
     Router::new()
         .route(IDENTITY, get(identity))
         .with_state(Answering { device, reading })
-        .fallback_service(members_only(members))
+        .fallback_service(members_only(Router::new(), members))
 }
 
 /// What the identity endpoint answers out of: what this device *is*, and the
@@ -284,57 +285,89 @@ struct Answering {
     reading: Reading,
 }
 
-/// Everything a membership admits, which today is nothing at all.
+/// Everything a membership admits, with the gate over the lot of it.
 ///
-/// The routes go in here as the stages that need them arrive, and the gate over
-/// them is one layer rather than a check inside each: a route added without its
-/// check is the kind of mistake that reads as working code, and there is no
-/// spelling of this router that has a route outside the gate.
-fn members_only(members: Members) -> Router {
-    Router::new().layer(axum::middleware::from_fn_with_state(members, gate))
+/// `routes` rather than a router built in here, because the gate is one layer
+/// over everything a member may reach and axum applies a layer to the routes
+/// added *before* it: a member-only route added after the fact would be a route
+/// outside the gate, and a route added without its check is the kind of mistake
+/// that reads as working code. So there is one call, and everything that goes
+/// through it is gated.
+///
+/// Empty on this listener until the stages that need routes arrive — the
+/// announcement, the unlink broadcast and the renewal. It is public all the
+/// same, because the suite stands its own one-line route behind the real gate:
+/// what is being asked of the gate is which callers get *through* it, and a
+/// gate with nothing behind it can only ever be asked who is refused.
+pub fn members_only(routes: Router, members: Members) -> Router {
+    routes.layer(axum::middleware::from_fn_with_state(members, gate))
 }
 
-/// The devices this one has linked to, as the two things that ask after them
-/// do: the gate over every route here, and the changeover a re-issued
-/// certificate is in the middle of.
+/// The devices this one is linked to, as the three things that ask after them
+/// do: the gate over every route a membership admits, the changeover a
+/// re-issued certificate is in the middle of, and the Devices section of the
+/// Remote access pane.
 ///
-/// **Empty, and read from nowhere.** A member is made by a join, and the join
-/// is the next stage's — so what this holds is not a store that happens to
-/// have nothing in it yet, it is the two questions that have to be askable,
-/// with the only answers this stage can honestly give: no, this caller is not
-/// one of them, and no, there is nobody owed an announcement.
+/// **Rows, read at the moment each question is asked.** A join writes one and
+/// an unlink takes one away — see [`verkstead_store::Member`] — and nothing
+/// here holds a copy between two questions: a membership that was cached would
+/// be a device that went on being admitted after the human unlinked it, which
+/// is the one thing an unlink has to mean.
+///
+/// A handle over the store rather than the pool itself, so that the three
+/// callers ask a membership their own question rather than each writing its own
+/// query — and so that a suite can state one.
 #[derive(Debug, Clone)]
 pub struct Members {
-    /// How many there are, which is the whole of what a membership can be said
-    /// in until there is a join to record one properly.
-    ///
-    /// Nought in every Verkstead this build can make. A number rather than a
-    /// list because the two questions a number can answer are the two that are
-    /// asked — how many are there, and how many are owed an announcement — and
-    /// the one it cannot is the one whose answer is no either way: a stated
-    /// membership holds no fingerprint, so [`Members::holds`] is false for
-    /// every caller, which is what this build would say in any case.
-    linked: usize,
+    recorded: Recorded,
 }
 
-impl Members {
-    /// None of them, which is the membership of every Verkstead this build can
-    /// make.
-    pub fn none() -> Members {
-        Members { linked: 0 }
-    }
+/// Where a membership's answers come from.
+#[derive(Debug, Clone)]
+enum Recorded {
+    /// The rows this Verkstead keeps, read afresh at every question. Which is
+    /// every running server.
+    InTheStore(SqlitePool),
 
-    /// And the membership a fixture states: `linked` devices, none of which
-    /// has acknowledged anything.
+    /// And the membership a fixture states: this many devices, none of which
+    /// this end holds a certificate for.
     ///
     /// Here for the reason [`Device::stated`] is. What a changeover does
     /// depends on whether anybody is owed an announcement of the new
-    /// fingerprint, and a suite that could only ever ask a membership of
-    /// nobody could only ever see one of the two answers — so the half of the
-    /// changeover that keeps presenting the outgoing certificate would be a
-    /// claim nothing stood behind.
+    /// fingerprint, and a suite about the renewal stands on nothing but that —
+    /// so it says how many there are rather than standing a store up to hold
+    /// them. Nothing is admitted by one: a stated membership holds no
+    /// fingerprint, so [`Members::holds`] is false for every caller, and a test
+    /// that wants a caller through the gate records a real row.
+    Stated(usize),
+}
+
+impl Members {
+    /// None of them, which is what a Verkstead that has never been linked to
+    /// anything has.
+    pub fn none() -> Members {
+        Members {
+            recorded: Recorded::Stated(0),
+        }
+    }
+
+    /// And the membership a fixture states: `linked` devices, none of which has
+    /// acknowledged anything — see [`Recorded::Stated`].
     pub fn stated(linked: usize) -> Members {
-        Members { linked }
+        Members {
+            recorded: Recorded::Stated(linked),
+        }
+    }
+
+    /// The membership this Verkstead really keeps: the rows in `pool`.
+    ///
+    /// Built at the start, after the database is open and before the identity
+    /// is read — the identity consults it, which is why the two are in that
+    /// order. See `run_on_keyed`.
+    pub fn recorded(pool: SqlitePool) -> Members {
+        Members {
+            recorded: Recorded::InTheStore(pool),
+        }
     }
 
     /// Whether the device whose certificate has this fingerprint is one of
@@ -345,36 +378,88 @@ impl Members {
     /// listener is the certificate it presented at the handshake, and the
     /// fingerprint is that certificate said in the spelling both ends of a
     /// link compare — see [`Device::fingerprint`].
-    fn holds(&self, _fingerprint: &str) -> bool {
-        false
+    ///
+    /// **A membership that cannot be read admits nobody.** This is the gate's
+    /// own question, and the two ways of not knowing the answer are not the
+    /// same: refusing a member while the database is unreachable costs a call
+    /// that is retried, and admitting a stranger because the read failed costs
+    /// the whole of what the gate is for. So a failure is said in the log and
+    /// answered no.
+    async fn holds(&self, fingerprint: &str) -> bool {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                match verkstead_store::member_holding(pool, fingerprint).await {
+                    Ok(held) => held,
+                    Err(what) => {
+                        tracing::error!(
+                            %what,
+                            "this device's membership could not be read, so the caller \
+                             presenting a certificate is refused rather than admitted",
+                        );
+
+                        false
+                    }
+                }
+            }
+
+            // A stated membership holds no certificate, so it admits nobody.
+            Recorded::Stated(_) => false,
+        }
     }
 
     /// How many of them have yet to acknowledge `fingerprint`, which is the
     /// question a changeover asks — see [`crate::device::Changeover`].
     ///
-    /// **All of them, whatever the fingerprint is.** An acknowledgement is a
-    /// member answering an announcement, the announcement is the linking
-    /// stage's, and neither has anywhere to be recorded yet — so a member here
-    /// has acknowledged nothing and every one of them is owed. Which comes to
-    /// nought, there being no member; and nought is the answer that completes
-    /// a changeover at the start that began it.
+    /// **All of them, whatever the fingerprint is**, and now read off the rows
+    /// rather than off a number nobody wrote. An acknowledgement is a member
+    /// answering an announcement, the announcement is this stage's last task,
+    /// and there is nowhere yet to record one — so every member is owed, and a
+    /// membership with nobody in it owes nought. Nought is what completes a
+    /// changeover at the start that began it, which is what a Verkstead that
+    /// has never been linked to anything still does.
     ///
-    /// What the stage after this fills in is the acknowledgement: this becomes
-    /// the members whose recorded fingerprint is not the one being changed to,
-    /// and the announcement is what takes them off that list one at a time.
-    pub(crate) fn unacknowledged(&self, _fingerprint: &str) -> usize {
-        self.linked
+    /// What the task that adds the announcement fills in is the other half:
+    /// this becomes the members that have not yet said they hold the new
+    /// fingerprint, and each acknowledgement takes one off the list.
+    pub(crate) async fn unacknowledged(&self, _fingerprint: &str) -> Result<usize> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_count(pool)
+                .await
+                .context("asking how many members are owed an announcement"),
+
+            Recorded::Stated(linked) => Ok(*linked),
+        }
     }
 
-    /// And how many of them there are, which is the clause the Remote access
-    /// card carries beside what Tailscale is doing — see
-    /// [`crate::device::Devices`], which is the workbench's side of this.
+    /// And every one of them as it answers for itself, which is what the
+    /// Devices section of the Remote access pane draws a row from — see
+    /// [`crate::device::Devices`].
     ///
-    /// Nought, for the reason [`Members::holds`] is false: there is no join to
-    /// make a member with, so nought is what there is to count rather than
-    /// what nobody looked for.
-    pub(crate) fn count(&self) -> usize {
-        self.linked
+    /// The same shape a device answers a stranger with on [`IDENTITY`],
+    /// because it is the same thing said: what was read off the far end's
+    /// machine at the last exchange, kept because this end cannot read another
+    /// machine's hostname for itself.
+    ///
+    /// A stated membership draws nothing. It is a number and not a set of
+    /// devices, and a row invented to make the count come out would be a row
+    /// naming a machine that does not exist.
+    pub(crate) async fn listed(&self) -> Result<Vec<DeviceIdentity>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => Ok(verkstead_store::members(pool)
+                .await
+                .context("reading the devices this one is linked to")?
+                .into_iter()
+                .map(|member| DeviceIdentity {
+                    device: member.device,
+                    fingerprint: member.fingerprint,
+                    name: member.name,
+                    os: member.os,
+                    addresses: member.addresses,
+                })
+                .collect()),
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
     }
 }
 
@@ -391,7 +476,7 @@ async fn gate(
     next: Next,
 ) -> Response {
     match caller.fingerprint() {
-        Some(fingerprint) if members.holds(&fingerprint) => next.run(request).await,
+        Some(fingerprint) if members.holds(&fingerprint).await => next.run(request).await,
         _ => refused(),
     }
 }

@@ -5570,8 +5570,8 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
     }
 }
 
-/// `GET /api/ui/devices` — this device, and how many others are linked to it,
-/// which is the **Devices** section of the Remote access pane (ADR-0020).
+/// `GET /api/ui/devices` — this device and every other in its cluster, which is
+/// the **Devices** section of the Remote access pane (ADR-0020).
 ///
 /// **The same answer a peer reads, told to the browser instead.** A stranger
 /// asks the identity endpoint on the peer listener; the browser cannot, that
@@ -5595,7 +5595,14 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
         return unavailable("this server holds no device identity to answer for");
     };
 
-    let view: DevicesView = devices.listing().await;
+    let view: DevicesView = match devices.listing().await {
+        Ok(view) => view,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices this one is linked to could not be read: {why:#}"
+            ));
+        }
+    };
 
     Json(view).into_response()
 }

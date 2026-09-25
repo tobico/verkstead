@@ -1945,21 +1945,26 @@ addresses: Array<string>, };
  */
 export type DevicesView = { 
 /**
- * This device, which is the whole of the list until something is linked to
- * it: the one row, marked *this device* and offering no Unlink.
+ * This device, which is the row marked *this device* and the one the list
+ * always holds: a Verkstead linked to nothing still has an identity.
  */
 this: DeviceIdentity, 
 /**
- * And how many other devices are linked to it, which is the clause the
- * Remote access card's line carries beside what Tailscale is doing.
+ * And every other device in its cluster, each as it last answered for
+ * itself.
  *
- * A count rather than the devices themselves, because a count is the whole
- * of what anything in this build can draw: a member is made by a join, and
- * the join is the next stage's — so this is nought on every Verkstead that
- * can be built from here, and it is nought because there is nothing to
- * count rather than because nobody looked.
+ * The same shape as the row above, because it is the same thing said: a
+ * member is drawn with its name, the mark for its OS and the addresses a
+ * peer could reach it on, exactly as this device is. What is different is
+ * where the answer came from — this device reads its own machine as the
+ * pane is drawn, and a member was read off the far end at the last
+ * exchange.
+ *
+ * **The count on the Remote access card comes off this**, rather than
+ * being answered beside it: there is one membership, and a number that
+ * could disagree with the rows would be two answers about it.
  */
-linked: number, };
+members: Array<DeviceIdentity>, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the

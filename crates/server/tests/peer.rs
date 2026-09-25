@@ -32,14 +32,17 @@ use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, RENEW_WITHIN};
+use verkstead_server::open_database;
 use verkstead_server::peer;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
+use verkstead_store::{Linking, forget_member, record_member};
 
 /// The id this device is stated as, so that what a test asserts against is a
 /// string it chose rather than sixteen random bytes it has to filter out of a
@@ -47,8 +50,12 @@ use verkstead_server::remote::Tailscale;
 const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// And the one the stranger below is stated as. A device this one has never
-/// been linked to, which in this stage is every device there is.
+/// been linked to.
 const SOME_OTHER_DEVICE: &str = "0011223344556677889900aabbccddee";
+
+/// And a third, for the suites about the member gate: one device is written
+/// down as a member and the other is not, which is what the gate tells apart.
+const A_THIRD_DEVICE: &str = "ffeeddccbbaa00998877665544332211";
 
 /// The join post, which is the stage after this one's. Asked for here because
 /// what this stage claims about it is that it is refused along with everything
@@ -112,12 +119,14 @@ impl Listening {
     /// Which is the whole of what this is here to ask — the listener presents
     /// the certificate that member holds, rather than the one it has not been
     /// told about yet, and a changeover is a re-issue that costs no call.
-    fn mid_changeover(id: &str) -> Listening {
+    async fn mid_changeover(id: &str) -> Listening {
         let dir = tempfile::tempdir().unwrap();
 
         Device::stated_good_for(dir.path(), id, RENEW_WITHIN - time::Duration::days(1)).unwrap();
 
-        let device = Device::issued(dir.path(), &peer::Members::stated(1)).unwrap();
+        let device = Device::issued(dir.path(), &peer::Members::stated(1))
+            .await
+            .unwrap();
 
         assert!(
             device.incoming_fingerprint().is_some(),
@@ -445,7 +454,7 @@ async fn the_certificate_the_handshake_hands_over_is_the_one_the_startup_line_pr
 /// are held rather than one replaced.
 #[tokio::test]
 async fn a_device_in_the_middle_of_a_changeover_presents_the_certificate_its_members_hold() {
-    let listening = Listening::mid_changeover(THIS_DEVICE);
+    let listening = Listening::mid_changeover(THIS_DEVICE).await;
 
     let (presented, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
 
@@ -559,10 +568,16 @@ async fn a_caller_that_says_nothing_is_let_go_of() {
 /// The directory comes back with it because the identity lives in it: dropped
 /// early, the certificate goes out from under the handle still presenting it.
 fn a_stranger() -> (Device, tempfile::TempDir) {
-    let elsewhere = tempfile::tempdir().unwrap();
-    let stranger = Device::stated(elsewhere.path(), SOME_OTHER_DEVICE).unwrap();
+    a_device_called(SOME_OTHER_DEVICE)
+}
 
-    (stranger, elsewhere)
+/// And a device standing on its own two files, whatever this suite wants to
+/// call it — a member, or a second stranger beside the first.
+fn a_device_called(id: &str) -> (Device, tempfile::TempDir) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let device = Device::stated(elsewhere.path(), id).unwrap();
+
+    (device, elsewhere)
 }
 
 /// Where the probe router below says what the handshake handed it.
@@ -952,4 +967,180 @@ async fn the_tailnet_comes_before_the_lan() {
         "the tailnet name and address lead, and the address the daemon already \
          named is not named again by the interface it is on, got:\n{answered}",
     );
+}
+
+/// Where the one route this suite stands behind the real member gate answers.
+///
+/// Stood up because the listener has none of its own yet: the announcement, the
+/// unlink broadcast and the renewal are what put routes inside the gate, and a
+/// gate with nothing behind it can only ever be asked who is *refused*. What is
+/// being asked here is the other half — which callers get through — and a route
+/// of one line is the whole of that question. It reads its caller back, so that
+/// what came through is known to be the caller that was admitted rather than
+/// somebody else on the same connection.
+const MEMBERS_ONLY: &str = "/api/peer/v1/members-only";
+
+/// A database with nothing in it, and the directory keeping it alive.
+///
+/// A real one rather than a stated membership, because what these tests are
+/// about is a caller getting *through* the gate: a stated membership holds no
+/// certificate, so it is a number for the changeover to read and can admit
+/// nobody.
+async fn a_store() -> (tempfile::TempDir, SqlitePool) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    (dir, pool)
+}
+
+/// A device written down as a member of this one's cluster, as it would be by
+/// the join the stage after this builds.
+///
+/// A fixture rather than a link, which is the whole of what this task has: what
+/// a row comes from is the join, and what the row *does* is what is being
+/// asked. The fingerprint is the device's own, because that is what a caller is
+/// on this listener.
+async fn recorded(pool: &SqlitePool, device: &Device) {
+    record_member(
+        pool,
+        &Linking {
+            device: device.id().to_owned(),
+            name: "somewhere-else".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["192.168.1.31".to_owned()],
+            fingerprint: device.fingerprint().to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A listener standing on the membership `pool` keeps: everything a Verkstead
+/// answers, with [`MEMBERS_ONLY`] merged in behind the real gate.
+///
+/// Merged rather than stood up on its own, so that the one listener can be
+/// asked all three of the gate's questions — a member reaches the route, a
+/// stranger does not, and a stranger still reads the identity endpoint, which
+/// is outside the gate and has to stay there.
+fn gated_on(id: &str, pool: SqlitePool) -> Listening {
+    Listening::serving(id, move |device| {
+        let members = peer::Members::recorded(pool);
+
+        peer::router(device, nowhere(), members.clone()).merge(peer::members_only(
+            Router::new().route(
+                MEMBERS_ONLY,
+                get(
+                    |ConnectInfo(caller): ConnectInfo<peer::Caller>| async move {
+                        caller.fingerprint().unwrap_or_else(|| "nothing".to_owned())
+                    },
+                ),
+            ),
+            members,
+        ))
+    })
+}
+
+/// The gate's other half, and the whole of what a membership is for: a caller
+/// presenting a certificate this device has recorded reaches a route behind it.
+///
+/// The three callers together, because what the gate does is tell them apart: a
+/// member gets through, a device this one has never heard of does not, and
+/// neither does one showing nothing at all. And the fingerprint that comes back
+/// is the member's own, so what got through is the caller that was admitted.
+#[tokio::test]
+async fn a_caller_presenting_a_members_certificate_reaches_a_gated_route() {
+    let (_held, pool) = a_store().await;
+    let listening = gated_on(THIS_DEVICE, pool.clone());
+    let (member, _elsewhere) = a_stranger();
+
+    recorded(&pool, &member).await;
+
+    let (_, answered) = asking(&listening, Showing::A(member.clone()), MEMBERS_ONLY).await;
+
+    assert_eq!(
+        status(&answered),
+        200,
+        "a device this one has recorded is a member, and a member reaches what a \
+         membership admits, got:\n{answered}",
+    );
+    assert_eq!(
+        body(&answered),
+        member.fingerprint(),
+        "and the route reads the caller that was admitted, got:\n{answered}",
+    );
+
+    let (unknown, _somewhere) = a_device_called(A_THIRD_DEVICE);
+
+    for (named, showing) in [
+        ("a device this one has never recorded", Showing::A(unknown)),
+        ("a caller showing nothing at all", Showing::Nothing),
+    ] {
+        let (_, answered) = asking(&listening, showing, MEMBERS_ONLY).await;
+
+        assert_eq!(
+            status(&answered),
+            403,
+            "{named} holds no membership here, got:\n{answered}",
+        );
+    }
+}
+
+/// And a member taken out of the table is refused on the next call, with
+/// nothing cached from before it went.
+///
+/// Which is what an unlink has to mean. A membership read once and held would
+/// be a device that went on being admitted for as long as the server ran, and
+/// the human's press would be a row changing under a gate that had stopped
+/// looking at it.
+#[tokio::test]
+async fn a_member_taken_out_of_the_table_is_refused_on_the_next_call() {
+    let (_held, pool) = a_store().await;
+    let listening = gated_on(THIS_DEVICE, pool.clone());
+    let (member, _elsewhere) = a_stranger();
+
+    recorded(&pool, &member).await;
+
+    let (_, answered) = asking(&listening, Showing::A(member.clone()), MEMBERS_ONLY).await;
+    assert_eq!(status(&answered), 200, "got:\n{answered}");
+
+    forget_member(&pool, member.id()).await.unwrap();
+
+    let (_, answered) = asking(&listening, Showing::A(member), MEMBERS_ONLY).await;
+
+    assert_eq!(
+        status(&answered),
+        403,
+        "the gate reads the table at every call, so a member that is gone is \
+         gone, got:\n{answered}",
+    );
+}
+
+/// And the identity endpoint is still outside the gate for all three of them,
+/// which is what a device looking for somebody to link to reads.
+#[tokio::test]
+async fn the_identity_stays_outside_the_gate_on_a_listener_with_members() {
+    let (_held, pool) = a_store().await;
+    let listening = gated_on(THIS_DEVICE, pool.clone());
+    let (member, _elsewhere) = a_stranger();
+
+    recorded(&pool, &member).await;
+
+    let (unknown, _somewhere) = a_device_called(A_THIRD_DEVICE);
+
+    for (named, showing) in [
+        ("a member", Showing::A(member)),
+        ("a device this one has never recorded", Showing::A(unknown)),
+        ("a caller showing nothing at all", Showing::Nothing),
+    ] {
+        let (_, answered) = asking(&listening, showing, peer::IDENTITY).await;
+
+        assert_eq!(
+            status(&answered),
+            200,
+            "{named} should read the identity endpoint: nobody has to be anybody \
+             to ask a device what it is, got:\n{answered}",
+        );
+    }
 }

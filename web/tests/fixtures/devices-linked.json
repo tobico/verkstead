@@ -1,0 +1,33 @@
+{
+  "members": [
+    {
+      "addresses": [
+        "laptop.tailnet-name.ts.net",
+        "100.64.0.2"
+      ],
+      "device": "0011223344556677889900aabbccddee",
+      "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
+      "name": "laptop",
+      "os": "macOS"
+    },
+    {
+      "addresses": [
+        "172.29.0.14"
+      ],
+      "device": "ffeeddccbbaa00998877665544332211",
+      "fingerprint": "AA:BB:CC:DD:ffeeddccbbaa00998877665544332211",
+      "name": "workbench",
+      "os": "Linux (WSL)"
+    }
+  ],
+  "this": {
+    "addresses": [
+      "192.168.1.24",
+      "10.0.0.7"
+    ],
+    "device": "aa00bb11cc22dd33ee44ff5566778899",
+    "fingerprint": "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16",
+    "name": "workbench",
+    "os": "Linux"
+  }
+}

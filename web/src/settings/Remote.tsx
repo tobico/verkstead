@@ -94,11 +94,12 @@
 //! hostname, the word for the OS is the platform's own — *Linux (WSL)* where
 //! the kernel says so, which is the one case a hostname cannot tell apart — and
 //! the addresses are read off the machine's interfaces at the moment it
-//! answers. The list holds this device alone until something is linked, and its
-//! row offers no Unlink: there is nothing yet to unlink from.
+//! answers. The list holds this device and a row apiece for the devices linked
+//! to it, drawn the same way — what is read off this machine now is what a
+//! member last said of its own. No row offers an Unlink yet.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch as Choose, type JSX } from "solid-js";
+import { For, Match, Show, Switch as Choose, type JSX } from "solid-js";
 
 import { faApple, faLinux, faWindows } from "@fortawesome/free-brands-svg-icons";
 import { faDesktop, type IconDefinition } from "@fortawesome/free-solid-svg-icons";
@@ -110,6 +111,7 @@ import { Icon } from "../Icon";
 import { PaneSticky } from "../Panes";
 import { loadDevices, loadRemote, pressServe, resetKey } from "../api/client";
 import type {
+  DeviceIdentity,
   DevicesView,
   RemoteView,
   ServePress,
@@ -197,7 +199,7 @@ function useRemote() {
 }
 
 /// And what this Verkstead *is*, read for the two panes that draw that too: the
-/// device this machine runs, and how many others are linked to it.
+/// device this machine runs, and every other device in its cluster.
 ///
 /// A read of its own beside the one above rather than a field of it, because
 /// they are two different questions about this machine: what Tailscale is doing
@@ -205,9 +207,8 @@ function useRemote() {
 /// changes when a link is made or an address moves. Neither is a setting, which
 /// is why neither is in the settings query.
 ///
-/// Merged by the device id: what says one row from another is the id, here and
-/// in the list this becomes once anything is linked, so a re-read that found
-/// another device leaves the rows it already drew alone.
+/// Merged by the device id: what says one row from another is the id, so a
+/// re-read that found another device leaves the rows it already drew alone.
 function useDevices() {
   return useReading(() => ({
     queryKey: ["devices"],
@@ -244,6 +245,9 @@ function osIcon(os: string): IconDefinition {
 /// devices, because this device is the row the list already holds and nothing
 /// is linked to itself. Nought is a sentence rather than a silence: a workbench
 /// that says nothing about devices reads as one that has not heard of them.
+///
+/// Counted off the rows the list draws rather than answered beside them, so the
+/// sentence and the list cannot come to disagree about one membership.
 function linked(count: number): string {
   if (count === 0) return "No other devices are linked.";
   if (count === 1) return "One other device is linked.";
@@ -336,7 +340,7 @@ export function RemoteCard(props: {
             <p class={styles.standing}>
               {standing(told())}{" "}
               <Show when={devices.data}>
-                {(here) => <>{linked(here().linked)}</>}
+                {(here) => <>{linked(here().members.length)}</>}
               </Show>
             </p>
           </CardButton>
@@ -608,7 +612,8 @@ function TheKey(): JSX.Element {
   );
 }
 
-/// The devices this workbench is one of, which today is this one.
+/// The devices this workbench is one of: this one, and every other in its
+/// cluster.
 ///
 /// **A section of this pane rather than a settings section of its own**
 /// (ADR-0020): linking is how this machine is reached as much as the serve and
@@ -619,11 +624,12 @@ function TheKey(): JSX.Element {
 /// of it: a machine that has never heard of a tailnet has a device identity all
 /// the same, and a list that went away on one would say this needed Tailscale.
 ///
-/// One row, and nothing to press on it. The name is the hostname and the mark
-/// beside it is the word for the OS — a WSL wears the Linux mark and reads
-/// *Linux (WSL)*, which is the one thing that tells it from the Windows it
-/// shares a hostname with. *This device* is what the row says instead of an
-/// Unlink, there being nothing yet to unlink it from.
+/// Nothing to press on any row yet. The name is the hostname the machine
+/// answers to and the mark beside it is the word for its OS — a WSL wears the
+/// Linux mark and reads *Linux (WSL)*, which is the one thing that tells it
+/// from the Windows it shares a hostname with, and the case a cluster of two
+/// rows is drawn for. *This device* is what marks which of them is this
+/// machine; Unlink is a later stage's.
 function Devices(): JSX.Element {
   const devices = useDevices();
 
@@ -638,44 +644,61 @@ function Devices(): JSX.Element {
             Could not read this device: {devices.error?.message}
           </ErrorLine>
         </Match>
-        <Match when={devices.data}>
-          {(here) => <ThisDevice of={here()} />}
-        </Match>
+        <Match when={devices.data}>{(here) => <List of={here()} />}</Match>
       </Choose>
     </section>
   );
 }
 
-/// The one row the list holds: the OS mark, the name, *this device*, and every
-/// address a peer could reach it on.
+/// The list: this device first, and then a row apiece for the devices linked to
+/// it.
+///
+/// This device leads rather than being sorted among them — it is the row
+/// somebody opening this pane is looking for, and it is the only one read off
+/// the machine the page is served from. The members follow in the order the
+/// reading gives them, which is by the name each is shown under.
+function List(props: { of: DevicesView }): JSX.Element {
+  return (
+    <ul class={styles.list}>
+      <Row of={props.of.this} here />
+
+      <For each={props.of.members}>{(member) => <Row of={member} />}</For>
+    </ul>
+  );
+}
+
+/// One row: the OS mark, the name, and every address a peer could reach that
+/// device on — with *this device* beside the name on the one that is this
+/// machine.
+///
+/// One component for both because they are one thing drawn: what the pane shows
+/// of a device is the same three facts whether it is this one or another, and
+/// the answer behind them is the same shape either way. What differs is only
+/// where it was read — this machine now, or the far end at the last exchange.
 ///
 /// The addresses are drawn only where there are any. A device on neither a
 /// tailnet nor a network answers with none, which is an answer rather than a
 /// failure — it still has a name and a mark, and an empty line under them would
 /// say something went wrong.
-function ThisDevice(props: { of: DevicesView }): JSX.Element {
+function Row(props: { of: DeviceIdentity; here?: boolean }): JSX.Element {
   return (
-    <ul class={styles.list}>
-      <li class={styles.device}>
-        <Icon
-          of={osIcon(props.of.this.os)}
-          label={props.of.this.os}
-          class={styles.os}
-        />
+    <li class={styles.device}>
+      <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
 
-        <div class={styles.about}>
-          <p class={styles.deviceName}>
-            {props.of.this.name} <span class={styles.here}>this device</span>
-          </p>
-
-          <Show when={props.of.this.addresses.length > 0}>
-            <p class={styles.addresses}>
-              {props.of.this.addresses.join(", ")}
-            </p>
+      <div class={styles.about}>
+        <p class={styles.deviceName}>
+          {props.of.name}
+          <Show when={props.here}>
+            {" "}
+            <span class={styles.here}>this device</span>
           </Show>
-        </div>
-      </li>
-    </ul>
+        </p>
+
+        <Show when={props.of.addresses.length > 0}>
+          <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+        </Show>
+      </div>
+    </li>
   );
 }
 

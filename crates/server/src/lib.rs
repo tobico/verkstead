@@ -1394,17 +1394,24 @@ pub async fn run_on_keyed(
     // human finds out which one that turned out to be.
     let data_dir = config.data_directory()?;
 
-    // And who this device is linked to, which is nobody: a member is made by a
-    // join and there is no join to make one with yet — see [`peer::Members`].
-    // The peer listener's gate asks it whether a caller is one, the Devices
-    // section of the Remote access pane asks it how many there are, and the
-    // identity below asks it the third question.
+    // The database, opened before anything that reads a row out of it — which
+    // on this path is the membership below, and through it the identity. Every
+    // other reader of it is a route, and no route is answered until the serve
+    // at the foot of this function.
+    let pool = open_database(&database(&data_dir)).await?;
+
+    // And who this device is linked to, which is the rows that database keeps —
+    // see [`peer::Members`]. The peer listener's gate asks it whether a caller
+    // is one, the Devices section of the Remote access pane asks it for a row
+    // apiece, and the identity below asks it the third question.
     //
     // Which is why it is read here rather than beside the listeners it is
     // handed to: a certificate near its expiry is made again at a start, and
     // whether the new one can be presented straight away is whether any member
-    // is owed an announcement of it.
-    let members = peer::Members::none();
+    // is owed an announcement of it. That is also what puts the database open
+    // above it rather than beside the router: a membership that reads rows
+    // cannot be built before there is anything to read.
+    let members = peer::Members::recorded(pool.clone());
 
     // And what this Verkstead is, which is read out of that directory or
     // invented into it: the device id every record and URL in a cluster names it
@@ -1417,12 +1424,14 @@ pub async fn run_on_keyed(
     // owed an announcement of the new one the changeover is over before the
     // line below is printed — see [`device::Changeover`], which is what says
     // which of those happened.
-    let device = device::Device::issued(&data_dir, &members).with_context(|| {
-        format!(
-            "keeping this device's id and certificate in {}",
-            data_dir.display()
-        )
-    })?;
+    let device = device::Device::issued(&data_dir, &members)
+        .await
+        .with_context(|| {
+            format!(
+                "keeping this device's id and certificate in {}",
+                data_dir.display()
+            )
+        })?;
 
     // And the listener that presents it, taken now: the peer port is the second
     // address this start claims, and one somebody else is already on is a
@@ -1511,8 +1520,6 @@ pub async fn run_on_keyed(
     // the file at once. Before the router below, whose probes read what this
     // held.
     sandbox::hold_session_path(&settings);
-
-    let pool = open_database(&database(&data_dir)).await?;
 
     listener
         .set_nonblocking(true)
@@ -1716,9 +1723,11 @@ pub async fn run_on_keyed(
     // than the one above: this port is other devices' and the workbench's is
     // the human's browser and its sessions, and the one thing they share so far
     // is the device they are both about — see [`peer`]. The member list it is
-    // gated on is empty and read from nowhere: this build has no join to make
-    // a member with, so the identity endpoint is the whole of what anybody
-    // reaches and everything else is refused for not being a member's.
+    // gated on is the rows above: a caller presenting a recorded certificate
+    // reaches what a membership admits, and everything else is refused for not
+    // being a member's. There is nothing inside the gate yet — the routes a
+    // membership admits arrive with the tasks that need them — so the identity
+    // endpoint is still the whole of what this build answers.
     let peers = peer::router(device, reading, members);
 
     // The workbench and the peer listener together, and on Windows the named

@@ -634,7 +634,9 @@ a tailnet has an identity all the same, and a list that vanished on one would be
 a cluster feature that appeared to need Tailscale.
 **And the card above it says how many devices are linked** — *other* devices,
 this one being the row the list already holds — after whichever of its sentences
-the machine's Tailscale earned.
+the machine's Tailscale earned. **Counted off the rows themselves** rather than
+answered beside them: there is one membership, and a number that could disagree
+with the list would be two answers about it.
 _Avoid_: linked devices pane, cluster list, machines, the device list (it is
 **Devices**, as **Repos** is)
 
@@ -710,12 +712,37 @@ its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Member**:
+A **Device** this one is linked to, as a row this one keeps: its **Device Id**,
+the name and the OS and the addresses it last advertised, the fingerprint of the
+certificate it presents, and when it was last heard from. Keyed by the id,
+because that is what outlives both the others — a certificate is renewed and an
+address moves, and the id lasts as long as the far end's **Data Directory**.
+**A cluster is a membership rather than a set of pairs**: every member holds the
+same list, so what is kept here is what a device is to all of them rather than
+what two machines agreed between themselves.
+**The addresses are a list and the order is load-bearing** — the tailnet name
+and its addresses first, then the LAN — because a peer dials them in the order
+the far end advertised them, and the address typed at link time is only the
+first one ever known.
+**Three things read it**: the **Member Gate**, which asks whether a caller's
+certificate is a member's; the **Changeover**, which asks how many are owed an
+announcement of a new fingerprint; and **Devices**, which draws a row apiece.
+Each asks at the moment it asks — a membership read once and held would be a
+device that went on being admitted after the human unlinked it.
+_Avoid_: peer (which is what a device is to another device), linked device,
+node, cluster member (it is a **Member**)
+
 **Member Gate**:
 What stands over every route on the **Peer Listener** but the un-gated three:
-the certificate the handshake took is matched against this device's members by
-fingerprint, and a caller that is not one of them is refused. The handshake
+the certificate the handshake took is matched against this device's **Members**
+by fingerprint, and a caller that is not one of them is refused. The handshake
 asks for a certificate and does not insist on one, so this is the first place a
 path and a caller are known together and the only place either is judged.
+**The rows are read at every call**, so a member taken off the list is refused
+on the next one — and a membership that cannot be read at all admits nobody,
+refusing a member being a call that is retried where admitting a stranger is the
+whole of what the gate is for.
 **The un-gated surface is a list of three and nothing grows it.** The identity
 endpoint, which asks for no certificate at all; the join post, which comes from
 a non-member by definition and whose certificate is pinned into the pending

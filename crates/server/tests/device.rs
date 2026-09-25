@@ -61,12 +61,12 @@ fn der(device: &Device) -> CertificateDer<'static> {
         .expect("the certificate this device was made with should parse")
 }
 
-#[test]
-fn a_second_start_reads_the_first_starts_id_and_certificate() {
+#[tokio::test]
+async fn a_second_start_reads_the_first_starts_id_and_certificate() {
     let dir = fresh();
 
-    let first = Device::issued(dir.path(), &Members::none()).unwrap();
-    let second = Device::issued(dir.path(), &Members::none()).unwrap();
+    let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
+    let second = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         first.id(),
@@ -85,16 +85,16 @@ fn a_second_start_reads_the_first_starts_id_and_certificate() {
     );
 }
 
-#[test]
-fn deleting_the_files_makes_fresh_ones() {
+#[tokio::test]
+async fn deleting_the_files_makes_fresh_ones() {
     let dir = fresh();
 
-    let first = Device::issued(dir.path(), &Members::none()).unwrap();
+    let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     std::fs::remove_file(dir.path().join(ID_FILE)).unwrap();
     std::fs::remove_file(dir.path().join(CERTIFICATE_FILE)).unwrap();
 
-    let second = Device::issued(dir.path(), &Members::none()).unwrap();
+    let second = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_ne!(
         first.id(),
@@ -104,18 +104,18 @@ fn deleting_the_files_makes_fresh_ones() {
     assert_ne!(first.fingerprint(), second.fingerprint());
 }
 
-#[test]
-fn an_empty_file_counts_as_one_that_is_not_there() {
+#[tokio::test]
+async fn an_empty_file_counts_as_one_that_is_not_there() {
     let dir = fresh();
 
-    let first = Device::issued(dir.path(), &Members::none()).unwrap();
+    let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     // Nothing writes one — both writes are atomic — so an empty file is a
     // machine that lost power or a hand that emptied it.
     std::fs::write(dir.path().join(ID_FILE), "").unwrap();
     std::fs::write(dir.path().join(CERTIFICATE_FILE), "").unwrap();
 
-    let second = Device::issued(dir.path(), &Members::none()).unwrap();
+    let second = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_ne!(first.id(), second.id());
     assert_ne!(first.fingerprint(), second.fingerprint());
@@ -123,22 +123,22 @@ fn an_empty_file_counts_as_one_that_is_not_there() {
     // And whitespace is the same thing: a file holding a newline holds no id.
     std::fs::write(dir.path().join(ID_FILE), "\n").unwrap();
 
-    let third = Device::issued(dir.path(), &Members::none()).unwrap();
+    let third = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_ne!(second.id(), third.id());
 }
 
-#[test]
-fn an_id_with_no_certificate_beside_it_keeps_the_id() {
+#[tokio::test]
+async fn an_id_with_no_certificate_beside_it_keeps_the_id() {
     let dir = fresh();
 
-    let first = Device::issued(dir.path(), &Members::none()).unwrap();
+    let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     // Which is what a start that wrote the id and then failed to write the
     // certificate leaves behind.
     std::fs::remove_file(dir.path().join(CERTIFICATE_FILE)).unwrap();
 
-    let second = Device::issued(dir.path(), &Members::none()).unwrap();
+    let second = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         first.id(),
@@ -152,15 +152,15 @@ fn an_id_with_no_certificate_beside_it_keeps_the_id() {
     );
 }
 
-#[test]
-fn a_certificate_with_no_id_beside_it_goes_with_the_id() {
+#[tokio::test]
+async fn a_certificate_with_no_id_beside_it_goes_with_the_id() {
     let dir = fresh();
 
-    let first = Device::issued(dir.path(), &Members::none()).unwrap();
+    let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     std::fs::remove_file(dir.path().join(ID_FILE)).unwrap();
 
-    let second = Device::issued(dir.path(), &Members::none()).unwrap();
+    let second = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_ne!(first.id(), second.id());
     assert_ne!(
@@ -175,18 +175,20 @@ fn a_certificate_with_no_id_beside_it_goes_with_the_id() {
     );
 }
 
-#[test]
-fn a_certificate_that_will_not_parse_is_a_failure_rather_than_a_fresh_one() {
+#[tokio::test]
+async fn a_certificate_that_will_not_parse_is_a_failure_rather_than_a_fresh_one() {
     let dir = fresh();
 
-    Device::issued(dir.path(), &Members::none()).unwrap();
+    Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     std::fs::write(dir.path().join(CERTIFICATE_FILE), "not a certificate\n").unwrap();
 
-    let failed = Device::issued(dir.path(), &Members::none()).expect_err(
-        "issuing a new certificate over the one a cluster has pinned is the one act here \
+    let failed = Device::issued(dir.path(), &Members::none())
+        .await
+        .expect_err(
+            "issuing a new certificate over the one a cluster has pinned is the one act here \
          that cannot be taken back, so a file that will not parse stops the start",
-    );
+        );
 
     let said = failed.to_string();
 
@@ -209,20 +211,22 @@ fn a_certificate_that_will_not_parse_is_a_failure_rather_than_a_fresh_one() {
 /// because a suite that ran as root would read a mode of nothing perfectly
 /// well and prove the opposite of what it says. What is being asked is that an
 /// error which is not *not found* stops the start, and any of them does.
-#[test]
-fn a_file_that_will_not_open_is_a_failure_rather_than_a_fresh_one() {
+#[tokio::test]
+async fn a_file_that_will_not_open_is_a_failure_rather_than_a_fresh_one() {
     for file in [ID_FILE, CERTIFICATE_FILE] {
         let dir = fresh();
 
-        let first = Device::issued(dir.path(), &Members::none()).unwrap();
+        let first = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
         std::fs::remove_file(dir.path().join(file)).unwrap();
         std::fs::create_dir(dir.path().join(file)).unwrap();
 
-        let failed = Device::issued(dir.path(), &Members::none()).expect_err(
-            "a file that is there and cannot be read is not a file that is missing, and \
+        let failed = Device::issued(dir.path(), &Members::none())
+            .await
+            .expect_err(
+                "a file that is there and cannot be read is not a file that is missing, and \
              writing a fresh identity over one is the act that cannot be taken back",
-        );
+            );
 
         let said = failed.to_string();
 
@@ -246,18 +250,21 @@ fn a_file_that_will_not_open_is_a_failure_rather_than_a_fresh_one() {
 
 /// And the same of the certificate waiting out a changeover, which is read by
 /// the same reading.
-#[test]
-fn a_changeover_file_that_will_not_open_is_a_failure_too() {
+#[tokio::test]
+async fn a_changeover_file_that_will_not_open_is_a_failure_too() {
     let dir = fresh();
 
     Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
 
-    let started = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+    let started = Device::issued(dir.path(), &Members::stated(1))
+        .await
+        .unwrap();
 
     std::fs::remove_file(started.incoming_path()).unwrap();
     std::fs::create_dir(started.incoming_path()).unwrap();
 
     let failed = Device::issued(dir.path(), &Members::stated(1))
+        .await
         .expect_err("a changeover cannot be carried on out of a file nothing can read");
 
     assert!(
@@ -266,14 +273,14 @@ fn a_changeover_file_that_will_not_open_is_a_failure_too() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[cfg(unix)]
-fn both_files_are_written_at_the_workbench_keys_own_mode() {
+async fn both_files_are_written_at_the_workbench_keys_own_mode() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
     let key = WorkbenchKey::issued(dir.path()).unwrap();
 
     let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
@@ -292,8 +299,8 @@ fn both_files_are_written_at_the_workbench_keys_own_mode() {
     }
 }
 
-#[test]
-fn a_stated_identity_is_the_id_the_suite_gave_it() {
+#[tokio::test]
+async fn a_stated_identity_is_the_id_the_suite_gave_it() {
     let dir = fresh();
 
     let stated = Device::stated(dir.path(), "a-stated-device").unwrap();
@@ -307,17 +314,17 @@ fn a_stated_identity_is_the_id_the_suite_gave_it() {
 
     // And it is on disk the way an invented one is, so a start after the
     // fixture reads what the fixture said.
-    let read_back = Device::issued(dir.path(), &Members::none()).unwrap();
+    let read_back = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(read_back.id(), "a-stated-device");
     assert_eq!(read_back.fingerprint(), stated.fingerprint());
 }
 
-#[test]
-fn the_certificate_is_good_for_ninety_days() {
+#[tokio::test]
+async fn the_certificate_is_good_for_ninety_days() {
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
     let der = der(&device);
     let (_, certificate) = x509_parser::certificate::X509Certificate::from_der(&der).unwrap();
 
@@ -336,11 +343,11 @@ fn the_certificate_is_good_for_ninety_days() {
     );
 }
 
-#[test]
-fn the_certificate_is_named_after_the_device_id() {
+#[tokio::test]
+async fn the_certificate_is_named_after_the_device_id() {
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         common_name(&device),
@@ -367,11 +374,11 @@ fn the_certificate_is_named_after_the_device_id() {
     );
 }
 
-#[test]
-fn the_certificate_is_good_at_both_ends_of_a_link() {
+#[tokio::test]
+async fn the_certificate_is_good_at_both_ends_of_a_link() {
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
     let der = der(&device);
     let (_, certificate) = x509_parser::certificate::X509Certificate::from_der(&der).unwrap();
 
@@ -385,11 +392,11 @@ fn the_certificate_is_good_at_both_ends_of_a_link() {
     assert!(usage.client_auth, "and makes one with it");
 }
 
-#[test]
-fn the_fingerprint_is_the_certificates_own_digest_spelled_for_the_eye() {
+#[tokio::test]
+async fn the_fingerprint_is_the_certificates_own_digest_spelled_for_the_eye() {
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     let digest = Sha256::digest(der(&device));
     let expected = digest
@@ -416,11 +423,11 @@ fn the_fingerprint_is_the_certificates_own_digest_spelled_for_the_eye() {
     assert_eq!(device.fingerprint(), device.fingerprint().to_uppercase());
 }
 
-#[test]
-fn the_id_is_short_enough_to_sit_in_a_url_segment() {
+#[tokio::test]
+async fn the_id_is_short_enough_to_sit_in_a_url_segment() {
     let dir = fresh();
 
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     // Which is what every record and URL in a cluster names a device by, so it
     // carries nothing a URL or a host name would have to escape — the hostname
@@ -451,12 +458,12 @@ fn the_renewal_window_is_thirty_of_the_ninety_days() {
     );
 }
 
-#[test]
-fn a_start_with_the_expiry_near_makes_the_certificate_again() {
+#[tokio::test]
+async fn a_start_with_the_expiry_near_makes_the_certificate_again() {
     let dir = fresh();
 
     let near = Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
-    let started = Device::issued(dir.path(), &Members::none()).unwrap();
+    let started = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_ne!(
         started.fingerprint(),
@@ -467,7 +474,7 @@ fn a_start_with_the_expiry_near_makes_the_certificate_again() {
 
     // And the fresh one is what is on disk from here: a start after this reads
     // it back rather than making a third.
-    let after = Device::issued(dir.path(), &Members::none()).unwrap();
+    let after = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(after.fingerprint(), started.fingerprint());
     assert_eq!(
@@ -477,12 +484,12 @@ fn a_start_with_the_expiry_near_makes_the_certificate_again() {
     );
 }
 
-#[test]
-fn a_start_with_the_expiry_far_off_leaves_the_certificate_alone() {
+#[tokio::test]
+async fn a_start_with_the_expiry_far_off_leaves_the_certificate_alone() {
     let dir = fresh();
 
     let far = Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN + A_DAY).unwrap();
-    let started = Device::issued(dir.path(), &Members::none()).unwrap();
+    let started = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         started.fingerprint(),
@@ -494,12 +501,12 @@ fn a_start_with_the_expiry_far_off_leaves_the_certificate_alone() {
     assert_eq!(started.certificate(), far.certificate());
 }
 
-#[test]
-fn with_no_members_the_changeover_completes_at_once_and_says_it_had_nobody_to_tell() {
+#[tokio::test]
+async fn with_no_members_the_changeover_completes_at_once_and_says_it_had_nobody_to_tell() {
     let dir = fresh();
 
     let old = Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
-    let started = Device::issued(dir.path(), &Members::none()).unwrap();
+    let started = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         started.changeover(),
@@ -519,8 +526,8 @@ fn with_no_members_the_changeover_completes_at_once_and_says_it_had_nobody_to_te
     );
 }
 
-#[test]
-fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
+#[tokio::test]
+async fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
     let dir = fresh();
 
     let old = Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
@@ -528,7 +535,9 @@ fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
     // One member, which has acknowledged nothing — because there is nothing
     // anywhere yet for an acknowledgement to be recorded in, the announcement
     // being the linking stage's.
-    let started = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+    let started = Device::issued(dir.path(), &Members::stated(1))
+        .await
+        .unwrap();
 
     assert_eq!(
         started.changeover(),
@@ -556,7 +565,9 @@ fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
     // A restart in the middle holds the same pair. A third certificate here
     // would be a third fingerprint for the members to acknowledge, and a
     // changeover that never finished.
-    let again = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+    let again = Device::issued(dir.path(), &Members::stated(1))
+        .await
+        .unwrap();
 
     assert_eq!(again.fingerprint(), old.fingerprint());
     assert_eq!(again.incoming_fingerprint(), Some(incoming.as_str()));
@@ -564,7 +575,7 @@ fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
 
     // And when nobody is owed one any more, the certificate that was waiting
     // becomes the one presented.
-    let done = Device::issued(dir.path(), &Members::none()).unwrap();
+    let done = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(done.fingerprint(), incoming);
     assert_eq!(done.incoming_fingerprint(), None);
@@ -572,16 +583,18 @@ fn a_member_yet_to_acknowledge_keeps_the_old_certificate_going_out() {
     assert!(!done.incoming_path().exists());
 }
 
-#[test]
+#[tokio::test]
 #[cfg(unix)]
-fn the_certificate_waiting_out_a_changeover_is_written_at_the_same_mode() {
+async fn the_certificate_waiting_out_a_changeover_is_written_at_the_same_mode() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = fresh();
 
     Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
 
-    let started = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+    let started = Device::issued(dir.path(), &Members::stated(1))
+        .await
+        .unwrap();
     let mode = std::fs::metadata(started.incoming_path())
         .unwrap()
         .permissions()
@@ -594,12 +607,12 @@ fn the_certificate_waiting_out_a_changeover_is_written_at_the_same_mode() {
     );
 }
 
-#[test]
-fn the_device_id_is_untouched_by_a_re_issue() {
+#[tokio::test]
+async fn the_device_id_is_untouched_by_a_re_issue() {
     let dir = fresh();
 
     let before = Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
-    let started = Device::issued(dir.path(), &Members::none()).unwrap();
+    let started = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     assert_eq!(
         started.id(),
@@ -621,17 +634,20 @@ fn the_device_id_is_untouched_by_a_re_issue() {
     );
 }
 
-#[test]
-fn a_certificate_waiting_out_a_changeover_that_will_not_parse_says_what_deleting_it_costs() {
+#[tokio::test]
+async fn a_certificate_waiting_out_a_changeover_that_will_not_parse_says_what_deleting_it_costs() {
     let dir = fresh();
 
     Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
 
-    let started = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+    let started = Device::issued(dir.path(), &Members::stated(1))
+        .await
+        .unwrap();
 
     std::fs::write(started.incoming_path(), "not a certificate\n").unwrap();
 
     let failed = Device::issued(dir.path(), &Members::stated(1))
+        .await
         .expect_err("a certificate that will not parse is a failure rather than a fresh one");
 
     let said = failed.to_string();

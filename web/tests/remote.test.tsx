@@ -28,7 +28,8 @@
 //!
 //! **And Devices is the third section of the same pane**, which is a reading of
 //! its own rather than another field of the machine: what device this is, and
-//! how many others are linked to it. It is drawn on every state of the pane —
+//! every other device in its cluster, a row apiece. It is drawn on every state
+//! of the pane —
 //! a machine with no Tailscale at all still has an identity — and the clause
 //! the card carries follows every one of the six sentences above it.
 //!
@@ -53,6 +54,7 @@ import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import type { DevicesView, RemoteView, ServePress } from "../src/api/types";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
 import devices from "./fixtures/devices.json" with { type: "json" };
+import devicesLinked from "./fixtures/devices-linked.json" with { type: "json" };
 import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
 import absent from "./fixtures/remote-absent.json" with { type: "json" };
 import down from "./fixtures/remote-down.json" with { type: "json" };
@@ -83,6 +85,12 @@ const UNGRANTED = ungranted as ServePress;
 /// and the one the row is told apart by.
 const DEVICES = devices as DevicesView;
 const WSL = devicesWsl as DevicesView;
+
+/// And the same device in a cluster of three: a Mac on a tailnet, and a WSL
+/// that answers to the same hostname this one does. Which is the case the whole
+/// of cluster mode was written for — the two rows read *workbench*, and the OS
+/// word and the mark beside it are the only things that tell them apart.
+const LINKED = devicesLinked as DevicesView;
 
 /// The login link the serving machine hands out, which is the address with the
 /// key on the end of it.
@@ -669,6 +677,50 @@ describe("the devices section", () => {
     expect(screen.queryByText("Unlink")).toBeNull();
   });
 
+  /// A device linked to this one is a row beside it, drawn the same way: the
+  /// mark for its OS, the name it is shown under, and the addresses a peer
+  /// could reach it on.
+  it("draws a row for every device linked to this one", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(theMark("macOS")).toBeTruthy();
+    expect(
+      screen.getByText("laptop.tailnet-name.ts.net, 100.64.0.2"),
+    ).toBeTruthy();
+
+    // And the third row, which answers to the same hostname this device does:
+    // a Windows machine and the WSL on it share one, and the OS word is what
+    // tells the two apart.
+    expect(theMark("Linux (WSL)")).toBeTruthy();
+    expect(screen.getByText("172.29.0.14")).toBeTruthy();
+
+    expect(
+      screen.getAllByText("workbench").length,
+      "this device and the WSL linked to it both answer to that hostname",
+    ).toBe(2);
+  });
+
+  /// And only one of them is this machine, whichever else is on the list.
+  it("marks this device and no other", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.getAllByText("this device").length).toBe(1);
+  });
+
+  /// Nothing to press on a member's row either. Unlink is a later stage's, and
+  /// a row with nothing on it is what this one draws.
+  it("offers no Unlink on a member either", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.queryByText("Unlink")).toBeNull();
+  });
+
   /// The case the whole of cluster mode was written for: a Windows machine and
   /// the WSL on it share a hostname, so the word and the mark together are what
   /// tell the two rows apart — the Linux mark, and *Linux (WSL)* beside it.
@@ -787,7 +839,10 @@ describe("the devices clause on the card", () => {
 
   /// One reads as a sentence rather than as a figure, and more than one counts.
   it("says one and says many", async () => {
-    const { unmount } = mountCard(SERVING, { ...DEVICES, linked: 1 });
+    const { unmount } = mountCard(SERVING, {
+      ...LINKED,
+      members: LINKED.members.slice(0, 1),
+    });
 
     await waitFor(() =>
       expect(screen.getByText(/One other device is linked\./)).toBeTruthy(),
@@ -795,10 +850,24 @@ describe("the devices clause on the card", () => {
 
     unmount();
 
-    mountCard(SERVING, { ...DEVICES, linked: 3 });
+    mountCard(SERVING, {
+      ...LINKED,
+      members: [...LINKED.members, ...LINKED.members, ...LINKED.members],
+    });
 
     await waitFor(() =>
-      expect(screen.getByText(/3 other devices are linked\./)).toBeTruthy(),
+      expect(screen.getByText(/6 other devices are linked\./)).toBeTruthy(),
+    );
+  });
+
+  /// And the number is the rows the list draws rather than a figure answered
+  /// beside them: one membership, one answer about it, so the sentence cannot
+  /// come to disagree with what the pane is showing.
+  it("counts the rows the list draws", async () => {
+    mountCard(SERVING, LINKED);
+
+    await waitFor(() =>
+      expect(screen.getByText(/2 other devices are linked\./)).toBeTruthy(),
     );
   });
 });
