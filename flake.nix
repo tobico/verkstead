@@ -121,6 +121,16 @@
               clippy
               rustfmt
               rust-analyzer
+              # What `pnpm start` in `desktop/` runs (ADR-0020). The npm
+              # package the project pins is there for its TypeScript
+              # definitions and for what electron-builder packs in CI; its own
+              # install script downloads a couple of hundred megabytes of
+              # Electron and is denied in `desktop/pnpm-workspace.yaml`, so
+              # this is the only Electron a developer ends up with. Same major
+              # as the pinned one — 43 — because a dev-only Electron that is
+              # not what ships would be proving the app against the wrong
+              # runtime.
+              electron
               sqlite
               # The CLI derives `project`, `branch` and the Diff by shelling out
               # to git, so git is a runtime dependency and not just a habit.

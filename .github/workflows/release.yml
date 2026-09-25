@@ -256,7 +256,7 @@ jobs:
       # see the action for what each pin is and why. So the viewer that ships is
       # built by the toolchain that CI checked it with.
       - name: Set up the viewer
-        uses: ./.github/actions/setup-viewer
+        uses: ./.github/actions/setup-pnpm-project
 
       - name: Build
         run: pnpm build

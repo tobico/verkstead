@@ -24,7 +24,7 @@ Roadmap stage: [02: The Electron shell](docs/roadmaps/electron-desktop/02-electr
 ## Tasks
 
 - [x] 01: The toolchain moves to nixos-26.05 — [details](01-the-toolchain-moves.md)
-- [ ] 02: The project, the shell and the sidecar — [details](02-the-project-and-the-sidecar.md)
+- [x] 02: The project, the shell and the sidecar — [details](02-the-project-and-the-sidecar.md)
 - [ ] 03: The window, logged in — [details](03-the-window-logged-in.md)
 - [ ] 04: Lifecycle — [details](04-lifecycle.md)
 - [ ] 05: The log file — [details](05-the-log-file.md)

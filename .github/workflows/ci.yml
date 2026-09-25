@@ -426,7 +426,7 @@ jobs:
       # workflow — see the action for what each pin is and why. A local `uses:`
       # path resolves against the checkout above, so it has to follow it.
       - name: Set up the viewer
-        uses: ./.github/actions/setup-viewer
+        uses: ./.github/actions/setup-pnpm-project
 
       # One rule, and it is the wall around the query hook: every query in the
       # viewer goes through `useReading`, which makes it name a reconcile key
@@ -439,6 +439,46 @@ jobs:
       # component that only compiles because vite erases the types would pass
       # vitest and fail nobody, and the generated `web/src/api/types.ts` is only
       # worth generating if something checks the viewer against it.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+  # And the Electron app's own checks, on its own sources. Beside the viewer
+  # rather than inside it (ADR-0020): the two share the pnpm and the Node the
+  # action above pins and nothing else, this project consuming a built binary
+  # where the viewer shares a toolchain. Nothing here waits on the Rust job
+  # either — what these run over is the main process's pure parts, and the
+  # sidecar they are about is a stand-in rather than a compiled `verkstead`.
+  desktop:
+    name: Desktop
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pins as the viewer's, said once — see the action. No Electron
+      # is downloaded by it: the package's install script is denied in
+      # `desktop/pnpm-workspace.yaml`, and nothing in this job runs a window.
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # One rule, and it is the wall around Electron: the main process's parts
+      # are functions of what the entry file hands them, so that vitest can run
+      # them at all. First because it is the cheapest of the three and fails in
+      # a line naming the import.
+      - name: Lint
+        run: pnpm lint
+
+      # Over the tests and the sources both. `pnpm build` emits the sources
+      # alone, so a test that had stopped compiling would be a test vitest ran
+      # through esbuild — which strips the types rather than reading them —
+      # and nobody would hear about it.
       - name: Typecheck
         run: pnpm typecheck
 
