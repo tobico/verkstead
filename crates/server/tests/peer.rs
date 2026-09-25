@@ -1,0 +1,313 @@
+//! The listener devices talk to each other over: what a caller meets when it
+//! dials the peer port (ADR-0020).
+//!
+//! Every test here is a real dial over a real socket with a real handshake,
+//! because that is the whole of what this stage claims: a router asked in
+//! process would answer the identity endpoint whether or not a certificate had
+//! ever been presented, and whether a certificate is *asked for* is a fact
+//! about the handshake and about nothing else.
+//!
+//! The two callers are the two the acceptance criteria name: one with nothing
+//! to show, and one showing a certificate this device has never heard of. The
+//! second is another Verkstead's identity rather than a certificate minted for
+//! the occasion — what an unknown device presents is exactly what a device
+//! presents, and a stranger made some other way would be a stranger of a shape
+//! no peer will ever be.
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
+use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use verkstead_server::device::Device;
+use verkstead_server::peer;
+
+/// The id this device is stated as, so that what a test asserts against is a
+/// string it chose rather than sixteen random bytes it has to filter out of a
+/// payload — see [`Device::stated`], which is here for that reason.
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
+/// And the one the stranger below is stated as. A device this one has never
+/// been linked to, which in this stage is every device there is.
+const SOME_OTHER_DEVICE: &str = "0011223344556677889900aabbccddee";
+
+/// A peer listener up on the loopback, with the device it is presenting.
+///
+/// The port is the operating system's rather than 8423: a suite that took the
+/// real one would fight whatever is already on it, and two of these tests
+/// running at once would fight each other.
+struct Listening {
+    address: SocketAddr,
+    device: Device,
+
+    /// Held for the length of the test, because the identity lives in it: a
+    /// directory dropped early is a certificate gone out from under the
+    /// listener still presenting it.
+    _dir: tempfile::TempDir,
+}
+
+impl Listening {
+    /// Stand one up, serving until the test is over.
+    fn with_the_device_called(id: &str) -> Listening {
+        let dir = tempfile::tempdir().unwrap();
+        let device = Device::stated(dir.path(), id).unwrap();
+
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
+            .expect("the loopback on a port the machine picked is free");
+        let address = listener.address();
+
+        tokio::spawn(listener.serving(peer::router(device.clone())));
+
+        Listening {
+            address,
+            device,
+            _dir: dir,
+        }
+    }
+}
+
+/// What a caller shows the listener: nothing, or somebody else's identity.
+enum Showing {
+    /// No client certificate at all, which is what a device asking *who are
+    /// you* has: it is asking because it does not know yet, and a link is not
+    /// what it is reaching for.
+    Nothing,
+
+    /// A certificate, from a device this one holds no membership for — which
+    /// in this stage is every device.
+    A(Device),
+}
+
+/// Dial `listening`, ask for `path`, and hand back what came of it: the
+/// certificate the server presented, and the response as it arrived.
+async fn asking(
+    listening: &Listening,
+    showing: Showing,
+    path: &str,
+) -> (CertificateDer<'static>, String) {
+    // Whatever the server shows is taken, the way a device linking for the
+    // first time takes it: what proves the far end is the certificate compared
+    // against a fingerprint afterwards, and there is no certificate authority
+    // anywhere in a cluster to check one against.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let algorithms = provider.signature_verification_algorithms;
+
+    let dialling = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(WhateverTheServerShows { algorithms }));
+
+    let dialling = match showing {
+        Showing::Nothing => dialling.with_no_client_auth(),
+        Showing::A(device) => {
+            let pem = device.certificate().as_bytes();
+
+            dialling
+                .with_client_auth_cert(
+                    vec![CertificateDer::from_pem_slice(pem).unwrap()],
+                    PrivateKeyDer::from_pem_slice(pem).unwrap(),
+                )
+                .expect("a device's own certificate and the key that signed it")
+        }
+    };
+
+    // Dialled by the name the certificate is made out to, which is the device
+    // id — that is what a peer will have to hand, and the only name this
+    // certificate has.
+    let name = ServerName::try_from(listening.device.id().to_owned()).unwrap();
+
+    let connection = TcpStream::connect(listening.address).await.unwrap();
+    let mut secured = TlsConnector::from(Arc::new(dialling))
+        .connect(name, connection)
+        .await
+        .expect("the handshake should complete");
+
+    let presented = secured
+        .get_ref()
+        .1
+        .peer_certificates()
+        .expect("a server presents its certificate")[0]
+        .clone()
+        .into_owned();
+
+    // `Connection: close`, so that reading to the end of the stream is reading
+    // to the end of the response and this suite needs no HTTP client of its
+    // own.
+    secured
+        .write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+                listening.device.id(),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let mut answered = Vec::new();
+    secured.read_to_end(&mut answered).await.unwrap();
+
+    (presented, String::from_utf8(answered).unwrap())
+}
+
+/// The body of a response read that way: everything past the blank line.
+fn body(answered: &str) -> &str {
+    answered
+        .split_once("\r\n\r\n")
+        .expect("a response has a head and a body")
+        .1
+}
+
+/// A certificate's fingerprint in the spelling the device module prints one:
+/// the SHA-256 of its own bytes, upper-case hex in colon-separated pairs.
+///
+/// Worked out here rather than read off the handle, because what this suite is
+/// checking is that the certificate that came down the wire is the one the
+/// startup line named — and taking the string off the handle at both ends
+/// would compare it with itself.
+fn fingerprint_of(certificate: &CertificateDer<'_>) -> String {
+    Sha256::digest(certificate)
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<String>>()
+        .join(":")
+}
+
+/// The client half of *whatever arrives is taken*: a device linking for the
+/// first time has nothing to check the far end against but the fingerprint it
+/// is about to read, so it takes the certificate and compares afterwards.
+#[derive(Debug)]
+struct WhateverTheServerShows {
+    algorithms: WebPkiSupportedAlgorithms,
+}
+
+impl ServerCertVerifier for WhateverTheServerShows {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algorithms.supported_schemes()
+    }
+}
+
+#[tokio::test]
+async fn a_caller_with_no_certificate_of_its_own_reads_the_identity() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    let identity: serde_json::Value = serde_json::from_str(body(&answered))
+        .unwrap_or_else(|why| panic!("the identity should be JSON: {why}\n{answered}"));
+
+    assert_eq!(
+        identity["device"], THIS_DEVICE,
+        "a device that has never been heard of is exactly who asks this — it is asking \
+         because it does not know yet, got:\n{answered}",
+    );
+}
+
+/// The demonstration the stage is judged on: a caller reads an id over TLS, and
+/// the certificate the handshake handed it is the one the startup line printed.
+#[tokio::test]
+async fn the_certificate_the_handshake_hands_over_is_the_one_the_startup_line_printed() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    let (presented, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert_eq!(
+        fingerprint_of(&presented),
+        listening.device.fingerprint(),
+        "what is presented has to be the device's own certificate, or a link pinned on \
+         the printed fingerprint would be pinned on nothing",
+    );
+
+    let identity: serde_json::Value = serde_json::from_str(body(&answered)).unwrap();
+
+    assert_eq!(
+        identity["fingerprint"],
+        listening.device.fingerprint(),
+        "and the answer names the same one, which is what a caller checks the \
+         handshake against, got:\n{answered}",
+    );
+}
+
+/// The other half of *asked for and not insisted on*: a certificate nothing
+/// here has ever seen is taken at the handshake rather than refused at it. A
+/// verifier that refused one is what the join of the stage after this could
+/// never have got through.
+#[tokio::test]
+async fn a_caller_showing_an_unknown_certificate_reaches_the_identity_too() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    let stranger = Device::stated(elsewhere.path(), SOME_OTHER_DEVICE).unwrap();
+
+    let (_, answered) = asking(&listening, Showing::A(stranger), peer::IDENTITY).await;
+
+    let identity: serde_json::Value = serde_json::from_str(body(&answered))
+        .unwrap_or_else(|why| panic!("the identity should be JSON: {why}\n{answered}"));
+
+    assert_eq!(
+        identity["device"], THIS_DEVICE,
+        "the handshake must not be what decides which endpoints a caller reaches, \
+         got:\n{answered}",
+    );
+}
+
+/// Two callers at once, one of which never finishes its handshake: the other is
+/// answered anyway.
+///
+/// This is why the accepting is a task per connection rather than a handshake
+/// run inside `accept`. A peer port answers a LAN that may not be the human's
+/// alone, and one socket opened and left silent would otherwise hold every
+/// device behind it.
+#[tokio::test]
+async fn a_caller_that_opens_a_socket_and_says_nothing_holds_nobody_up() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    // Connected and then left alone: no ClientHello, so this connection's
+    // handshake never completes.
+    let _silent = TcpStream::connect(listening.address).await.unwrap();
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert!(
+        body(&answered).contains(THIS_DEVICE),
+        "the silent connection should have held up its own task and nobody else's, \
+         got:\n{answered}",
+    );
+}
