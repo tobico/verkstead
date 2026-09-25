@@ -9,9 +9,11 @@
 //! any other way would be a dial reaching for the LAN before the tailnet.
 
 use sqlx::SqlitePool;
+
 use verkstead_store::{
-    Linking, announcement_made, announcements_owed, forget_member, member_count, member_holding,
-    member_unreachable, members, open_database, owe_announcement, record_member,
+    Linking, Telling, announcement_made, announcements_owed, announcements_owed_to,
+    forget_every_member, forget_member, member_count, member_holding, member_unreachable, members,
+    open_database, owe_announcement, record_member,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -303,8 +305,12 @@ async fn a_telling_that_did_not_get_through_is_owed_until_it_does() {
         "nothing has been announced, so nobody is owed anything",
     );
 
-    owe_announcement(&pool, B, A).await.unwrap();
-    owe_announcement(&pool, C, A).await.unwrap();
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, C, A, Telling::Joined)
+        .await
+        .unwrap();
 
     assert_eq!(
         announcements_owed(&pool, A).await.unwrap(),
@@ -323,7 +329,9 @@ async fn a_telling_that_did_not_get_through_is_owed_until_it_does() {
     // Owing the same telling twice is owing it once: a row says that this
     // member has not heard about that device, and a second announcement that
     // also failed says the same thing again.
-    owe_announcement(&pool, C, A).await.unwrap();
+    owe_announcement(&pool, C, A, Telling::Joined)
+        .await
+        .unwrap();
 
     assert_eq!(
         announcements_owed(&pool, A).await.unwrap(),
@@ -341,8 +349,12 @@ async fn a_telling_that_did_not_get_through_is_owed_until_it_does() {
 async fn a_debt_names_the_device_it_is_about() {
     let (_dir, pool) = fresh_pool().await;
 
-    owe_announcement(&pool, C, A).await.unwrap();
-    owe_announcement(&pool, C, B).await.unwrap();
+    owe_announcement(&pool, C, A, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, C, B, Telling::Joined)
+        .await
+        .unwrap();
 
     assert_eq!(
         announcements_owed(&pool, A).await.unwrap(),
@@ -376,8 +388,12 @@ async fn an_unlinked_member_is_owed_nothing_and_owed_about_by_nobody() {
         .await
         .unwrap();
 
-    owe_announcement(&pool, B, A).await.unwrap();
-    owe_announcement(&pool, C, B).await.unwrap();
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, C, B, Telling::Joined)
+        .await
+        .unwrap();
 
     forget_member(&pool, B).await.unwrap();
 
@@ -389,4 +405,113 @@ async fn an_unlinked_member_is_owed_nothing_and_owed_about_by_nobody() {
         announcements_owed(&pool, B).await.unwrap().is_empty(),
         "and a debt naming it would be a dial nobody would ever make",
     );
+}
+
+/// A debt says *what* is owed, and the two a cluster makes are opposites.
+///
+/// **Which is what an unlink needed the word for.** A member that was away is
+/// told what it missed when it comes back, and *a device joined* and *a device
+/// left* are the same pair of ids with the whole of the meaning in the word
+/// beside them.
+#[tokio::test]
+async fn a_debt_says_which_of_the_two_tellings_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, B, C, Telling::Removed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        announcements_owed_to(&pool, B).await.unwrap(),
+        vec![
+            (A.to_owned(), Telling::Joined),
+            (C.to_owned(), Telling::Removed),
+        ],
+        "read the other way round: not who has not heard, but what this one \
+         has yet to be told",
+    );
+
+    assert!(
+        announcements_owed_to(&pool, C).await.unwrap().is_empty(),
+        "and a member owed nothing is owed nothing",
+    );
+}
+
+/// And the later telling replaces the earlier, rather than being ignored for a
+/// pair already there.
+///
+/// A member that was off when a device joined and off again when the human
+/// unlinked it is owed the removal alone: it never heard the join, and telling
+/// it about a device the cluster no longer holds would be a row it would have
+/// to be told to take away again on the next call.
+#[tokio::test]
+async fn the_later_telling_is_the_one_that_is_owed() {
+    let (_dir, pool) = fresh_pool().await;
+
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, B, A, Telling::Removed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        announcements_owed_to(&pool, B).await.unwrap(),
+        vec![(A.to_owned(), Telling::Removed)],
+        "one debt about that device, and it is the last thing said",
+    );
+
+    announcement_made(&pool, B, A).await.unwrap();
+
+    assert!(
+        announcements_owed_to(&pool, B).await.unwrap().is_empty(),
+        "and paying the pair pays it whichever of the two it turned out to be",
+    );
+}
+
+/// A device told it has been unlinked lets go of the whole membership, rather
+/// than of the device that told it.
+///
+/// **The leaver's own half of an unlink.** Every other device in the cluster
+/// has dropped it, so every one of them would refuse it at the gate — a leaver
+/// that kept whichever members the telling happened to name would be a cluster
+/// of one that thought it was a cluster of two.
+#[tokio::test]
+async fn a_device_told_it_has_left_forgets_everybody() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(&pool, &advertising(C, "laptop", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    owe_announcement(&pool, B, A, Telling::Joined)
+        .await
+        .unwrap();
+
+    forget_every_member(&pool).await.unwrap();
+
+    assert!(
+        members(&pool).await.unwrap().is_empty(),
+        "the list is this device's own row and nothing else",
+    );
+    assert_eq!(member_count(&pool).await.unwrap(), 0, "and so is the count");
+    assert!(
+        !member_holding(&pool, B_FINGERPRINT).await.unwrap(),
+        "and nobody is admitted at the gate on a certificate this device no \
+         longer holds a membership for",
+    );
+    assert!(
+        announcements_owed_to(&pool, B).await.unwrap().is_empty(),
+        "a device that is in no cluster owes nobody anything",
+    );
+
+    // And being told twice is not a thing to fail: a device that holds no
+    // members has already forgotten everybody.
+    forget_every_member(&pool).await.unwrap();
 }

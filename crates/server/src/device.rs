@@ -75,7 +75,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView, JoinSettled};
-use verkstead_store::{AskedJoin, Linking};
+use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
@@ -944,7 +944,8 @@ impl Devices {
     /// while a member was away.
     ///
     /// **And nothing here retries.** The debt is the record, and what pays it
-    /// is the next thing that finds that member answering.
+    /// is the next thing that finds that member answering — which is
+    /// [`Devices::caught_up`], run against each member this did get through to.
     async fn announce(&self, members: &[verkstead_store::Member], newcomer: &DeviceIdentity) {
         for member in members {
             match self.peers.announce(member, newcomer).await {
@@ -956,15 +957,18 @@ impl Devices {
                     );
 
                     // Whatever it was owed about this device is paid, which is
-                    // the announcement the task after this one makes when a
-                    // member comes back: the ordinary case owes nothing and
-                    // this clears nothing.
+                    // the ordinary case owing nothing and this clearing
+                    // nothing.
                     if let Err(why) = self.members.told(&member.device, &newcomer.device).await {
                         tracing::error!(
                             %why,
                             "an announcement that was made could not be cleared as made",
                         );
                     }
+
+                    // And this member is answering, which is the whole of what
+                    // a debt was waiting on.
+                    self.caught_up(member).await;
                 }
 
                 Err(why) => {
@@ -976,13 +980,216 @@ impl Devices {
                          is owed the telling until it answers again",
                     );
 
-                    if let Err(why) = self.members.owed(&member.device, &newcomer.device).await {
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, &newcomer.device, Telling::Joined)
+                        .await
+                    {
                         tracing::error!(
                             %why,
                             "an announcement that was not made could not be written down as owed",
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// **Unlink**: take `device` out of the cluster, for everybody.
+    ///
+    /// **A membership rather than a set of pairs** (ADR-0020), so the press is
+    /// not this device cutting its own half of a link: every member drops the
+    /// same device, and the device itself is told to let go of the lot of them.
+    /// Cutting one pair was rejected for what it leaves behind — a list that
+    /// reads differently depending on which machine you open it on.
+    ///
+    /// **Three things happen, and the order is the one thing about them that is
+    /// forced.** The leaver is told first, while this device still holds a
+    /// membership for it to be dialled from and it still holds one for this
+    /// device to get through its gate with; then it is dropped here, which is
+    /// the human's own machine being right whatever else fails; then every
+    /// other member is told. A leaver told after it had been dropped would be a
+    /// dial with no row to make it from, and one told after this device had
+    /// been dropped over *there* would be a caller that member refuses.
+    ///
+    /// **Nothing waits on the leaver answering**, which is most of what Unlink
+    /// is for: the machine the human reaches for this on is the one that is
+    /// never coming back. It is told where it can be, and the cluster is right
+    /// either way.
+    ///
+    /// **And a member that could not be told is owed the removal**, exactly as
+    /// one that could not be told about a newcomer is — see
+    /// [`Devices::caught_up`], which is what pays either debt the moment that
+    /// member is found answering.
+    ///
+    /// **A second press is not a second thing happening.** A device that is not
+    /// a member is one this machine has already unlinked, and saying so twice
+    /// is not a failure — the stance [`verkstead_store::forget_member`] takes,
+    /// for its reason.
+    pub(crate) async fn unlink(&self, device: &str) -> Result<()> {
+        let held = self.members.rows().await?;
+
+        let Some(leaver) = held.iter().find(|member| member.device == device).cloned() else {
+            return Ok(());
+        };
+
+        // Told while it is still a member here and this device is still one
+        // there. A laptop that is not there is told nothing, and nothing waits
+        // on it — the cluster it was in has moved on without it, and its own
+        // list is wrong until somebody presses Add again.
+        if let Err(why) = self.peers.unlink(&leaver, device).await {
+            tracing::info!(
+                %why,
+                device = %device,
+                "a device that was unlinked could not be told, so it goes on holding a \
+                 cluster that no longer holds it",
+            );
+        }
+
+        self.members.forget(device).await?;
+
+        tracing::info!(
+            device = %device,
+            name = %leaver.name,
+            "a device has been taken out of this one's cluster",
+        );
+
+        for member in held.iter().filter(|member| member.device != device) {
+            match self.peers.unlink(member, device).await {
+                Ok(()) => {
+                    tracing::info!(
+                        device = %member.device,
+                        leaver = %device,
+                        "a member has been told to drop the device that was unlinked",
+                    );
+
+                    self.caught_up(member).await;
+                }
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        leaver = %device,
+                        "a member could not be told to drop the device that was unlinked, so \
+                         it is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, device, Telling::Removed)
+                        .await
+                    {
+                        tracing::error!(
+                            %why,
+                            "a removal that was not made could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Say to `member` everything it has yet to be told, which is what a dial
+    /// that just got through to it has earned the right to do.
+    ///
+    /// **The trigger is a dial that answered, rather than a timer.** Nothing in
+    /// a cluster retries in a loop: a debt is written down when a telling could
+    /// not be made, and it is paid the moment that member turns out to be
+    /// there. Something dials a member whenever the cluster does anything at
+    /// all, so a device whose members are all quiet is a device with nothing
+    /// owed that matters yet.
+    ///
+    /// **Whichever of the two it is**, because a member that was away for a
+    /// week may have missed a join and an unlink both — see
+    /// [`verkstead_store::Telling`]. A join is said again out of this device's
+    /// own membership, which is where the newcomer's addresses and certificate
+    /// are; a removal carries nothing but the id.
+    ///
+    /// **And a member that stops answering part way through keeps the rest.**
+    /// The walk stops at the first telling that did not get through, so what is
+    /// left is still owed and is said the next time — rather than every
+    /// remaining one being dialled at a machine that has just gone.
+    ///
+    /// Nothing here can fail its caller. The press that ran it already
+    /// happened, and a debt that could not be paid is a debt.
+    async fn caught_up(&self, member: &verkstead_store::Member) {
+        let owed = match self.members.owing(&member.device).await {
+            Ok(owed) => owed,
+            Err(why) => {
+                tracing::error!(%why, "what a member is owed could not be read");
+
+                return;
+            }
+        };
+
+        if owed.is_empty() {
+            return;
+        }
+
+        // Read once for the whole walk: what a *joined* telling carries is the
+        // device as this one holds it, and the membership does not move while
+        // the debts are being paid.
+        let held = match self.members.rows().await {
+            Ok(held) => held,
+            Err(why) => {
+                tracing::error!(%why, "the membership a debt is paid out of could not be read");
+
+                return;
+            }
+        };
+
+        for (about, telling) in owed {
+            let said = match telling {
+                Telling::Removed => self.peers.unlink(member, &about).await,
+
+                Telling::Joined => {
+                    let Some(newcomer) = held.iter().find(|held| held.device == about) else {
+                        // Owed a join about a device this one no longer holds,
+                        // which is nothing left to say: the unlink that dropped
+                        // it took its debts with it, so this is a row written
+                        // between the two reads above rather than anything to
+                        // put right.
+                        continue;
+                    };
+
+                    self.peers
+                        .announce(
+                            member,
+                            &DeviceIdentity {
+                                device: newcomer.device.clone(),
+                                fingerprint: newcomer.fingerprint.clone(),
+                                name: newcomer.name.clone(),
+                                os: newcomer.os.clone(),
+                                addresses: newcomer.addresses.clone(),
+                            },
+                        )
+                        .await
+                }
+            };
+
+            if let Err(why) = said {
+                tracing::info!(
+                    %why,
+                    device = %member.device,
+                    about = %about,
+                    "a member stopped answering part way through what it was owed, so the \
+                     rest of it waits for the next call that gets through",
+                );
+
+                return;
+            }
+
+            tracing::info!(
+                device = %member.device,
+                about = %about,
+                "a member that was away has been told what it missed",
+            );
+
+            if let Err(why) = self.members.told(&member.device, &about).await {
+                tracing::error!(%why, "a telling that was made could not be cleared as made");
             }
         }
     }

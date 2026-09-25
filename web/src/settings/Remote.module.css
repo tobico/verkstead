@@ -332,6 +332,95 @@
   }
 }
 
+/* The press that undoes, on every member's row and on no other. Drawn as an
+   outline rather than as a filled one, the way Remove on a Repo is and for its
+   reason: it undoes rather than does — and it sits at the end of the row,
+   where the eye is not on its way to anything.
+
+   `flex: none` and the margin above it set it to the first line of the row
+   rather than to the row's height, so a device with three addresses under its
+   name keeps its press beside the name. */
+.unlink {
+  flex: none;
+  margin-top: 0.1rem;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--removed);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.unlink:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* And under the pointer, which is the only thing it says before it is pressed:
+   the edge takes the colour the words already have. */
+@media (hover: hover) {
+  .unlink:not(:disabled):hover {
+    border-color: var(--removed);
+  }
+}
+
+/* The card an Unlink is answered with before anything happens, on the one modal
+   in the UI — the same shape the Repos pane's confirm takes, and drawn here in
+   this module because the words are this section's.
+
+   `Modal.module.css` is the card and everything around it; what is here is what
+   stands on it. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. Said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find
+   itself under it instead. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
 /* And the box the whole section is here for, set off from the rows above it by
    the same rule the section itself stands under: it is the one control on this
    pane that configures rather than reads, and it reads as a form rather than as

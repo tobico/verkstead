@@ -325,14 +325,79 @@ impl Peers {
     /// Allow, and a laptop with its lid shut is that machine's problem rather
     /// than the press's.
     pub async fn announce(&self, member: &Member, newcomer: &DeviceIdentity) -> Result<()> {
+        self.telling(
+            member,
+            &format!("being told about device {}", newcomer.device),
+            |dialling, at| {
+                dialling
+                    .post(reaching(at, crate::peer::announcing::MEMBERS))
+                    .json(newcomer)
+            },
+        )
+        .await
+    }
+
+    /// And tell `member` that `leaving` is not one of this cluster's any more,
+    /// which is what an Unlink broadcasts.
+    ///
+    /// **The announcement above, the other way round**, and a member's call in
+    /// exactly the same sense: it goes down a link the far end has verified, and
+    /// nobody over there is asked to confirm it — a cluster is a membership, so
+    /// the press that dropped the device dropped it for everybody.
+    ///
+    /// **And the leaver is told over this same call**, with its own id as
+    /// `leaving`: what a device does when the id named is its own is let go of
+    /// every member it holds. See [`crate::peer::unlinking`], which is what
+    /// answers.
+    ///
+    /// The same walk down the addresses and the same reading of a member that
+    /// answers nowhere. What is not here is a retry: the failure is handed back
+    /// to the caller, which writes the removal down as owed — a member that was
+    /// off when the human pressed Unlink is told when it next answers.
+    pub async fn unlink(&self, member: &Member, leaving: &str) -> Result<()> {
+        self.telling(
+            member,
+            &format!("being told to drop device {leaving}"),
+            |dialling, at| {
+                dialling.delete(reaching(
+                    at,
+                    &crate::peer::unlinking::MEMBER.replace("{device}", leaving),
+                ))
+            },
+        )
+        .await
+    }
+
+    /// What both of those are: one call made to a member, at every address the
+    /// row holds and in the order it holds them, until one answers.
+    ///
+    /// **One walk rather than one per thing said.** What differs between an
+    /// announcement and an unlink is the request built and the words a refusal
+    /// is reported in; everything else — the pinned certificate, the addresses
+    /// worked down, the machine that answered with somebody else's certificate,
+    /// the member that answered nowhere being dimmed — is what *dialling a
+    /// member* means, and it is one behaviour however many things there are to
+    /// say over it.
+    ///
+    /// `doing` is what the far end did not do, in the words a log line reads
+    /// it in: *being told about device …*, *being told to drop device …*.
+    ///
+    /// A transport failure is that address being gone and nothing about the
+    /// device, so the next one is tried; an address that answered *anything*
+    /// ends the walk, because a second address of the same machine would answer
+    /// the same way.
+    async fn telling(
+        &self,
+        member: &Member,
+        doing: &str,
+        build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<()> {
         let met = Arc::new(Mutex::new(None));
         let dialling = self.dialling(&member.fingerprint, &met)?;
         let mut nothing_at = Vec::new();
 
         for address in &member.addresses {
-            let at = reaching(address, crate::peer::announcing::MEMBERS);
-
-            match dialling.post(&at).json(newcomer).send().await {
+            match build(&dialling, address).send().await {
                 Ok(answered) => {
                     let status = answered.status();
 
@@ -340,9 +405,8 @@ impl Peers {
                         let said = answered.text().await.unwrap_or_default();
 
                         bail!(
-                            "device {} answered {status} to being told about device {}: {}",
+                            "device {} answered {status} to {doing}: {}",
                             member.device,
-                            newcomer.device,
                             said.trim(),
                         );
                     }

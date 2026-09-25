@@ -53,7 +53,8 @@ use super::Members;
 ///
 /// `POST` to the membership rather than a path with a verb in it, because that
 /// is what the call is: a device put on this one's list. The unlink broadcast
-/// the stage after this one adds is the same noun the other way round.
+/// beside it is the same noun the other way round — see
+/// [`super::unlinking::MEMBER`].
 pub const MEMBERS: &str = "/api/peer/v1/members";
 
 /// The device being told, as this route answers out of it.

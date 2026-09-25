@@ -56,8 +56,16 @@
 //! announced then being this one rather than a newcomer — which is why what a
 //! row names is the pair *member owed* and *device it has not heard about*
 //! rather than anything about a join.
+//!
+//! **And what is owed about it is a word beside the pair**, because a cluster
+//! has two opposite things to say about a device: that it is one of ours, and
+//! that it is not any more. A member that was off when a newcomer joined and
+//! off again when the human unlinked it is owed *the last of them* rather than
+//! both — the pair is the key, so the later telling replaces the earlier, which
+//! is exactly what that member would have ended up holding had it been
+//! answering all along.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
 use super::writing;
@@ -106,6 +114,49 @@ pub struct Member {
     /// dimmed row back. What clears it is [`member_unreachable`], on the first
     /// dial that answers at none of the addresses above.
     pub reachable: bool,
+}
+
+/// What a member has yet to be told about a device.
+///
+/// **Two opposite things, which is why it is a word rather than a flag on a
+/// row that would otherwise mean one of them.** A cluster tells a member that a
+/// device is one of ours, and it tells a member that a device is not any more;
+/// a debt that did not say which would be a machine coming back to whichever of
+/// the two the code happened to assume.
+///
+/// Stored as its own spelling rather than as a number, so a row read out of the
+/// database by a human says what it is — the stance every other word this store
+/// keeps takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Telling {
+    /// That the device named is one of this cluster's: the announcement an
+    /// introducer makes the moment its human presses Allow.
+    Joined,
+
+    /// And that it is not any more: the unlink, broadcast to every member.
+    Removed,
+}
+
+impl Telling {
+    /// How it is written down.
+    fn spelled(self) -> &'static str {
+        match self {
+            Telling::Joined => "joined",
+            Telling::Removed => "removed",
+        }
+    }
+
+    /// And read back, which is fallible because the column is a string: a
+    /// database written by a newer Verkstead may hold a word this one has never
+    /// heard of, and guessing at one would be a member told the opposite of
+    /// what it is owed.
+    fn read(said: &str) -> Result<Telling> {
+        match said {
+            "joined" => Ok(Telling::Joined),
+            "removed" => Ok(Telling::Removed),
+            _ => bail!("{said} is not something a member can be owed"),
+        }
+    }
 }
 
 /// A device about to be written down as a member: everything it said about
@@ -198,16 +249,42 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // at all — a renewal announces this machine, which is on nobody's own list
     // — and a foreign key that held for one column and not the other would read
     // as a rule somebody meant.
+    //
+    // And a word for *which* telling it is, because the two a cluster makes are
+    // opposites — see [`Telling`]. The pair stays the key: the later telling
+    // replaces the earlier, which is what a member that was away the whole time
+    // would have ended up holding anyway.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS owed_announcements (
-             device TEXT NOT NULL,
-             about  TEXT NOT NULL,
+             device  TEXT NOT NULL,
+             about   TEXT NOT NULL,
+             telling TEXT NOT NULL DEFAULT 'joined',
              PRIMARY KEY (device, about)
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the table of what members have yet to be told")?;
+
+    // Through `ALTER TABLE` as well as in the declaration above, the rule the
+    // mark on a member row takes and for its reason. Arriving *joined*, which
+    // is the only thing a row written before the word existed could have been:
+    // an unlink is what put the word there.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('owed_announcements') WHERE name = ?")
+            .bind("telling")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column that says what a member is owed")?;
+
+    if there.is_none() {
+        sqlx::query(
+            "ALTER TABLE owed_announcements ADD COLUMN telling TEXT NOT NULL DEFAULT 'joined'",
+        )
+        .execute(pool)
+        .await
+        .context("adding the column that says what a member is owed")?;
+    }
 
     Ok(())
 }
@@ -401,28 +478,41 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
         .with_context(|| format!("marking device {device} as answering nothing"))
 }
 
-/// Write down that `device` has yet to be told about `about`.
+/// Write down that `device` has yet to be told `telling` about `about`.
 ///
 /// **What a failed announcement leaves behind.** The announcement itself is a
 /// dial, and a dial to a machine that is off reaches nobody — but a human has
-/// pressed Allow and the device being announced is a member here whatever that
-/// machine made of it, so the telling is owed rather than lost. What pays it is
-/// the next thing that finds this member answering.
+/// pressed Allow or pressed Unlink and the device being named is a member here
+/// or is not, whatever that machine made of it, so the telling is owed rather
+/// than lost. What pays it is the next thing that finds this member answering.
 ///
 /// Nothing is refused and owing twice is owing once: a row says that this
 /// member has not heard about that device, and a second announcement that also
 /// failed says the same thing again.
-pub async fn owe_announcement(pool: &SqlitePool, device: &str, about: &str) -> Result<()> {
+///
+/// **And the later telling replaces the earlier**, rather than being ignored
+/// for a pair already there. A member that was off when a newcomer joined and
+/// off again when the human unlinked it is owed the removal alone: it never
+/// heard the join, and telling it about a device the cluster no longer holds
+/// would be a row that had to be taken away again on the next call.
+pub async fn owe_announcement(
+    pool: &SqlitePool,
+    device: &str,
+    about: &str,
+    telling: Telling,
+) -> Result<()> {
     let mut tx = writing(pool, "writing down an announcement that was not made").await?;
 
-    sqlx::query("INSERT OR IGNORE INTO owed_announcements (device, about) VALUES (?, ?)")
-        .bind(device)
-        .bind(about)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| {
-            format!("writing down that device {device} has not heard about {about}")
-        })?;
+    sqlx::query(
+        "INSERT INTO owed_announcements (device, about, telling) VALUES (?, ?, ?)
+         ON CONFLICT (device, about) DO UPDATE SET telling = excluded.telling",
+    )
+    .bind(device)
+    .bind(about)
+    .bind(telling.spelled())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("writing down that device {device} has not heard about {about}"))?;
 
     tx.commit()
         .await
@@ -466,6 +556,41 @@ pub async fn announcements_owed(pool: &SqlitePool, about: &str) -> Result<Vec<St
     Ok(rows.into_iter().map(|(device,)| device).collect())
 }
 
+/// And the debt read the other way round: everything `device` has yet to be
+/// told, as the pair *which device* and *what about it*.
+///
+/// **The question a dial that got through asks.** The list above is what is
+/// asked while a telling is being made — who still has not heard this — and
+/// this is what is asked the moment a member turns out to be answering: it is
+/// back, so what has it missed. Which is how a debt is paid without anything
+/// retrying in a loop; something dials a member whenever the cluster does
+/// anything, and that dial is the trigger.
+///
+/// Ordered by the device named, so that a member coming back after a busy week
+/// is caught up in one order rather than in whatever order the rows landed in.
+pub async fn announcements_owed_to(
+    pool: &SqlitePool,
+    device: &str,
+) -> Result<Vec<(String, Telling)>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT about, telling FROM owed_announcements WHERE device = ? ORDER BY about",
+    )
+    .bind(device)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("listing what device {device} has yet to be told"))?;
+
+    rows.into_iter()
+        .map(|(about, telling)| {
+            Ok((
+                about,
+                Telling::read(&telling)
+                    .with_context(|| format!("reading what device {device} is owed"))?,
+            ))
+        })
+        .collect()
+}
+
 /// Take a device out of the membership, with the addresses it advertised.
 ///
 /// The addresses first, because they point at the row: a member row dropped out
@@ -503,4 +628,41 @@ pub async fn forget_member(pool: &SqlitePool, device: &str) -> Result<()> {
     tx.commit()
         .await
         .with_context(|| format!("forgetting device {device}"))
+}
+
+/// And take the whole membership away, which is what a device does when it is
+/// told it has been unlinked.
+///
+/// **The leaver's own half of an unlink.** A cluster is a membership rather
+/// than a set of pairs, so a device dropped from it is dropped by everybody —
+/// and the device itself is left holding a list of machines that no longer hold
+/// it, every one of which would refuse it at the gate. So it is told, over the
+/// link it still has while it still has it, and what it does is this.
+///
+/// Everything, rather than the devices named: the caller is not handing over a
+/// list, and a leaver that kept whichever members the telling happened to name
+/// would be a cluster of one that thought it was a cluster of two.
+///
+/// One transaction, and the debts first for the reason [`forget_member`] takes
+/// them first: a device that is in no cluster is owed nothing and owes nothing.
+///
+/// Nothing is refused. A device that holds no members is one that has already
+/// forgotten everybody, and being told twice is not a thing to fail.
+pub async fn forget_every_member(pool: &SqlitePool) -> Result<()> {
+    let mut tx = writing(pool, "forgetting every member").await?;
+
+    for statement in [
+        "DELETE FROM owed_announcements",
+        "DELETE FROM member_addresses",
+        "DELETE FROM members",
+    ] {
+        sqlx::query(statement)
+            .execute(&mut *tx)
+            .await
+            .context("forgetting every device this one was linked to")?;
+    }
+
+    tx.commit()
+        .await
+        .context("forgetting every device this one was linked to")
 }
