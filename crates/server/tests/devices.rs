@@ -95,7 +95,7 @@ async fn listing(app: &Router) -> DevicesView {
 #[tokio::test]
 async fn the_list_is_this_device() {
     let (dir, app) = app(plainly()).await;
-    let device = Device::issued(dir.path()).unwrap();
+    let device = Device::issued(dir.path(), &Members::none()).unwrap();
 
     let listing = listing(&app).await;
 
