@@ -18,8 +18,8 @@
 //! so all three arms are exercised by ordinary unit tests on Linux. The one read
 //! of the real environment is at the edge, in `main.ts`.
 //!
-//! The **Log Directory** is the other directory resolved this way, and it is the
-//! log file task's arm to add here.
+//! The **Log Directory** is the other directory resolved this way, and it is
+//! [`logDir`] below — the same three arms, read out of the same values.
 
 import { join } from "node:path";
 
@@ -135,4 +135,39 @@ function absolute(value: string | undefined): string | undefined {
 /// by being what the platform set.
 function set(value: string | undefined): string | undefined {
   return value !== undefined && value !== "" ? value : undefined;
+}
+
+/// The Log Directory this run writes its log file in, or `undefined` where the
+/// machine names nowhere to put one.
+///
+/// `crates/server/src/platform.rs`'s `default_log_dir`, arm for arm, and the
+/// three arms disagree about what this directory even *is*: a state directory
+/// on Linux, a logs directory on macOS, the local rather than the roaming
+/// application data on Windows — local because a log file follows nobody
+/// between machines, which is the opposite of what the Data Directory holds.
+///
+/// **Nothing says otherwise.** There is no variable for this the way
+/// [`SAID`] is one for the Data Directory: the server resolves it and
+/// deliberately does not create it, and the app is what makes it — see
+/// [`keep`](./log.js), which is also what answers the `undefined`.
+export function logDir({ platform, env }: Machine): string | undefined {
+  switch (platform) {
+    case "darwin": {
+      const home = absolute(env.HOME);
+      return home === undefined ? undefined : join(home, "Library", "Logs", CAPITALISED);
+    }
+
+    case "win32": {
+      const local = set(env.LOCALAPPDATA);
+      return local === undefined ? undefined : join(local, CAPITALISED);
+    }
+
+    default: {
+      // The state directory rather than the data one, and it is the same
+      // specification saying both — so a relative `XDG_STATE_HOME` is ignored
+      // here for the reason a relative `XDG_DATA_HOME` is there.
+      const base = xdg(env.XDG_STATE_HOME, env.HOME, join(".local", "state"));
+      return base === undefined ? undefined : join(base, LOWERCASE);
+    }
+  }
 }

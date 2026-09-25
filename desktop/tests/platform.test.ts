@@ -1,16 +1,17 @@
-//! Where the **Data Directory** is, on all three platforms at once.
+//! Where Verkstead's two directories are, on all three platforms at once.
 //!
-//! The app has to land on the directory the sidecar landed on — the key it
-//! reads is the file that server wrote — so this is the server's own
-//! `crates/server/src/platform.rs` asked the same questions, arm for arm. Every
-//! arm runs on the Linux runner, which is the whole reason the platform and the
-//! environment are values rather than reads of this process.
+//! The app has to land on the **Data Directory** the sidecar landed on — the
+//! key it reads is the file that server wrote — and on the **Log Directory**
+//! the server resolves and deliberately does not make. So this is the server's
+//! own `crates/server/src/platform.rs` asked the same questions, arm for arm.
+//! Every arm runs on the Linux runner, which is the whole reason the platform
+//! and the environment are values rather than reads of this process.
 
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { dataDir, SAID, type Machine } from "../src/platform.js";
+import { dataDir, logDir, SAID, type Machine } from "../src/platform.js";
 
 /// A Unix machine that has never heard of XDG: a home and nothing else.
 const withHome = (platform: NodeJS.Platform, home: string): Machine => ({
@@ -107,5 +108,89 @@ describe(`the Data Directory ${SAID} says`, () => {
     expect(dataDir({ platform: "linux", env: { [SAID]: "", HOME: "/home/you" } })).toBe(
       "/home/you/.local/share/verkstead",
     );
+  });
+});
+
+/// And where the **Log Directory** is, which is the other directory resolved
+/// this way — the server's own `default_log_dir`, asked the same questions. It
+/// disagrees with the Data Directory on every platform, deliberately: a log
+/// file follows nobody between machines and the human's own work does.
+describe("where the Log Directory is", () => {
+  it("is under the XDG state directory on Linux", () => {
+    expect(logDir(withHome("linux", "/home/you"))).toBe("/home/you/.local/state/verkstead");
+  });
+
+  it("honours an absolute XDG_STATE_HOME", () => {
+    const machine = withHome("linux", "/home/you");
+    machine.env.XDG_STATE_HOME = "/var/lib/state";
+
+    expect(logDir(machine)).toBe("/var/lib/state/verkstead");
+  });
+
+  it("ignores a relative XDG_STATE_HOME", () => {
+    const machine = withHome("linux", "/home/you");
+    machine.env.XDG_STATE_HOME = "state";
+
+    expect(logDir(machine)).toBe("/home/you/.local/state/verkstead");
+  });
+
+  /// The data variable says nothing about where the state directory is, and a
+  /// checkout run pointed at a checkout's data still logs where the machine
+  /// keeps logs.
+  it("reads neither the data variable nor the one that names the Data Directory", () => {
+    const machine = withHome("linux", "/home/you");
+    machine.env.XDG_DATA_HOME = "/var/lib/data";
+    machine.env[SAID] = "/srv/somewhere";
+
+    expect(logDir(machine)).toBe("/home/you/.local/state/verkstead");
+  });
+
+  /// Somewhere Console.app already looks, which is where a Mac keeps logs of
+  /// its own.
+  it("is in Library/Logs on macOS", () => {
+    expect(logDir(withHome("darwin", "/Users/you"))).toBe("/Users/you/Library/Logs/Verkstead");
+  });
+
+  it("reads no XDG variable on macOS either", () => {
+    const machine = withHome("darwin", "/Users/you");
+    machine.env.XDG_STATE_HOME = "/var/lib/state";
+
+    expect(logDir(machine)).toBe("/Users/you/Library/Logs/Verkstead");
+  });
+
+  /// The local rather than the roaming application data — and so a different
+  /// directory from the Data Directory, which is the roaming one.
+  it("is in the local application data on Windows", () => {
+    const machine: Machine = {
+      platform: "win32",
+      env: {
+        LOCALAPPDATA: "C:\\Users\\you\\AppData\\Local",
+        APPDATA: "C:\\Users\\you\\AppData\\Roaming",
+      },
+    };
+
+    expect(logDir(machine)).toBe(join("C:\\Users\\you\\AppData\\Local", "Verkstead"));
+    expect(logDir(machine)).not.toBe(dataDir(machine));
+  });
+
+  it("reads no roaming application data on Windows", () => {
+    const machine: Machine = {
+      platform: "win32",
+      env: { APPDATA: "C:\\Users\\you\\AppData\\Roaming" },
+    };
+
+    expect(logDir(machine)).toBeUndefined();
+  });
+
+  /// Which is not a failure: the app says so and logs to standard error
+  /// instead. See `log.test.ts`, which is where that half is asked.
+  it("is nowhere on every platform with nothing in the environment", () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      expect(logDir({ platform, env: {} }), `${platform} has nowhere to log`).toBeUndefined();
+    }
+  });
+
+  it("takes a platform that is neither a Mac nor Windows for the XDG one", () => {
+    expect(logDir(withHome("freebsd", "/home/you"))).toBe("/home/you/.local/state/verkstead");
   });
 });

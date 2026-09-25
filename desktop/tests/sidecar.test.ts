@@ -12,9 +12,10 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ARGUMENTS, how, start, type Sidecar } from "../src/sidecar.js";
+import { FILE, heard, keep } from "../src/log.js";
+import { ARGUMENTS, byLine, how, start, type Lines, type Sidecar } from "../src/sidecar.js";
 
 /// A stand-in `verkstead`, written somewhere of its own and made runnable.
 ///
@@ -64,6 +65,23 @@ async function recorded(record: string): Promise<string[]> {
   throw new Error(`the stand-in never wrote ${record}`);
 }
 
+/// Wait until `file` holds `line`, which is a pipe read and written after the
+/// child that said it had gone on to something else.
+async function held(file: string, line: string): Promise<string> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      const written = readFileSync(file, "utf8");
+      if (written.includes(line)) {
+        return written;
+      }
+    } catch {
+      // Not written yet.
+    }
+    await new Promise((on) => setTimeout(on, 10));
+  }
+  throw new Error(`${file} never held ${line}`);
+}
+
 /// Whether a process is still there. A pid that has gone is `ESRCH`; one that
 /// belongs to somebody else is `EPERM`, which is still a pid in use.
 const alive = (pid: number): boolean => {
@@ -102,7 +120,7 @@ afterEach(async () => {
 describe.skipIf(process.platform === "win32")("the sidecar", () => {
   it("is started as `serve --desktop` and nothing else", async () => {
     const { cli, record } = standIn();
-    started = start(cli);
+    started = start(cli, heard);
 
     const [said] = await recorded(record);
     expect(said).toBe(ARGUMENTS.join(" "));
@@ -115,7 +133,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const { cli, record } = standIn();
     process.env.VERKSTEAD_DATA_DIR = "/srv/somewhere";
     try {
-      started = start(cli);
+      started = start(cli, heard);
       const [, data] = await recorded(record);
       expect(data).toBe("/srv/somewhere");
     } finally {
@@ -123,9 +141,30 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     }
   });
 
+  /// The other half of the log file: the app writes it, and what the *server*
+  /// says is what it is mostly full of. A stand-in saying the line a server
+  /// says, because what is being asked here is the wiring rather than the
+  /// server — and the line it says is the redacted one, which is stage 01's
+  /// and `crates/server`'s to keep true.
+  it("has what the server says land in the app's log file", async () => {
+    const where = mkdtempSync(join(tmpdir(), "verkstead-sidecar-log-"));
+    // Opening a log says which file it is on standard error, which is a line
+    // for a developer rather than for a test run.
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    keep(where);
+    stderr.mockRestore();
+
+    const said = "2026-09-25T10:00:00.000000Z  INFO verkstead_server: verkstead is listening";
+    const { cli, record } = standIn(`echo '${said}'\nexec sleep 600`);
+    started = start(cli, heard);
+    await recorded(record);
+
+    expect(await held(join(where, FILE), said)).toContain(said);
+  });
+
   it("goes when it is stopped", async () => {
     const { cli, record } = standIn();
-    const sidecar = start(cli);
+    const sidecar = start(cli, heard);
     await recorded(record);
 
     sidecar.stop();
@@ -140,7 +179,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
   /// what the child handed over as it went.
   it("says a server that ended on its own exited", async () => {
     const { cli, record } = standIn("exit 3");
-    started = start(cli);
+    started = start(cli, heard);
     await recorded(record);
 
     const ending = await started.gone;
@@ -151,7 +190,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
   it("says a server that was stopped was killed", async () => {
     const { cli, record } = standIn();
-    started = start(cli);
+    started = start(cli, heard);
     await recorded(record);
 
     started.stop();
@@ -191,5 +230,55 @@ describe("an ending in words", () => {
 
   it("says so rather than nothing where there is nothing to say", () => {
     expect(how({ code: null, signal: null })).toBe("it ended without saying how");
+  });
+});
+
+/// And the reading of the stream the lines come out of, which is the piece the
+/// log file rests on: a pipe hands over bytes as they arrive rather than events
+/// as they were logged, and the file rolls between lines.
+describe("the sidecar's stream, read by line", () => {
+  /// The collector, and what it collected.
+  const collect = (): { lines: Lines; said: string[] } => {
+    const said: string[] = [];
+    return { lines: byLine((line) => said.push(line)), said };
+  };
+
+  it("hands over whole lines however the chunks fell", () => {
+    const { lines, said } = collect();
+
+    lines.feed("verkstead is ");
+    lines.feed("listening\nand so\nis");
+    lines.feed(" something else\n");
+
+    expect(said).toEqual(["verkstead is listening", "and so", "is something else"]);
+  });
+
+  it("holds a part line until the rest of it arrives", () => {
+    const { lines, said } = collect();
+
+    lines.feed("verkstead is ");
+
+    expect(said).toEqual([]);
+  });
+
+  /// A sidecar taken mid-line still said what it had said, and the log file is
+  /// the only account of why the app went with it.
+  it("hands over the last line where the stream ended without one", () => {
+    const { lines, said } = collect();
+
+    lines.feed("the server fell over");
+    lines.end();
+    lines.end();
+
+    expect(said).toEqual(["the server fell over"]);
+  });
+
+  /// A Windows sidecar's own line endings are not the log file's.
+  it("takes the carriage return off a line that carried one", () => {
+    const { lines, said } = collect();
+
+    lines.feed("verkstead is listening\r\n");
+
+    expect(said).toEqual(["verkstead is listening"]);
   });
 });
