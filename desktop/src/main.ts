@@ -8,6 +8,13 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
+//! **And it is what answers the page**, over the three channels
+//! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
+//! run it arrives in, and the log file opened. Each of them is something only
+//! this process can do — a file under Electron's user data, an icon on
+//! somebody's panel, a file handed to whatever the desktop reads text with —
+//! while what a set *means* is [`changed`](./settings.js)'s, which vitest runs.
+//!
 //! **The order at the top of [`run`] is the lifecycle**, and it is an order
 //! rather than a sequence of conveniences: the log file, so that every line
 //! below it is in the file somebody will be asked to send; then the lock, so
@@ -19,10 +26,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, dialog, type BrowserWindow } from "electron";
+import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 
 import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
+import { ASKED, LOGS, PRELOAD, SET } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { healthy, NeverCameUp } from "./health.js";
@@ -30,10 +38,10 @@ import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
-import { FILE as DESKTOP, settings } from "./settings.js";
+import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import { taken } from "./taken.js";
-import { lower, raise } from "./tray.js";
+import { logs, lower, raise, type Trayed } from "./tray.js";
 import { forward, open } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
 
@@ -125,6 +133,55 @@ function give(code: number): void {
   leaving = true;
   child?.stop();
   app.exit(code);
+}
+
+/// Enact a set that arrived over the bridge, and answer with the settings in
+/// force once it has been.
+///
+/// **In this run rather than at the next launch**, which is what makes the
+/// Desktop page a control rather than a form: the icon goes or comes back as
+/// the switch is moved, and what a close means changes with it — the policy is
+/// read out of the file at the moment of the press, so there is nothing to
+/// re-read it here.
+///
+/// **What is refused writes nothing.** [`changed`](./settings.js) is what says
+/// so, and what comes back then is the settings as they stand — which is a
+/// control on the page that goes back where it was rather than one left showing
+/// something the app never agreed to.
+///
+/// **And the answer is read back off the file rather than handed back.** A
+/// write that failed is a set that did not happen, and the app goes on behaving
+/// the way it was behaving; the page is told what is true, and the icon follows
+/// the same reading.
+function enact(desk: string, trayed: Trayed, sent: unknown): Settings {
+  const wanted = changed(sent);
+
+  if (wanted === undefined) {
+    say("a set came over the bridge that is not one of this app's settings, so nothing is written");
+    return settings(desk);
+  }
+
+  // Said before it is done, so that a write which then failed reads as what it
+  // is: this line, and the settings module's own saying it could not keep them.
+  say(
+    `the Desktop page set ${Object.entries(wanted)
+      .map(([which, value]) => `${which} to ${String(value)}`)
+      .join(" and ")}`,
+  );
+
+  set(desk, { ...settings(desk), ...wanted });
+
+  const now = settings(desk);
+
+  // Where the icon should now be, said as a statement rather than as a change:
+  // both of these leave an icon that is already as asked exactly where it is.
+  if (now.trayIcon) {
+    raise(trayed);
+  } else {
+    lower();
+  }
+
+  return now;
 }
 
 async function run(): Promise<void> {
@@ -308,6 +365,31 @@ async function run(): Promise<void> {
   const userData = app.getPath("userData");
   const desk = join(userData, DESKTOP);
 
+  // What the icon is made of, made before there is a window for it to open:
+  // **Show tray icon** can ask for it back at any moment the app is running, so
+  // the raise below and the one [`enact`] makes are the same value. `onscreen`
+  // rather than the window itself, for the reason `second-instance` reads it —
+  // this is built before there is one.
+  const trayed: Trayed = {
+    icon: artwork(install),
+    kept,
+    open: () => {
+      if (onscreen !== undefined) {
+        forward(onscreen);
+      }
+    },
+    quit: () => app.quit(),
+  };
+
+  // The bridge's three acts, enacted here because here is the process that can
+  // — the file is read and written, the icon is raised and lowered, and the log
+  // file is handed to whatever the desktop reads text with. Registered before
+  // the window is opened, because the page is loaded the moment there is one
+  // and a page that asked before this would be asking nobody.
+  ipcMain.handle(ASKED, () => settings(desk));
+  ipcMain.handle(SET, (_event, sent: unknown) => enact(desk, trayed, sent));
+  ipcMain.handle(LOGS, () => logs(kept));
+
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
@@ -315,6 +397,11 @@ async function run(): Promise<void> {
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
     state: join(userData, FILE),
+
+    // The bridge, beside the compiled main process rather than anywhere the
+    // page could name: this directory is what `pnpm build` emits into, and the
+    // file is the `.mjs` an ESM preload has to be — see `bridge.ts`.
+    preload: join(import.meta.dirname, PRELOAD),
 
     // Read at the moment of the press, for the reason the key is: the settings
     // file is what the Desktop page writes, and a policy read once at startup
@@ -326,16 +413,11 @@ async function run(): Promise<void> {
 
   // And then the icon, which is the other way to this window and the only one
   // while it is off the screen — which is why the close policy falls to Quit
-  // without it. Shown unless this machine has said otherwise: turning **Show
-  // tray icon** off while the app is running is the bridge's to enact, and what
-  // is read here is where the last run left it.
+  // without it. Shown unless this machine has said otherwise, which is where
+  // the last run left the switch — moving it while the app is running is
+  // [`enact`]'s, and it raises and lowers this same icon.
   if (settings(desk).trayIcon) {
-    raise({
-      icon: artwork(install),
-      kept,
-      open: () => forward(window),
-      quit: () => app.quit(),
-    });
+    raise(trayed);
   } else {
     say("the desktop settings say no tray icon, so there is none — and closing the window quits");
   }

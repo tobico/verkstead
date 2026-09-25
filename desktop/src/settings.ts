@@ -23,8 +23,15 @@
 //! each value is read on its own below rather than the object being checked as
 //! a whole.
 //!
+//! **And what may be written to it is here too**, in [`changed`]: a set
+//! arriving over the bridge from the page is checked against the shape before
+//! it reaches the file. That reading is this module's rather than the bridge's
+//! because the shape is this module's — the same three positions the radio
+//! draws and the file is read by, checked in one place.
+//!
 //! What a close *comes to*, given these two and the platform, is
-//! [`closing.ts`](./closing.js)'s: this module is the file and nothing else.
+//! [`closing.ts`](./closing.js)'s: this module is the file, what is in it, and
+//! what may go into it.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -100,6 +107,55 @@ export function settings(file: string): Settings {
 /// `value` where it is one of the three positions, and nothing otherwise.
 export function position(value: unknown): WhenClosed | undefined {
   return POSITIONS.find((held) => held === value);
+}
+
+/// What a set that arrived over the bridge asks for, where what it sent is
+/// settings — and nothing where it is not.
+///
+/// **Because a renderer is a renderer.** The page is the app's own and the
+/// window never leaves the one origin, but what comes up the bridge is checked
+/// against the shape before it reaches the file all the same: a value that is
+/// not one of the positions or not a boolean is refused rather than written,
+/// and so is a key this app has no setting for.
+///
+/// **All or nothing, which is the opposite of what [`settings`] does with a
+/// file** — and deliberately. A file that is half wrong is a human who
+/// hand-edited one line and said nothing about the other, so the good half
+/// stands; a set that is half wrong is a program with a bug in it, and writing
+/// the half of it that parsed would be the app guessing at what a bug meant.
+///
+/// A change that names nothing is nothing to write, so it is refused with the
+/// rest: every set this app makes comes from a control somebody moved.
+export function changed(sent: unknown): Partial<Settings> | undefined {
+  if (typeof sent !== "object" || sent === null || Array.isArray(sent)) {
+    return undefined;
+  }
+
+  const asked = sent as Record<string, unknown>;
+  const wanted: Partial<Settings> = {};
+
+  for (const [key, value] of Object.entries(asked)) {
+    switch (key) {
+      case "whenClosed": {
+        const chosen = position(value);
+        if (chosen === undefined) {
+          return undefined;
+        }
+        wanted.whenClosed = chosen;
+        break;
+      }
+      case "trayIcon":
+        if (typeof value !== "boolean") {
+          return undefined;
+        }
+        wanted.trayIcon = value;
+        break;
+      default:
+        return undefined;
+    }
+  }
+
+  return Object.keys(wanted).length > 0 ? wanted : undefined;
 }
 
 /// Keep `chosen` for this run and the ones after it.

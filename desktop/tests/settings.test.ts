@@ -1,5 +1,10 @@
-//! The app's own settings file: what comes back from it, and what a file that
-//! is not what this wrote comes back as.
+//! The app's own settings file: what comes back from it, what a file that is
+//! not what this wrote comes back as, and what may be written to it.
+//!
+//! The two readings are opposites and both are here: a file is read one
+//! setting at a time and a set arriving over the bridge is refused whole. The
+//! difference is who is on the other end — a human who hand-edited a line, or
+//! a program with a bug in it.
 //!
 //! The failure this is here to catch is the all-or-nothing reading: a hand that
 //! edited the file and mistyped one line has said nothing about the other, and
@@ -12,7 +17,16 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { DEFAULTS, FILE, position, POSITIONS, set, type Settings, settings } from "../src/settings.js";
+import {
+  changed,
+  DEFAULTS,
+  FILE,
+  position,
+  POSITIONS,
+  set,
+  type Settings,
+  settings,
+} from "../src/settings.js";
 
 /// Everything a spy on the stream was handed — where the app's lines go on a
 /// run that has no log file open, which is every run under vitest.
@@ -150,5 +164,69 @@ describe("the positions", () => {
     for (const value of ["", "TRAY", "minimise", null, 0, true, {}]) {
       expect(position(value), JSON.stringify(value)).toBeUndefined();
     }
+  });
+});
+
+describe("a set that arrived over the bridge", () => {
+  it("takes one setting, or both, and says what is to change", () => {
+    expect(changed({ whenClosed: "quit" })).toEqual({ whenClosed: "quit" });
+    expect(changed({ trayIcon: false })).toEqual({ trayIcon: false });
+    expect(changed({ whenClosed: "ask", trayIcon: true })).toEqual({
+      whenClosed: "ask",
+      trayIcon: true,
+    });
+  });
+
+  it("takes every position", () => {
+    for (const whenClosed of POSITIONS) {
+      expect(changed({ whenClosed }), whenClosed).toEqual({ whenClosed });
+    }
+  });
+
+  /// A renderer is a renderer: what comes up the bridge is checked against the
+  /// shape before it reaches the file, whoever it came from.
+  it("refuses a value that is not one of the positions or not a boolean", () => {
+    for (const sent of [
+      { whenClosed: "minimise" },
+      { whenClosed: "TRAY" },
+      { whenClosed: "" },
+      { whenClosed: null },
+      { whenClosed: true },
+      { trayIcon: "yes" },
+      { trayIcon: 1 },
+      { trayIcon: null },
+    ]) {
+      expect(changed(sent), JSON.stringify(sent)).toBeUndefined();
+    }
+  });
+
+  /// All or nothing, which is the opposite of what a hand-edited file gets: a
+  /// set that is half wrong is a program with a bug in it, and writing the half
+  /// that parsed would be the app guessing at what the bug meant.
+  it("refuses the whole set where one half of it is wrong", () => {
+    expect(changed({ whenClosed: "ask", trayIcon: "yes" })).toBeUndefined();
+    expect(changed({ whenClosed: "minimise", trayIcon: false })).toBeUndefined();
+  });
+
+  /// The app has two settings, and a set naming a third is not a set of this
+  /// app's settings — no more than a position it has never heard of is.
+  it("refuses a key this app has no setting for", () => {
+    expect(changed({ colour: "green" })).toBeUndefined();
+    expect(changed({ trayIcon: false, colour: "green" })).toBeUndefined();
+  });
+
+  /// Every set this app makes comes from a control somebody moved, so a set
+  /// that names nothing is nothing to write.
+  it("refuses a set that is no set of settings at all", () => {
+    for (const sent of [{}, null, undefined, [], ["trayIcon"], "trayIcon", 7, true]) {
+      expect(changed(sent), JSON.stringify(sent)).toBeUndefined();
+    }
+  });
+
+  /// What comes back is a change rather than the settings: a set naming one of
+  /// them says nothing about the other, and a caller that read the missing half
+  /// as a default would turn a press of the checkbox into a reset of the radio.
+  it("carries only what was named", () => {
+    expect(Object.keys(changed({ trayIcon: false }) ?? {})).toEqual(["trayIcon"]);
   });
 });

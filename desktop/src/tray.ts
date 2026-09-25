@@ -67,7 +67,18 @@ export interface Trayed {
 let icon: Tray | undefined;
 
 /// Put the icon in the tray, with its menu on it and its click wired.
+///
+/// **Says where the icon should be rather than asking for another one.** This
+/// and [`lower`] are what **Show tray icon** comes to while the app is running
+/// — the set takes effect in that run rather than at the next launch — so both
+/// are called with whatever the switch now says, and a raise over an icon that
+/// is already up leaves the one that is there. A second `Tray` would be a
+/// second icon on the panel and the first one lost to this module.
 export function raise(trayed: Trayed): void {
+  if (icon !== undefined) {
+    return;
+  }
+
   const tray = new Tray(trayed.icon);
 
   // What a panel shows when the pointer rests on the icon, and on some desktops
@@ -109,7 +120,16 @@ export function lower(): void {
 }
 
 /// **View Logs**: this run's log file, or why there is not one.
-function logs(kept: Kept): void {
+///
+/// **Exported, because the page has this button too** (ADR-0020): a switch
+/// somebody can turn off cannot be the only way to a log file, and the desktop
+/// most likely to have the tray off is the one the tray misbehaved on. So the
+/// Desktop page's **View Logs** is this same call reached over the bridge —
+/// one action reached two ways rather than two actions that agree. It lives
+/// here rather than beside the bridge because opening a file and putting a
+/// dialog up are things only the edge can do, and this is the file that already
+/// does them.
+export function logs(kept: Kept): void {
   const act = viewing(kept);
 
   if (!("open" in act)) {

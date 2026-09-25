@@ -27,7 +27,7 @@ Roadmap stage: [03: Tray, close policy and the Desktop page](docs/roadmaps/elect
 
 - [x] 01: The tray — [details](01-the-tray.md)
 - [x] 02: The close policy, over the app's own settings — [details](02-the-close-policy.md)
-- [ ] 03: The bridge — [details](03-the-bridge.md)
+- [x] 03: The bridge — [details](03-the-bridge.md)
 - [ ] 04: The Desktop page — [details](04-the-desktop-page.md)
 - [ ] 05: Launch on Startup, and the hidden login start — [details](05-launch-on-startup.md)
 - [ ] 06: COSMIC and the late panel — [details](06-cosmic-and-the-late-panel.md)
