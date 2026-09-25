@@ -7,8 +7,8 @@ Devices has **Add**: type B's address, and A's list shows a pending row,
 *Waiting for confirmation on B*, with A's fingerprint and Cancel. On B, every
 open workbench raises a modal — A's name, OS, address and fingerprint, Allow
 and Deny — and B's phones get a push. Allow exchanges certificates, B hands A
-every member, and A introduces itself to each without a further press; both
-lists now read the same. Unlink drops a device from the cluster for everyone,
+every member and announces A to each of them over its own link, with no further
+press anywhere; both lists now read the same. Unlink drops a device from the cluster for everyone,
 asked once. A member that stops answering stays on the list dimmed
 *unreachable*. Demonstrable end to end with three servers.
 
@@ -16,8 +16,13 @@ asked once. A member that stops answering stays on the list dimmed
 
 - **A cluster is a membership, not a set of pairs**
   ([ADR-0020](../../adr/0020-cluster-mode.md), *A cluster is a membership*).
-  One confirmation joins the newcomer to everyone; introductions need no
-  confirmation because the introducer vouched.
+  One confirmation joins the newcomer to everyone, and **the introducer is what
+  announces it** to each member over the link it already holds — no member
+  confirms that announcement, because it arrives over a link that member has
+  verified. A newcomer introducing itself was rejected: nothing on the wire
+  would carry the vouching, so a member could not tell the newcomer from
+  anybody else able to reach its peer port, and every member but the one that
+  confirmed would be joinable without a press.
 - **The join protocol** is the ADR's: A accepts B's certificate for the one
   call and posts id, name, OS, addresses and certificate; B holds the request
   ten minutes and asks; on Allow B dials A back, checks the certificate it
@@ -51,10 +56,13 @@ asked once. A member that stops answering stays on the list dimmed
    the modal in the workbench, a push notification titled for the device.
    - Allow and Deny each settle the request once; a second workbench sees the
      modal go.
-4. **The exchange and the introductions** — B dials back, verifies, hands
-   over members; A introduces itself to each; every member records A.
+4. **The exchange and the announcement** — B dials back, verifies, hands over
+   its members, and announces A to each of them over its own link; every member
+   records A from B rather than from A.
    - After a join, `GET` Devices on any of three servers lists the same
      three.
+   - A device that announces itself to a member is refused; only a member's own
+     peers can name a newcomer to it.
 5. **Addresses in order, and unreachable** — the address list on every
    exchange, tried in order with a short timeout; a member that answers
    nothing dims.

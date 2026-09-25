@@ -60,10 +60,19 @@ Pairwise links were rejected because *control all of them through any one*
 would then hold only where the human had linked every pair — N times N minus
 one over two presses — and a transfer from B to C pressed on A would need B
 and C linked besides. Under a membership, one confirmation joins the newcomer
-to everyone: the device it joined through hands it every member's identity,
-addresses and certificate, and the newcomer introduces itself to each of them
-in turn, which no member confirms because the introducer vouched. Every
+to everyone: the device it joined through hands the newcomer every member's
+identity, addresses and certificate, and **announces the newcomer to each of
+those members over its own link**, which is a verified one already. Every
 device's Devices list reads the same.
+
+The announcement is the introducer's to make rather than the newcomer's,
+because the vouching has to be carried by something. A newcomer that introduced
+itself would be a stranger asking a member to record it, and a member has no way
+to tell that from anybody else who can reach its peer port: the confirmation on
+the one device would be the cluster's only gate, and every other member would be
+joinable without passing it. Announced by the introducer, the claim arrives over
+a link the member has already verified, and the newcomer's own first call is an
+ordinary one from a device that member now knows.
 
 **The join.** A presses Add on B's address. A dials B's peer listener,
 accepts whatever certificate B presents for this one call, and posts a join
@@ -75,7 +84,9 @@ its pending row, *Waiting for confirmation on B*, with Cancel, so the two can
 be compared by eye. On Allow, B dials A back at the addresses A gave, checks
 the certificate it meets is the one in the request, and hands over its own
 identity and certificate and every member's; A checks B's certificate is the
-one it saw. A deny or an expiry reads on A's pending row and is dismissed.
+one it saw. B then announces A to each of its own members, over the link it
+already holds to each, and every one of them records A. A deny or an expiry
+reads on A's pending row and is dismissed.
 
 **Addresses.** A laptop moves between the LAN and the tailnet and DHCP moves
 everyone, so every device advertises all its addresses — tailnet name and IP,
