@@ -11,6 +11,7 @@ import type {
   AnswerAttached,
   AnswerAttachmentRemoved,
   ApiError,
+  AskingDevice,
   Attached,
   AttachmentRemoved,
   BacklogPane,
@@ -1385,6 +1386,47 @@ export function addDevice(address: string): Promise<DevicesView> {
 export function cancelJoin(request: string): Promise<DevicesView> {
   return post<DevicesView>(
     `/api/ui/devices/joins/${encodeURIComponent(request)}/cancel`,
+  );
+}
+
+/// And the other side of a join: every device asking to be let into *this*
+/// one's cluster.
+///
+/// Read by the shell every page sits inside rather than by a page, because the
+/// question belongs to no page: a join arrives while somebody is reading a
+/// Transcript, and it is theirs to answer wherever they are.
+///
+/// A request whose ten minutes have run out is not in the answer, which is what
+/// takes the modal down when nobody pressed anything: the page reads this again
+/// and the question it was holding open is not in it.
+export function loadAsking(): Promise<AskingDevice[]> {
+  return get<AskingDevice[]>("/api/ui/devices/asking");
+}
+
+/// **Allow**: let the device that asked into this one's cluster.
+///
+/// It records that device as a member and settles the request, and nothing goes
+/// back to the device that asked — which is still drawing *waiting*. What comes
+/// back is the list read again, so a modal that has just been answered goes out
+/// of this answer rather than out of a second request.
+///
+/// A second press is not a second thing happening: two workbenches may both be
+/// showing the modal, and the one that presses second finds the request settled
+/// and the list empty.
+export function allowJoin(request: string): Promise<AskingDevice[]> {
+  return post<AskingDevice[]>(
+    `/api/ui/devices/asking/${encodeURIComponent(request)}/allow`,
+  );
+}
+
+/// **Deny**: settle the request and record nothing.
+///
+/// The same answer and the same shrug at a second press. Nothing is remembered
+/// about the device refused — a cluster is a membership rather than a list of
+/// verdicts, and a device turned away is free to ask again.
+export function denyJoin(request: string): Promise<AskingDevice[]> {
+  return post<AskingDevice[]>(
+    `/api/ui/devices/asking/${encodeURIComponent(request)}/deny`,
   );
 }
 

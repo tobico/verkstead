@@ -31,8 +31,8 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
+    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, AskingDevice,
+    Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
     CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
@@ -613,6 +613,20 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Dismiss on one that has run out. One route, because they are one act
         // seen at two moments — see [`crate::device::Devices::take_back`].
         .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
+        // And the other side of a join: the devices asking to be let into *this*
+        // one's cluster, which is what the modal in every open workbench is
+        // drawn from. A read of its own beside the section above rather than a
+        // field of it, because the modal belongs to no page — a join has to be
+        // raised whatever the human happens to be looking at, so it is drawn in
+        // the shell every page sits inside and reads this for itself.
+        .route("/api/ui/devices/asking", get(asking))
+        // And the press that settles one, which is the whole of what this task
+        // delivers on this side. Two routes rather than one with a verdict in
+        // the body: they are two different acts — one writes a member and the
+        // other writes nothing — and a body that said which would be the same
+        // fact in a worse place.
+        .route("/api/ui/devices/asking/{request}/allow", post(allow_join))
+        .route("/api/ui/devices/asking/{request}/deny", post(deny_join))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -5669,6 +5683,92 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
     }
 
     listed(&devices).await
+}
+
+/// `GET /api/ui/devices/asking` — every device asking to be let into this one's
+/// cluster, which is what the confirmation modal is drawn from (ADR-0020, *The
+/// join*).
+///
+/// **Read by the shell rather than by a page.** A join arrives while somebody is
+/// reading a Transcript, and the question is theirs to answer wherever they are
+/// — so this is asked by the one thing that is drawn over every page, beside the
+/// toast layer, and the Nudge that says the joins moved is what makes it ask
+/// again.
+///
+/// A request whose ten minutes have run out is not in the answer. Which is what
+/// takes the modal down when nobody pressed anything: the page reads this again
+/// and the question it was holding open is not in it — see
+/// [`crate::peer::joining::Joins::asking`].
+async fn asking(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    are_asking(&devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/allow` — **Allow**: let the device
+/// that asked into this one's cluster.
+///
+/// It records the asker as a member and settles the request, and that is the
+/// whole of it: nothing goes back to the device that asked, which is still
+/// drawing *waiting* until the dial back a later task adds. See
+/// [`crate::device::Devices::allow`], which is also where a second press being
+/// nothing new is settled.
+async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if let Err(why) = devices.allow(&request).await {
+        return unavailable(&format!("the device could not be let in: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/deny` — **Deny**: settle the request
+/// and record nothing.
+async fn deny_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.deny(&request).await {
+        return unavailable(&format!("the device could not be refused: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// What both presses answer with: the list read again, and every other open
+/// workbench told the joins moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement every press on this pane makes — what
+/// differs here is that there is a rest of them to tell: two workbenches may
+/// both be showing the modal, and the one that did not press has to see it go.
+/// Which is the same word a join arriving sends, because it is the same fact:
+/// the joins moved, and a page reads them back.
+async fn settled(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Joins);
+
+    are_asking(devices).await
+}
+
+/// The devices asking, as the modal reads them: one reading, made at the moment
+/// it is asked for.
+async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
+    let asking: Vec<AskingDevice> = match devices.asking().await {
+        Ok(asking) => asking,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices asking to link with this one could not be read: {why:#}"
+            ));
+        }
+    };
+
+    Json(asking).into_response()
 }
 
 /// The Devices section as the pane reads it, which is what all three of the

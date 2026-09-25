@@ -3500,6 +3500,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "devices-waiting.json",
         &a_stated_machine(&get(&asking, "/api/ui/devices").await),
     );
+
+    // And the other side of a join, which is not on that pane at all: the
+    // device asking to be let into *this* one's cluster, as the modal every
+    // open workbench raises is drawn from. Nothing of this machine is in it —
+    // it is the whole of what the far end said about itself — so it needs none
+    // of the stating above.
+    let (_dir, asked) = an_asked_devices_app().await;
+    write(
+        "joins-asking.json",
+        &get(&asked, "/api/ui/devices/asking").await,
+    );
 }
 
 /// What a WSL kernel calls itself, which is the one thing that tells one apart
@@ -3671,6 +3682,46 @@ async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
         .await
         .unwrap();
     }
+
+    (dir, app)
+}
+
+/// The same router with one device asking to be let into this one's cluster.
+///
+/// One rather than two, because the modal raises one at a time: a second device
+/// asking is the card the first one's answer puts up, out of the same read, and
+/// a fixture of two would be feeding the viewer a state it never draws whole.
+///
+/// A WSL, which is the case the OS word exists for and the one the whole of
+/// cluster mode was written for — the mark beside the name is the only thing
+/// that would tell it from the Windows it shares a hostname with, and this is
+/// the card where somebody is deciding which machine they are looking at.
+///
+/// The moment it runs out at is far enough ahead of any run to stay ahead of
+/// one in a committed file: a fixture whose question expired the week after it
+/// was written would be an empty list.
+#[cfg(unix)]
+async fn an_asked_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+
+    verkstead_store::hold_join(
+        &pool,
+        &verkstead_store::HeldJoin {
+            request: "5566778899aabbcc".to_owned(),
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: vec![
+                "laptop.tailnet-name.ts.net".to_owned(),
+                "192.168.1.31".to_owned(),
+            ],
+            fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+            asked_at: "2026-09-25T10:00:00Z".to_owned(),
+            expires_at: "2099-01-01T00:00:00Z".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
 
     (dir, app)
 }

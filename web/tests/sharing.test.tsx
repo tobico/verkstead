@@ -19,6 +19,7 @@ import {
   screen,
   waitFor,
 } from "@solidjs/testing-library";
+import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it } from "vitest";
 
 // The column every page of the app sits in, which is what a share has to sit in
@@ -194,10 +195,16 @@ describe("a shared conversation", () => {
   /// the assertion has to fail when the app's shell changes and the share's does
   /// not.
   it("draws its record in the same column the app draws every page in", async () => {
+    // Under a query client, because the shell reads one thing of its own: the
+    // devices asking to be let into this one's cluster, for the modal it draws
+    // over every page — see `src/Joining.tsx`. A share carries no such thing,
+    // which is what this test is comparing columns rather than shells.
     const app = render(() => (
-      <Shell>
-        <p>Any page at all.</p>
-      </Shell>
+      <QueryClientProvider client={new QueryClient()}>
+        <Shell>
+          <p>Any page at all.</p>
+        </Shell>
+      </QueryClientProvider>
     ));
     const shell = app.container.querySelector("main");
     expect(shell).toBeTruthy();

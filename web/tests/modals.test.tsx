@@ -26,7 +26,10 @@ import stylesheet from "../src/Modal.module.css?raw";
 import sheets from "../src/set/Sheet.module.css?raw";
 
 /// A modal that starts open, with the way it was closed recorded.
-function mount(): {
+///
+/// `insist` is the one card nobody opened — see the two tests about it below,
+/// and `src/Joining.tsx`, which is why the flag exists.
+function mount(insist = false): {
   container: HTMLElement;
   open: () => boolean;
   shut: () => void;
@@ -39,6 +42,7 @@ function mount(): {
       open={open()}
       close={() => setOpen(false)}
       labelledBy="example-title"
+      insist={insist}
     >
       <p id="example-title">Are you sure?</p>
       <button type="button">Do the thing</button>
@@ -117,6 +121,33 @@ describe("a modal", () => {
 
     await waitFor(() => expect(open()).toBe(false));
     expect(sheet(container)).toBeNull();
+  });
+
+  /// Except on the one card nobody opened. A join arriving from another machine
+  /// raises a modal over whatever the human was reading, so there is nowhere for
+  /// Escape to go back to — and a question pressed away from would run out ten
+  /// minutes later with nothing on the page ever having said it was asked.
+  ///
+  /// Refused at `cancel`, which is what Escape fires and is cancelable: the
+  /// platform's own way of saying a dialog has no way out but its contents,
+  /// rather than the key being swallowed somewhere up the page.
+  it("stays up under Escape where the card insists on an answer", () => {
+    const { container, open } = mount(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(open()).toBe(true);
+    expect(sheet(container)!.open).toBe(true);
+  });
+
+  /// And nor is a press away from it a way out of that one, for the same reason.
+  it("stays up under a press on the backdrop where it insists", () => {
+    const { container, open } = mount(true);
+
+    fireEvent.click(sheet(container)!);
+
+    expect(open()).toBe(true);
+    expect(sheet(container)!.open).toBe(true);
   });
 
   /// And a press inside the card is not one: it is the whole of what a form in a

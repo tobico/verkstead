@@ -433,6 +433,43 @@ text_html: string,
 columns: Array<string>, options: Array<OptionView>, };
 
 /**
+ * One device asking to be let into this one's cluster, as the modal draws it.
+ *
+ * **The other side of [`PendingJoin`].** That one is the row the *asking*
+ * device draws while it waits; this is the question the device that was asked
+ * is holding, and it carries the whole of what the asker said about itself
+ * because that is what the human is being asked to judge.
+ *
+ * **And it carries no moment, where the pending row carries a flag.** A row
+ * that has run out is still drawn, reading so — somebody pressed Add over
+ * there and is owed the answer that nobody pressed anything back. A question
+ * that has run out is simply not asked any more, so it is left out of this
+ * list where it is answered, and the modal over it goes when the page reads
+ * the list again. Which leaves the page nothing to count down and nothing to
+ * hold a clock for.
+ *
+ * **The identity whole rather than four fields picked out of it**, the way
+ * [`LinkedDevice`](crate::LinkedDevice) carries one: it is the same description
+ * of a device the join post arrived as and the same one a member row keeps, so
+ * the modal and the row a press on it creates cannot come to disagree about a
+ * name or an OS word. The modal draws the name, the mark for the OS, the first
+ * address advertised and the fingerprint — and that last is the string the
+ * asking device's own pending row is drawing, which is the whole reason both
+ * ends show one.
+ */
+export type AskingDevice = { 
+/**
+ * What this device calls the request, which is what Allow and Deny name.
+ */
+request: string, 
+/**
+ * And what the device asking said it is: the id, the fingerprint of the
+ * certificate the handshake took from it, the name and OS word it is shown
+ * under, and every address it advertised.
+ */
+identity: DeviceIdentity, };
+
+/**
  * What became of attaching a file to a Conversation.
  *
  * Every refusal is a sentence the composer has to put in front of the human —
@@ -2811,7 +2848,7 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "profiles" };
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.

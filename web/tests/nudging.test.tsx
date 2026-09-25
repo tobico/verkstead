@@ -504,6 +504,11 @@ const ABOUT: Record<string, readonly string[]> = {
   // against the saved accounts. Once however many of them are mounted — one
   // key, one query, one re-read.
   profiles: [PROFILES],
+  // The joins in flight, which move the list the modal is drawn from and the
+  // Devices section of the Remote access pane. Neither is among the five: the
+  // modal is read by the shell rather than by a page, and the Devices section
+  // is a settings pane this sweep never opens.
+  joins: [],
 };
 
 describe("what a Nudge is about", () => {

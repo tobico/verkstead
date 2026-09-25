@@ -17,25 +17,25 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved,
-    BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DeviceIdentity, DevicesView,
-    DirectoryListing, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, OnboardingView,
-    OpenPullRequestRepo, PendingJoin, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached,
+    AttachmentRemoved, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
+    DeviceIdentity, DevicesView, DirectoryListing, FileDeleted, FileDeleting, FileListsView,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, LinkedDevice, Locked,
+    NewAdoption, NewCompanion, NewConversation, NewJoin, NewOrder, NewPullRequestAdoption,
+    OnboardingView, OpenPullRequestRepo, PendingJoin, PrefillView, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
+    ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown, Started,
+    SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -422,6 +422,12 @@ fn the_viewers_types_are_written_from_these() {
     // the ten minutes it is held for have run out.
     NewJoin::export_all(&config).unwrap();
     PendingJoin::export_all(&config).unwrap();
+
+    // And the other side of that waiting: the question the device that *was*
+    // asked is holding, which the modal in every one of its open workbenches is
+    // drawn from — what this device calls the request, and the whole of what the
+    // asker said about itself.
+    AskingDevice::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

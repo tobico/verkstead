@@ -72,8 +72,8 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::DevicesView;
-use verkstead_store::AskedJoin;
+use verkstead_render::{AskingDevice, DevicesView};
+use verkstead_store::{AskedJoin, Linking};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
@@ -775,6 +775,101 @@ impl Devices {
         }
 
         self.joins.forget(request).await
+    }
+
+    /// Every device asking to be let into this one's cluster, as the modal in
+    /// every open workbench draws it.
+    ///
+    /// The other side of the pending rows [`Devices::listing`] carries, and a
+    /// reading of its own rather than a field of that one: the modal is raised
+    /// wherever the human happens to be looking, so it is drawn in the shell
+    /// every page sits inside and reads this on its own — a question that only
+    /// arrived when somebody had the settings open would be a question the
+    /// human never saw.
+    pub(crate) async fn asking(&self) -> Result<Vec<AskingDevice>> {
+        self.joins.asking(OffsetDateTime::now_utc()).await
+    }
+
+    /// **Allow**: let the device that asked into this one's cluster.
+    ///
+    /// **The membership's first real row.** What it comes to is two writes: the
+    /// asker is recorded as a member out of what it said about itself in the
+    /// join post, and the request is let go of. In that order, because the
+    /// order is what a failure between them decides — a member recorded with
+    /// the request still held is an Allow the human can press again, and a
+    /// request let go of with no member written is a join that has to be made
+    /// from the beginning.
+    ///
+    /// **And nothing goes back to the device that asked.** It is still drawing
+    /// *waiting*, and what closes that is the dial back in the task after this
+    /// one. Half a link, deliberately.
+    ///
+    /// **A second press is not a second thing happening**, which is the whole
+    /// of what two workbenches showing one modal need: the first settles the
+    /// request, and the second finds nothing held and does nothing — rather
+    /// than a second member landing or an error being shown for having lost a
+    /// race. A request whose ten minutes ran out is not held either, so an
+    /// expiry settles it in exactly the same words.
+    pub(crate) async fn allow(&self, request: &str) -> Result<()> {
+        let Some(held) = self.joins.held(request, OffsetDateTime::now_utc()).await? else {
+            return Ok(());
+        };
+
+        self.members
+            .refreshed(&Linking {
+                device: held.device.clone(),
+                name: held.name.clone(),
+                os: held.os,
+
+                // Every address it advertised, in the order it advertised them,
+                // which is the order a dial to it will work down — see
+                // [`crate::peer::dialling`].
+                addresses: held.addresses,
+
+                // And the certificate the handshake took from it, which is the
+                // whole of what will prove it at this device's gate from now
+                // on: a member *is* a fingerprint.
+                fingerprint: held.fingerprint,
+            })
+            .await?;
+
+        self.joins.let_go(request).await?;
+
+        tracing::info!(
+            device = %held.device,
+            name = %held.name,
+            request = %request,
+            "a device has been let into this one's cluster",
+        );
+
+        Ok(())
+    }
+
+    /// **Deny**: settle the request and record nothing.
+    ///
+    /// The same shrug at a second press, and for the same reason: a request
+    /// that is not held is one somebody has already answered or one whose ten
+    /// minutes ran out, and neither is a thing to fail.
+    ///
+    /// Nothing is remembered about the device that was refused. A cluster is a
+    /// membership rather than a list of verdicts, and a device turned away is
+    /// free to ask again — which is what somebody who pressed the wrong button
+    /// would have it do.
+    pub(crate) async fn deny(&self, request: &str) -> Result<()> {
+        let Some(held) = self.joins.held(request, OffsetDateTime::now_utc()).await? else {
+            return Ok(());
+        };
+
+        self.joins.let_go(request).await?;
+
+        tracing::info!(
+            device = %held.device,
+            name = %held.name,
+            request = %request,
+            "a device asking to be let into this one's cluster was refused",
+        );
+
+        Ok(())
     }
 }
 

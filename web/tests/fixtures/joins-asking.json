@@ -1,0 +1,15 @@
+[
+  {
+    "identity": {
+      "addresses": [
+        "laptop.tailnet-name.ts.net",
+        "192.168.1.31"
+      ],
+      "device": "0011223344556677889900aabbccddee",
+      "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
+      "name": "laptop",
+      "os": "Linux (WSL)"
+    },
+    "request": "5566778899aabbcc"
+  }
+]
