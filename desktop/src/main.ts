@@ -7,19 +7,27 @@
 //! without an Electron, and the reads of the running application it makes for
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
+//!
+//! **The order at the top of [`run`] is the lifecycle**, and it is an order
+//! rather than a sequence of conveniences: the lock, so that a second launch is
+//! the first window brought forward and never a second sidecar; then the
+//! address, which the lock is what makes an unambiguous question; then the
+//! binary; and only then a child. Everything before the child is an app that
+//! can refuse having made nothing at all.
 
 import { existsSync } from "node:fs";
 
-import { app, dialog } from "electron";
+import { app, dialog, type BrowserWindow } from "electron";
 
 import { cli, OVERRIDE } from "./cli.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { say } from "./log.js";
 import { dataDir } from "./platform.js";
-import { start } from "./sidecar.js";
-import { open } from "./window.js";
-import { HEALTH, ORIGIN } from "./workbench.js";
+import { how, start } from "./sidecar.js";
+import { taken } from "./taken.js";
+import { forward, open } from "./window.js";
+import { ADDRESS, HEALTH, HOST, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -37,7 +45,64 @@ function missing(path: string): void {
   );
 }
 
+/// What the human is told when the one address is already somebody else's.
+///
+/// The Rust app's words, for the same situation and the same reasons
+/// (ADR-0012): fronting whatever is there would conflate two Verksteads over
+/// possibly different Data Directories, and moving to a free port would leave
+/// the bookmark on the phone pointing at the wrong one. Both were rejected
+/// twice, so what is left is naming the address and stopping. Not *another copy
+/// of this app*, which the single-instance lock has already dealt with by the
+/// time these words can be reached.
+function foreign(address: string): void {
+  dialog.showErrorBox(
+    "Verkstead cannot start",
+    `Something is already listening on ${address}, which is the one address ` +
+      `Verkstead serves on.\n\n` +
+      `That will be a Verkstead the machine starts for itself, or one started ` +
+      `in a terminal. Stop that one, then start Verkstead again.`,
+  );
+}
+
+/// The window, once there is one — which a second launch wants and the launch
+/// it happens in cannot hand it.
+let onscreen: BrowserWindow | undefined;
+
+/// Whether the app is on its way out under its own steam, so that the child
+/// going is the expected end of a quit rather than news about the server.
+let leaving = false;
+
 async function run(): Promise<void> {
+  // First, and before anything is started: a second launch of the app is this
+  // one's window brought forward, and the launch that asked exits having made
+  // nothing. It is also what the probe below rests on — with this held, a
+  // listener on the address cannot be another copy of this app.
+  if (!app.requestSingleInstanceLock()) {
+    say("Verkstead is already running, so this launch hands over to it");
+    app.quit();
+    return;
+  }
+
+  app.on("second-instance", () => {
+    say("a second launch — the window already open is brought forward");
+    if (onscreen !== undefined) {
+      forward(onscreen);
+    }
+  });
+
+  // Closing the window quits, on every platform including the Mac. Stage 03 is
+  // what makes it a choice, with a tray to keep running in and the Dock
+  // behaviour that goes with it; until there is one, a window closed with the
+  // app still running would be a Verkstead with no way back to itself.
+  app.on("window-all-closed", () => app.quit());
+
+  if (await taken(HOST, PORT)) {
+    say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
+    foreign(ADDRESS);
+    app.exit(1);
+    return;
+  }
+
   const path = cli({
     packaged: app.isPackaged,
     entry: import.meta.dirname,
@@ -67,7 +132,23 @@ async function run(): Promise<void> {
   // The app quitting is the sidecar stopping. `will-quit` rather than
   // `before-quit` so that a quit which something else has since cancelled does
   // not take the server with it.
-  app.on("will-quit", () => sidecar.stop());
+  app.on("will-quit", () => {
+    leaving = true;
+    sidecar.stop();
+  });
+
+  // And the server ending is the app quitting, carried over from the tray app:
+  // there is nothing for a window to draw once the thing it is a window onto
+  // has gone. Cleanly, killed or crashed are all the same end, and which of
+  // them it was is said before the app goes — including the crash that a bind
+  // the probe above did not catch comes out as.
+  void sidecar.gone.then((ending) => {
+    if (leaving) {
+      return;
+    }
+    say(`the server has gone — ${how(ending)}, so the app goes with it`);
+    app.quit();
+  });
 
   // And a signal is the app quitting, which is what carries the child out with
   // it: an unhandled `SIGTERM` ends this process without running anything, and
@@ -90,6 +171,7 @@ async function run(): Promise<void> {
     // Said rather than shown: there is no window to draw a dialog over yet, and
     // the line is what a developer running `pnpm start` is reading anyway.
     say(`the server never came up — ${trouble.message}`);
+    leaving = true;
     sidecar.stop();
     app.exit(1);
     return;
@@ -106,7 +188,7 @@ async function run(): Promise<void> {
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  open({ origin: ORIGIN, secret: () => (data === undefined ? undefined : keyIn(data)) });
+  onscreen = open({ origin: ORIGIN, secret: () => (data === undefined ? undefined : keyIn(data)) });
 }
 
 // **Started rather than awaited**, and this is not a style. Electron emits

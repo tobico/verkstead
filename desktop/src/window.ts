@@ -105,3 +105,18 @@ export function open(workbench: Workbench): BrowserWindow {
 
   return window;
 }
+
+/// Bring the window forward, which is what a second launch of the app comes to.
+///
+/// Electron's single-instance lock hands the second launch's argument over to
+/// the first and ends it, so this runs in the app that is already here. Three
+/// steps rather than a `focus`, because the window this reaches may be
+/// minimised, may be hidden behind everything, and may — from stage 03, where
+/// closing can mean keep running — not be on the screen at all.
+export function forward(window: BrowserWindow): void {
+  if (window.isMinimized()) {
+    window.restore();
+  }
+  window.show();
+  window.focus();
+}
