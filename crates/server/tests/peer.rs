@@ -21,6 +21,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::extract::ConnectInfo;
@@ -128,6 +129,26 @@ impl Listening {
         })
     }
 
+    /// And one that lets go of a caller who has not got through the handshake
+    /// in `handshake`, rather than in the ten seconds a running server gives
+    /// one.
+    ///
+    /// A stated deadline for the reason the certificate's life is stated: what
+    /// is being asked is that the connection is let go of at all, and a test
+    /// that waited out the real one would be a test spending ten seconds on the
+    /// clock rather than on the question.
+    fn letting_go_after(id: &str, handshake: Duration) -> Listening {
+        let dir = tempfile::tempdir().unwrap();
+        let device = Device::stated(dir.path(), id).unwrap();
+
+        Listening::within(
+            dir,
+            device,
+            |device| peer::router(device, nowhere(), peer::Members::none()),
+            Some(handshake),
+        )
+    }
+
     /// The socket, the handshakes and the serve, over a device that is already
     /// made: what every constructor above comes down to once it has said which
     /// device it is standing behind.
@@ -136,8 +157,25 @@ impl Listening {
         device: Device,
         answering: impl FnOnce(Device) -> Router,
     ) -> Listening {
+        Listening::within(dir, device, answering, None)
+    }
+
+    /// The same, with the handshake's deadline said where a suite is asking
+    /// about that — see [`Listening::letting_go_after`].
+    fn within(
+        dir: tempfile::TempDir,
+        device: Device,
+        answering: impl FnOnce(Device) -> Router,
+        handshake: Option<Duration>,
+    ) -> Listening {
         let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
             .expect("the loopback on a port the machine picked is free");
+
+        let listener = match handshake {
+            Some(handshake) => listener.handshaking_within(handshake),
+            None => listener,
+        };
+
         let address = listener.address();
 
         tokio::spawn(listener.serving(answering(device.clone())));
@@ -434,6 +472,38 @@ async fn a_caller_that_opens_a_socket_and_says_nothing_holds_nobody_up() {
         body(&answered).contains(THIS_DEVICE),
         "the silent connection should have held up its own task and nobody else's, \
          got:\n{answered}",
+    );
+}
+
+/// And the other half of that: a caller that opens a socket and says nothing is
+/// let go of rather than held on to for as long as it likes.
+///
+/// The test above proves such a caller holds nobody else up, which is a
+/// different claim. Each of them costs this process a task and a descriptor for
+/// as long as it is kept, and with no deadline on the handshake *how long* is
+/// the caller's to decide — so a host on the LAN opens sockets until this
+/// process is out of descriptors, and the workbench goes down with the listener,
+/// the two being served out of one process.
+///
+/// What says the connection was let go of is the far end reading to its end: a
+/// dropped connection closes the socket, so a read that had been waiting comes
+/// back with nothing rather than waiting for ever.
+#[tokio::test]
+async fn a_caller_that_says_nothing_is_let_go_of() {
+    let listening = Listening::letting_go_after(THIS_DEVICE, Duration::from_millis(100));
+
+    let mut silent = TcpStream::connect(listening.address).await.unwrap();
+
+    let mut nothing = [0u8; 1];
+    let read = tokio::time::timeout(Duration::from_secs(10), silent.read(&mut nothing))
+        .await
+        .expect("the listener should have let go of a caller that never began a handshake");
+
+    assert_eq!(
+        read.unwrap(),
+        0,
+        "the connection should have been closed from the listener's end, which is what \
+         gives the descriptor back",
     );
 }
 
