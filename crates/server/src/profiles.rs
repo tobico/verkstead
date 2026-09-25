@@ -181,7 +181,19 @@ pub(crate) fn ready_to_grill(
     implementation: Option<&PairingView>,
     review: &PickedView,
 ) -> bool {
-    runnable(grilling) && runnable(implementation) && settled(review)
+    runnable(grilling) && ready_to_wrap(implementation, review)
+}
+
+/// And the same with the grilling left out of it, which is what a Process that
+/// is never interviewed waits on: a **Tinker**, whose composer draws no Grilling
+/// picker at all.
+///
+/// The reading `unready_to_wrap` in [`crate::conversations`] takes for the
+/// press, said the way the pane wants it — one of them is what decides whether
+/// to offer the button and the other is what was wrong when it was pressed, and
+/// they have to be the one question.
+pub(crate) fn ready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) -> bool {
+    runnable(implementation) && settled(review)
 }
 
 /// Whether the one role that can be picked away is settled: a Pairing something

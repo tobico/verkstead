@@ -833,7 +833,7 @@ describe("the process a compose page is composing under", () => {
     expect(showing("Process")).toBe("Develop");
   });
 
-  /// One row for now. A Process is offered only once its stage has landed, as
+  /// Two rows for now. A Process is offered only once its stage has landed, as
   /// an agent type is offered only once it can launch the real thing.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -843,7 +843,7 @@ describe("the process a compose page is composing under", () => {
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
     expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker"]);
   });
 
   /// The server applies its own reading to the Conversation it creates — no row
@@ -939,6 +939,25 @@ describe("the pickers a compose page's process draws", () => {
     await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
+  });
+
+  /// And two under a Tinker, which is the other Process this page can be moved
+  /// to: no Grilling picker, it being a Process that is never interviewed.
+  it("draws two and no grilling picker under Tinker", async () => {
+    composedAs("Tinker");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openAgent(container);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Implementation")).toBeTruthy(),
+    );
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    expect(ROLES.Tinker.uses).toEqual(["implementation", "review"]);
+    expect(OFFERED).toContain("Tinker");
   });
 
   /// And one picker is no panel at all: the control is the picker, which is

@@ -11,8 +11,8 @@ use verkstead_store::{
     conversations, create_profile, follow_branch, load_conversation, open_database, register_repo,
     reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
     settle_naming, show_archived, showing_archived, start_adoption, start_conversation,
-    start_grilling, start_pull_request_adoption, start_unnamed_conversation, switch_repo, timeline,
-    unarchive_conversation,
+    start_grilling, start_pull_request_adoption, start_tinkering, start_unnamed_conversation,
+    switch_repo, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -940,6 +940,48 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
     );
     assert_eq!(moves(&pool, id).await, [Lifecycle::Grilling]);
+}
+
+/// And the **Tinker** landing writes the same three things and leaves the
+/// Conversation in Follow-up, which is the whole of what separates the two.
+#[tokio::test]
+async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        start_tinkering(
+            &pool,
+            id,
+            "deadbeef",
+            Path::new("/state/worktrees/verkstead-rate-limiting"),
+            &[],
+        )
+        .await
+        .unwrap(),
+        Grilling::Started
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        conversation.state,
+        Lifecycle::FollowUp,
+        "a Tinker is never interviewed, so there is no grilling to land in",
+    );
+    assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
+    assert_eq!(
+        conversation.worktree.as_deref(),
+        Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
+    );
+    assert_eq!(moves(&pool, id).await, [Lifecycle::FollowUp]);
+
+    assert_eq!(
+        start_tinkering(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
+            .await
+            .unwrap(),
+        Grilling::NotDrafting,
+        "and it cannot be started twice, for the reason no start can",
+    );
 }
 
 /// The rule that the base commit is the default branch's tip *at grill start*

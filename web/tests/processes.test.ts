@@ -101,9 +101,11 @@ describe("the roles a process is run under", () => {
       );
     }
 
-    // With only Develop landed, the panel is the shape every draft gets.
-    expect(OFFERED).toEqual(["Develop"]);
+    // Both the landed ones are run under several roles, so the panel is the
+    // shape every draft gets.
+    expect(OFFERED).toEqual(["Develop", "Tinker"]);
     expect(ROLES.Develop.control).toBe("panel");
+    expect(ROLES.Tinker.control).toBe("panel");
   });
 
   /// Every Process the wire carries has a row, for the reason all five are

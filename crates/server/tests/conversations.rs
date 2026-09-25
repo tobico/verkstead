@@ -714,7 +714,21 @@ async fn a_drafting_conversations_process_is_the_humans_to_pick() {
     assert_eq!(opened(&app, id).await.process, Process::Develop);
 }
 
-/// The four whose stage has not landed are refused by a name of their own,
+/// And **Tinker** is the second row the picker offers, its stage having landed:
+/// what the record takes is what the composer draws.
+#[tokio::test]
+async fn a_draft_can_be_set_to_tinker() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Tinker).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(opened(&app, id).await.process, Process::Tinker);
+}
+
+/// The three whose stage has not landed are refused by a name of their own,
 /// rather than under the refusal about this Conversation: nothing the human does
 /// here makes one of them pickable, and what they are waiting on is Verkstead.
 ///
@@ -729,7 +743,6 @@ async fn a_process_whose_stage_has_not_landed_is_refused_by_name() {
     for process in [
         Process::Investigate,
         Process::Review,
-        Process::Tinker,
         Process::FixMergeIssues,
     ] {
         assert_eq!(
@@ -1700,6 +1713,185 @@ async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
         git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
         view.branch
     );
+}
+
+/// Everything a **Tinker** needs before it will start, which is two roles and a
+/// Brief: it is never interviewed, so no Grilling picker is drawn for it and
+/// none is answered here. Hands back the Conversation's id.
+async fn tinker(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
+    let id = started(app, repo_id).await;
+
+    assert_eq!(
+        pick_process(app, id, Process::Tinker).await,
+        ProcessPicked::Picked
+    );
+
+    let implementation = profile(app, elsewhere, "opus").await;
+    let review = profile(app, elsewhere, "haiku").await;
+    choose(app, id, "implementation", implementation).await;
+    choose(app, id, "review", review).await;
+
+    assert_eq!(
+        write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    id
+}
+
+/// A Tinker waits on the two roles it is run under and never on the grilling
+/// one — the same reading on the button and under the press.
+///
+/// The Grilling picker is drawn for one nowhere, so a Tinker that waited on it
+/// would be a Start nothing on the page could ever satisfy.
+#[tokio::test]
+async fn a_tinker_waits_on_two_roles_and_never_on_the_grilling_one() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Tinker).await,
+        ProcessPicked::Picked
+    );
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoImplementationProfile,
+        "the role the work runs under is asked for first, and nothing asks \
+         about a grilling",
+    );
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, elsewhere.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoReviewProfile,
+        "and then the role the wrap-up's review reads under",
+    );
+    assert!(!opened(&app, id).await.ready_to_grill);
+
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::EmptyBrief,
+        "a Review picked away is a Review answered, so what is left is the Brief",
+    );
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "which the button waits on too",
+    );
+
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    assert!(
+        opened(&app, id).await.ready_to_grill,
+        "two roles and a brief is the whole of what a Tinker waits on: the \
+         Grilling picker nobody drew is never one of them",
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And the press does the grill start's own sequence, landing Follow-up: the
+/// branch, the worktree, the frozen Brief and the move on the Timeline, with no
+/// grilling anywhere in it.
+#[tokio::test]
+async fn starting_a_tinker_lands_it_in_follow_up() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = tinker(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::FollowUp],
+        "one move, straight past the state a Develop would have been grilled in",
+    );
+
+    assert_eq!(
+        git(
+            &repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", view.branch)
+            ]
+        )
+        .trim()
+        .len(),
+        40,
+        "the branch is cut exactly as a grill start cuts one",
+    );
+
+    let worktree = view.worktree.expect("a Tinker is worked in a Worktree");
+    let path = PathBuf::from(&worktree.path);
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert!(
+        worktrees(&repo).contains(&path.canonicalize().unwrap()),
+        "and git has it registered: {:?}",
+        worktrees(&repo),
+    );
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+        "checked out on the branch the work is on",
+    );
+
+    assert!(
+        view.base_commit.is_some(),
+        "with what it branched from settled, which is the rule resolving",
+    );
+
+    // And everything the press freezes is frozen: the Brief, the Pairings and
+    // the Process, exactly as they are for a grilling that has started.
+    assert_eq!(
+        write_brief(&app, id, "# Something else\n").await,
+        BriefSaved::NotDrafting
+    );
+    assert_eq!(no_review(&app, id).await, ProfileChosen::NotDrafting);
+    assert_eq!(
+        pick_process(&app, id, Process::Develop).await,
+        ProcessPicked::NotDrafting
+    );
+}
+
+/// A Tinker checks its companions out as a grill start does, every one of them
+/// on a branch of its own.
+#[tokio::test]
+async fn starting_a_tinker_checks_its_companions_out_too() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+
+    let id = tinker(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.companions.len(), 1);
+
+    let worktree = view.companions[0]
+        .worktree
+        .as_ref()
+        .expect("a companion is checked out when the Conversation's own is");
+    assert!(!worktree.missing);
+    assert!(PathBuf::from(&worktree.path).join("README.md").is_file());
 }
 
 /// The rule the workbench already states — the default branch's tip *at grill

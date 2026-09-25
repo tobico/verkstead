@@ -686,6 +686,12 @@ pub(crate) fn instruction(
 /// conversation the Timeline kept. Every follow-up a steer starts hands in
 /// nothing here: a heading over an empty digest would tell the session that
 /// something had already been said.
+///
+/// **And an empty `brief` is a session with no documents at all**, which is the
+/// one a **Tinker** start opens: nothing has been built, so what the work is and
+/// what is being followed up on are the same words — and they are said once,
+/// under the heading that says act on them, rather than twice under two headings
+/// that would have the session reading the second as news.
 pub(crate) fn following_up(
     skills: &Skills,
     brief: &str,
@@ -695,11 +701,13 @@ pub(crate) fn following_up(
 ) -> String {
     let skill = skills.named(FOLLOWING_UP);
 
-    let prompt = on_the_documents(
-        &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
-        brief,
-        handoff,
-    );
+    let opening =
+        format!("Read {skill} and follow up on this branch's pull request, the way it says.");
+
+    let prompt = match brief.trim().is_empty() {
+        true => alone(&opening),
+        false => on_the_documents(&opening, brief, handoff),
+    };
 
     let prompt = format!(
         "{prompt}\n# What I want to follow up on\n\n{}\n",
@@ -990,7 +998,7 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
         "{}\n\n# This branch has no name yet\n\nThe branch this session starts on \
          carries a name Verkstead invented at random, because the work had not \
          been read by anybody when it was cut. Switch it to a short kebab-case \
-         name taken from what the Brief above is about — `git branch -m <name>` \
+         name taken from what the work above is about — `git branch -m <name>` \
          in this worktree — before anything lands on it, and carry on. There is \
          nobody to ask and nothing to report: the rename is read off the \
          checkout, and the name is left as it is by leaving it alone.\n",
@@ -998,12 +1006,22 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
+/// The opening line and the one thing said beside it wherever a session is
+/// started: how to reach the human.
+///
+/// On its own only for the session a **Tinker** start opens, which has no
+/// documents to be told the work in — everything else built here goes on to
+/// [`on_the_documents`], which is this with them under it.
+fn alone(opening: &str) -> String {
+    format!("{opening} Nothing else in this session tells you how to reach me.\n")
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
     let mut prompt = format!(
-        "{opening} Nothing else in this session tells you how to reach me.\n\n\
-         # The Brief this started from\n\n{brief}\n"
+        "{}\n# The Brief this started from\n\n{brief}\n",
+        alone(opening)
     );
 
     if let Some(handoff) = handoff {
@@ -3234,6 +3252,77 @@ mod tests {
                  header saying when it resets.\n"
             ),
             "and the follow-up brief is the last thing said, under them: {prompt:?}"
+        );
+    }
+
+    /// And the one a **Tinker** start opens says the Brief once, under the
+    /// heading that says act on it.
+    ///
+    /// Nothing has been built, so there are no documents to be told the work in:
+    /// a session handed the same words twice under two headings would read the
+    /// second as something new the human had said about the first.
+    #[test]
+    fn a_tinkers_session_is_primed_with_the_brief_as_what_to_follow_up_on() {
+        let prompt = following_up(
+            &mounted(),
+            "",
+            None,
+            "# Rate limiting\n\nThe API has none.\n",
+            "",
+        );
+
+        assert!(
+            prompt.contains(&at(FOLLOWING_UP)),
+            "it is the follow-up's own session, in the follow-up's own skill: \
+             {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("# The Brief this started from"),
+            "and there are no documents over it: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("# What the grilling settled"),
+            "nor a handoff, a Tinker never having been grilled: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("The API has none.").count(),
+            1,
+            "the Brief is said once, and it is said here: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with(
+                "# What I want to follow up on\n\n# Rate limiting\n\nThe API has none.\n"
+            ),
+            "under the heading that says act on it: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Nothing else in this session tells you how to reach me."),
+            "with the one thing every session is told beside the skill: {prompt:?}"
+        );
+    }
+
+    /// And the naming instruction goes on it as it goes on every first session:
+    /// a Tinker is cut on a name Verkstead invented, exactly as a grilling is.
+    #[test]
+    fn a_tinkers_session_is_told_to_name_the_branch() {
+        let prompt = naming(
+            &following_up(
+                &mounted(),
+                "",
+                None,
+                "# Rate limiting\n\nThe API has none.\n",
+                "",
+            ),
+            true,
+        );
+
+        assert!(
+            prompt.contains("# This branch has no name yet"),
+            "the branch is still carrying the name nobody read: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`git branch -m <name>`") && prompt.contains("kebab-case"),
+            "said as the command and the shape, as it is everywhere: {prompt:?}"
         );
     }
 

@@ -896,7 +896,11 @@ pub enum Chosen {
     NotDrafting,
 }
 
-/// What became of starting a Conversation grilling.
+/// What became of starting a Conversation's work — grilling it, or, on a
+/// **Tinker**, landing it in Follow-up.
+///
+/// One answer for both landings, because the two are the same record written
+/// with one word different: see [`start_grilling`] and [`start_tinkering`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -3711,11 +3715,11 @@ impl<'a> From<&'a String> for Base<'a> {
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
-/// **One landing**, which is the whole of what the press behind this can do.
-/// There were two while a Conversation could be started with no grilling at all
-/// — the same cut, the same freeze and an inline Direction written down, landing
-/// it Implementing — and what that was for is the **Tinker** Process, which
-/// starts somewhere else again rather than giving this a second meaning.
+///
+/// **Two landings, and which of them is the Conversation's Process's** — see
+/// [`start_tinkering`] below, which writes this same transaction and leaves the
+/// Conversation in Follow-up. Everything the server did against git before
+/// calling either is the same work, so the record of it is the same record.
 pub async fn start_grilling<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -3723,7 +3727,57 @@ pub async fn start_grilling<'a>(
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
-    let base = base.into();
+    start(
+        pool,
+        id,
+        Lifecycle::Grilling,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// And the same start on a **Tinker** Conversation, which lands in Follow-up.
+///
+/// One press, two landings, and which of them is a fact about the Process
+/// rather than a second kind of start: the base commit, the worktree, the
+/// companions, the naming and the Repo's memory are written exactly as they are
+/// above. What differs is the state it comes out in — a Tinker is never
+/// interviewed, so there is no grilling for it to land in — and the session the
+/// server starts once this has been written.
+pub async fn start_tinkering<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::FollowUp,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// What the two of them do, which is the same thing but for where it leaves the
+/// Conversation.
+///
+/// `landing` is the whole of what the Process decides here. Everything else is
+/// written the same way whichever press asked, because it is the same work being
+/// recorded.
+async fn start(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+    base: Base<'_>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
 
     let mut tx = super::writing(pool, "starting a Conversation's work").await?;
@@ -3754,11 +3808,11 @@ pub async fn start_grilling<'a>(
     )
     .bind(base.commit)
     .bind(base.named)
-    .bind(Lifecycle::Grilling.stored())
+    .bind(landing.stored())
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("moving Conversation {id} to grilling"))?;
+    .with_context(|| format!("moving Conversation {id} to {}", landing.stored()))?;
 
     // Written over whatever is there rather than inserted: a record that somehow
     // holds a worktree already is corrected to the one just made, where an
@@ -3775,7 +3829,7 @@ pub async fn start_grilling<'a>(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    moved(&mut tx, id, Lifecycle::Grilling).await?;
+    moved(&mut tx, id, landing).await?;
 
     // And what it is being started with, against its Repo, so the next
     // Conversation started on that Repo arrives with every picker filled. In

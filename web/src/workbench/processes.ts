@@ -37,9 +37,9 @@ export const PROCESS: Record<Process, string> = {
 /// is offered in the first place. A stage that brings a Process to life adds to
 /// both, and each of them is written knowing the other is there.
 ///
-/// One row for now. A Process is offered only once its stage has landed, as an
+/// Two rows for now. A Process is offered only once its stage has landed, as an
 /// agent type is offered only once it can launch the real thing.
-export const OFFERED: Process[] = ["Develop"];
+export const OFFERED: Process[] = ["Develop", "Tinker"];
 
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside

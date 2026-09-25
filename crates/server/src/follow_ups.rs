@@ -57,6 +57,19 @@ pub(crate) struct FollowUp {
     /// Not read off `settled`: a session can die before its first round comes
     /// back, and that one is being picked up too.
     pub(crate) again: bool,
+
+    /// Whether [`brief`] is the Conversation's own Brief rather than something
+    /// the human steered it with.
+    ///
+    /// True for the follow-up a **Tinker** start opens, where the Brief *is* the
+    /// thing to follow up on: it goes under *What I want to follow up on* and
+    /// nowhere else, so the session reads it once, under the heading that says
+    /// act on it. False for a steer, where the documents describe work that is
+    /// already on a pull request and the brief is what the human wants taken up
+    /// about it — two different things, said in two places.
+    ///
+    /// [`brief`]: FollowUp::brief
+    pub(crate) from_the_brief: bool,
 }
 
 impl FollowUp {
@@ -70,6 +83,19 @@ impl FollowUp {
             brief,
             settled: String::new(),
             again: false,
+            from_the_brief: false,
+        }
+    }
+
+    /// And the one a **Tinker** start opens, on the Conversation's own Brief.
+    ///
+    /// The same follow-up with one thing different: nothing has been built, so
+    /// there are no documents for the session to be told the work in and the
+    /// Brief is the whole of what it is being asked to take up.
+    pub(crate) fn priming(brief: String) -> FollowUp {
+        FollowUp {
+            from_the_brief: true,
+            ..FollowUp::opening(brief)
         }
     }
 }
@@ -77,11 +103,17 @@ impl FollowUp {
 /// Read back what the Conversation's follow-up was opened about and what it has
 /// been through, or `None` where the Timeline holds no brief to pick up.
 ///
-/// `None` is a record that cannot be true: a steer into Follow-up is the only
-/// way into the state and it is refused without a brief, so a Conversation
-/// standing in Follow-up with no brief on its Timeline is one nothing can be
-/// started for. The press that asked says so by name rather than starting a
-/// session on nothing — see [`crate::resume`].
+/// **Two ways in, and the newer of them wins.** A steer is one, and a **Tinker**
+/// start is the other: that one writes no steer, because it is the press that
+/// starts the work rather than one that takes something up about work already
+/// done — so where there is no steer into Follow-up the Brief is what the
+/// follow-up is about, and the rounds are what has been answered under it.
+///
+/// `None` is a record that cannot be true: both ways in are refused without
+/// something to start from, so a Conversation standing in Follow-up with
+/// neither a steer nor a Brief on its Timeline is one nothing can be started
+/// for. The press that asked says so by name rather than starting a session on
+/// nothing — see [`crate::resume`].
 ///
 /// One read of the Timeline for both halves, as a relaunched grilling takes one
 /// for its three: a Conversation on a pull request has a long Timeline behind
@@ -94,21 +126,25 @@ impl FollowUp {
 pub(crate) async fn opened(state: &AppState, conversation_id: i64) -> Result<Option<FollowUp>> {
     let timeline = store::timeline(&state.pool, conversation_id).await?;
 
-    let Some((steered, brief)) = steered(&timeline) else {
+    let Some((opened, brief, from_the_brief)) = steered(&timeline)
+        .map(|(at, brief)| (at, brief, false))
+        .or_else(|| briefed(&timeline).map(|(at, brief)| (at, brief, true)))
+    else {
         return Ok(None);
     };
 
     Ok(Some(FollowUp {
         brief: brief.to_owned(),
-        // Everything answered under the steer, which is what makes these this
-        // follow-up's rounds rather than the whole Conversation's: a wrap-up's
-        // review, the grilling that settled the work and the round before this
-        // one are all above it.
+        // Everything answered under whichever of the two opened it, which is
+        // what makes these this follow-up's rounds rather than the whole
+        // Conversation's: a wrap-up's review, the grilling that settled the work
+        // and the round before this one are all above it.
         settled: crate::grillings::settled(
-            &timeline[steered + 1..],
+            &timeline[opened + 1..],
             &OnAnswers::of(state, conversation_id).await,
         ),
         again: true,
+        from_the_brief,
     }))
 }
 
@@ -128,6 +164,24 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
             store::Event::Steer(store::Lifecycle::FollowUp, Some(brief), _) => {
                 Some((at, brief.as_str()))
             }
+            _ => None,
+        })
+}
+
+/// And where its Brief stands, for the follow-up a **Tinker** start opened.
+///
+/// The newest again, and for the newest's reason: a Conversation gets one Brief
+/// per round, and the one a Tinker is following up on is the one at the bottom
+/// of the Timeline. Read only where there is no steer above it — a Tinker
+/// steered into Follow-up a second time is having the steer's follow-up, not its
+/// first one all over again.
+fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
+    timeline
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(at, event)| match &event.event {
+            store::Event::Brief(markdown) => Some((at, markdown.as_str())),
             _ => None,
         })
 }

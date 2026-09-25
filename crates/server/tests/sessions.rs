@@ -71,10 +71,10 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BriefSaved, Capture, CommitEvent,
     CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
-    TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
+    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
+    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached,
+    Started, SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalClosed,
+    TerminalOpened, TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -2156,6 +2156,73 @@ async fn grilling_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
+}
+
+/// The same workbench with the same press, on a draft whose Process is
+/// **Tinker**: it lands in Follow-up rather than Grilling, and the one session
+/// it starts is the follow-up's.
+///
+/// Two roles rather than three — a Tinker is never interviewed, so no Grilling
+/// picker is drawn for one — and the Process picked before the Brief is written,
+/// which is the order the composer sends its fields in.
+async fn tinkering(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_two_a_wrap_up_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Tinker }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A Tinker's one session: it writes down what it was primed with, then waits on
+/// the human, which is what a follow-up spends its time doing.
+///
+/// Written to a file rather than printed, for the reason the wrap-up's review
+/// prompts are: what is being read is a whole prompt, and a terminal is eighty
+/// columns wide.
+fn a_tinker_round(prompts: &Path) -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
 }
 
 /// The same over a repository `seed` has committed into before the Conversation
@@ -23151,6 +23218,85 @@ questions:
       - n: 2
         text: No, see below
 "#;
+
+/// A **Tinker** starts where a steer arrives: the press cuts the branch and the
+/// Worktree and lands the Conversation in Follow-up, with the follow-up's own
+/// session running on the Brief.
+///
+/// One session and no interview, under the Implementation Pairing, inside the
+/// same skill a steered follow-up is put in. What it is primed with is the Brief
+/// under *What I want to follow up on* and nowhere else — nothing has been
+/// built, so there are no documents over it — with the naming instruction that
+/// rides every first session, the branch still carrying the name Verkstead
+/// invented.
+#[tokio::test]
+async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("follow-up-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round(&written_to)).await;
+
+    // The session, once it is printing — and then the round it puts, which is
+    // what a follow-up waits on the human with and what keeps the rescue and
+    // the sweep off it while this reads the record.
+    fixture.running().await;
+    fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the press landed it there rather than in a grilling",
+    );
+    assert!(
+        view.worktree.is_some_and(|worktree| !worktree.missing),
+        "with somewhere to work, cut as a grill start cuts one",
+    );
+
+    let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one session, the follow-up's: {started:?}",
+    );
+
+    let prompt = started[0];
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "run under the Implementation Pairing, a Tinker having no other: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        "inside the follow-up skill, which is the one that keeps asking until \
+         the human is finished: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# What I want to follow up on"),
+        "primed with the Brief as the thing to act on: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("# The Brief this started from")
+            && !prompt.contains("# What the grilling settled"),
+        "and with no documents over it: nothing has been built, and nothing \
+         was grilled: {prompt:?}",
+    );
+    assert_eq!(
+        prompt.matches("The API has none.").count(),
+        1,
+        "so the Brief is read once, under the heading that says act on it: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# This branch has no name yet"),
+        "with the instruction every first session carries, the branch still \
+         being on the name Verkstead invented: {prompt:?}",
+    );
+}
 
 /// Steering a Conversation Verkstead has finished with into Follow-up starts a
 /// session inside the follow-up skill, on the brief the human wrote — and the

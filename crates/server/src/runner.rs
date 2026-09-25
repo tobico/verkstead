@@ -3335,13 +3335,23 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::reviewing(skills, &brief, handoff, on.as_deref(), said.as_deref())
                 }
                 Prompt::Responding(said) => skills::responding(skills, &brief, handoff, said),
-                Prompt::FollowingUp(follow_up) => skills::following_up(
-                    skills,
-                    &brief,
-                    handoff,
-                    &follow_up.brief,
-                    &follow_up.settled,
-                ),
+                // The documents, unless the follow-up *is* the Brief — which is
+                // the one a **Tinker** start opens. Nothing has been built
+                // there, so the Brief goes under *What I want to follow up on*
+                // and nowhere else: the session reads it once, under the
+                // heading that says act on it. See [`crate::follow_ups`].
+                Prompt::FollowingUp(follow_up) => match follow_up.from_the_brief {
+                    true => {
+                        skills::following_up(skills, "", None, &follow_up.brief, &follow_up.settled)
+                    }
+                    false => skills::following_up(
+                        skills,
+                        &brief,
+                        handoff,
+                        &follow_up.brief,
+                        &follow_up.settled,
+                    ),
+                },
             }
         }
         Err(error) => {

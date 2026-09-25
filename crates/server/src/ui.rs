@@ -1556,6 +1556,7 @@ pub(crate) async fn conversation_view(
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
+        conversation.process,
         grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
         &review_pairing,

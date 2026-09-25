@@ -4812,7 +4812,7 @@ describe("a conversation's process", () => {
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// One row for now, and that list is the one place a later stage adds to: a
+  /// Two rows for now, and that list is the one place a later stage adds to: a
   /// Process is offered only once its stage has landed.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -4820,7 +4820,7 @@ describe("a conversation's process", () => {
     await theProcess();
 
     expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker"]);
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there
@@ -5977,6 +5977,24 @@ describe("the pickers a conversation's process draws", () => {
     expect(uses("Review", "grilling")).toBe(false);
   });
 
+  /// And so does a Tinker, which is the one Process besides Develop a draft can
+  /// actually be moved to: two pickers stacked in the panel, and no Grilling
+  /// picker at all — it is never interviewed, so there is no session for that
+  /// role to run.
+  it("draws no grilling picker under Tinker", async () => {
+    theWorkbenchWith({ process: "Tinker" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
+
+    await waitFor(() => picker("Implementation"));
+    expect(picker("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    expect(uses("Tinker", "grilling")).toBe(false);
+    expect(away("Tinker", "review")).toBe("No review");
+    expect(OFFERED).toContain("Tinker");
+  });
+
   /// A Process nothing offers yet, which the wire carries all the same: one
   /// role, so one picker — and one picker is the control drawn as the picker
   /// itself, which the describe below is about. Nothing here has landed to pick
@@ -7038,7 +7056,7 @@ describe("starting the work", () => {
   /// Every refusal is its own sentence, because each of them is something
   /// different for the human to go and do.
   it.each([
-    ["NoGrillingProfile", /Pick a grilling profile/],
+    ["NoGrillingProfile", /Choose a grilling profile/],
     ["NoImplementationProfile", /Choose an implementation profile/],
     ["NoReviewProfile", /Pick a review profile/],
     ["EmptyBrief", /Write the brief first/],
