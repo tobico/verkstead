@@ -8,6 +8,10 @@ import { vi } from "vitest";
 
 import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
 
+/// Where the shell asks whether another device is asking to link — see the
+/// default [`serving`] holds for it.
+const ASKING = "/api/ui/devices/asking";
+
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
 /// say how many times.
@@ -19,6 +23,19 @@ import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
 export function serving(...answers: Array<Answer>) {
   const asked: Array<(init?: RequestInit) => Promise<Response>> = [];
   const held = new Map<string, (init?: RequestInit) => Promise<Response>>();
+
+  // The one read the app makes whatever page it is drawing: the devices asking
+  // to be let into this one's cluster, which the shell every page sits inside
+  // holds the modal for — see `src/Joining.tsx`. Nobody asking, which is what
+  // is true of every machine in every test here that has not said otherwise.
+  //
+  // Seeded rather than written out in each file's own list, and *before* the
+  // answers below so that a test about the modal overrides it with a `whenever`
+  // of its own: it belongs to no page, so there is no page whose test would
+  // naturally carry it, and a file that forgot it would be one whose mounts
+  // fell through to the positional answers meant for something else.
+  held.set(`GET ${ASKING}`, json([]));
+
   for (const answer of answers) {
     if (typeof answer === "function") {
       asked.push(answer);

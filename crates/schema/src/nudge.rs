@@ -76,6 +76,16 @@ pub enum Nudge {
     /// Something about the Repos moved, roadmaps nothing is driving included.
     Repos,
 
+    /// The joins in flight moved: one was asked of this device, or one it was
+    /// holding was settled or ran out.
+    ///
+    /// **It says which kind of thing moved and not which request**, as every
+    /// other kind here does: the page reads the pending joins back, which is a
+    /// handful of rows. A kind that carried the request id would be a second
+    /// account of what that read already says, and a page drawing a modal out
+    /// of an event rather than out of the server.
+    Joins,
+
     /// The Agent Profiles moved.
     ///
     /// Nothing announces this yet: a Profile is only ever saved or deleted by a

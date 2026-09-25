@@ -34,6 +34,9 @@
     "kind": "repos"
   },
   {
+    "kind": "joins"
+  },
+  {
     "kind": "profiles"
   }
 ]

@@ -1,6 +1,6 @@
 //! The join, as the device being asked answers it: the post a stranger makes,
-//! the ten minutes the question is held for, and the cancel that takes it back
-//! (ADR-0020, *The join*).
+//! the ten minutes the question is held for, the human it raises a modal in
+//! front of, and the cancel that takes it back (ADR-0020, *The join*).
 //!
 //! **This is the second of the three routes outside the member gate**, and the
 //! one the whole arrangement was built around — see [`super::router`]. A join
@@ -27,6 +27,15 @@
 //! one naming a request that was never there.** Which is what lets the expired
 //! rows be swept whenever a fresh one arrives: what a caller is told cannot
 //! depend on whether the housekeeping has been round yet.
+//!
+//! **And the human is told twice over, in the two places a human is.** Every
+//! open workbench of this device is Nudged that the joins moved and reads them
+//! back, which is what raises the modal; every phone subscribed to it gets a
+//! push titled for the device asking. Both happen behind the row rather than in
+//! front of it and neither can fail the post — a browser nobody has open costs
+//! nothing, and a push service that cannot be reached costs a notification and
+//! never the request. What settles the question is [`crate::device::Devices`],
+//! over on the workbench where the press is.
 
 use std::time::Duration;
 
@@ -39,7 +48,8 @@ use axum::response::{IntoResponse, Response};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::{DeviceIdentity, JoinHeld, PendingJoin};
+use verkstead_render::{AskingDevice, DeviceIdentity, JoinHeld, PendingJoin};
+use verkstead_schema::Nudge;
 use verkstead_store::{AskedJoin, HeldJoin};
 
 use crate::device::Device;
@@ -91,11 +101,22 @@ pub(crate) struct Holding {
 
     /// And where the question is written down.
     pub(crate) joins: Joins,
+
+    /// And who to tell when it lands, which is every workbench of this device
+    /// that happens to be open — see [`crate::nudge`].
+    ///
+    /// **The one handle that crosses from this listener to the other one.** A
+    /// join arrives here and the modal it raises is drawn over there, so the
+    /// stream the pages are listening on is made once at the start and given to
+    /// both routers. Nothing is carried on it but the word that the joins moved:
+    /// the page reads them back, as it does for every other kind.
+    pub(crate) nudges: crate::nudge::Nudges,
 }
 
 /// The joins in flight, as the things that ask after them do: the post that
-/// holds one, the cancel that takes one back, and the Devices section drawing a
-/// pending row for each this device is waiting on.
+/// holds one, the cancel that takes one back, the Devices section drawing a
+/// pending row for each this device is waiting on, and the modal drawing one for
+/// each it has been asked.
 ///
 /// A handle over the store rather than the pool itself, the way [`super::Members`]
 /// is one and for its reasons: each caller asks its own question rather than
@@ -127,7 +148,12 @@ impl Joins {
 
     /// Where the rows are, or the refusal for a device that has nowhere to keep
     /// one.
-    fn store(&self) -> Result<&SqlitePool> {
+    ///
+    /// Reachable from outside this module for the one thing beside a row that a
+    /// held join sets off: the push that tells this human's phones a device is
+    /// asking, which goes out of the same database the subscriptions are in —
+    /// see [`crate::push`].
+    pub(crate) fn store(&self) -> Result<&SqlitePool> {
         self.kept
             .as_ref()
             .context("this server has no store to keep a join in")
@@ -174,7 +200,46 @@ impl Joins {
         Ok((!run_out(&held.expires_at, now)).then_some(held))
     }
 
-    /// Let go of one, which in this task is a cancel from the device that asked.
+    /// And every one of them the human still has time to answer, as the modal
+    /// draws it.
+    ///
+    /// **The ones that have run out are left out rather than drawn as expired**,
+    /// which is the one place this list parts company with [`Joins::pending`]
+    /// beside it. A pending row is somebody's own press and stays on the pane
+    /// until they are done with it; a question nobody answered in ten minutes is
+    /// a question there is nothing left to do about, and a modal is not
+    /// something to be left holding two dead buttons. Which is also what takes
+    /// the modal down when the ten minutes run out under it: the page reads this
+    /// again and the request it was drawing is not in it.
+    ///
+    /// A device with nowhere to keep a join is being asked by nobody, which is
+    /// an answer rather than a failure — the same shrug [`Joins::pending`]
+    /// makes, for its reason.
+    pub(crate) async fn asking(&self, now: OffsetDateTime) -> Result<Vec<AskingDevice>> {
+        let Some(pool) = self.kept.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        Ok(verkstead_store::held_joins(pool)
+            .await
+            .context("reading the joins this device is being asked")?
+            .into_iter()
+            .filter(|held| !run_out(&held.expires_at, now))
+            .map(|held| AskingDevice {
+                request: held.request,
+                identity: DeviceIdentity {
+                    device: held.device,
+                    fingerprint: held.fingerprint,
+                    name: held.name,
+                    os: held.os,
+                    addresses: held.addresses,
+                },
+            })
+            .collect())
+    }
+
+    /// Let go of one, which is a cancel from the device that asked, and an Allow
+    /// or a Deny pressed over here.
     pub(crate) async fn let_go(&self, request: &str) -> Result<()> {
         verkstead_store::let_go_of_join(self.store()?, request)
             .await
@@ -318,6 +383,22 @@ pub(crate) async fn join(
          until it is answered or its ten minutes run out",
     );
 
+    // And the human is asked, in the two places a human is: every workbench of
+    // this device that is open, which raises the modal off the Nudge, and every
+    // phone subscribed to it. Both after the row, and neither able to fail the
+    // request — a push service that cannot be reached costs a notification, and
+    // a browser nobody has open costs nothing at all.
+    asked(&holding.nudges);
+
+    if let Ok(pool) = holding.joins.store() {
+        crate::push::mentioned(
+            pool,
+            crate::push::Word::ADeviceIsAsking {
+                name: held.name.clone(),
+            },
+        );
+    }
+
     Json(JoinHeld {
         request: held.request,
         expires: expires_at,
@@ -380,7 +461,36 @@ pub(crate) async fn cancel(
         "a device has taken back its request to join this one's cluster",
     );
 
+    // And the modal it raised goes, wherever it is up: a question taken back is
+    // one there is nothing left to answer.
+    holding.nudges.announce(Nudge::Joins);
+
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Tell the open workbenches the joins moved, now and again when this one's ten
+/// minutes are up.
+///
+/// **Two announcements for one request, because a modal has to go by itself.**
+/// The first raises it; the second is what takes it down where nobody pressed
+/// anything, the page reading the list back and not finding the request in it —
+/// see [`Joins::asking`], which is where a request that has run out stops being
+/// answered.
+///
+/// A timer rather than a sweep on a schedule, because there is exactly one
+/// moment worth waking for and this is the call that knows it. A restart inside
+/// the ten minutes loses it and costs nothing that matters: every page reads the
+/// world back whole when its stream comes back, and a request that has run out
+/// is not in what it reads.
+fn asked(nudges: &crate::nudge::Nudges) {
+    nudges.announce(Nudge::Joins);
+
+    let nudges = nudges.clone();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(HELD).await;
+        nudges.announce(Nudge::Joins);
+    });
 }
 
 /// A moment in the spelling both sides of a join write one in: RFC 3339, UTC.

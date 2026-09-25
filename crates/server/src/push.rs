@@ -13,9 +13,17 @@
 //! nothing that would put a Question — or the substance of the work — in a
 //! notification the phone shows on a lock screen.
 //!
+//! And **the machine**, which is the one kind that is about no piece of work at
+//! all: another device has asked to be let into this one's cluster, and
+//! somebody has ten minutes to say yes. That one comes in through [`Word`]
+//! rather than [`News`] — every arm of the latter loads a Conversation and
+//! titles itself by its branch, and there is no Conversation here to load — and
+//! goes out through the same [`notify`] underneath, which never knew about one.
+//!
 //! What tells one from another is its title, which is why all of them are
-//! written in the same place: see [`News::title`]. A phone that lights up with
-//! the same sentence whatever happened is a phone the human learns to ignore.
+//! written in the same place: see [`News::title`], and [`Word::title`] beside
+//! it. A phone that lights up with the same sentence whatever happened is a
+//! phone the human learns to ignore.
 //!
 //! Sending always happens behind the thing it is announcing, never in front of
 //! it. Delivery goes out through the browser vendors' push services, which is
@@ -334,6 +342,101 @@ async fn say(pool: &SqlitePool, conversation_id: i64, news: &News) -> Result<()>
     .await
 }
 
+/// What a push about something that is not a piece of work is saying.
+///
+/// **The second entry point beside [`News`], rather than a tenth arm of it.**
+/// Every one of those loads a Conversation and titles itself by its branch,
+/// because every one of them is about work; this is about the machine. Bending
+/// the enum to carry one would have meant a Conversation id nothing reads and a
+/// branch nothing says, on the one code path every other notification takes. So
+/// there are two ways in and one way out: the sending underneath is
+/// [`notify`], which never knew about a Conversation to begin with.
+///
+/// What still holds is the rule all the titles are written in one place for —
+/// see [`News::title`]. A notification has to be told from every other one at a
+/// glance, and these are read on the same lock screen as those.
+#[derive(Debug, Clone)]
+pub(crate) enum Word {
+    /// A device has asked to be let into this one's cluster, and it will go on
+    /// asking for ten minutes — see [`crate::peer::joining`]. Named for the
+    /// device, which is the whole of what the human is deciding about.
+    ADeviceIsAsking { name: String },
+}
+
+impl Word {
+    /// The sentence the lock screen shows.
+    fn title(&self) -> String {
+        match self {
+            // The device rather than what it wants: a phone that lights up
+            // while somebody is standing at another machine is one the name is
+            // the whole answer on.
+            Word::ADeviceIsAsking { name } => format!("{name} is asking to link with this device"),
+        }
+    }
+
+    /// And where a tap goes: the pane the press is on.
+    ///
+    /// The Remote access pane rather than a page of its own, because the modal
+    /// is not a page — it is raised in whatever workbench is open, and the one
+    /// this tap opens raises it off the Nudge it reads on arrival. So this is a
+    /// place to land rather than the thing being opened.
+    fn path(&self) -> &'static str {
+        match self {
+            Word::ADeviceIsAsking { .. } => "/settings/remote",
+        }
+    }
+
+    /// What the log calls it, where a push could not be sent.
+    fn about(&self) -> &'static str {
+        match self {
+            Word::ADeviceIsAsking { .. } => "the device asking to link",
+        }
+    }
+}
+
+/// Tell every subscribed device something that happened to this machine, without
+/// making the thing that happened wait for it.
+///
+/// Returns as soon as the work is handed to the runtime, exactly as the two
+/// above do and for their reason: the caller's job is to write the request down
+/// and answer the device that made it, and none of this may delay that or fail
+/// it. A push service that cannot be reached costs a notification and nothing
+/// else — the modal is up and the press works regardless.
+pub(crate) fn mentioned(pool: &SqlitePool, word: Word) {
+    let pool = pool.clone();
+
+    tokio::spawn(async move {
+        let title = word.title();
+
+        let notice = Notice {
+            path: word.path().to_owned(),
+            title: &title,
+
+            // Nothing. The project is what tells two notifications about two
+            // pieces of work apart, and this is about no work at all — a
+            // repository named under it would be a repository this has nothing
+            // to do with.
+            project: None,
+        };
+
+        let notice = match serde_json::to_vec(&notice) {
+            Ok(notice) => notice,
+            Err(error) => {
+                tracing::error!(about = word.about(), error = ?error, "the push notice could not be built");
+                return;
+            }
+        };
+
+        if let Err(error) = notify(&pool, word.about(), &notice).await {
+            tracing::error!(
+                about = word.about(),
+                error = ?error,
+                "telling the devices about this machine failed",
+            );
+        }
+    });
+}
+
 /// Send the notice to every device, and prune the ones the push services have
 /// finished with.
 ///
@@ -514,7 +617,7 @@ fn signed(private_key: &str, claims: &[u8]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{JWT_HEADER, News, audience, signed};
+    use super::{JWT_HEADER, News, Word, audience, signed};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use p256::ecdsa::signature::Verifier;
@@ -554,17 +657,35 @@ mod tests {
         ]
     }
 
+    /// And everything that is not about a piece of work, which is the other way
+    /// in — see [`Word`].
+    fn about_the_machine() -> Vec<Word> {
+        vec![Word::ADeviceIsAsking {
+            name: "laptop".to_owned(),
+        }]
+    }
+
+    /// Every title a lock screen can show, from both ways in.
+    ///
+    /// One list rather than two, because there is one lock screen: a phone does
+    /// not know which enum a notification came out of, and what has to hold is
+    /// that the human can tell any of them from any other.
+    fn every_title() -> Vec<String> {
+        all()
+            .iter()
+            .map(|news| news.title("rate-limiting"))
+            .chain(about_the_machine().iter().map(Word::title))
+            .collect()
+    }
+
     /// The whole job of a title is to say which of these it is, to somebody
     /// glancing at a lock screen with the app shut. Two of them reading alike is
     /// a phone that says only that *something* happened.
     #[test]
-    fn no_two_notifications_about_one_conversation_read_alike() {
-        let mut titles: Vec<String> = all()
-            .iter()
-            .map(|news| news.title("rate-limiting"))
-            .collect();
+    fn no_two_notifications_read_alike() {
+        let said = every_title();
 
-        let said = titles.clone();
+        let mut titles = said.clone();
         titles.sort();
         titles.dedup();
 
@@ -580,14 +701,29 @@ mod tests {
     /// half was at the end of it.
     #[test]
     fn a_title_is_short_enough_to_be_shown_whole() {
-        for news in all() {
-            let title = news.title("rate-limiting");
-
+        for title in every_title() {
             assert!(
                 title.len() <= 80,
                 "a title a lock screen would cut off mid-sentence: {title:?}",
             );
         }
+    }
+
+    /// A notification about the machine names the device asking, which is the
+    /// whole of what the human is deciding about — and lands them on the pane
+    /// the press is on rather than on a Conversation, there being none.
+    #[test]
+    fn a_device_asking_to_link_is_named_and_lands_on_the_remote_access_pane() {
+        let asking = Word::ADeviceIsAsking {
+            name: "laptop".to_owned(),
+        };
+
+        assert!(
+            asking.title().contains("laptop"),
+            "the device asking is what the title is for: {:?}",
+            asking.title(),
+        );
+        assert_eq!(asking.path(), "/settings/remote");
     }
 
     #[test]

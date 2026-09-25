@@ -359,8 +359,58 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
     }))
 }
 
-/// Let go of a join this device was holding: a cancel from the far end, and in
-/// the stages to come an Allow or a Deny that has been settled.
+/// Every join this device is holding, oldest first — which is the order they
+/// arrived in, and the order the modal raises them in.
+///
+/// **Whether any of them has run out is not asked here**, for the reason
+/// [`held_join`] does not ask it of one: the rows come back as they stand, with
+/// the moment each expires at on it, and reading that moment is the caller's.
+///
+/// One hop for the addresses, the way [`super::members::members`] takes them:
+/// a device is asked to link by a handful of machines at most, and a query per
+/// request would be a query per row of a list that is nearly always empty.
+pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
+    let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
+        "SELECT request, device, name, os, fingerprint, asked_at, expires_at
+         FROM joins_held
+         ORDER BY asked_at, request",
+    )
+    .fetch_all(pool)
+    .await
+    .context("listing the joins this device is holding")?;
+
+    let advertised: Vec<(String, String)> =
+        sqlx::query_as("SELECT request, address FROM join_addresses ORDER BY request, position")
+            .fetch_all(pool)
+            .await
+            .context("listing the addresses those joins advertised")?;
+
+    let mut addresses: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for (request, address) in advertised {
+        addresses.entry(request).or_default().push(address);
+    }
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(request, device, name, os, fingerprint, asked_at, expires_at)| HeldJoin {
+                addresses: addresses.remove(&request).unwrap_or_default(),
+                request,
+                device,
+                name,
+                os,
+                fingerprint,
+                asked_at,
+                expires_at,
+            },
+        )
+        .collect())
+}
+
+/// Let go of a join this device was holding: a cancel from the far end, an
+/// Allow or a Deny that has settled it, and a sweep of the ones that ran out.
 ///
 /// The addresses first, because they point at the row — the order
 /// [`super::members::forget_member`] takes them in, and for its reason.

@@ -6,6 +6,7 @@ import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
 import { DragBar } from "./DragBar";
+import { Joining } from "./Joining";
 import { Toasts } from "./Toasts";
 import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
@@ -210,6 +211,14 @@ function Verkstead(): JSX.Element {
 /// it is here, once, because an outcome outlives the control that learned it and
 /// no page owns one. See [`Toasts`].
 ///
+/// **And the join another device is asking about, beside that layer and for its
+/// reason.** A device asking to be let into this one's cluster raises a modal
+/// wherever the human happens to be looking — that is what a join *is*, a
+/// question from another machine rather than the end of a press somebody made —
+/// so it belongs to no page either, and this is the one place in the tree
+/// something is already drawn over every page and is there once. See
+/// [`Joining`].
+///
 /// Exported so that a test mounting a page can mount the shell it really sits
 /// in: a press whose outcome is a toast has nowhere to say it otherwise, and a
 /// test that supplied its own layer would be asking about a layer the app does
@@ -224,6 +233,7 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
     <>
       <main class={styles.shell}>{props.children}</main>
       <Toasts />
+      <Joining />
     </>
   );
 }

@@ -280,7 +280,17 @@ impl Listener {
 /// endpoints existed would be telling a stranger what to reach for. That is
 /// the Workbench Key's own arrangement, where a path under `/api/` that no
 /// route answers is refused at the gate rather than missed at the fallback.
-pub fn router(device: Device, reading: Reading, members: Members, joins: Joins) -> Router {
+/// And `nudges` is the stream this device's open workbenches are listening on,
+/// which is the one thing this listener shares with the other one: a join
+/// arriving here raises a modal over there, so the handle is made once at the
+/// start and given to both — see [`crate::nudge`].
+pub fn router(
+    device: Device,
+    reading: Reading,
+    members: Members,
+    joins: Joins,
+    nudges: crate::nudge::Nudges,
+) -> Router {
     Router::new()
         .route(IDENTITY, get(identity))
         .with_state(Answering {
@@ -295,6 +305,7 @@ pub fn router(device: Device, reading: Reading, members: Members, joins: Joins) 
                     device,
                     reading,
                     joins,
+                    nudges,
                 }),
         )
         .fallback_service(members_only(Router::new(), members))

@@ -55,10 +55,10 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// on a Capture growing, so until the viewer wanted to hear about them there
 /// was nobody to tell.
 #[derive(Debug, Clone)]
-pub(crate) struct Nudges(broadcast::Sender<Nudge>);
+pub struct Nudges(broadcast::Sender<Nudge>);
 
 impl Nudges {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let (moves, _) = broadcast::channel(NUDGE_BACKLOG);
         Self(moves)
     }
@@ -70,7 +70,7 @@ impl Nudges {
     /// The kind is not optional and has no default: what a caller knows about
     /// what it just changed is knowledge that exists nowhere else, and a Nudge
     /// that shrugged would put every page back to reading everything.
-    pub(crate) fn announce(&self, moved: Nudge) {
+    pub fn announce(&self, moved: Nudge) {
         let _ = self.0.send(moved);
     }
 
@@ -78,6 +78,12 @@ impl Nudges {
     /// wants to know whether a caller told the pages anything is another.
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Nudge> {
         self.0.subscribe()
+    }
+}
+
+impl Default for Nudges {
+    fn default() -> Self {
+        Nudges::new()
     }
 }
 

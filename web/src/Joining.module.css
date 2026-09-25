@@ -1,0 +1,91 @@
+/* The card another device's request is asked on — see `Joining.tsx`. The shared
+   chrome is `Modal.module.css`; what is here is the one card's own.
+
+   A little wider than the confirm sheet a Remove opens, because of the
+   fingerprint: thirty-two bytes of hex in colon-separated pairs is what the
+   human is comparing against another screen, and one wrapped mid-pair is one
+   they lose their place in. */
+.asking {
+  width: min(32rem, calc(100% - 2rem));
+}
+
+/* Who is asking, with the mark for its operating system in front of the name —
+   a WSL wears the Linux mark and reads *Linux (WSL)* below, which is the one
+   thing that tells it from the Windows it shares a hostname with. */
+.asking .title {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.asking .os {
+  color: var(--ink-soft);
+}
+
+.asking .why {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+/* What the machine is, as a list of what it said about itself: the label above
+   each so that a narrow phone reads down rather than across, which is where
+   the fingerprint would otherwise be squeezed into a column. */
+.asking .about {
+  display: grid;
+  gap: 0.15rem;
+  margin: 1rem 0 0;
+}
+
+.asking .about dt {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.asking .about dd {
+  margin: 0 0 0.6rem;
+}
+
+/* The one line that is read character by character, against another screen.
+   Monospaced so the pairs line up under each other when it wraps, and broken
+   anywhere rather than overflowing the card. */
+.asking .fingerprint {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The pair of presses, which is the confirm row every card in the app that asks
+   something carries — see `RepoList.module.css`, whose Remove is the same
+   shape. */
+.asking .out {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.asking .out button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled — Allow, which is what writes a
+   member. Deny beside it is a secondary press like every other in the app, and
+   `.secondary` in `styles/base.css` paints it; it is stood out of the way with
+   `:where`, which weighs nothing. */
+.asking .out button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .asking .out button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
