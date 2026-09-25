@@ -11,8 +11,13 @@
    trigger is the exception, being a card of its own. */
 
 /* The row. It wraps rather than scrolling — the pane is as wide as the human
-   dragged it, and four triggers do not fit a phone — and the wrap is the box's
+   dragged it, and five triggers do not fit a phone — and the wrap is the box's
    own width rather than the window's.
+
+   Five is a passing count rather than the shape of this row: the processes
+   roadmap folds the three role pickers into one Agent control, which brings it
+   back down again. So the rule is written for a row that wraps at whatever it
+   holds, and the number said here is only what it holds today.
 
    A rem under the field it sits below, inside the same box: the brief is what
    the box is for and this is how it will be run, and the two of them a hair
@@ -70,7 +75,8 @@
 }
 
 /* Its value line, laid out as the listbox's closed control is laid out beside
-   it, so the four triggers read as four of one thing. */
+   it, so the row's five triggers read as five of one thing — and as however
+   many of one thing the row comes to hold. */
 .optionLine {
   display: flex;
   grid-area: 2 / 1;

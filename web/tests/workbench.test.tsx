@@ -3987,7 +3987,8 @@ describe("a conversation's setup", () => {
       `.${shell.detailsPane} .${composer.box} > .${setup.options}`,
     );
 
-    // Four options, the repo first and then the three roles.
+    // Five options, the repo first, what kind of work it is after it, and
+    // then the three roles.
     expect(row.querySelector(`.${setup.repoOption}`)).toBeTruthy();
     await waitFor(() =>
       expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
