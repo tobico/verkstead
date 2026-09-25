@@ -8220,16 +8220,17 @@ async fn refused_for_a_pull_request(fixture: &Grilling) -> String {
     let refused = handoff_directory(fixture).join("refused");
     let deadline = Instant::now() + *PATIENCE;
 
-    while !refused.is_file() {
-        assert!(
-            Instant::now() < deadline,
-            "the signal was never refused for want of a pull request: {}",
-            standing(&fixture.view().await),
-        );
+    loop {
+        match std::fs::read_to_string(&refused) {
+            Ok(said) if !said.is_empty() => return said,
+            _ => assert!(
+                Instant::now() < deadline,
+                "the signal was never refused for want of a pull request: {}",
+                standing(&fixture.view().await),
+            ),
+        }
         pause(Duration::from_millis(25)).await;
     }
-
-    std::fs::read_to_string(&refused).unwrap()
 }
 
 /// The Conversation wrapping up the pull request the session opened itself, with
@@ -26632,16 +26633,24 @@ const SIGNALS_BEFORE_COMMITTING: &str = r#"    : > /tmp/verkstead/done
     sleep 300"#;
 
 /// What a stub kept of the first refusal it was given, once it has one.
+///
+/// Waited for by its contents rather than by its name: a stub publishes this
+/// with `cp`, which creates the file and then fills it, so it exists for a
+/// moment holding nothing — and a read landing in that window comes back `""`
+/// and fails the assertion about what the refusal said, having read the right
+/// file too early. The shell's own waits on `done-said` say `[ -s ]` for the
+/// same reason.
 async fn refused(fixture: &Grilling) -> String {
     let refused = handoff_directory(fixture).join("refused");
     let deadline = Instant::now() + *PATIENCE;
 
-    while !refused.is_file() {
-        assert!(Instant::now() < deadline, "the signal was never refused");
+    loop {
+        match std::fs::read_to_string(&refused) {
+            Ok(said) if !said.is_empty() => return said,
+            _ => assert!(Instant::now() < deadline, "the signal was never refused"),
+        }
         pause(Duration::from_millis(25)).await;
     }
-
-    std::fs::read_to_string(&refused).unwrap()
 }
 
 /// An inline session's signal with nothing committed since it began is refused
