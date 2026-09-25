@@ -6,9 +6,11 @@ starts, saying up front what kind of work this is and so which states it runs
 through. The composer's setup row becomes **Repo**, **Process**, **Agent**, the
 three role pickers folding into one Agent control shaped by the Process. The
 decisions and their why are in [ADR-0020](../../adr/0020-a-conversation-has-a-process.md);
-the terms are in [CONTEXT.md](../../../CONTEXT.md) under **Process**, and the
-revised **Pairing**, **Adopt**, **Follow-up**, **Steer** and **Done signal**
-entries. The briefs reference both rather than restating them.
+the terms are in [CONTEXT.md](../../../CONTEXT.md) under **Process** and
+**Investigating**, and the revised **Conversation**, **Worktree**, **Brief**,
+**Pairing**, **Adopt**, **Follow-up**, **Nothing else**, **Steer**,
+**Mergeable** and **Done signal** entries. The briefs reference both rather
+than restating them.
 
 Each stage is one feature: one branch, one review unit. Task chunkings inside
 the briefs are provisional — re-grounded against the codebase when the stage

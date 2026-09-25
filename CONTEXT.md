@@ -122,8 +122,8 @@ work under it is something to tell them about rather than something to pick
 around.
 
 **And where nobody has named it, the work's first session is asked to.** The
-press that starts the work leaves the naming to the session it starts — the
-grilling one, the ungrilled build one, or the one a steered Draft starts — and
+press that starts the work leaves the naming to the session it starts —
+whichever the **Process** launches, and the one a steered Draft starts — and
 its prompt carries the instruction under the Brief: switch the branch to a short
 kebab-case name taken from what the work is about, with git, before anything
 lands on it. Nothing is asked back, a rename being read off the checkout the way
@@ -198,9 +198,11 @@ _Avoid_: mode, kind, type, workflow, flow, template, Direction (that is how
 Develop's building is run, and is picked inside it)
 
 **Worktree**:
-The checkout a Conversation's work is done in, made when grilling starts along
-with the branch it holds, and removed when the Conversation is closed — the
-branch outlives it, because a branch is cheap and may hold work worth reading.
+The checkout a Conversation's work is done in, made when the work starts along
+with the branch it holds — whichever **Process** it starts on, every one of them
+cutting as a grill start does — and removed when the Conversation is closed;
+the branch outlives it, because a branch is cheap and may hold work worth
+reading.
 A Conversation may have more than one: its own, and one per Companion Repo,
 made when its own is made and given back when its own is. A steered
 Conversation keeps the one it has; where the directory has gone, one is checked
@@ -219,16 +221,16 @@ refused over, and the ones a crash left behind. A Conversation that is Done
 keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
 works in them.
 **A task list the checkout inherited is cleared at the cut.** Every cut for new
-work — a grilled start, an ungrilled build, Continue a roadmap, and a stage
-started by the one before it settling — removes a `.tasks/` that came with the
-base and commits the removal on the fresh branch, as the configured git author,
-before any session runs. What says a branch has planned is its tree rather than
-its history, so an inherited list reads as this branch's own plan and would end
-the planning session before it had asked anything. Every cut for new work
-therefore needs an author configured, and is refused by name — or halted with a
-notice, where nobody pressed anything — without one. A cut for work that already
-exists clears nothing: a steer's re-checkout and a taken-up pull request hold
-work somebody has already done.
+work — a Develop start, a Tinker's, an Investigate's, Continue a roadmap, and a
+stage started by the one before it settling — removes a `.tasks/` that came with
+the base and commits the removal on the fresh branch, as the configured git
+author, before any session runs. What says a branch has planned is its tree
+rather than its history, so an inherited list reads as this branch's own plan
+and would end the planning session before it had asked anything. Every cut for
+new work therefore needs an author configured, and is refused by name — or
+halted with a notice, where nobody pressed anything — without one. A cut for
+work that already exists clears nothing: a steer's re-checkout and a taken-up
+pull request hold work somebody has already done.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than beside
 the Repo it was made from: Verkstead made it, so it goes among Verkstead's own
@@ -763,7 +765,8 @@ _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
 The editable markdown document a round of a Conversation starts from, and the
-first Timeline Event. Freezes when its round's grilling starts; a steer into
+first Timeline Event. Freezes when its round's work starts, which for a Develop
+Conversation is its grilling; a steer into
 Grilling opens a round with a new Brief rather than editing the frozen one, so a
 Conversation has one Brief per round and the newest is the one being written.
 What is *not* the human's again on a later round is the branch and the base
@@ -839,32 +842,22 @@ sidebar back with them in it.
 box, at the near edge of the row the two presses are at the far edge of — drawn
 whenever nothing is written in the box and nothing is loaded, since what it
 loads stands in place of what would have been written there. One nested level
-per action, in the one card the menu always is: **Continue a roadmap** and
-**Wrap up a pull request**, each greyed rather than hidden while there is
-nothing under it, because a menu that came and went with its lists would say
-nothing about what it offers. Picking a roadmap creates nothing: the roadmap is
-loaded into what the device is holding, the box locks to a card naming it and
-the Stage that would be started, the Repo and the base commit are the roadmap's
-own, and what is still the human's is the Pairings and the repos the work runs
-alongside. A clear control puts it down and gives the box back what was in it.
-**Start** then creates the adopting Conversation and adopts the Stage; **Save
-as draft** creates it and leaves the adopting to the press on its own page.
+per action, in the one card the menu always is: **Continue a roadmap** alone
+since 2026-09-25, greyed rather than hidden while there is nothing under it,
+because a menu that came and went with its list would say nothing about what it
+offers. *Wrap up a pull request* was the second level until then, and taking a
+pull request up is the **Review** Process now — named in the Brief or the
+**Target** field of a draft like any other, so nothing is loaded into the box
+and no list of open pull requests is read when the page opens. Picking a roadmap
+creates nothing: the roadmap is loaded into what the device is holding, the box
+locks to a card naming it and the Stage that would be started, the Repo and the
+base commit are the roadmap's own, and what is still the human's is the Process,
+the Pairings and the repos the work runs alongside. A clear control puts it down
+and gives the box back what was in it. **Start** then creates the adopting
+Conversation and adopts the Stage; **Save as draft** creates it and leaves the
+adopting to the press on its own page.
 
-**Picking a pull request loads it the same way**, with one difference: a pull
-request brings words of its own. The card names it — the Repo, the number, the
-title, the head branch and the base it goes into — over a box that stays a
-box, prefilled with the title as a heading and the description under it, and
-what is left there when the work starts is the Brief; what was typed before is
-put away and given back on clear, the way a held file is. The Repo is the pull
-request's and reads disabled, the branch and the base are its own and not
-drawn, and the grilling Pairing is not asked for, there being no grilling: what
-is the human's is the Implementation and Review Pairings and the companions.
-**Start** creates the Conversation and takes the pull request up; **Save as
-draft** creates it holding the pull request for the press on its own page. A
-pull request a Conversation already holds is listed all the same, and its row
-goes to that Conversation rather than loading anything.
-
-Every one of those freezes at the same moment the Brief does, so once grilling
+Every one of those freezes at the same moment the Brief does, so once the work
 starts none of it is drawn; on a later round the branch and the base commit are
 frozen already, and so is the Repo — a checkout is of one repository, and the
 one thing that can no longer be done is the one thing still drawn, the picker
@@ -1660,11 +1653,12 @@ pull request answered in batches, Done once the suites are green. With no review
 there is nothing to split findings out of, so the one path back down the ladder
 never opens from a wrap-up like this.
 
-Every one of them is **fixed when grilling starts**, alongside the branch, the
-base commit and the Brief: what runs the work is settled before the work begins
-rather than swapped underneath it — and the implementation and review ones are
-used long after that, which is exactly why they are not left changeable until
-then.
+Every one the Process uses is **fixed when the work starts**, alongside the
+branch, the base commit and the Brief — grilling for a Develop Conversation, and
+whatever its own Process starts for any other. What runs the work is settled
+before the work begins rather than swapped underneath it — and the
+implementation and review ones are used long after that, which is exactly why
+they are not left changeable until then.
 
 Each Repo **remembers the last set it was grilled with**, so a new
 Conversation on it arrives with every picker already filled. Written at grill
@@ -2268,10 +2262,12 @@ Timeline.
 _Avoid_: research, spike, exploration, read-only mode, question state
 
 **Nothing else**:
-The control that ends a follow-up: a checkbox in the closing section of a
-follow-up's Question Set, under the set-level comment box it shares that
-section with, saying there is nothing more the human wants from this follow-up.
-Drawn on a Follow-up's Sets and on no others.
+The control that ends a follow-up or an investigation: a checkbox in the closing
+section of its Question Set, under the set-level comment box it shares that
+section with, saying there is nothing more the human wants from this round of
+rounds. Drawn on a **Follow-up**'s Sets and an **Investigating**'s, and on no
+others — the two states whose end is the human's to say rather than the
+session's.
 
 Not a Question and not an Option. It answers nothing anybody asked, so it rides
 the Response as a field of its own the way a picked Direction does; and it is a
@@ -2361,6 +2357,14 @@ each session is dispatched and kept across a restart; one out of goes waits for
 every other pull request's before the run stops, and the stop's Notice names the
 pull request that would not merge clean. Resume, a steer into Wrapping and the
 press below all forget the count, exactly as they forget the checks'.
+
+**A stack is one session and one count**, and the exception to the paragraph
+above: a **Fix Merge Issues** Conversation may hold a whole stack of pull
+requests in one repository, and a conflict anywhere in it sends one session told
+the ordered list from the bottom — a fix low in a stack changing everything
+above it — with the goes counted per stack rather than per pull request, and `gh
+stack sync` doing the work whatever the resolution strategy says. Every other
+Conversation holds one pull request per repository and is the paragraph above.
 
 **And it goes on being asked after Done.** A wrap-up's watchers stop when the
 Conversation reaches Done, and the pull request goes on sitting there waiting to

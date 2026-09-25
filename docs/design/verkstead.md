@@ -328,7 +328,11 @@ flowchart LR
   2026-08-29, building optional-steps-and-auto-branch*: the button reads
   "Start work", one press covering both ways a conversation starts, and on
   **No grilling** the same press lands it Implementing with an inline session
-  on the brief alone. Question sets
+  on the brief alone. *Revised 2026-09-25, grilling conversation-processes*: the
+  one press starts whichever the conversation's **Process** is, and grilling is
+  Develop's — **No grilling** is retired, the brief that wants no interview
+  being a **Tinker** conversation, which the same press lands in Follow-up. See
+  [ADR-0020](../adr/0020-a-conversation-has-a-process.md). Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
