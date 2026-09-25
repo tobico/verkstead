@@ -32,12 +32,25 @@ import parser from "@typescript-eslint/parser";
 /// `menu.ts` is the application menu, which is a list of the platform's own
 /// roles handed to Electron: there is no behaviour of ours in it to test, and
 /// the reason it exists at all — the shortcuts a hidden menu bar still has to
-/// answer — is a thing only a real window can be asked about.
-const EDGE = ["src/main.ts", "src/menu.ts", "src/tray.ts", "src/window.ts"];
+/// answer — is a thing only a real window can be asked about. `preload.mts` is
+/// the one file here that is not the main process at all: it runs inside the
+/// window and `contextBridge` is how it puts the bridge on it, which is a call
+/// nothing else can make. What the bridge *is* is `bridge.ts` and what a set
+/// *means* is `settings.ts`, and vitest runs both.
+const EDGE = [
+  "src/main.ts",
+  "src/menu.ts",
+  "src/preload.mts",
+  "src/tray.ts",
+  "src/window.ts",
+];
 
 export default [
   {
-    files: ["src/**/*.ts", "tests/**/*.ts"],
+    // `.mts` as well as `.ts`: the preload is one, an ESM preload having to be
+    // an `.mjs` once it is compiled, and the wall is no wall with a way round
+    // it by extension.
+    files: ["src/**/*.ts", "src/**/*.mts", "tests/**/*.ts"],
 
     // `tsc` is what typechecks; this parser is here to read TypeScript into an
     // AST the core rule can see the imports in, and no more than that.

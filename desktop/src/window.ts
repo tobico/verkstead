@@ -9,7 +9,11 @@
 //!
 //! **Loaded exactly as it is served.** Nothing about the viewer changes to draw
 //! inside the app and nothing on the wire changes: this is the same document a
-//! browser on this machine gets, over the same loopback origin.
+//! browser on this machine gets, over the same loopback origin. What is
+//! different is the window rather than the document — it carries the preload in
+//! [`bridge.ts`](./bridge.js), and the page reads that being there as *this is
+//! the app*. A browser gets no preload and so no Desktop page, which is the
+//! whole mechanism by which a phone never sees one.
 //!
 //! **A 401 on the window's own frame is the key having been reset from the
 //! phone.** **Reset key** at the foot of Remote Access re-issues the secret, and
@@ -83,6 +87,12 @@ export interface Workbench {
   /// user data — a fact about this machine rather than about this Verkstead.
   state: string;
 
+  /// The preload script this window is given, which is the whole of what makes
+  /// the page inside the app different from the same page in a browser — see
+  /// [`bridge.ts`](./bridge.js). An absolute path, because this is a file the
+  /// app ships beside itself rather than anything the page names.
+  preload: string;
+
   /// What this press of the close button means — [`closing`](./closing.js)'s
   /// answer, asked at the moment of the press rather than once at startup.
   ///
@@ -113,6 +123,27 @@ export function open(workbench: Workbench): BrowserWindow {
     // hides it and the call alone leaves Alt showing it permanently. On a Mac
     // neither does anything: its menu is the strip at the top of the screen.
     autoHideMenuBar: true,
+
+    webPreferences: {
+      // The bridge, and the whole of what the app adds to the document the
+      // browser gets. A file inside the app rather than a path from anywhere
+      // else.
+      preload: workbench.preload,
+
+      // **And Chromium's own sandbox off, which the preload above is what
+      // decides.** An ESM preload is loaded only in a window that has it off —
+      // and a sandboxed preload, which is the alternative, may require nothing
+      // but `electron` itself, so it could not import the shape it exposes in a
+      // project that compiles rather than bundles (ADR-0020).
+      //
+      // What is not given up is the pair that matters to a page: node
+      // integration stays off, so nothing in the document has a `require`, and
+      // `contextIsolation` stays on, so the preload's own world is not the
+      // page's. Which leaves a renderer that loads one document — this
+      // machine's own Verkstead, on loopback, with every navigation off it
+      // handed to the browser by `bound` below.
+      sandbox: false,
+    },
   });
   window.setMenuBarVisibility(false);
 
