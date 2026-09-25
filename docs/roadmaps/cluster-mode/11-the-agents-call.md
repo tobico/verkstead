@@ -49,7 +49,9 @@ Windows VM and carries on there.
 
 ## Re-verify at start
 
-- Stage 09 landed; stage 10 may or may not have — the move works either way.
+- Stage 09 landed, and 07 with it, since the ticks sit in the panel of the
+  device select 07 exports and 09's dialog draws. Stage 10 may or may not have —
+  the move works either way.
 - The CLI's commands are still in `crates/cli/src/lib.rs` with the client in
   `crates/cli/src/client.rs`; the done request is still
   `crates/server/src/done.rs` acted on by the driver.

@@ -13,10 +13,16 @@ Each stage is one feature: one branch, one review unit. Task chunkings inside
 the briefs are provisional — re-grounded against the codebase when the stage
 starts.
 
-Stages 01, 02 and 03 are in order. 04 stands on 02. 05 is independent of
-everything and can land anywhere before 06. 06 stands on 04 and 05. 07 and 08
-both stand on 04 and are reorderable with each other. 09 stands on 08. 10 and
-11 both stand on 09 and are reorderable with each other.
+Stages 01, 02 and 03 are in order. 04 stands on 02. 05 stands on nothing here
+and can land any time before 06. 06 stands on 04 and 05. 07 and 08 both stand on
+04 and are reorderable with each other. 09 stands on 06, 07 and 08 — and so on
+05, through 06. 10 and 11 both stand on 09 and are reorderable with each other.
+
+What 09 stands on is easy to miss, so: it draws the live copy of a transferred
+Conversation in **06**'s merged list, it carries a rank on the copy it makes,
+which is **05**'s through 06, it builds its Transfer dialog from the device
+select **07** exports, and it needs the Repo matching and mirror Profiles of
+**08**. 11's ticks sit in that same select's panel, which it reaches through 09.
 
 ## Stages
 

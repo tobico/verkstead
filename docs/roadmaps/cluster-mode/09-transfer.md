@@ -60,7 +60,9 @@ local id. Demonstrable end to end across two OSes, and back.
 
 ## Re-verify at start
 
-- Stage 08 landed: Repo matching and mirror Profiles.
+- Stages 06, 07 and 08 landed: the merged list this draws one live copy in and
+  the ranks under it, the device select the Transfer dialog is built from, and
+  Repo matching with mirror Profiles.
 - Worktrees are still cut in `crates/server/src/worktrees.rs`, uncommitted
   changes read in `crates/server/src/diffs.rs` (`uncommitted`, `writable`),
   companions in `crates/store/src/companions.rs`, renames followed in
