@@ -48,21 +48,24 @@
 //! The fresh one waits beside the one being presented until every member has
 //! acknowledged its fingerprint, so a re-issue never costs a call; with no
 //! member to acknowledge anything the changeover completes at the start that
-//! began it, and says it had nobody to tell. Telling them is the linking
-//! stage's, there being no member to tell yet.
+//! began it, and says it had nobody to tell. How many are owed is read off the
+//! members this device keeps — see [`Members`]; the announcement that takes
+//! them off that list one at a time is still to come, so every member there is
+//! is owed.
 //!
 //! **And [`Devices`] is what the human's own browser reads of all this**: this
-//! device and how many others are linked to it, which is the Devices section of
-//! the Remote access pane. The same answer a stranger reads off the peer
-//! listener's identity endpoint, told to the browser instead — that listener
-//! presents a certificate nothing but another Verkstead has a reason to trust,
-//! so the workbench is where the pane asks.
+//! device and every other device in its cluster, a row apiece, which is the
+//! Devices section of the Remote access pane. This device's own row is the same
+//! answer a stranger reads off the peer listener's identity endpoint, told to
+//! the browser instead — that listener presents a certificate nothing but
+//! another Verkstead has a reason to trust, so the workbench is where the pane
+//! asks.
 
 pub mod reading;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, Result, anyhow};
 use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
@@ -171,8 +174,8 @@ pub enum Changeover {
     /// moment on: nobody was owed an announcement of its fingerprint, so the
     /// changeover completed at the start that began it.
     ///
-    /// Which is every re-issue this build can make. A member is made by a join
-    /// and there is no join yet — see [`Members`] — so the answer to *is
+    /// Which is every re-issue on a Verkstead that has never been linked to
+    /// anything: with no member recorded — see [`Members`] — the answer to *is
     /// anything still owed an announcement* is no, and saying so is the whole
     /// of what a changeover here has to do about it.
     NobodyToTell,
@@ -276,7 +279,7 @@ impl Device {
     /// **And the expiry is seen to here**, which is the one thing a start does
     /// *to* an identity it found rather than with it — see [`Device::renewed`],
     /// which is where `members` is asked its one question.
-    pub fn issued(data_dir: &Path, members: &Members) -> std::io::Result<Device> {
+    pub async fn issued(data_dir: &Path, members: &Members) -> std::io::Result<Device> {
         let id_path = data_dir.join(ID_FILE);
         let certificate_path = data_dir.join(CERTIFICATE_FILE);
 
@@ -314,7 +317,9 @@ impl Device {
             }
         };
 
-        Device::holding(data_dir, id, certificate)?.renewed(members)
+        Device::holding(data_dir, id, certificate)?
+            .renewed(members)
+            .await
     }
 
     /// The identity a fixture states, so that what a suite asserts against is
@@ -398,10 +403,11 @@ impl Device {
     /// changeover that completes here and now; anybody owed one is a
     /// changeover in flight, the old certificate still going out and the new
     /// one waiting in [`INCOMING_FILE`] for the start after this. That is the
-    /// whole of the bookkeeping. Telling them is the linking stage's, and
-    /// there is no member to tell yet — so what this answers is *nobody*, and
-    /// [`Changeover::NobodyToTell`] is it saying so.
-    fn renewed(self, members: &Members) -> std::io::Result<Device> {
+    /// whole of the bookkeeping. Telling them is still to come, so what a
+    /// member is owed is never worked off and every member there is is owed —
+    /// which on a Verkstead that has never been linked to anything is nobody,
+    /// and [`Changeover::NobodyToTell`] is it saying so.
+    async fn renewed(self, members: &Members) -> std::io::Result<Device> {
         // A changeover an earlier start began, where there is one. The
         // certificate it made is read back rather than a third one minted:
         // every restart during a changeover would otherwise be another
@@ -434,7 +440,11 @@ impl Device {
             return Ok(self);
         };
 
-        match members.unacknowledged(&incoming.fingerprint) {
+        match members
+            .unacknowledged(&incoming.fingerprint)
+            .await
+            .map_err(|why| std::io::Error::other(format!("{why:#}")))?
+        {
             // Nobody is owed an announcement, so the changeover completes at
             // once: the new certificate becomes the presented one and the file
             // it was waiting in goes. In that order, so that a machine losing
@@ -548,7 +558,7 @@ impl Device {
 }
 
 /// What the **Devices** section of the Remote access pane reads: this device,
-/// and how many others are linked to it (ADR-0020).
+/// and every other device in its cluster (ADR-0020).
 ///
 /// **The browser's side of the identity endpoint.** A peer reads what this
 /// device is off [`crate::peer::IDENTITY`], over TLS on a port of its own; the
@@ -573,9 +583,10 @@ pub struct Devices {
     /// see [`reading::Reading`].
     reading: reading::Reading,
 
-    /// And who it is linked to, which is what the count on the card comes off.
-    /// Nobody, in every Verkstead this build can make: a member is made by a
-    /// join, and the join is the next stage's — see [`crate::peer::Members`].
+    /// And who it is linked to, which is a row apiece on the list and the count
+    /// on the card — the count coming off the rows rather than being answered
+    /// beside them, there being one membership and one answer about it. Rows in
+    /// the store, read at the moment the pane asks — see [`crate::peer::Members`].
     members: Members,
 }
 
@@ -597,12 +608,19 @@ impl Devices {
     ///
     /// `async` for the reason the identity endpoint's handler is: the tailnet
     /// half of the addresses is a command run on this machine, and a pane opened
-    /// a moment later would get a different and equally true answer.
-    pub(crate) async fn listing(&self) -> DevicesView {
-        DevicesView {
+    /// a moment later would get a different and equally true answer. And the
+    /// members are read now for the same reason again — a join or an unlink on
+    /// another tab is a different and equally true answer too.
+    ///
+    /// Fallible where the row for this device is not, because the membership is
+    /// a database and the identity is two files already in hand. A pane that
+    /// drew this device alone when the members could not be read would be a
+    /// cluster that looked dissolved.
+    pub(crate) async fn listing(&self) -> Result<DevicesView> {
+        Ok(DevicesView {
             this: self.reading.identity(&self.device).await,
-            linked: self.members.count(),
-        }
+            members: self.members.listed().await?,
+        })
     }
 }
 

@@ -24,7 +24,7 @@ Roadmap stage: [02: Linking](docs/roadmaps/cluster-mode/02-linking.md)
 
 ## Tasks
 
-- [ ] 01: The member store and the gate — [details](01-the-member-store-and-the-gate.md)
+- [x] 01: The member store and the gate — [details](01-the-member-store-and-the-gate.md)
 - [ ] 02: Dialling a peer — [details](02-dialling-a-peer.md)
 - [ ] 03: Add, the join post and the pending row — [details](03-add-and-the-join-post.md)
 - [ ] 04: The confirmation modal and its push — [details](04-the-confirmation-modal.md)
