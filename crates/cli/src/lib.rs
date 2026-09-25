@@ -167,9 +167,11 @@ enum Command {
 
     /// Run the Verkstead server: the agents' API and the human's viewer.
     ///
-    /// The flags are the server's own, and the one verb here that is not an
-    /// agent's — everything else in this binary talks *to* a server.
-    Serve(verkstead_server::Config),
+    /// The one verb here that is not an agent's — everything else in this binary
+    /// talks *to* a server. The flags are the server's own beneath `--desktop`,
+    /// which is the desktop app saying the sidecar it started is this one
+    /// (ADR-0020) and is nobody else's to pass.
+    Serve(serve::Serve),
 
     /// Run Verkstead on the desktop: the server, and a tray icon over it.
     ///
@@ -239,7 +241,7 @@ impl Cli {
             Some(Command::Waiting { length, server }) => {
                 waiting::waiting(length.as_deref(), &server)
             }
-            Some(Command::Serve(config)) => serve::serve(config),
+            Some(Command::Serve(asked)) => serve::serve(asked),
             #[cfg(feature = "desktop")]
             Some(Command::Desktop(app)) => desktop::desktop(app),
             #[cfg(windows)]

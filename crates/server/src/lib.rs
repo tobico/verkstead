@@ -1188,6 +1188,50 @@ fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
     gate.guarding(Router::new().fallback(viewer::serve::<V>))
 }
 
+/// Who started this server, which is the whole of what a command line can say
+/// about it.
+///
+/// The desktop app starts the very same binary an operator does, with
+/// `--desktop` on the serve verb, and what that flag names is the caller rather
+/// than a setting: everything it changes, the server does differently because
+/// there is somebody at the machine rather than a journal on it
+/// ([ADR-0020](../../../docs/adr/0020-electron-desktop.md)). So it crosses in
+/// here as a value of its own rather than as a field of [`Config`] — that struct
+/// is what points *any* caller at a Data Directory and an address, the desktop
+/// verb's own flags included, and a caller that hands the link over in-process
+/// has no flag to have said.
+///
+/// **Nothing about it reaches the wire.** It is behaviour on this side of the
+/// socket: nothing serialisable carries it and no viewer can read it, which is
+/// what ADR-0020 leaves to the preload bridge instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartedBy {
+    /// A shell, or a unit file: the line hands the link over, and there is
+    /// nobody at the machine to put a password dialog in front of.
+    AnOperator,
+    /// The desktop app, which started this as its sidecar: it opens its own
+    /// window on the link, so the line names the address alone.
+    TheDesktopApp,
+}
+
+impl StartedBy {
+    /// Who hands the login link over on this install, which is what the startup
+    /// line carries and what it leaves off — see [`key::HandsOverTheLink`].
+    ///
+    /// The whole of the difference is who is holding a browser. The desktop app
+    /// reads the key out of the Data Directory and opens its window on the link
+    /// itself, so the line names the address alone and the secret stays out of
+    /// the log file the app's own menu opens. A machine started from a unit file
+    /// has no window and nobody to press anything in, and what somebody reading
+    /// the journal pastes is the whole link (ADR-0015, as amended).
+    pub fn hands_over_the_link(self) -> key::HandsOverTheLink {
+        match self {
+            StartedBy::AnOperator => key::HandsOverTheLink::TheStartupLine,
+            StartedBy::TheDesktopApp => key::HandsOverTheLink::TheCaller,
+        }
+    }
+}
+
 /// Take the address, open the database, and serve until the process is stopped.
 ///
 /// **The socket is taken before anything is made.** Everything below makes
@@ -1201,11 +1245,11 @@ fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
 /// desktop binary starts: a taken address is the one failure it draws a dialog
 /// for, and a dialog wants the failure before the side effects rather than after
 /// them.
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let listener = std::net::TcpListener::bind(config.listen)
         .with_context(|| format!("binding {}", config.listen))?;
 
-    run_on(listener, config).await
+    run_on(listener, config, started_by).await
 }
 
 /// The same, on a socket that is already bound.
@@ -1217,23 +1261,31 @@ pub async fn run(config: Config) -> Result<()> {
 /// A bare `verkstead serve` is configured by nobody and comes up all the same:
 /// there is nothing here that has to be said before the server can be reached,
 /// and everything that *was* said is resolved before it is served over.
-pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
+pub async fn run_on(
+    listener: std::net::TcpListener,
+    config: Config,
+    started_by: StartedBy,
+) -> Result<()> {
     // The Data Directory resolved and made, and the key in it read or written,
     // before anything else this start does — see [`Config::workbench_key`], and
     // [`run_on_keyed`] for the caller that arrives having already made this call.
     let key = config.workbench_key()?;
 
-    // And nothing to escalate with: a server started this way was started from a
-    // shell or a unit file, where there is nobody at the machine to put a
-    // password dialog in front of — see [`remote::Elevate`]. Which is the same
-    // machine that has no tray to press **Open** in, so the startup line below
-    // is where this install hands the login link over.
+    // And nothing to escalate with, whoever started it: the operator grant the
+    // Remote access pane asks for is a command run with a privilege this process
+    // has not got, and what a server reached through here does about that is
+    // hand the `sudo` line back — see [`remote::Elevate`].
+    //
+    // What `started_by` decides is the startup line: whether it is this
+    // install's handing over of the login link, or the address alone because the
+    // caller has opened a window on one already — see
+    // [`StartedBy::hands_over_the_link`].
     run_on_keyed(
         listener,
         config,
         key,
         None,
-        key::HandsOverTheLink::TheStartupLine,
+        started_by.hands_over_the_link(),
     )
     .await
 }
