@@ -29,4 +29,4 @@ Roadmap stage: [01: Device identity and the peer listener](docs/roadmaps/cluster
 - [x] 04: The machine reading — [details](04-the-machine-reading.md)
 - [x] 05: The option and the VM test — [details](05-the-option-and-the-vm-test.md)
 - [x] 06: The Devices section — [details](06-the-devices-section.md)
-- [ ] 07: The renewal — [details](07-the-renewal.md)
+- [x] 07: The renewal — [details](07-the-renewal.md)

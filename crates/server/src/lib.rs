@@ -1394,12 +1394,30 @@ pub async fn run_on_keyed(
     // human finds out which one that turned out to be.
     let data_dir = config.data_directory()?;
 
+    // And who this device is linked to, which is nobody: a member is made by a
+    // join and there is no join to make one with yet — see [`peer::Members`].
+    // The peer listener's gate asks it whether a caller is one, the Devices
+    // section of the Remote access pane asks it how many there are, and the
+    // identity below asks it the third question.
+    //
+    // Which is why it is read here rather than beside the listeners it is
+    // handed to: a certificate near its expiry is made again at a start, and
+    // whether the new one can be presented straight away is whether any member
+    // is owed an announcement of it.
+    let members = peer::Members::none();
+
     // And what this Verkstead is, which is read out of that directory or
     // invented into it: the device id every record and URL in a cluster names it
     // by, and the self-signed certificate a link is made of (ADR-0020) — see
     // [`device`]. Both are on the startup line below, the fingerprint because it
     // is what two machines are checked against each other by.
-    let device = device::Device::issued(&data_dir).with_context(|| {
+    //
+    // This is also where the expiry is seen to. A certificate with less than
+    // thirty of its ninety days left is made again here, and with no member
+    // owed an announcement of the new one the changeover is over before the
+    // line below is printed — see [`device::Changeover`], which is what says
+    // which of those happened.
+    let device = device::Device::issued(&data_dir, &members).with_context(|| {
         format!(
             "keeping this device's id and certificate in {}",
             data_dir.display()
@@ -1591,6 +1609,34 @@ pub async fn run_on_keyed(
         "verkstead is listening",
     );
 
+    // And what this start did about the certificate's expiry, on a line of its
+    // own rather than as a field on the one above — for the reason the pipe
+    // below is: a changeover is a handful of days in a certificate's life, and
+    // a field saying *not due* at every other startup would be a line about
+    // nothing (ADR-0020) — see [`device::Changeover`].
+    //
+    // Both fingerprints where there are two of them, because over a changeover
+    // that is the only way anybody tells which of the two a peer met: the one
+    // going out is still what the handshake presents, and the one coming in is
+    // what every member has to be told before it can.
+    match device.changeover() {
+        device::Changeover::NotDue => {}
+
+        device::Changeover::NobodyToTell => tracing::info!(
+            fingerprint = %device.fingerprint(),
+            "this device's certificate was near its expiry and has been made again, \
+             and there was no member to announce the new fingerprint to",
+        ),
+
+        device::Changeover::YetToTell(owed) => tracing::info!(
+            fingerprint = %device.fingerprint(),
+            incoming = %device.incoming_fingerprint().unwrap_or_default(),
+            owed,
+            "this device's certificate has been made again and is waiting on members to \
+             acknowledge the new fingerprint, so the old one is still what it presents",
+        ),
+    }
+
     // The pipe on a line of its own rather than as a field on the one above:
     // the other platforms have no pipe, and a field saying so at every startup
     // there would be a line about nothing. In the spelling a client is given
@@ -1623,12 +1669,6 @@ pub async fn run_on_keyed(
     // answer told to two different askers.
     let reading =
         device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
-
-    // And who this device is linked to, which is nobody: a member is made by a
-    // join and there is no join to make one with yet — see [`peer::Members`].
-    // The peer listener's gate asks it whether a caller is one, and the Devices
-    // section asks it how many there are.
-    let members = peer::Members::none();
 
     let app = router_with_ui(
         pool,

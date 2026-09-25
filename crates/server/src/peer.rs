@@ -251,20 +251,47 @@ fn members_only(members: Members) -> Router {
     Router::new().layer(axum::middleware::from_fn_with_state(members, gate))
 }
 
-/// The devices this one has linked to, as the gate asks after them.
+/// The devices this one has linked to, as the two things that ask after them
+/// do: the gate over every route here, and the changeover a re-issued
+/// certificate is in the middle of.
 ///
 /// **Empty, and read from nowhere.** A member is made by a join, and the join
 /// is the next stage's — so what this holds is not a store that happens to
-/// have nothing in it yet, it is the one question the gate has to be able to
-/// ask, with the only answer this stage can honestly give.
+/// have nothing in it yet, it is the two questions that have to be askable,
+/// with the only answers this stage can honestly give: no, this caller is not
+/// one of them, and no, there is nobody owed an announcement.
 #[derive(Debug, Clone)]
-pub struct Members;
+pub struct Members {
+    /// How many there are, which is the whole of what a membership can be said
+    /// in until there is a join to record one properly.
+    ///
+    /// Nought in every Verkstead this build can make. A number rather than a
+    /// list because the two questions a number can answer are the two that are
+    /// asked — how many are there, and how many are owed an announcement — and
+    /// the one it cannot is the one whose answer is no either way: a stated
+    /// membership holds no fingerprint, so [`Members::holds`] is false for
+    /// every caller, which is what this build would say in any case.
+    linked: usize,
+}
 
 impl Members {
     /// None of them, which is the membership of every Verkstead this build can
     /// make.
     pub fn none() -> Members {
-        Members
+        Members { linked: 0 }
+    }
+
+    /// And the membership a fixture states: `linked` devices, none of which
+    /// has acknowledged anything.
+    ///
+    /// Here for the reason [`Device::stated`] is. What a changeover does
+    /// depends on whether anybody is owed an announcement of the new
+    /// fingerprint, and a suite that could only ever ask a membership of
+    /// nobody could only ever see one of the two answers — so the half of the
+    /// changeover that keeps presenting the outgoing certificate would be a
+    /// claim nothing stood behind.
+    pub fn stated(linked: usize) -> Members {
+        Members { linked }
     }
 
     /// Whether the device whose certificate has this fingerprint is one of
@@ -279,6 +306,23 @@ impl Members {
         false
     }
 
+    /// How many of them have yet to acknowledge `fingerprint`, which is the
+    /// question a changeover asks — see [`crate::device::Changeover`].
+    ///
+    /// **All of them, whatever the fingerprint is.** An acknowledgement is a
+    /// member answering an announcement, the announcement is the linking
+    /// stage's, and neither has anywhere to be recorded yet — so a member here
+    /// has acknowledged nothing and every one of them is owed. Which comes to
+    /// nought, there being no member; and nought is the answer that completes
+    /// a changeover at the start that began it.
+    ///
+    /// What the stage after this fills in is the acknowledgement: this becomes
+    /// the members whose recorded fingerprint is not the one being changed to,
+    /// and the announcement is what takes them off that list one at a time.
+    pub(crate) fn unacknowledged(&self, _fingerprint: &str) -> usize {
+        self.linked
+    }
+
     /// And how many of them there are, which is the clause the Remote access
     /// card carries beside what Tailscale is doing — see
     /// [`crate::device::Devices`], which is the workbench's side of this.
@@ -287,7 +331,7 @@ impl Members {
     /// make a member with, so nought is what there is to count rather than
     /// what nobody looked for.
     pub(crate) fn count(&self) -> usize {
-        0
+        self.linked
     }
 }
 

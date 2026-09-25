@@ -34,8 +34,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
-use verkstead_server::device::Device;
 use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, RENEW_WITHIN};
 use verkstead_server::peer;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
@@ -101,6 +101,41 @@ impl Listening {
         let dir = tempfile::tempdir().unwrap();
         let device = Device::stated(dir.path(), id).unwrap();
 
+        Listening::standing(dir, device, answering)
+    }
+
+    /// And one whose device came up in the middle of a changeover: a
+    /// certificate near enough its expiry for the start to make another, and a
+    /// member that has yet to acknowledge the one it made.
+    ///
+    /// Which is the whole of what this is here to ask — the listener presents
+    /// the certificate that member holds, rather than the one it has not been
+    /// told about yet, and a changeover is a re-issue that costs no call.
+    fn mid_changeover(id: &str) -> Listening {
+        let dir = tempfile::tempdir().unwrap();
+
+        Device::stated_good_for(dir.path(), id, RENEW_WITHIN - time::Duration::days(1)).unwrap();
+
+        let device = Device::issued(dir.path(), &peer::Members::stated(1)).unwrap();
+
+        assert!(
+            device.incoming_fingerprint().is_some(),
+            "a start inside the renewal window makes a fresh certificate",
+        );
+
+        Listening::standing(dir, device, |device| {
+            peer::router(device, nowhere(), peer::Members::stated(1))
+        })
+    }
+
+    /// The socket, the handshakes and the serve, over a device that is already
+    /// made: what every constructor above comes down to once it has said which
+    /// device it is standing behind.
+    fn standing(
+        dir: tempfile::TempDir,
+        device: Device,
+        answering: impl FnOnce(Device) -> Router,
+    ) -> Listening {
         let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
             .expect("the loopback on a port the machine picked is free");
         let address = listener.address();
@@ -313,6 +348,45 @@ async fn the_certificate_the_handshake_hands_over_is_the_one_the_startup_line_pr
         listening.device.fingerprint(),
         "and the answer names the same one, which is what a caller checks the \
          handshake against, got:\n{answered}",
+    );
+}
+
+/// And the other half of that: over a changeover the certificate the handshake
+/// hands over is the *outgoing* one, which is the one every member holds.
+///
+/// A re-issue that started presenting the new certificate the moment it made
+/// one would take every link down until each member had been told — which is
+/// the call a changeover exists not to cost, and the reason two certificates
+/// are held rather than one replaced.
+#[tokio::test]
+async fn a_device_in_the_middle_of_a_changeover_presents_the_certificate_its_members_hold() {
+    let listening = Listening::mid_changeover(THIS_DEVICE);
+
+    let (presented, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert_eq!(
+        fingerprint_of(&presented),
+        listening.device.fingerprint(),
+        "a member that has not acknowledged the new fingerprint is answered with the one \
+         it holds",
+    );
+    assert_ne!(
+        fingerprint_of(&presented),
+        listening
+            .device
+            .incoming_fingerprint()
+            .expect("this device is in the middle of a changeover"),
+        "and the new certificate is not what is going out yet, or there would have been \
+         nothing to announce",
+    );
+
+    let identity: serde_json::Value = serde_json::from_str(body(&answered)).unwrap();
+
+    assert_eq!(
+        identity["fingerprint"],
+        listening.device.fingerprint(),
+        "and what the endpoint names is the certificate the handshake just presented, \
+         which is what a caller checks one against, got:\n{answered}",
     );
 }
 

@@ -186,6 +186,17 @@ tracing = "0.1"
 # than 0.5 for the same reason: 0.5's hashing is a generation ahead of the one
 # p256 uses, and would put two of every crypto crate in the tree.
 web-push-native = { version = "0.4", default-features = false }
+# Reading the expiry back out of the certificate this device presents, which is
+# what says whether a re-issue is due (ADR 0020) — see `src/device.rs`. rcgen
+# wrote that date and cannot be asked for it afterwards: what a later start
+# finds on disk is a PEM file rather than the parameters it was made from, so
+# the renewal reads the certificate the way any other tool would.
+#
+# The device suite reads it the same way and for a reason of its own — a test
+# that took the validity back out of rcgen's own parameters would be a test of
+# nothing — which is what this was here for before the server itself had to
+# ask.
+x509-parser = "0.18"
 
 # The Unix half of the server: everything the session machinery does that is a
 # syscall rather than a record.
@@ -291,10 +302,3 @@ tower = { version = "0.5", features = ["util"] }
 # every such failure reads *it printed nothing*. `env-filter` so that what is
 # printed is this crate's own account rather than sqlx's every statement.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Reading a certificate the way something other than rcgen would, which is what
-# the device suite has to do to be a check at all: `src/device.rs` writes the
-# validity and the device id into the certificate it makes, and a test that read
-# those back out of the same crate's own parameters would be a test of nothing.
-# A dev-dependency rather than a dependency — the server never parses a
-# certificate beyond the DER its fingerprint is a hash of.
-x509-parser = "0.18"

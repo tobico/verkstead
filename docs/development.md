@@ -40,8 +40,21 @@ the first start and read back at every one after it.
 at the first start and read back at every one after it, and it is what every
 record and URL naming a device will name this one by; the fingerprint is its
 self-signed certificate's, in the spelling two people compare one in. Both are
-in the Data Directory beside the key, as `device.id` and `device.pem`, and they
-are good for ninety days ([ADR 0020](adr/0020-cluster-mode.md)).
+in the Data Directory beside the key, as `device.id` and `device.pem`. The
+certificate is good for ninety days and the first start with fewer than thirty
+of them left makes another ([ADR 0020](adr/0020-cluster-mode.md)) — an expired
+one is refused at the handshake, so a certificate issued once and read back for
+ever would be the day every link in a cluster went down together. The id is
+untouched by that: it is the certificate that is renewed.
+
+While the new certificate is waiting on members to acknowledge it, a line of
+its own says so and names both fingerprints — the one still going out and the
+one coming in. Nothing is linked yet, so what that line says here is that there
+was nobody to announce to and the changeover is already over:
+
+```console
+  INFO verkstead_server: this device's certificate was near its expiry and has been made again, and there was no member to announce the new fingerprint to fingerprint=9C:4B:…
+```
 
 **`peer_listen=` is where another Verkstead reaches this one.** A second
 listener, TLS on every interface at port 8423, presenting the certificate
@@ -92,7 +105,7 @@ rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
-directories, the two files this device is, and the settings files. `--data-dir`
+directories, the files this device is, and the settings files. `--data-dir`
 says where, or `VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own
 place for it — `~/.local/share/verkstead` on Linux, `~/Library/Application
 Support/Verkstead` on macOS — which is what an installed Verkstead wants and

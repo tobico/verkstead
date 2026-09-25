@@ -15,8 +15,8 @@
 //! link between two devices is the two fingerprints each side holds, with no
 //! bearer token and nothing stored beside the certificates — so the certificate
 //! is not a detail of how a connection is encrypted but the thing being
-//! identified. Here it is made, read back and named; the peer listener that
-//! presents it and the renewal that replaces it come after.
+//! identified. Here it is made, read back, named and made again before it runs
+//! out; the peer listener that presents it is [`crate::peer`]'s.
 //!
 //! **A file of its own each, beside `workbench.key` rather than inside a
 //! settings file** — see [`crate::key`], which is the same problem solved
@@ -34,12 +34,22 @@
 //! because none of them is a fact about this install that outlives a request:
 //! a laptop moves between the LAN and the tailnet, and DHCP moves everybody.
 //!
-//! **The validity is said here rather than taken from the crate.** Ninety days,
-//! written down in [`VALIDITY`]. An expired certificate is refused at the
-//! handshake, so the number decides when every link in a cluster would go down
-//! together if nothing renewed it — which is exactly why a default accepted
-//! without looking was the thing ADR-0020 ruled out, along with a validity long
-//! enough never to matter.
+//! **The validity is said here rather than taken from the crate, and the
+//! certificate is re-issued before it runs out.** Ninety days, written down in
+//! [`VALIDITY`], and made again at the first start with fewer than
+//! [`RENEW_WITHIN`] of them left. An expired certificate is refused at the
+//! handshake, so a certificate issued once and read back for ever would take
+//! every link in a cluster down together on the same day, the only way back
+//! being to re-link every device by hand — which is exactly what ADR-0020
+//! ruled out, along with a validity long enough never to matter and a default
+//! accepted without looking.
+//!
+//! **Both certificates are held over the changeover** — see [`Changeover`].
+//! The fresh one waits beside the one being presented until every member has
+//! acknowledged its fingerprint, so a re-issue never costs a call; with no
+//! member to acknowledge anything the changeover completes at the start that
+//! began it, and says it had nobody to tell. Telling them is the linking
+//! stage's, there being no member to tell yet.
 //!
 //! **And [`Devices`] is what the human's own browser reads of all this**: this
 //! device and how many others are linked to it, which is the Devices section of
@@ -52,12 +62,15 @@ pub mod reading;
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, anyhow};
 use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use verkstead_render::DevicesView;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::FromDer;
 
 use crate::peer::Members;
 use crate::settings::write_atomically;
@@ -75,15 +88,27 @@ const ID_FILE: &str = "device.id";
 /// of the two is better than having neither.
 const CERTIFICATE_FILE: &str = "device.pem";
 
-/// And what both are written as: readable and writable by the account Verkstead
-/// runs under, and by nothing else on the machine. The same mode the Workbench
-/// Key's file gets, and for the same reason on the half that is a private key —
-/// it is the whole of what proves this device is this device, and a link is
-/// somebody else's machine trusting it.
+/// And where the certificate made to replace it waits, while any member has
+/// still to be told its fingerprint — see [`Changeover`].
+///
+/// A file of its own rather than the first one being written over, because
+/// [`CERTIFICATE_FILE`] is what this device *presents*. A changeover that
+/// moved that file's meaning would be a start — one that lost power halfway,
+/// or an older build's — presenting a certificate no member had acknowledged,
+/// which is the call a changeover exists not to cost. So the new one waits
+/// here, and the last thing a completed changeover does is write it over the
+/// old one and take this away.
+const INCOMING_FILE: &str = "device.next.pem";
+
+/// And what all of them are written as: readable and writable by the account
+/// Verkstead runs under, and by nothing else on the machine. The same mode the
+/// Workbench Key's file gets, and for the same reason on the half that is a
+/// private key — it is the whole of what proves this device is this device,
+/// and a link is somebody else's machine trusting it.
 ///
 /// The id is nobody's secret and is written at that mode anyway. It is one
-/// identity in two files, and two modes over it would be two things to
-/// remember and one of them to get wrong.
+/// identity in a handful of files, and two modes over them would be two things
+/// to remember and one of them to get wrong.
 const DEVICE_MODE: u32 = 0o600;
 
 /// How much randomness the id is: sixteen bytes from the operating system's own
@@ -104,35 +129,112 @@ const ID_BYTES: usize = 16;
 /// out about while there is still somebody around who remembers this feature,
 /// and long enough that renewing is a quarterly event rather than a weekly one.
 ///
-/// Nothing here renews: the re-issue that reads this is the renewal's own, and
-/// what this stage does with the number is write it into the certificate.
+/// What keeps that day from arriving is [`RENEW_WITHIN`], which is how much of
+/// this is left when the certificate is made again.
 pub const VALIDITY: time::Duration = time::Duration::days(90);
 
-/// This device: its id, its certificate, and the two files they are kept in.
+/// And how much of that validity is left when it is: **thirty days**.
+///
+/// The first start inside this window makes a fresh certificate — see
+/// [`Device::renewed`] — which leaves two months of ordinary starts to do it
+/// in and a month of them after in which to notice that one did.
+///
+/// **At a start rather than on a timer**, because a start is when these files
+/// are read at all, and a schedule inside the process would be a second thing
+/// to get right about an event that every upgrade and every reboot already
+/// walks into.
+///
+/// **Which leaves the server nobody restarts, and that is a trade rather than
+/// an oversight.** A process running longer than [`VALIDITY`] without one goes
+/// past this window and then past its own expiry still presenting the
+/// certificate it started with, and every member refuses it at the handshake
+/// until somebody restarts it. Sixty days of running before the window is so
+/// much as reached is longer than any upgrade here has gone without a restart,
+/// and the machine that manages it has a human on it who can restart it.
+pub const RENEW_WITHIN: time::Duration = time::Duration::days(30);
+
+/// What a start did about the expiry: whether a re-issue was due, and whether
+/// anybody is owed an announcement of the certificate it made (ADR-0020).
+///
+/// Read off the handle rather than logged and forgotten, because it is where
+/// the linking stage picks the announcement up: a changeover still owed one is
+/// a changeover with a member to tell, and telling them is the whole of what
+/// that stage adds to what is here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Changeover {
+    /// Nothing was due: the certificate has more than [`RENEW_WITHIN`] left, so
+    /// it is the one it was. Which is what all but one start in a
+    /// certificate's life finds.
+    NotDue,
+
+    /// A fresh certificate was made, and it is the one presented from this
+    /// moment on: nobody was owed an announcement of its fingerprint, so the
+    /// changeover completed at the start that began it.
+    ///
+    /// Which is every re-issue this build can make. A member is made by a join
+    /// and there is no join yet — see [`Members`] — so the answer to *is
+    /// anything still owed an announcement* is no, and saying so is the whole
+    /// of what a changeover here has to do about it.
+    NobodyToTell,
+
+    /// A fresh certificate is held beside the one still being presented, and
+    /// this many members have yet to acknowledge its fingerprint.
+    ///
+    /// The old one goes on going out until they have, so the changeover never
+    /// costs a call: a member that was unreachable is announced to again when
+    /// it next answers, and one that never answers is a member the human
+    /// unlinks anyway.
+    YetToTell(usize),
+}
+
+/// This device: its id, the certificate it presents, and the files they are
+/// kept in.
 ///
 /// A handle rather than the two strings, because the files are what the
 /// identity *is*: a second Verkstead over the same Data Directory is the same
 /// device, and a re-issue has somewhere to write.
 #[derive(Debug, Clone)]
 pub struct Device {
-    /// The directory both files are in, which is the Data Directory. Kept
-    /// rather than the two paths, because either is the other's neighbour and
-    /// the renewal writes one of them again.
+    /// The directory the files are in, which is the Data Directory. Kept
+    /// rather than the paths, because each is the others' neighbour and a
+    /// re-issue writes more than one of them.
     dir: PathBuf,
 
     id: String,
 
-    /// The private key and the certificate, as the file holds them: the text
-    /// is what is presented and what is read back, so it is kept rather than
-    /// reassembled out of parsed halves.
+    /// The certificate this device presents, which over a changeover is the
+    /// outgoing one: what a member holds is what a member is answered with.
+    presenting: Held,
+
+    /// And the one made to replace it, where a changeover is in flight. `None`
+    /// is the ordinary state, and it is two different ordinary states — no
+    /// re-issue is due, or the last one is over.
+    incoming: Option<Held>,
+
+    /// What this start did about the expiry, which is what the startup line
+    /// says and what an announcement will be picked up from.
+    changeover: Changeover,
+}
+
+/// A certificate as this module holds one: the text its file keeps, what it is
+/// named by, and when it runs out.
+///
+/// The text is what is presented and what is read back, so it is kept rather
+/// than reassembled out of parsed halves. The other two are worked out once as
+/// it is read or made, there being no reading either of them without a parse.
+#[derive(Debug, Clone)]
+struct Held {
     certificate: String,
 
-    /// And the certificate's fingerprint, worked out once as it is read or
-    /// made. It is compared by eye rather than by machine — two people on two
-    /// phones checking that the device one of them is linking is the device the
-    /// other is offering — so it is a string here rather than the digest it is
-    /// a spelling of.
+    /// Its fingerprint, which is compared by eye rather than by machine — two
+    /// people on two phones checking that the device one of them is linking is
+    /// the device the other is offering — so it is a string here rather than
+    /// the digest it is a spelling of.
     fingerprint: String,
+
+    /// And when it stops being accepted at a handshake, which is the one thing
+    /// a start asks of a certificate it already has.
+    expires: OffsetDateTime,
 }
 
 impl Device {
@@ -165,7 +267,11 @@ impl Device {
     /// cluster has pinned is the single act here that cannot be taken back. So
     /// the start says what it could not read and what deleting the file would
     /// do, and stops.
-    pub fn issued(data_dir: &Path) -> std::io::Result<Device> {
+    ///
+    /// **And the expiry is seen to here**, which is the one thing a start does
+    /// *to* an identity it found rather than with it — see [`Device::renewed`],
+    /// which is where `members` is asked its one question.
+    pub fn issued(data_dir: &Path, members: &Members) -> std::io::Result<Device> {
         let id_path = data_dir.join(ID_FILE);
         let certificate_path = data_dir.join(CERTIFICATE_FILE);
 
@@ -195,7 +301,7 @@ impl Device {
         let certificate = match certificate {
             Some(certificate) => certificate,
             None => {
-                let certificate = minted(&id)?;
+                let certificate = minted(&id, VALIDITY)?;
 
                 write_atomically(&certificate_path, &certificate, DEVICE_MODE)?;
 
@@ -203,7 +309,7 @@ impl Device {
             }
         };
 
-        Device::holding(data_dir, id, certificate)
+        Device::holding(data_dir, id, certificate)?.renewed(members)
     }
 
     /// The identity a fixture states, so that what a suite asserts against is
@@ -222,33 +328,46 @@ impl Device {
     /// needs of the fingerprint it reads off the handle this hands back, which
     /// is the same string the server would present.
     pub fn stated(data_dir: &Path, id: &str) -> std::io::Result<Device> {
+        Device::stated_good_for(data_dir, id, VALIDITY)
+    }
+
+    /// And the same with how much life is left in the certificate stated too,
+    /// which is what the suite about the renewal stands on.
+    ///
+    /// A start near the expiry is the whole of what that suite has to be able
+    /// to stand at, and there are two ways of standing there: a clock this
+    /// process does not keep, or a certificate that was made with less life in
+    /// it. This is the second. The certificate is a real one made the way
+    /// every other one here is made, and the only thing stated about it is how
+    /// long it was ever good for — so what [`Device::issued`] then does with it
+    /// is what it would do on a machine that had been running for two months.
+    ///
+    /// It writes the identity and hands back what was written. The re-issue is
+    /// [`Device::issued`]'s, as it is at a start.
+    pub fn stated_good_for(
+        data_dir: &Path,
+        id: &str,
+        good_for: time::Duration,
+    ) -> std::io::Result<Device> {
         write_atomically(&data_dir.join(ID_FILE), &format!("{id}\n"), DEVICE_MODE)?;
 
-        let certificate = minted(id)?;
+        let certificate = minted(id, good_for)?;
 
         write_atomically(&data_dir.join(CERTIFICATE_FILE), &certificate, DEVICE_MODE)?;
 
         Device::holding(data_dir, id.to_owned(), certificate)
     }
 
-    /// One handle over an id and a certificate that are both already on disk.
+    /// One handle over an id and a certificate that are both already on disk,
+    /// with nothing said yet about the expiry.
     ///
     /// Where the certificate is parsed, which is what turns text into an
-    /// identity: the fingerprint is a hash of the certificate's own bytes
-    /// rather than of the file's, so there is no reading this without parsing,
-    /// and the private key is parsed beside it because half a pair would be
-    /// found out at the first handshake instead of here.
+    /// identity — see [`held`]. A failure here is a failure at the start that
+    /// read it, saying which file it was and what deleting it would cost.
     fn holding(data_dir: &Path, id: String, certificate: String) -> std::io::Result<Device> {
-        // Ended with one newline whichever way it arrived. What is read back
-        // off the disk is trimmed — an empty file is a file that is not there,
-        // and that judgement is made on the text — so without this the
-        // certificate a restart holds would differ from the one the start that
-        // wrote it held by the line ending at the end of it.
-        let certificate = format!("{}\n", certificate.trim_end());
-
-        let fingerprint = fingerprint_of(&certificate).map_err(|why| {
+        let presenting = held(&certificate).map_err(|why| {
             std::io::Error::other(format!(
-                "reading the device certificate in {}: {why} — delete {CERTIFICATE_FILE} and \
+                "reading the device certificate in {}: {why:#} — delete {CERTIFICATE_FILE} and \
                  the next start makes a fresh one, which every device this one is linked to \
                  would then have to be linked to again",
                 data_dir.display(),
@@ -258,20 +377,124 @@ impl Device {
         Ok(Device {
             dir: data_dir.to_owned(),
             id,
-            certificate,
-            fingerprint,
+            presenting,
+            incoming: None,
+            changeover: Changeover::NotDue,
         })
     }
 
+    /// The same device with the expiry seen to: a fresh certificate where one
+    /// is due, and the changeover already in flight where an earlier start
+    /// began one.
+    ///
+    /// **`members` is asked one question** — how many of them have yet to
+    /// acknowledge the new fingerprint — and its answer decides which of the
+    /// two certificates is presented. Nobody owed an announcement is a
+    /// changeover that completes here and now; anybody owed one is a
+    /// changeover in flight, the old certificate still going out and the new
+    /// one waiting in [`INCOMING_FILE`] for the start after this. That is the
+    /// whole of the bookkeeping. Telling them is the linking stage's, and
+    /// there is no member to tell yet — so what this answers is *nobody*, and
+    /// [`Changeover::NobodyToTell`] is it saying so.
+    fn renewed(self, members: &Members) -> std::io::Result<Device> {
+        // A changeover an earlier start began, where there is one. The
+        // certificate it made is read back rather than a third one minted:
+        // every restart during a changeover would otherwise be another
+        // fingerprint for the members to acknowledge, and a changeover that
+        // never finished.
+        let begun = match read_back(&self.incoming_path()) {
+            Some(pem) => Some(held(&pem).map_err(|why| {
+                std::io::Error::other(format!(
+                    "reading the certificate this device is changing over to, in {}: {why:#} — \
+                     delete {INCOMING_FILE} and the next start begins the changeover again, \
+                     which costs nothing while nothing has acknowledged it",
+                    self.dir.display(),
+                ))
+            })?),
+            None => None,
+        };
+
+        // Or one begun here, where the expiry is near enough for that.
+        let incoming = match begun {
+            Some(incoming) => Some(incoming),
+            None if self.due() => {
+                let certificate = minted(&self.id, VALIDITY)?;
+
+                Some(held(&certificate).map_err(std::io::Error::other)?)
+            }
+            None => None,
+        };
+
+        let Some(incoming) = incoming else {
+            return Ok(self);
+        };
+
+        match members.unacknowledged(&incoming.fingerprint) {
+            // Nobody is owed an announcement, so the changeover completes at
+            // once: the new certificate becomes the presented one and the file
+            // it was waiting in goes. In that order, so that a machine losing
+            // power between the two leaves a start holding two copies of one
+            // certificate rather than none — which is a changeover that
+            // completes again and comes out where this one did.
+            0 => {
+                write_atomically(&self.certificate_path(), &incoming.certificate, DEVICE_MODE)?;
+
+                taken_away(&self.incoming_path())?;
+
+                Ok(Device {
+                    presenting: incoming,
+                    incoming: None,
+                    changeover: Changeover::NobodyToTell,
+                    ..self
+                })
+            }
+
+            // And somebody is, so the old certificate goes on being presented
+            // and the new one waits where the start after this will find it.
+            // Written again although it may have just been read from there:
+            // one write of the same bytes at each start while a changeover is
+            // in flight is cheaper than two paths through here that have to
+            // stay in step.
+            owed => {
+                write_atomically(&self.incoming_path(), &incoming.certificate, DEVICE_MODE)?;
+
+                Ok(Device {
+                    incoming: Some(incoming),
+                    changeover: Changeover::YetToTell(owed),
+                    ..self
+                })
+            }
+        }
+    }
+
+    /// Whether the certificate being presented is near enough its expiry to be
+    /// made again: [`RENEW_WITHIN`] or less left of it.
+    ///
+    /// One that has already run out is near enough too, which is what a
+    /// machine switched off for a season comes back to. There is nothing
+    /// better to do with an expired certificate than replace it — every member
+    /// refuses it at the handshake, so the links it was holding are down
+    /// already and the changeover costs nothing that is not lost.
+    fn due(&self) -> bool {
+        self.presenting.expires - OffsetDateTime::now_utc() <= RENEW_WITHIN
+    }
+
     /// What every record and URL names this device by.
+    ///
+    /// Untouched by a re-issue: it is the certificate that is renewed, and a
+    /// device keeps its id for as long as its Data Directory lasts.
     pub fn id(&self) -> &str {
         &self.id
     }
 
     /// The certificate and its private key, as the file holds them: the PEM a
     /// TLS configuration is built out of.
+    ///
+    /// Over a changeover this is the *outgoing* one, which is the point of
+    /// holding two: what the members hold is what they are answered with,
+    /// until they have said they hold the other.
     pub fn certificate(&self) -> &str {
-        &self.certificate
+        &self.presenting.certificate
     }
 
     /// The certificate's fingerprint, in the spelling a human compares one in:
@@ -282,7 +505,25 @@ impl Device {
     /// reads off a phone while another reads it off a screen, so it is grouped
     /// to be found a place in and cased to be read aloud.
     pub fn fingerprint(&self) -> &str {
-        &self.fingerprint
+        &self.presenting.fingerprint
+    }
+
+    /// And the fingerprint of the certificate waiting to replace it, where a
+    /// changeover is in flight.
+    ///
+    /// Both are printable over a changeover because that is the only way
+    /// anybody tells which of the two a peer met: a human reading a startup
+    /// line off one machine, and a member's record of what it has acknowledged,
+    /// are looking at the same pair of strings.
+    pub fn incoming_fingerprint(&self) -> Option<&str> {
+        self.incoming
+            .as_ref()
+            .map(|incoming| incoming.fingerprint.as_str())
+    }
+
+    /// What the start that read this identity did about the expiry.
+    pub fn changeover(&self) -> Changeover {
+        self.changeover
     }
 
     /// Where the id is kept, which is what says so in a failure to write it.
@@ -293,6 +534,11 @@ impl Device {
     /// And where the certificate is.
     pub fn certificate_path(&self) -> PathBuf {
         self.dir.join(CERTIFICATE_FILE)
+    }
+
+    /// And where the one replacing it waits, over a changeover.
+    pub fn incoming_path(&self) -> PathBuf {
+        self.dir.join(INCOMING_FILE)
     }
 }
 
@@ -386,25 +632,42 @@ fn invented() -> std::io::Result<String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// A fresh self-signed certificate for `id`, and the key that signed it, as the
-/// one PEM text the file holds.
+/// Take `path` away, counting one that is already gone as one taken away.
+///
+/// Which is what a changeover completing twice looks like: a start that
+/// finished one and lost power before the file went, and the start after it
+/// doing the same work again. The file is in the same state either way, and
+/// the second start has nothing to report about the first.
+fn taken_away(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        otherwise => otherwise,
+    }
+}
+
+/// A fresh self-signed certificate for `id`, good for `good_for`, and the key
+/// that signed it, as the one PEM text a file holds.
 ///
 /// **The id is what the certificate is named after**, in the subject's common
 /// name and as its one subject alternative name. It is the only name this
 /// device has that does not change: the hostname is what a device is *shown*
 /// under and two machines may share one, where the id was invented to be a
-/// device's own.
+/// device's own — which is why a re-issue is a new certificate for the same
+/// device rather than a new device.
 ///
 /// **It carries both purposes.** One certificate stands at both ends of every
 /// link — a device presents it to answer a call and presents the same one to
 /// make a call — so a certificate good for only one of the two would be a
 /// device that could be talked to and could not talk.
 ///
-/// The validity is [`VALIDITY`], counted from the moment it is made. Nothing is
-/// backdated: a clock skewed far enough to refuse a certificate issued now is a
-/// clock that will refuse the handshake's other checks too, and an hour quietly
-/// added here would make the ninety days ninety days and an hour.
-fn minted(id: &str) -> std::io::Result<String> {
+/// The validity is counted from the moment it is made, and every certificate a
+/// start makes is made for [`VALIDITY`]: `good_for` is said rather than taken
+/// from there so that a fixture can stand a suite at a start near the expiry —
+/// see [`Device::stated_good_for`]. Nothing is backdated: a clock skewed far
+/// enough to refuse a certificate issued now is a clock that will refuse the
+/// handshake's other checks too, and an hour quietly added here would make the
+/// ninety days ninety days and an hour.
+fn minted(id: &str, good_for: time::Duration) -> std::io::Result<String> {
     let key = KeyPair::generate().map_err(std::io::Error::other)?;
 
     let mut params = CertificateParams::new(vec![id.to_owned()]).map_err(std::io::Error::other)?;
@@ -420,30 +683,52 @@ fn minted(id: &str) -> std::io::Result<String> {
     let now = OffsetDateTime::now_utc();
 
     params.not_before = now;
-    params.not_after = now + VALIDITY;
+    params.not_after = now + good_for;
 
     let certificate = params.self_signed(&key).map_err(std::io::Error::other)?;
 
     Ok(format!("{}{}", key.serialize_pem(), certificate.pem()))
 }
 
-/// The fingerprint of the certificate in `pem`, and the parse that has to
-/// happen to work one out.
+/// The certificate in `pem` as this module holds one, and the parse that has to
+/// happen to hold it.
 ///
-/// The hash is of the certificate's DER — its own bytes, as they go over the
-/// wire — rather than of the file's text, so that the fingerprint two people
-/// compare is the one every other tool would print of the same certificate and
-/// does not move when a line ending does.
+/// There is no reading either of the two things beside the text without a
+/// parse: the fingerprint is a hash of the certificate's DER — its own bytes,
+/// as they go over the wire, rather than of the file's text, so that what two
+/// people compare is what every other tool would print of the same certificate
+/// and does not move when a line ending does — and the expiry is a field
+/// inside it, which is where a re-issue reads whether it is due.
 ///
-/// The private key is parsed and thrown away. Nothing here wants it yet; what
+/// The private key is parsed and thrown away. Nothing here wants it; what
 /// asking for it buys is that a truncated file is a failure at the start that
-/// wrote it rather than a handshake that will not complete weeks later.
-fn fingerprint_of(pem: &str) -> Result<String, rustls_pki_types::pem::Error> {
-    PrivateKeyDer::from_pem_slice(pem.as_bytes())?;
+/// read it rather than a handshake that will not complete weeks later.
+fn held(pem: &str) -> anyhow::Result<Held> {
+    // Ended with one newline whichever way it arrived. What is read back off
+    // the disk is trimmed — an empty file is a file that is not there, and that
+    // judgement is made on the text — so without this the certificate a restart
+    // holds would differ from the one the start that wrote it held by the line
+    // ending at the end of it.
+    let certificate = format!("{}\n", pem.trim_end());
 
-    let certificate = CertificateDer::from_pem_slice(pem.as_bytes())?;
+    PrivateKeyDer::from_pem_slice(certificate.as_bytes())
+        .context("the private key that should stand in front of it")?;
 
-    Ok(fingerprint_of_der(&certificate))
+    let der =
+        CertificateDer::from_pem_slice(certificate.as_bytes()).context("the certificate itself")?;
+
+    let (_, parsed) = X509Certificate::from_der(&der)
+        .map_err(|why| anyhow!("{why}"))
+        .context("what the certificate says about itself")?;
+
+    let expires = OffsetDateTime::from_unix_timestamp(parsed.validity().not_after.timestamp())
+        .context("the expiry the certificate carries")?;
+
+    Ok(Held {
+        fingerprint: fingerprint_of_der(&der),
+        certificate,
+        expires,
+    })
 }
 
 /// The same fingerprint of a certificate that arrived rather than one that was

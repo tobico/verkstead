@@ -545,6 +545,13 @@ certificates. It is good for **ninety days**, said in Verkstead's own code
 rather than inherited from a crate's default, because an expired certificate is
 refused at the handshake and a validity nobody chose is the day every link goes
 down together.
+**And it is made again before it runs out**, at the first start with fewer than
+**thirty** of those days left — which is what a **Changeover** is the middle
+of. Nothing is on a timer: a start is when these files are read at all, which
+leaves two months of ordinary starts to make the certificate again in and a
+month of them after in which to notice that one did. A process left running
+past its own ninety days is the trade that buys, and a restart is its whole
+remedy.
 **Its fingerprint is spelled to be compared by eye**: the SHA-256 of the
 certificate's own bytes as upper-case hex in colon-separated pairs, which is
 what every other tool prints of the same certificate. That is what it is for —
@@ -621,6 +628,29 @@ this one being the row the list already holds — after whichever of its sentenc
 the machine's Tailscale earned.
 _Avoid_: linked devices pane, cluster list, machines, the device list (it is
 **Devices**, as **Repos** is)
+
+**Changeover**:
+What a **Device** is in the middle of between making its certificate again and
+every member holding the new one. Two certificates side by side in the **Data
+Directory**: `device.pem`, which is what the **Peer Listener** presents, and
+`device.next.pem`, which is what is coming.
+**The outgoing one goes on being presented** until every member has
+acknowledged the new fingerprint, so a changeover never costs a call — what a
+member holds is what it is answered with. A member that was unreachable is
+announced to again when it next answers, and one that never answers is a member
+the human unlinks anyway.
+**Both fingerprints are printable while one is in flight**, on a startup line
+of its own, because that is the only way anybody tells which of the two a peer
+met.
+**With no member there is nobody to announce to**, and then it completes at the
+start that began it: the new certificate is written over the old, the file it
+was waiting in goes, and the line says it had nobody to tell. Which is every
+re-issue a Verkstead of this build can make — a member is made by a join, and
+the join is the linking stage's.
+**A device keeps its id through one.** It is the certificate that is renewed —
+the **Device Id** was invented once and lasts as long as the **Data Directory**
+does.
+_Avoid_: rotation, rollover, key rotation, cert refresh
 
 **Peer Listener**:
 The second listener, and the one another **Device** dials: TLS on every
