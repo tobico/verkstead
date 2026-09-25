@@ -24,8 +24,10 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
   what is inside the file.
 - **Records are rewritten by the stage that ships each platform** (Q19): the
   Linux section of `docs/adoption.md`, the Log Directory, Startup Registration
-  and tray entries in `CONTEXT.md`, and the Linux leg's paragraph in
-  `docs/releasing.md`.
+  and tray entries in `CONTEXT.md`, the Linux leg's paragraph in
+  `docs/releasing.md`, and that platform's artifact in `docs/development.md` —
+  which is the document a developer reads to build one, and which stage 02
+  has already put right about running the app.
 - **The trunk stays releasable**: after this stage a Release carries the
   Electron AppImage beside the Rust dmg and msi, and that is accepted.
 
@@ -45,13 +47,15 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
 3. **The Rust AppImage retired** — `tools/build-appimage.sh`, its container
    image and its steps removed from the leg. Accepts: no leg builds the Rust
    tray for Linux.
-4. **The words** — adoption, CONTEXT and releasing rewritten for the app on
-   Linux, including what a desktop with no tray host now loses (only the
-   icon) and what COSMIC proof stage 03 recorded. CONTEXT's Log Directory
-   entry says **View Logs** is on the tray menu; what opens the file now is
-   that item *or* the Desktop page's button, which is why losing the icon
-   loses nothing but the icon. Accepts: nothing in the Linux section names
-   `verkstead desktop` or `AppRun`.
+4. **The words** — adoption, CONTEXT, releasing and development rewritten for
+   the app on Linux, including what a desktop with no tray host now loses
+   (only the icon) and what COSMIC proof stage 03 recorded. CONTEXT's Log
+   Directory entry says **View Logs** is on the tray menu; what opens the file
+   now is that item *or* the Desktop page's button, which is why losing the
+   icon loses nothing but the icon. development's build list drops
+   `tools/build-appimage.sh` and its AppImage paragraph describes the packed
+   app. Accepts: nothing in the Linux section names `verkstead desktop` or
+   `AppRun`.
 
 ## Re-verify at start
 

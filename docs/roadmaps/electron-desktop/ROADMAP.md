@@ -12,7 +12,9 @@ only the app draws. The decisions and their why are in
 [ADR-0020](../../adr/0020-electron-desktop.md), which supersedes
 [ADR-0012](../../adr/0012-desktop-tray-binary.md); the terms are in
 [CONTEXT.md](../../../CONTEXT.md), which each stage updates as its piece
-lands.
+lands, as does [development.md](../../development.md) — a fifth of which is
+about the crate this roadmap retires, and which goes wrong at stage 02 rather
+than at the end.
 
 Each stage is one feature: one branch, one review unit. Task chunkings inside
 the briefs are provisional — re-grounded against the codebase when the stage

@@ -36,10 +36,12 @@ says it did.
    shell; the closure check updated. Accepts: CI green with fewer steps;
    `nix flake check` passes.
 3. **The words** — `docs/releasing.md` rewritten for eight legs of the new
-   shape; the desktop roadmap's index note updated to say what stands now;
-   the CONTEXT.md sweep for `verkstead desktop`, the shim and the launcher.
-   Accepts: a grep for `verkstead desktop` finds only ADR-0012 and the old
-   roadmap's briefs.
+   shape; `docs/development.md`'s remaining tray paragraphs gone, the GTK the
+   workspace linked among them, and `tools/generate-packaging.sh` described
+   for what it still makes; the desktop roadmap's index note updated to say
+   what stands now; the CONTEXT.md sweep for `verkstead desktop`, the shim and
+   the launcher. Accepts: a grep for `verkstead desktop` finds only ADR-0012
+   and the old roadmap's briefs.
 
 ## Re-verify at start
 
