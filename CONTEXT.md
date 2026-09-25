@@ -387,15 +387,17 @@ as the Build Cache makes its own where it uses it, and what it holds is the log
 and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
 few megabytes and kept no further back than that, so a machine that has been
 running Verkstead for months is not handed a log nobody can open. **View Logs**
-on the tray menu is what opens it. **A file started here opens with a
-byte-order mark** — a fresh one and each roll both, and a run appending to one
-that already has content adds none: Verkstead's own messages have em-dashes in
-them, and the viewers Windows opens a `.log` in read a file with no mark in the
-machine's code page, which is mojibake to the very person being asked to report
-what it says. **The server keeps logging to stdout and the app reads it**:
-nothing about a `verkstead serve`'s own logging changes, and what goes in the
-file is those lines with the app's own beside them, interleaved as they
-happened — the app saying it started a sidecar, the server saying it is
+opens it, on the tray menu and on the **Desktop** section of the settings both,
+one act reached two ways rather than two that agree — so a desktop that gives
+Verkstead no icon loses the icon and nothing else. **A file started here opens
+with a byte-order mark** — a fresh one and each roll both, and a run appending
+to one that already has content adds none: Verkstead's own messages have
+em-dashes in them, and the viewers Windows opens a `.log` in read a file with
+no mark in the machine's code page, which is mojibake to the very person being
+asked to report what it says. **The server keeps logging to stdout and the app
+reads it**: nothing about a `verkstead serve`'s own logging changes, and what
+goes in the file is those lines with the app's own beside them, interleaved as
+they happened — the app saying it started a sidecar, the server saying it is
 listening, the app saying the window is opening on it. `RUST_LOG` filters the
 file exactly as it filters that stdout.
 **A machine that names nowhere to put one is not refused**: it gets no file, the
@@ -408,8 +410,10 @@ _Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
 
 **Startup Registration**:
 What says Verkstead comes up when the machine's desktop session does, and what
-**Launch on Startup** on the tray menu ticks and unticks. The platform's own,
-and the platform's alone: an XDG autostart entry named for the app id on Linux
+**Launch on Startup** on the **Desktop** section of the settings ticks and
+unticks — the tray menu is **Open**, **View Logs** and **Quit**, and startup is
+not among them. The platform's own, and the platform's alone: an XDG autostart
+entry named for the app id on Linux
 (`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
 launch agent on macOS. **It is the state rather than a copy of it** — the box
 is drawn from reading it, checking writes it and unchecking removes it, and
@@ -425,6 +429,49 @@ asked for one is left alone. What it starts is an ordinary launch of the app
 with the browser left alone, because a login is not a moment to be handed a
 browser window.
 _Avoid_: autostart setting, startup preference, run at login option
+
+**Desktop Settings**:
+What the desktop app keeps about the machine it is running on, and the
+**Desktop** section at the top of the settings page that draws them: **When the
+window is closed** — keep running in the tray, ask before quitting, or quit,
+keeping running being the default — and **Show tray icon**. A JSON file of
+Electron's own under its user data, beside the one the window's place is
+remembered in, rather than anything the server was ever told (ADR-0020):
+whether this machine's Verkstead keeps running when its window is closed is a
+fact about the desk in front of the human, and the same account read from a
+laptop and from a desktop wants two different answers. **So none of it is on
+the wire and none of it is in `config.yaml`** — the split the viewer's own
+per-device push switch already made, and the reason there is no server setting
+standing behind any of it.
+**The page reaches the app over a preload bridge and over nothing else**:
+`window.verkstead`, which the app puts on its own window, exposing the platform,
+the settings read and written, the log file opened, and the **Startup
+Registration** read and written. **A page with no bridge is a page with no
+Desktop section**: the same document served to a browser on this machine, or to
+a phone over the tailnet, carries no preload, and that absence reads as *this is
+not the app* rather than as something that failed — which is the whole mechanism
+by which a phone never sees the section, and why nothing had to be added to the
+wire to keep it away from one.
+**A set is enacted in the run it is made in** rather than kept for the next
+launch: turning the tray off takes the icon away that moment, greys the
+keep-running position with a note saying why, and the choice falls to Quit while
+there is no icon to come back from — an app with no icon that has hidden its
+only window is a Verkstead nobody can reach. **And the app is what validates
+one**: a value that is not one of the three positions, or not a boolean, changes
+nothing and answers with the settings as they stand, so the control it came from
+goes back where it was.
+**Two things stand on that section without being settings of it.** **Launch on
+Startup** is the **Startup Registration** itself, read from the platform through
+the bridge and written to it, never copied into the file; and **View Logs** is
+the tray item's own act reached the other way, drawn whatever the tray setting
+says and on every platform: a switch somebody can turn off cannot be the only
+way to a log file, and the desktop most likely to have it turned off is the one
+the tray misbehaved on, which is the machine whose log is worth reading.
+**A Mac draws no close radio**, closing a window there leaving the application
+running in the Dock, and **Show tray icon** reads as the menu bar, that being
+where the icon goes.
+_Avoid_: preferences, app config, device settings, desktop configuration, the
+settings page (that is the whole page, and this is one section of it)
 
 **Workbench Key**:
 The one long-lived secret that says a request is the human's browser rather
