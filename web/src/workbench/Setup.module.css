@@ -1,23 +1,23 @@
 /* What is still the human's to change while the brief is a draft: the repo the
-   work is done in — and with it the branch, the base and the companions — and
-   the three pairings. See `Setup.tsx`.
+   work is done in — and with it the branch, the base and the companions — what
+   kind of work it is, and who runs each role of it. See `Setup.tsx`.
 
    A row of dropdowns along the inside of the composer box's bottom edge rather
    than a form under it, so what it costs the eye is one line of labels and
    values. Which means almost every rule here is a rule taking something *off*
    a control the app draws with a border and a field's paper everywhere else:
    inside this box the border is the box's, and a trigger that drew its own
-   would read as a form dropped into a chat composer. The panel behind the Repo
-   trigger is the exception, being a card of its own. */
+   would read as a form dropped into a chat composer. The two panels are the
+   exception, each being a card of its own. */
 
 /* The row. It wraps rather than scrolling — the pane is as wide as the human
-   dragged it, and five triggers do not fit a phone — and the wrap is the box's
-   own width rather than the window's.
+   dragged it, and a phone fits fewer triggers than a dragged-out pane — and the
+   wrap is the box's own width rather than the window's.
 
-   Five is a passing count rather than the shape of this row: the processes
-   roadmap folds the three role pickers into one Agent control, which brings it
-   back down again. So the rule is written for a row that wraps at whatever it
-   holds, and the number said here is only what it holds today.
+   Three is a passing count rather than the shape of this row, as five was
+   before the role pickers were folded into one Agent control: the rule is
+   written for a row that wraps at whatever it holds, and the number said here
+   is only what it holds today.
 
    A rem under the field it sits below, inside the same box: the brief is what
    the box is for and this is how it will be run, and the two of them a hair
@@ -35,6 +35,7 @@
 .repoOption,
 .repoSelect,
 .processChoice,
+.agentOption,
 .profileChoice {
   flex: 1 1 9rem;
   min-width: 0;
@@ -54,13 +55,14 @@
   color: var(--ink-soft);
 }
 
-/* The Repo trigger, which is a menu's button rather than a listbox's and so is
-   painted here: everything a button arrives with given up, and the two lines
-   put back. The same grid the listboxes beside it lay their handles out on —
-   `.control.headed` in `picking.module.css` — because the caret stands beside
+/* The two panel triggers, which are a menu's button rather than a listbox's and
+   so are painted here: everything a button arrives with given up, and the two
+   lines put back. The same grid the listbox between them lays its handle out on
+   — `.control.headed` in `picking.module.css` — because the caret stands beside
    the label and the value both rather than on either: what it hangs off is the
    whole handle. */
-.repoOption > button {
+.repoOption > button,
+.agentOption > button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -167,6 +169,24 @@
   width: min(22rem, calc(100vw - 2.5rem));
   max-height: min(28rem, 70vh);
   overflow-y: auto;
+}
+
+/* And the panel behind the Agent trigger: a picker per role the Process uses,
+   stacked. The same card at the same width as the Repo one, and hung where the
+   chrome hangs it — off the trigger's far edge, which is the edge the Repo panel
+   has to give up and this one does not: this is the last option of the row, so a
+   card spreading the other way would be a card off the pane.
+
+   The pickers inside keep the dress they wear in the row, which is what makes
+   the stack read as a setting per role rather than as a form. Their own rows are
+   as wide as they always were, being fixed and measured off each control rather
+   than laid out in this card — see `dropping` in `picking.tsx`. */
+.agentOption > [role="group"] {
+  width: min(22rem, calc(100vw - 2.5rem));
+}
+
+.agentOption > [role="group"] > .profileChoice + .profileChoice {
+  margin-top: 0.85rem;
 }
 
 .repoPick,
@@ -388,6 +408,7 @@
    focus only: a press has the rows to show for itself, and a label that lit up
    under every click would be saying what the open dropdown already said. */
 .repoOption > button:focus-visible,
+.agentOption > button:focus-visible,
 .optionPick > button:focus-visible,
 .optionPick > button[aria-expanded="true"],
 .processPick > button:focus-visible,
@@ -399,6 +420,7 @@
 }
 
 .repoOption > button:focus-visible .optionLabel,
+.agentOption > button:focus-visible .optionLabel,
 .optionPick > button:focus-visible .optionLabel,
 .processPick > button:focus-visible .optionLabel,
 .repoSelectPick > button:focus-visible .optionLabel {
@@ -415,11 +437,12 @@
     border-color: var(--ink-soft);
   }
 
-  /* The Repo trigger under the pointer, which is what the three listboxes
-     beside it already do from `picking.module.css`: the whole handle takes an
+  /* The two panel triggers under the pointer, which is what the listbox between
+     them already does from `picking.module.css`: the whole handle takes an
      edge, label and value together, so what the pointer says can be pressed is
      the rectangle that will be pressed. */
-  .repoOption > button:not(:disabled):hover {
+  .repoOption > button:not(:disabled):hover,
+  .agentOption > button:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
 

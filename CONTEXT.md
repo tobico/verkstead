@@ -1704,6 +1704,37 @@ alone.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
 profile (the Profile is half of it)
 
+**Agent**:
+The one control on the composer that settles who runs the work — the last of the
+three the setup row reads, **Repo**, **Process**, Agent, on the compose page and
+a saved Draft's composer both. **Its shape is the Process's.** Where the Process
+uses several roles it is a trigger dropping a panel, the Repo option's own
+pattern — one flat card of controls rather than a modal, two shapes in one row
+being two things to learn — holding a picker per role stacked under its name:
+Grilling, Implementation, Review for Develop. Where the Process uses one role it
+is the flat Pairing dropdown itself, labelled *Agent* and wired to the
+Implementation role, and no panel is drawn at all. Which roles a Process uses and
+which shape it takes is one table the web reads, ADR-0020's own, so a Process
+arriving later is a row added rather than a branch. With only Develop landed the
+panel is the shape every draft gets.
+
+**The trigger reads the Implementation Pairing**, in the short form a closed
+pairing control has always read — the harness's mark beside the words, which is
+why the words leave the harness's name to it — and then ` +1` for each other role
+the Process uses that is picked onto a different Pairing, which is the Repo
+trigger's own convention for the companions it counts. A role picked away and a
+role on the same Pairing add nothing, there being nothing to say about either.
+**Not chosen** stands while any role the Process uses is empty, so the trigger
+says what the start press will refuse on.
+
+*Agent* is the trigger's own label and nothing inside is renamed: the pickers
+keep the role names, which the tests, the Brief's setup facts and the Steer form
+all speak. Nothing about the choices themselves moved either — each picker saves
+itself the moment it is touched, says its own refusals where it stands, and
+stands on the per-Repo memory and the platform default exactly as it did in the
+row, both of those being keyed by role.
+_Avoid_: agent picker, profile pickers, who-runs-it dropdown
+
 **Direction**:
 How a Conversation's work gets built — **inline**, **task list** or **roadmap**
 — picked by the human on a Proposal's own Set, never anywhere else. One of the

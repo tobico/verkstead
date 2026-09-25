@@ -9,14 +9,15 @@
 //!
 //! **A row of options rather than a form under the Brief.** Setting a
 //! Conversation up and kicking it off are one act, and the act is written in
-//! one box — so the whole of the setup is five dropdowns inside that box's
+//! one box — so the whole of the setup is three dropdowns inside that box's
 //! bottom edge, each a dimmed label over its value, and what a reader takes off
-//! them at a glance is the sentence *this repo, this kind of work, these three
-//! accounts*. The panel behind the first of them is where the rest of it lives:
-//! the branch, the base and the companion repos are all answers to *which
-//! code*, and one trigger for the four of them is what keeps the row down to
-//! what it says. See [`Composer`](./Composer.tsx) for the box, and
-//! [`SetupNotes`] for what the setup has to say that is not a control.
+//! them at a glance is the sentence *this repo, this kind of work, this
+//! account*. Two of the three drop a panel rather than a list, which is where
+//! the rest of it lives: the branch, the base and the companion repos are all
+//! answers to *which code*, and the role pickers are all answers to *who runs
+//! it*, so each is one trigger rather than four. See
+//! [`Composer`](./Composer.tsx) for the box, and [`SetupNotes`] for what the
+//! setup has to say that is not a control.
 //!
 //! Once grilling starts none of this is drawn at all: the server freezes every
 //! one of them at that moment, so nothing taken away was still actionable, and
@@ -33,12 +34,16 @@
 //! row: two pages that asked these questions apart would come to word them
 //! differently.
 //!
-//! The three pairings are separate choices because they are genuinely separate
+//! The role pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
 //! grilling one on. Two of the pickers carry one row that is not an account at
 //! all: a conversation can be built without being grilled and wrapped up
-//! without being reviewed.
+//! without being reviewed. They are one **Agent** control all the same, because
+//! *who runs this* is one question however many roles a Process puts it in:
+//! which roles those are is [`ROLES`](./processes.ts)'s to say, and the trigger
+//! over them reads the Implementation Pairing and counts the rest — see
+//! [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
@@ -53,6 +58,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
@@ -99,6 +105,7 @@ import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
+import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
 import { OFFERED, PROCESS, uses } from "./processes";
 import styles from "./Setup.module.css";
@@ -224,8 +231,9 @@ export function Setup(props: {
           about. */}
       <ProcessOption conversation={props.conversation} />
 
-      {/* And the three accounts, one trigger each. */}
-      <Profiles conversation={props.conversation} />
+      {/* And who runs it: one trigger for every role the Process uses, the
+          pickers themselves standing inside the panel behind it. */}
+      <AgentOption conversation={props.conversation} />
     </section>
   );
 }
@@ -819,79 +827,157 @@ function UncachedCompiles(props: {
     </Show>
   );
 }
-/// The pairings the work will run under — some of which may be picked away
-/// instead — one option of the row each, the role as the label and the pairing
-/// as the value.
+/// The **Agent**: the Pairings the work will run under — some of which may be
+/// picked away instead — one picker per role the Process uses, stacked inside
+/// the panel behind one trigger.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
 /// pairings are made of it here: a row per profile-and-model combination, which
 /// is what a picker offers.
 ///
-/// They stand in the row rather than in a section of their own, and there is
-/// no heading over them: the role is written on each one, so a word above all of
-/// them would be the row saying what its labels already say.
-///
-/// **One per role the Process uses**, which is [`ROLES`]'s to say rather than
-/// this pane's. A Conversation holding a pull request reads as a Review, and
+/// **One picker per role the Process uses**, which is [`ROLES`]'s to say rather
+/// than this pane's. A Conversation holding a pull request reads as a Review, and
 /// Review does not use Grilling — so the picker that was taken away by a test
 /// for the held pull request is taken away by the table instead, and the two
 /// composers stop saying the same thing twice.
-function Profiles(props: { conversation: ConversationView }): JSX.Element {
+///
+/// [`ProfileChoices`] stands outside the option rather than inside its panel:
+/// what it draws in place of the pickers is a workbench with no account saved in
+/// it, and an invitation to go and save one is no use behind a trigger nobody
+/// has a reason to press.
+function AgentOption(props: { conversation: ConversationView }): JSX.Element {
   return (
     <ProfileChoices>
       {(saved) => (
-        <>
-          {/* One of the two pickers with a row that is not an account: a
-              brief can go straight to the work, with no interview between
-              the two. */}
-          <Show when={uses(props.conversation.process, "grilling")}>
-            <PairingPicker
-              conversation={props.conversation}
-              saved={saved()}
-              role="grilling"
-              label="Grilling"
-              away="No grilling"
-              chosen={pairing.settled(props.conversation.grilling_pairing)}
-              pairing={pairing.under(props.conversation.grilling_pairing)}
-              choose={(id, picked) =>
-                chooseGrillingPairing(id, pairing.role(picked))
-              }
-            />
-          </Show>
-          <Show when={uses(props.conversation.process, "implementation")}>
-            <PairingPicker
-              conversation={props.conversation}
-              saved={saved()}
-              role="implementation"
-              label="Implementation"
-              chosen={pairing.chosen(props.conversation.implementation_pairing)}
-              pairing={props.conversation.implementation_pairing}
-              choose={(id, picked) =>
-                chooseImplementationPairing(id, pairing.choice(picked))
-              }
-            />
-          </Show>
-          {/* And the other: a conversation can be wrapped up without being
-              reviewed at all, and that is picked here rather than anywhere
-              else. */}
-          <Show when={uses(props.conversation.process, "review")}>
-            <PairingPicker
-              conversation={props.conversation}
-              saved={saved()}
-              role="review"
-              label="Review"
-              away="No review"
-              chosen={pairing.settled(props.conversation.review_pairing)}
-              pairing={pairing.under(props.conversation.review_pairing)}
-              choose={(id, picked) =>
-                chooseReviewPairing(id, pairing.role(picked))
-              }
-            />
-          </Show>
-        </>
+        <AgentOptions
+          process={props.conversation.process}
+          saved={saved()}
+          // What each picker inside is showing, which is what the trigger
+          // reads — the record's own choices, read exactly as the pickers below
+          // read them.
+          picked={{
+            grilling: pairing.settled(props.conversation.grilling_pairing),
+            implementation: pairing.chosen(
+              props.conversation.implementation_pairing,
+            ),
+            review: pairing.settled(props.conversation.review_pairing),
+          }}
+        >
+          {() => (
+            <>
+              {/* One of the two pickers with a row that is not an account: a
+                  brief can go straight to the work, with no interview between
+                  the two. */}
+              <Show when={uses(props.conversation.process, "grilling")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="grilling"
+                  label="Grilling"
+                  away="No grilling"
+                  chosen={pairing.settled(props.conversation.grilling_pairing)}
+                  pairing={pairing.under(props.conversation.grilling_pairing)}
+                  choose={(id, picked) =>
+                    chooseGrillingPairing(id, pairing.role(picked))
+                  }
+                />
+              </Show>
+              <Show when={uses(props.conversation.process, "implementation")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="implementation"
+                  label="Implementation"
+                  chosen={pairing.chosen(
+                    props.conversation.implementation_pairing,
+                  )}
+                  pairing={props.conversation.implementation_pairing}
+                  choose={(id, picked) =>
+                    chooseImplementationPairing(id, pairing.choice(picked))
+                  }
+                />
+              </Show>
+              {/* And the other: a conversation can be wrapped up without being
+                  reviewed at all, and that is picked here rather than anywhere
+                  else. */}
+              <Show when={uses(props.conversation.process, "review")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="review"
+                  label="Review"
+                  away="No review"
+                  chosen={pairing.settled(props.conversation.review_pairing)}
+                  pairing={pairing.under(props.conversation.review_pairing)}
+                  choose={(id, picked) =>
+                    chooseReviewPairing(id, pairing.role(picked))
+                  }
+                />
+              </Show>
+            </>
+          )}
+        </AgentOptions>
       )}
     </ProfileChoices>
+  );
+}
+
+/// The option itself: the trigger standing in the row, and the panel of role
+/// pickers that comes down behind it.
+///
+/// Presentational, for [`RepoOptions`]'s reason and drawn the same way — a
+/// `Menu` with `panel`, one flat card, because the Repo option beside it is
+/// exactly this and two shapes in one row would be two things to learn. What a
+/// pick *does* belongs to whoever draws the pickers inside: a request on a
+/// Conversation, a field of the draft the compose page's device holds.
+///
+/// **The label is *Agent* and the labels inside the panel are the roles'.** The
+/// tests, the Brief's setup facts and the Steer form all speak Grilling,
+/// Implementation and Review, and a panel that renamed them would be the one
+/// place they are called something else.
+export function AgentOptions(props: {
+  /// Which Process the control is shaped by, which is what says how many roles
+  /// the reading counts over.
+  process: Process;
+  /// The Profiles as they stand, for the reading inside the trigger — see
+  /// [`reading`](./agent.ts).
+  saved: ProfileEntry[];
+  /// And what each picker inside is showing, as that picker would send it.
+  picked: Picked;
+  children: () => JSX.Element;
+}): JSX.Element {
+  const shown = () => reading(props.process, props.picked, props.saved);
+
+  return (
+    <Menu
+      panel
+      class={styles.agentOption!}
+      name="Agent setup"
+      trigger={
+        <>
+          <span class={styles.optionLabel}>Agent</span>
+          <span class={styles.optionLine}>
+            {/* The mark in front of the words, as every reading of who runs a
+                session is drawn — and as the pickers inside draw the same
+                choice, so the trigger and the panel read as one thing. */}
+            <HarnessMark of={shown().mark} />
+            <span class={styles.optionValue}>
+              {shown().words}
+              {/* The other roles counted rather than named, which is the Repo
+                  trigger's own convention for the companions beside it: the row
+                  is one line, and what each role is on is inside the panel. */}
+              <Show when={shown().also}>{(many) => <> +{many()}</>}</Show>
+            </span>
+          </span>
+          {/* Which way the panel comes down, beside the label and the value
+              both — [`RepoOptions`]'s caret, for its reason. */}
+          <Icon of={faChevronDown} class={styles.optionArrow!} />
+        </>
+      }
+    >
+      {props.children}
+    </Menu>
   );
 }
 
@@ -935,8 +1021,9 @@ export function ProfileChoices(props: {
   );
 }
 
-/// One of the three choices: which profile-and-model pairing fills this role —
-/// or, where the role can be picked away, that it runs nothing.
+/// One of the choices inside the Agent panel: which profile-and-model pairing
+/// fills this role — or, where the role can be picked away, that it runs
+/// nothing.
 ///
 /// A dropdown rather than a list of buttons, because the pairings are a short
 /// list that barely changes and the choice is one of them. One flat row per
@@ -946,7 +1033,7 @@ export function ProfileChoices(props: {
 /// The app's own listbox rather than a `<select>`, because every row carries the
 /// mark of the harness it runs and an `<option>` holds nothing but text — the
 /// mark is what makes a column of accounts scannable, which is the whole reason
-/// these three rows are worth drawing by hand.
+/// these rows are worth drawing by hand.
 ///
 /// `away` is the row a role that can run nothing offers above the pairings,
 /// where it offers one. In the same flat list rather than beside it as a switch,
@@ -1020,13 +1107,18 @@ function PairingPicker(props: {
   );
 }
 
-/// The control itself: one option of the row, the role as its label and the
-/// pairing as its value.
+/// The control itself: one picker, the role as its label and the pairing as its
+/// value.
 ///
 /// Presentational and shared, for [`RepoOptions`]'s reason — the compose page
-/// asks the same three questions before there is a Conversation for an answer
-/// to be about. What a pick *does* is the caller's, and so is everything said
-/// under it.
+/// asks the same questions before there is a Conversation for an answer to be
+/// about. What a pick *does* is the caller's, and so is everything said under
+/// it.
+///
+/// Drawn as it always was: a dimmed label over its value, one rectangle to
+/// press. Inside the Agent panel that is what stacks, and a card of them reads
+/// as a setting per role — the same pickers dressed as the Repo panel's fields
+/// would read as a form to fill in rather than as the controls they are.
 export function RolePicker(props: {
   saved: ProfileEntry[];
   /// What this control is called in the document, for the id the label inside
