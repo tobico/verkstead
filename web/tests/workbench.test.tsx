@@ -19734,6 +19734,100 @@ describe("the code pane's file tree", () => {
     expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
   });
 
+  /// **A folder shut while its listing was still out stays shut.** The press is
+  /// what says whether a folder is open, and a read that wrote down what it got
+  /// whatever had happened since would be that press undone a moment later: the
+  /// caret comes back, and the rows under it with it. Which is a folder nobody
+  /// shut re-opening itself on a slow worktree — `Tree.tsx` asks whether the
+  /// folder is still one this tree is reading before it keeps the answer.
+  ///
+  /// **The wait after the answer lands is what makes this a test.** A shut
+  /// folder that stays shut has nothing to wait *for*, and a `waitFor` passes on
+  /// its first attempt — which is before the microtask the answer would have
+  /// been written in. So a second folder is opened afterwards and waited on:
+  /// that read is made after the first one had already settled, so by the time
+  /// its rows are drawn the answer under test has certainly been handled.
+  it("leaves a folder shut that was shut while its listing was out", async () => {
+    const crates = `${OWN_ROOT.path}/crates`;
+    const web = `${OWN_ROOT.path}/web`;
+
+    // The reads that are out, in the order they went: one per ask, landed when
+    // this test says so. A queue rather than one slot, so that *which* read is
+    // being answered is what the test names.
+    const landing: Array<() => void> = [];
+
+    withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), () =>
+        json({
+          Listed: {
+            path: OWN_ROOT.path,
+            entries: [
+              { name: "crates", path: crates, folder: true },
+              { name: "web", path: web, folder: true },
+              { name: "Cargo.toml", path: `${OWN_ROOT.path}/Cargo.toml`, folder: false },
+            ],
+          },
+        } satisfies FolderListing)(),
+      ),
+      // Held rather than answered, so the shut below lands while the read is
+      // genuinely in flight — which is the whole of the case.
+      whenever(
+        folderOf(crates),
+        () =>
+          new Promise<Response>((settle) => {
+            landing.push(
+              () =>
+                void json({
+                  Listed: {
+                    path: crates,
+                    entries: [{ name: "server", path: `${crates}/server`, folder: true }],
+                  },
+                } satisfies FolderListing)().then(settle),
+            );
+          }),
+      ),
+      // The barrier: a folder whose read is made after the one above had
+      // settled, so its rows are proof that the other answer has been dealt
+      // with.
+      whenever(folderOf(web), () =>
+        json({
+          Listed: {
+            path: web,
+            entries: [{ name: "src", path: `${web}/src`, folder: true }],
+          },
+        } satisfies FolderListing)(),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    fireEvent.click(row(container, OWN_ROOT.repo));
+    await waitFor(() => expect(named(container)).toContain("crates"));
+
+    // Opened, and then shut again before the answer has landed.
+    fireEvent.click(row(container, "crates"));
+    await waitFor(() => expect(landing).toHaveLength(1));
+    fireEvent.click(row(container, "crates"));
+    expect(row(container, "crates").getAttribute("aria-expanded")).toBe("false");
+
+    landing[0]!();
+    fireEvent.click(row(container, "web"));
+    await waitFor(() => expect(named(container)).toContain("src"));
+
+    // Still shut, and nothing under it.
+    expect(named(container)).toEqual([
+      OWN_ROOT.repo,
+      "crates",
+      "web",
+      "src",
+      "Cargo.toml",
+      `${COMPANION_ROOT.repo}read-only`,
+    ]);
+    expect(row(container, "crates").getAttribute("aria-expanded")).toBe("false");
+    expect(named(container)).not.toContain("server");
+  });
+
   /// A folder the server refused says which refusal it is, where its rows would
   /// have been: each of them is a different thing for a human to read, and none
   /// of them is a status code.
@@ -19970,6 +20064,78 @@ describe("the code pane's file tree", () => {
       // And the folder nobody opened is still unread: it is not drawn, so there
       // is nothing about it to be wrong.
       expect(askedFor(fetching, folderOf(web))).toBe(0);
+    });
+
+    /// **And a folder shut while the re-read was out stays shut**, which is the
+    /// same rule as the press's own read and the other half of it: a Nudge's
+    /// re-read is the tree following the disk, and following the disk must not
+    /// re-open what somebody has just closed. The whole of the difference from
+    /// the press is who asked, and [`again`] keeps the rule its own way — a
+    /// folder the keeping no longer holds is not written back into it.
+    ///
+    /// The second folder opened at the end is the barrier the press's own test
+    /// uses, and for the same reason: nothing about a folder that stays shut is
+    /// something to wait for.
+    it("leaves a folder shut that was shut while a nudge's re-read was out", async () => {
+      const crates = `${OWN_ROOT.path}/crates`;
+      const web = `${OWN_ROOT.path}/web`;
+
+      // The reads that are out, as the press's own test keeps them: one per ask,
+      // landed when this test says so. Two of them here — the press that opens
+      // the folder, then the Nudge's re-read.
+      const landing: Array<() => void> = [];
+
+      /// What the folder answers with, which is the same either time: what is
+      /// being asked here is what the tree does with the answer.
+      const inside = json({
+        Listed: {
+          path: crates,
+          entries: [{ name: "server", path: `${crates}/server`, folder: true }],
+        },
+      } satisfies FolderListing);
+
+      const { container } = await watching(
+        listing(OWN_ROOT.path, () => ["crates/", "web/", "Cargo.toml"]),
+        // Held every time, so both the press that opens it and the Nudge's
+        // re-read are answered on this test's own say-so.
+        whenever(
+          folderOf(crates),
+          () =>
+            new Promise<Response>((settle) => {
+              landing.push(() => void inside().then(settle));
+            }),
+        ),
+        listing(web, () => ["src/"]),
+      );
+
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(landing).toHaveLength(1));
+      landing[0]!();
+      await waitFor(() => expect(named(container)).toContain("server"));
+
+      // The disk moved, so the re-read goes out — and then the human shuts the
+      // folder while it is still in flight.
+      moved();
+      await waitFor(() => expect(landing).toHaveLength(2));
+      fireEvent.click(row(container, "crates"));
+      await waitFor(() => expect(named(container)).not.toContain("server"));
+
+      landing[1]!();
+      fireEvent.click(row(container, "web"));
+      await waitFor(() => expect(named(container)).toContain("src"));
+
+      // Still shut. A re-read that wrote itself down here would have the caret
+      // and the rows back a moment after the press that took them away.
+      expect(named(container)).toEqual([
+        OWN_ROOT.repo,
+        "crates",
+        "web",
+        "src",
+        "Cargo.toml",
+        `${COMPANION_ROOT.repo}read-only`,
+      ]);
+      expect(row(container, "crates").getAttribute("aria-expanded")).toBe("false");
+      expect(named(container)).not.toContain("server");
     });
 
     /// And what the human is in the middle of is left exactly where it is,

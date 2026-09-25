@@ -17,9 +17,27 @@ export const PORT = 8422;
 /// rather than anything listening wider than loopback.
 export const HOST = "127.0.0.1";
 
-/// The two together, which is what the probe asks about and what the dialog
-/// names when somebody else is already there.
+/// The two together, which is what the probe asks about, what the dialog names
+/// when somebody else is already there, and **what the sidecar is told to bind**
+/// — see [`ARGUMENTS`](./sidecar.js).
+///
+/// Told rather than left to the server's own default, which is the same number:
+/// the server reads [`LISTEN`] from the environment it inherits, so a shell that
+/// exported one would otherwise put the server on an address the probe, the
+/// health wait and the window all know nothing about. One address, named once,
+/// and the app is what names it.
 export const ADDRESS = `${HOST}:${PORT}`;
+
+/// The variable the server takes an address from, which the app overrides on the
+/// command line and reports having overridden.
+///
+/// It is read here for one line of logging and nothing else. The app has no
+/// setting for where Verkstead listens and this is not the beginning of one: the
+/// port is fixed by decision (ADR-0012, carried into ADR-0020), so a developer
+/// who has this exported for a `verkstead serve` of their own is owed the news
+/// that the app ignored it rather than half an hour wondering which of the two
+/// halves is wrong.
+export const LISTEN = "VERKSTEAD_LISTEN";
 
 /// The origin the window loads and the sidecar answers on.
 export const ORIGIN = `http://${ADDRESS}`;

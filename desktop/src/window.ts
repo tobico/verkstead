@@ -43,6 +43,7 @@ import {
 } from "./bounds.js";
 import { where } from "./elsewhere.js";
 import { link } from "./key.js";
+import { why } from "./loading.js";
 import { say } from "./log.js";
 
 /// What the window opens at on a machine that has not told it otherwise — a
@@ -118,9 +119,12 @@ export function open(workbench: Workbench): BrowserWindow {
 
     // The origin rather than the link, here and everywhere: these lines go to a
     // file a menu item opens on somebody's desk, and a key written there is a
-    // login for anybody reading over a shoulder (ADR-0015).
+    // login for anybody reading over a shoulder (ADR-0015). Which the failure
+    // has to be worded for as well as the success — Electron puts the URL it
+    // was handed into a rejected `loadURL`, so the reason is read off the
+    // error's own fields by [`why`](./loading.js) rather than stringified.
     window.webContents.loadURL(target).catch((trouble: unknown) => {
-      say(`the window could not load ${workbench.origin} — ${String(trouble)}`);
+      say(`the window could not load ${workbench.origin} — ${why(trouble)}`);
     });
   };
 
