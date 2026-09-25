@@ -23,6 +23,13 @@ WiX sources for the Rust msi are gone.
 - **The overlay and its colours** are stage 04's code, proven here.
 - **Launch on Startup through the login-item API** (Set 846 Q9a), which is
   the Run key underneath; hidden start when the tray is shown.
+- **The tray app's own Run value is taken over, once.** It is named for the
+  app id — `net.tobico.Verkstead` — and holds `verkstead.exe desktop`, a verb
+  stage 08 removes; Electron's API writes a value of its own and knows nothing
+  about that one. So the first launch after an upgrade reads the old value,
+  carries whether it was set into the new registration, and deletes it. Read
+  once at launch rather than offered as a control: it is a registration this
+  app made under another name, not a second setting.
 - **Sessions on ConPTY and the AppContainer are untouched**: the CLI inside
   is the same, and the named pipe a container asks through is the server's.
 - **The Windows Installer version stays three numbers**, so the package must
@@ -33,9 +40,11 @@ WiX sources for the Rust msi are gone.
 
 1. **The overlay on Windows** — proven with the stage-04 code; snap layouts
    work. Accepts: no control under the overlay in any pane count.
-2. **Login item** — the Run key arm through the API, hidden start. Accepts:
-   the value appears and disappears with the box and names the app's own
-   path.
+2. **Login item** — the Run key arm through the API, hidden start, and the
+   one-shot take-over of the tray app's `net.tobico.Verkstead` value.
+   Accepts: the value appears and disappears with the box and names the app's
+   own path; a profile carrying the tray app's value comes up registered
+   through the API with that value gone, and one carrying none is untouched.
 3. **The msi** — electron-builder's WiX target, per-user, the PATH fragment,
    the Start-menu entry, the same-version upgrade rule. Accepts: a local build
    installs under the profile; `verkstead guide` runs from a new terminal.
@@ -53,6 +62,9 @@ WiX sources for the Rust msi are gone.
 - The WiX toolset the runner image carries, against what the target wants.
 - The shim is still in `crates/desktop` and is stage 08's to remove; this
   stage leaves the crate alone.
+- What `crates/desktop/src/startup/run_key.rs` writes today — the value's name
+  and what it holds — which is what the take-over has to find, and which
+  stage 08 deletes the only other reader of.
 
 [ADR-0020]: ../../adr/0020-electron-desktop.md
 [releasing.md]: ../../releasing.md

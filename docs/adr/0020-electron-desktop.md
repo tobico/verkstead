@@ -115,6 +115,17 @@ login-item API on a Mac and Windows — the app is always a bundle now, which is
 what the tray app's hand-written plist was working around — and an XDG
 autostart file on Linux, where Electron has no such API.
 
+**And the tray app's own registration is taken over rather than orphaned.**
+Linux needs nothing for this, the entry being the same file under the same
+name; the other two change mechanism, and a registration the new API cannot
+see is one that goes on firing at a path this roadmap deletes while the box
+above it reads off. So the first launch after an upgrade reads what the tray
+app wrote — the launch agent at
+`~/Library/LaunchAgents/net.tobico.Verkstead.plist`, the Run value named
+`net.tobico.Verkstead` — carries whether it was on into the new registration,
+and deletes it. Once, at launch, and never as a control: it is this app's own
+registration under an older name rather than a second setting.
+
 ## The Desktop page
 
 **Desktop settings are the app's, not the server's.** They are kept in a
