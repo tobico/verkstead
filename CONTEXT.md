@@ -537,7 +537,11 @@ One Verkstead install, as another one sees it. What it *is* is a **Device Id**
 and a self-signed certificate, both invented at its first start and kept in the
 **Data Directory** beside `workbench.key` — `device.id` and `device.pem`, files
 of their own at mode `0600`, read back at every start after, and an empty one
-counting as one that is not there. Nothing is configured and nothing is typed.
+counting as one that is not there. **One that is there and cannot be read stops
+the start instead**, as one that will not parse does: writing a fresh identity
+over the one a cluster has pinned is the single act here that cannot be taken
+back, and a file left out of this account's reach by one start under `sudo` is
+not a file that is missing. Nothing is configured and nothing is typed.
 **The certificate is what a link is made of** rather than a detail of how a
 connection is encrypted: a link between two devices is the two fingerprints
 each side holds, with no bearer token and nothing stored beside the

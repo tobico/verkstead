@@ -196,6 +196,76 @@ fn a_certificate_that_will_not_parse_is_a_failure_rather_than_a_fresh_one() {
     );
 }
 
+/// And a file that is there and will not *open* is a failure too, which is the
+/// half a missing file and an unreadable one are told apart by.
+///
+/// The case this is really about is a `device.pem` left owned by root by one
+/// start under `sudo`: the file is right there and this process cannot read it,
+/// while the directory around it stays writable — so treating it as a file that
+/// is not there is not a write that fails and reports itself, it is a rename
+/// straight over the certificate every linked device is holding.
+///
+/// Stood at with a directory in the file's place rather than with a mode,
+/// because a suite that ran as root would read a mode of nothing perfectly
+/// well and prove the opposite of what it says. What is being asked is that an
+/// error which is not *not found* stops the start, and any of them does.
+#[test]
+fn a_file_that_will_not_open_is_a_failure_rather_than_a_fresh_one() {
+    for file in [ID_FILE, CERTIFICATE_FILE] {
+        let dir = fresh();
+
+        let first = Device::issued(dir.path(), &Members::none()).unwrap();
+
+        std::fs::remove_file(dir.path().join(file)).unwrap();
+        std::fs::create_dir(dir.path().join(file)).unwrap();
+
+        let failed = Device::issued(dir.path(), &Members::none()).expect_err(
+            "a file that is there and cannot be read is not a file that is missing, and \
+             writing a fresh identity over one is the act that cannot be taken back",
+        );
+
+        let said = failed.to_string();
+
+        assert!(
+            said.contains(file),
+            "the failure should name the file it could not read, and said: {said}",
+        );
+
+        // And nothing was written over on the way out: the id is still the one
+        // this device was invented as.
+        if file != ID_FILE {
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join(ID_FILE))
+                    .unwrap()
+                    .trim(),
+                first.id(),
+            );
+        }
+    }
+}
+
+/// And the same of the certificate waiting out a changeover, which is read by
+/// the same reading.
+#[test]
+fn a_changeover_file_that_will_not_open_is_a_failure_too() {
+    let dir = fresh();
+
+    Device::stated_good_for(dir.path(), A_DEVICE, RENEW_WITHIN - A_DAY).unwrap();
+
+    let started = Device::issued(dir.path(), &Members::stated(1)).unwrap();
+
+    std::fs::remove_file(started.incoming_path()).unwrap();
+    std::fs::create_dir(started.incoming_path()).unwrap();
+
+    let failed = Device::issued(dir.path(), &Members::stated(1))
+        .expect_err("a changeover cannot be carried on out of a file nothing can read");
+
+    assert!(
+        failed.to_string().contains(INCOMING_FILE),
+        "the failure should name the file it could not read, and said: {failed}",
+    );
+}
+
 #[test]
 #[cfg(unix)]
 fn both_files_are_written_at_the_workbench_keys_own_mode() {
