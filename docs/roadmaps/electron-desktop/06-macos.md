@@ -7,9 +7,10 @@ app carrying the two Mac CLI builds joined with `lipo`. Closing the window
 leaves the app in the Dock and a Dock click brings the window back; Cmd+Q
 quits at once. The traffic lights sit to the left of the Wordmark; the
 Desktop page holds the menu bar icon (on by default), View Logs and Launch on
-Startup, and nothing else; Launch on Startup is the login-item registration
-and a login start comes up hidden. The `desktop-macos` leg builds, mounts and
-runs it, and the Rust launcher script and dmg script are gone.
+Startup, and nothing else; Launch on Startup is the login-item registration,
+taking over the tray app's launch agent where there is one, and a login start
+comes up hidden. The `desktop-macos` leg builds, mounts and runs it, and the
+Rust launcher script and dmg script are gone.
 
 ## Decisions in force
 
