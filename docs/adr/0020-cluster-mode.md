@@ -34,8 +34,20 @@ hostname and the OS is what tells them apart.
 Devices talk over a **listener of their own**: TLS, every interface, port 8423
 by default (`--peer-listen`, and an option in the NixOS module). Every call a
 device makes to another presents its own certificate, and a link *is* the two
-fingerprints each side holds — no bearer token, nothing to store beside the
-certificates, and the handshake is the whole of verifying a call.
+fingerprints each side holds — no bearer token and nothing to store beside the
+certificates.
+
+**The handshake carries the certificate and the routes check it.** A client
+certificate is asked for once per connection, before any path is known, so the
+handshake cannot be what decides which endpoints a caller reaches: it accepts
+whatever arrives, or nothing, and middleware over the gated routes is what
+consults the member list. Three routes stand outside that gate and are the whole
+of the un-gated surface — the identity endpoint, which asks for no certificate;
+the join post, which comes from a non-member by definition and whose certificate
+is pinned into the pending request it creates; and the dial-back answering a
+join, matched against the certificate that request holds. A verifier that
+refused every non-member at the handshake was the first shape of this and is
+what a join could never have got through.
 
 The workbench listener is untouched: loopback, `tailscale serve` in front of
 it, plain HTTP to the browser. Two things ruled out sharing it. The served

@@ -40,14 +40,24 @@ asked once. A member that stops answering stays on the list dimmed
   is; cutting only this device's own pair was rejected. Unreachable members
   stay listed, dimmed, Unlink still working.
 - **Members are a store table**: id, name, OS, addresses, fingerprint, last
-  seen. The mutual-TLS verifier from stage 01 now consults it.
+  seen. Stage 01's per-route membership check now has something to consult.
+- **The join and the dial-back stand outside that check**, as stage 01's third
+  decision says they must: a join arrives from a non-member, which is what a
+  join is, and the dial-back answering it arrives before A has recorded B.
+  Neither is un-authenticated for it — the join's certificate is pinned into
+  the pending request, and the dial-back is matched against the certificate
+  that request is holding — and both are refused once the ten minutes are up.
+  The announcement in task 4 needs no exemption, being a member's own call.
 
 ## Proposed tasks (provisional)
 
-1. **The member store and the verifier** — the members table, and the peer
-   listener's client-certificate check reading it.
-   - A call from a member's certificate reaches the peer API; another is
-     refused.
+1. **The member store and the gate** — the members table, and stage 01's
+   per-route membership check reading it.
+   - A call from a member's certificate reaches the gated peer API; one from a
+     stranger is refused there.
+   - The join post and the dial-back answer a stranger, each against the
+     pending request rather than the member list, and refuse one once it has
+     expired.
    - Removing a member takes effect on the next call.
 2. **The join request and the pending row** — Add on A, the request held on
    B with its expiry, A's pending row with fingerprint and Cancel.
