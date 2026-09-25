@@ -181,6 +181,10 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 // source to read the rules that jsdom lays nothing out for.
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
+// The words a Process is said in, read here rather than spelled out again: the
+// pane and this assertion about it would otherwise be two opinions about what
+// Develop is called.
+import { PROCESS } from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -17103,6 +17107,10 @@ describe("the configuration on the brief's pane", () => {
 
     expect(configuration()).toEqual({
       Repo: GRILLING.repo.name,
+      // What kind of work it is, where the composer asked for it: the picker
+      // sits between the Repo and the Pairings, and these are the same two facts
+      // in the same order.
+      Process: "Develop",
       Branch: GRILLING.branch,
       // The commit, abbreviated the way every other commit on the page is.
       Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
@@ -17142,6 +17150,20 @@ describe("the configuration on the brief's pane", () => {
       configuration().Review,
       "and the roles beside it read as they always did",
     ).toBe("Claude Code Sonnet 5 — sonnet");
+  });
+
+  /// And a Conversation that reads Review says Review: the word is the record's,
+  /// so what the pane says is what the wire carried rather than what a fresh
+  /// draft happens to default to.
+  ///
+  /// The five are worded in one place — `processes.ts` — so the thing picked on
+  /// the composer and the thing read back here cannot come to be called
+  /// different things.
+  it("says whichever process the conversation is", async () => {
+    theGrillingStanding({ process: "Review" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Process).toBe("Review");
   });
 
   /// A profile chosen before models were paired beside them is half a choice,
@@ -17242,6 +17264,25 @@ describe("the configuration on the brief's pane", () => {
     expect(summary()!.querySelector(`.${briefPane.gone}`)!.textContent).toBe(
       "gone from disk",
     );
+  });
+
+  /// And here is where the Process is said, rather than on the sidebar: a row
+  /// says where the work has got to, and what kind of work it is is a setup fact
+  /// like the Repo and the base.
+  ///
+  /// Nothing of it reaches the row at all — `ConversationEntry` carries no
+  /// Process — so the check is that the list the human finds a Conversation by
+  /// reads exactly as it always did.
+  it("is the only place the process is said", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    for (const card of await cards(container)) {
+      for (const word of Object.values(PROCESS)) {
+        expect(card.textContent).not.toContain(word);
+        expect(card.getAttribute("aria-label") ?? "").not.toContain(word);
+      }
+    }
   });
 
   /// The pane reports the configuration; the setup card is still the only place

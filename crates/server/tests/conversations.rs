@@ -26,9 +26,10 @@ use verkstead_render::{
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, ProfileChosen, ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoadmapPane, ShowingArchived, Standing, Started, SteerCancelled,
-    SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp, TimelineEvent,
+    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
+    SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
+    TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -293,6 +294,15 @@ async fn base(app: &Router, id: i64, branch: Option<&str>) -> BaseRecorded {
         app,
         &format!("/api/ui/conversations/{id}/base"),
         &serde_json::json!({ "branch": branch }),
+    )
+    .await
+}
+
+async fn pick_process(app: &Router, id: i64, process: Process) -> ProcessPicked {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": process }),
     )
     .await
 }
@@ -664,6 +674,91 @@ async fn clearing_the_base_branch_puts_the_conversation_back_on_the_rule() {
         assert_eq!(base(&app, id, cleared).await, BaseRecorded::Recorded);
         assert_eq!(opened(&app, id).await.base_commit, None);
     }
+}
+
+/// Every Conversation has a Process, and a new one is a Develop: the ladder as
+/// it has always run, which is what the composer defaults to and what every
+/// Conversation from before there were Processes reads as.
+#[tokio::test]
+async fn a_new_conversation_is_a_develop_one() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(opened(&app, id).await.process, Process::Develop);
+}
+
+/// And one started off a pull request is a Review, that being the Process its
+/// path already was: Draft to Wrapping over somebody else's branch.
+///
+/// Read rather than written, so this is as true of the Conversations started
+/// before there were Processes as of the one started here.
+#[tokio::test]
+async fn a_conversation_wrapping_up_a_pull_request_is_a_review_one() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = wrapping_up(&app, repo_id, 41).await;
+
+    assert_eq!(opened(&app, id).await.process, Process::Review);
+}
+
+/// What kind of work it is is the Draft's to say, and what the picker sends is
+/// what the pane reads back.
+#[tokio::test]
+async fn a_drafting_conversations_process_is_the_humans_to_pick() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Develop).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(opened(&app, id).await.process, Process::Develop);
+}
+
+/// The four whose stage has not landed are refused by a name of their own,
+/// rather than under the refusal about this Conversation: nothing the human does
+/// here makes one of them pickable, and what they are waiting on is Verkstead.
+///
+/// The endpoint is reachable without the picker, so this is the server's
+/// refusal rather than a control that simply drew no row — and what the
+/// Conversation is is untouched by an ask it refused.
+#[tokio::test]
+async fn a_process_whose_stage_has_not_landed_is_refused_by_name() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    for process in [
+        Process::Investigate,
+        Process::Review,
+        Process::Tinker,
+        Process::FixMergeIssues,
+    ] {
+        assert_eq!(
+            pick_process(&app, id, process).await,
+            ProcessPicked::NotLanded,
+            "{process:?} has no stage behind it yet"
+        );
+        assert_eq!(opened(&app, id).await.process, Process::Develop);
+    }
+}
+
+/// And the freeze: past drafting, the Process stops being the human's to change,
+/// exactly as the branch name and the base do.
+///
+/// Nothing is written when the work starts — the refusal is the whole of the
+/// freeze — so a Develop Conversation nobody touched the picker on reads Develop
+/// on either side of it.
+#[tokio::test]
+async fn a_process_is_settled_once_the_grilling_has_started() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        pick_process(&app, id, Process::Develop).await,
+        ProcessPicked::NotDrafting
+    );
+    assert_eq!(opened(&app, id).await.process, Process::Develop);
 }
 
 /// A second registered repository in the same directory, for the tests
@@ -1075,6 +1170,10 @@ async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
     assert_eq!(
         base(&app, 404, None).await,
         BaseRecorded::NoSuchConversation
+    );
+    assert_eq!(
+        pick_process(&app, 404, Process::Develop).await,
+        ProcessPicked::NoSuchConversation
     );
     assert_eq!(
         add_companion(&app, 404, 1).await,

@@ -47,6 +47,45 @@ pub enum Lifecycle {
     Closed,
 }
 
+/// What kind of work a Conversation is for, and so which states it runs
+/// through.
+///
+/// [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
+/// Set, so it is the viewer's half of a fact of the record's — the store's own
+/// enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
+/// held to each other in one function on the server.
+///
+/// All five, though only [`Process::Develop`] can start anything yet: which of
+/// them the picker offers is a list of its own, and what a stage after this one
+/// adds is a row on that list and a start path behind it — never a variant. A
+/// wire that carried only what could be started would be one to widen every
+/// time one more could.
+///
+/// See ADR-0020.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Process {
+    /// The ladder as it has always run, the interview included. Every new
+    /// draft's default, and how every Conversation from before there were
+    /// Processes reads.
+    Develop,
+
+    /// Questions about the code answered without changing it.
+    Investigate,
+
+    /// The wrap-up run over a pull request or a branch the Brief names — and
+    /// how a Conversation that adopted a pull request reads, that being the
+    /// Process its path already was.
+    Review,
+
+    /// Follow-up entered from a Draft: rounds on a fresh branch, primed with
+    /// the Brief.
+    Tinker,
+
+    /// A wrap-up narrowed to what GitHub refuses a merge for.
+    FixMergeIssues,
+}
+
 /// One row of the conversations sidebar.
 ///
 /// The branch is the row's name where somebody has settled on one: a
@@ -438,6 +477,19 @@ pub struct ConversationView {
     /// shows the same three facts about it, and a second shape for the same
     /// thing would be a second opinion about what a Repo is.
     pub repo: RepoEntry,
+
+    /// What kind of work it is: the Process, picked on the composer between the
+    /// Repo and the Pairings and frozen when the work starts — see [`Process`].
+    ///
+    /// Never `null`. Every Conversation has one, including every one started
+    /// before there were any: where the record holds no pick the reading stands,
+    /// and the reading is the store's.
+    ///
+    /// Beside the Repo rather than beside the Pairings, which is where the pane
+    /// draws it: the Pairings are in the half of the Configuration that is about
+    /// the machine the work was done on, and a Process is a fact about the work.
+    /// So it is one of the facts a published share says.
+    pub process: Process,
 
     pub branch: String,
 
@@ -3167,6 +3219,50 @@ pub struct BriefEdit {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RepoChoice {
     pub repo_id: i64,
+}
+
+/// What kind of work a drafting Conversation is for.
+///
+/// The Process and nothing else, the way [`RepoChoice`] is an id and nothing
+/// else: which one it is is the whole of what the picker says.
+///
+/// Any of the five may be asked for — the wire carries all of them, and whether
+/// the one asked for can be started yet is the server's list to keep rather than
+/// something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProcessChoice {
+    pub process: Process,
+}
+
+/// What became of picking one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ProcessPicked {
+    Picked,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, or its branch has been cut. The same
+    /// refusal the Repo switch gives and under the same one word, for the same
+    /// reason: a Conversation with a worktree is not one a dropdown rewrites,
+    /// and which of the two it is makes no difference to what the human can do
+    /// about it.
+    ///
+    /// Which is the whole of how a Process is frozen at Start. Nothing is
+    /// written when the work begins; from the moment there is a worktree there
+    /// is no way left to change it.
+    NotDrafting,
+
+    /// That Process has no stage behind it yet: the record reads and writes all
+    /// five, and only the ones whose stage has landed can be picked on.
+    ///
+    /// A refusal of its own rather than one of the above, because it is
+    /// something different about the world — nothing the human does to this
+    /// Conversation makes it pickable, and what they are waiting on is
+    /// Verkstead rather than themselves. Which Processes have landed is the
+    /// server's list; the rows the picker draws are the viewer's, and a stage
+    /// that adds one adds the other.
+    NotLanded,
 }
 
 /// What the branch is to be called.

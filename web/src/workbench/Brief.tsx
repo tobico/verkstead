@@ -53,6 +53,7 @@ import { Empty } from "../notices";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
+import { PROCESS } from "./processes";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -156,6 +157,13 @@ function Configuration(props: {
 
       <dl class={styles.facts}>
         <Fact term="Repo">{props.conversation.repo.name}</Fact>
+        {/* And what kind of work it is, where the composer asked for it: the
+            picker sits between the Repo and the Pairings, and this is the same
+            two facts in the same order. In this half rather than the one below
+            because a Process is a fact about the work rather than about the
+            machine it was worked on — so a share says it, as it says the three
+            around it. */}
+        <Fact term="Process">{PROCESS[props.conversation.process]}</Fact>
         {/* The name where there is one, and the rule that will pick one where
             there is not — which is what a Conversation adopting a roadmap
             reads, its Brief being frozen from the start and its branch being

@@ -43,7 +43,8 @@ use verkstead_render::{
     Adopted, Attached, AttachmentRemoved, AttachmentView, BaseRecorded, BranchRenamed, BriefSaved,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
-    PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, TakenUp, Worktree,
+    PairingView, PickedView, Process, ProcessPicked, RepoPairingsView, RepoSwitched, Started,
+    TakenUp, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -974,6 +975,50 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
         store::Switched::HoldingPullRequest => RepoSwitched::HoldingPullRequest,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
+}
+
+/// The Processes a Conversation can actually be started on: the ones whose
+/// stage has landed.
+///
+/// **The server's list, and the viewer keeps the other** — the rows the picker
+/// draws, in `web/src/workbench/processes.ts`. Two places rather than one
+/// because they are two different statements: this is what the record will
+/// accept, and that is what the human is offered. A stage that brings a Process
+/// to life adds to both, and each of them is written knowing the other is there.
+///
+/// One for now. The record reads and writes all five — see [`store::Process`] —
+/// so this list is the whole of what holds the other four back, and nothing
+/// about them has to be added when one of them arrives.
+const LANDED: &[Process] = &[Process::Develop];
+
+/// Say what kind of work a drafting Conversation is for.
+///
+/// Thin over the store with one question of its own in front of it, which is
+/// the one the store deliberately does not ask: whether that Process has a stage
+/// behind it yet. The record holds all five and only the landed ones can be
+/// picked on, so the other four are refused here by a name that says why —
+/// rather than under [`ProcessPicked::NotDrafting`], which is about this
+/// Conversation and is something the human could have done differently.
+///
+/// Asked first, and before the Conversation is so much as looked up: a Process
+/// with no stage behind it is refused for a Conversation that does not exist as
+/// readily as for one that does, because what is wrong with the ask is the ask.
+pub(crate) async fn pick_process(
+    pool: &SqlitePool,
+    id: i64,
+    process: Process,
+) -> Result<ProcessPicked> {
+    if !LANDED.contains(&process) {
+        return Ok(ProcessPicked::NotLanded);
+    }
+
+    Ok(
+        match store::set_process(pool, id, crate::ui::picked_process(process)).await? {
+            store::Edited::Saved => ProcessPicked::Picked,
+            store::Edited::NoSuchConversation => ProcessPicked::NoSuchConversation,
+            store::Edited::NotDrafting => ProcessPicked::NotDrafting,
+        },
+    )
 }
 
 /// Add a registered Repo for the work to run alongside.

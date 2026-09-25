@@ -24,6 +24,7 @@
   "parked": null,
   "pending_steer": null,
   "pinned": [],
+  "process": "Review",
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": false,
