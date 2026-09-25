@@ -34,6 +34,15 @@ let
   # is: systemd creates it and hands it over. Anywhere else it is the human's,
   # and something that already exists.
   homeIsOurs = lib.hasPrefix "${stateDir}/" "${cfg.home}";
+
+  # The port out of `peerListen`, which is the whole of what the firewall rule
+  # below is made of: the address half says which interfaces the server binds
+  # and means nothing to a firewall, and moving the listener has to move the
+  # rule with it rather than leaving 8423 open onto nothing.
+  #
+  # Split from the right, so that an IPv6 address written `[::]:8423` gives up
+  # its port rather than its first colon.
+  peerPort = lib.toInt (lib.last (lib.splitString ":" cfg.peerListen));
 in
 
 {
@@ -43,7 +52,9 @@ in
         Whether to run the Verkstead server as a system service, with the CLI on
         every user's `PATH`.
 
-        The server binds the loopback interface and speaks plain HTTP.
+        The workbench listener binds the loopback interface and speaks plain
+        HTTP — the peer listener beside it is another matter, and has
+        {option}`peerListen` and {option}`openFirewall` below to itself.
         Reaching the web UI from a phone means HTTPS, which is
         `tailscale serve --bg 8422`'s job in front of it — and that is the
         **Remote access** section of the workbench settings rather than a
@@ -90,6 +101,50 @@ in
 
         The CLI's own default is `http://127.0.0.1:8422`, so a host that changes
         the port here has to set `VERKSTEAD_SERVER` for the agents alongside it.
+      '';
+    };
+
+    peerListen = lib.mkOption {
+      type = lib.types.str;
+      default = "0.0.0.0:8423";
+      example = "[::]:8423";
+      description = ''
+        Address and port the peer listener binds, as `--peer-listen` — the
+        second listener, and the one other devices dial.
+
+        Every interface by default, where {option}`listen` above is the
+        loopback: the device calling this one may be on the LAN or on the
+        tailnet, and neither of those is the loopback. What stands in front of
+        it is not the address but the handshake — it presents this device's own
+        certificate, asks the caller for one, and answers nothing but the
+        identity endpoint to a caller this device's cluster does not hold.
+
+        Two Verksteads on one machine want a port each here, as they want a
+        {option}`listen` each: an address somebody else is already on refuses
+        the start rather than coming up with half a server. Moving it moves the
+        firewall rule below with it.
+      '';
+    };
+
+    openFirewall = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Whether to open {option}`peerListen`'s port on this host's firewall.
+
+        On, because a peer listener nothing can reach is a linking that cannot
+        happen. A NixOS host firewalls by default, so a module that left this
+        shut would ship a feature that silently does not work: the device
+        dialling in would time out, and nothing on either machine would say
+        why.
+
+        That port and nothing else. The workbench's own stays shut — what
+        reaches it from another device is `tailscale serve` on the tailnet
+        rather than anything arriving on this machine's LAN.
+
+        Turn it off on a host that says its open ports somewhere of its own,
+        and open the peer port there instead.
       '';
     };
 
@@ -292,6 +347,20 @@ in
       "--operator=verkstead"
     ];
 
+    # The one port this host has to answer on for another device to reach it.
+    # A rule rather than an instruction in a manual: a NixOS host firewalls by
+    # default, and a linking that times out on a shut port looks from both ends
+    # like a Verkstead that is simply not there.
+    #
+    # A list option, so this is merged with what the host and every other
+    # module say rather than replacing it; `optionals` is what leaves a host
+    # that turned the option off with nothing of ours in that list at all.
+    #
+    # The workbench's own port is not here and is not to be added: what reaches
+    # it from another device is `tailscale serve` on the tailnet, and its socket
+    # speaks plain HTTP to whoever opens it.
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ peerPort ];
+
     users.users.verkstead = {
       isSystemUser = true;
       group = "verkstead";
@@ -359,6 +428,8 @@ in
             "serve"
             "--listen"
             cfg.listen
+            "--peer-listen"
+            cfg.peerListen
             "--data-dir"
             stateDir
             "--build-cache-dir"
