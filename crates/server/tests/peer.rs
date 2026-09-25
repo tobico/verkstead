@@ -35,7 +35,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use verkstead_server::device::Device;
+use verkstead_server::device::reading::Reading;
 use verkstead_server::peer;
+use verkstead_server::platform::{self, Platform};
+use verkstead_server::remote::Tailscale;
 
 /// The id this device is stated as, so that what a test asserts against is a
 /// string it chose rather than sixteen random bytes it has to filter out of a
@@ -73,8 +76,22 @@ struct Listening {
 
 impl Listening {
     /// Stand one up serving what a Verkstead serves, until the test is over.
+    ///
+    /// Reading a machine with no Tailscale and no interfaces, which is what
+    /// every test here but the ones about the addresses wants: the tailnet half
+    /// would otherwise be whatever the box running the suite is on, and running
+    /// somebody's real `tailscale` to answer a test about a fingerprint would be
+    /// a suite asking a question it is not about.
     fn with_the_device_called(id: &str) -> Listening {
-        Listening::serving(id, |device| peer::router(device, peer::Members::none()))
+        Listening::reading(id, nowhere())
+    }
+
+    /// And one whose device is on the machine `reading` describes, for the
+    /// tests that are about what this device says of the machine it is on.
+    fn reading(id: &str, reading: Reading) -> Listening {
+        Listening::serving(id, |device| {
+            peer::router(device, reading, peer::Members::none())
+        })
     }
 
     /// And one serving `answering` instead, for the questions that are about
@@ -473,5 +490,164 @@ async fn a_route_can_read_the_certificate_the_handshake_took() {
         "nothing",
         "and nothing where the caller presented nothing, that being an ordinary \
          caller rather than a failure, got:\n{answered}",
+    );
+}
+
+/// The machine a device with nothing around it is on: no Tailscale, and no
+/// interface worth advertising.
+///
+/// `verkstead-no-such-tailscale` is a program that is not there, which is what
+/// a machine with no Tailscale on it *is* — see the Remote access suite, which
+/// tells a missing binary from one that will not answer the same way.
+fn nowhere() -> Reading {
+    Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    )
+}
+
+/// The same machine, on the two LAN addresses a test states for it.
+fn on_the_lan() -> Reading {
+    Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
+    )
+}
+
+/// What a WSL kernel calls itself, which is the one thing that says one apart
+/// from the Linux it is in every other way.
+const WSL_KERNEL: &str = "5.15.167.4-microsoft-standard-WSL2";
+
+/// The identity a caller reads, parsed.
+fn identity(answered: &str) -> serde_json::Value {
+    serde_json::from_str(body(answered))
+        .unwrap_or_else(|why| panic!("the identity should be JSON: {why}\n{answered}"))
+}
+
+/// What a device says about the machine it is on: the hostname it is shown
+/// under, and the word for its operating system.
+///
+/// The name is checked against the one reading there is of it rather than
+/// against a string in this file: a hostname read off the box the suite is
+/// running on would be a golden fixture nobody could commit, which is the same
+/// reason the onboarding suite states the machines it asks about.
+#[tokio::test]
+async fn the_identity_names_the_machine_this_device_is_on() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+    let identity = identity(&answered);
+
+    assert_eq!(
+        identity["name"],
+        platform::hostname(),
+        "the name is the hostname read off the machine, with nothing configurable \
+         about it, got:\n{answered}",
+    );
+
+    assert!(
+        !identity["name"].as_str().unwrap().is_empty(),
+        "and a machine that will not say what it is called still reads as something, \
+         got:\n{answered}",
+    );
+
+    assert_eq!(
+        identity["os"],
+        platform::os_word(Platform::HERE, platform::kernel_release().as_deref()),
+        "and the OS is this platform's own word for itself, got:\n{answered}",
+    );
+}
+
+/// The case the whole roadmap was written for: a Windows machine and the WSL on
+/// it share a hostname, and the OS is what tells the two rows apart.
+#[tokio::test]
+async fn a_wsl_reads_linux_wsl() {
+    let wsl = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::Linux,
+        Some(WSL_KERNEL.to_owned()),
+        Vec::new(),
+    );
+
+    let listening = Listening::reading(THIS_DEVICE, wsl);
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert_eq!(
+        identity(&answered)["os"],
+        "Linux (WSL)",
+        "a WSL has to read as one, or a cluster holding a Windows machine and its \
+         WSL would draw two rows nobody could tell apart, got:\n{answered}",
+    );
+}
+
+/// And a machine with no Tailscale on it answers with its LAN addresses rather
+/// than failing the answer they are part of.
+#[tokio::test]
+async fn a_machine_with_no_tailscale_answers_with_its_lan_alone() {
+    let listening = Listening::reading(THIS_DEVICE, on_the_lan());
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert_eq!(
+        identity(&answered)["addresses"],
+        serde_json::json!(["192.168.1.24", "10.0.0.7"]),
+        "a device is reachable on what it can say it is reachable on, and a LAN \
+         address is an answer, got:\n{answered}",
+    );
+}
+
+/// And where Tailscale *is* up, the tailnet name and address come first: they
+/// are the half a peer on another network can reach.
+///
+/// Unix only, for the reason the Remote access suite is: what stands in for
+/// `tailscale` here is a shell script, the machine running the tests being the
+/// one machine a suite about four different machines must not ask.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_tailnet_comes_before_the_lan() {
+    /// A machine on a tailnet, as `tailscale status --json` describes one.
+    const ON_A_TAILNET: &str = r#"printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net.","TailscaleIPs":["100.64.0.1","fd7a:115c:a1e0::1"]}}'"#;
+
+    let reading = Reading::stated(
+        Tailscale::running(
+            vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                ON_A_TAILNET.to_owned(),
+                // `sh -c` gives `$0` the script's own name, so what Verkstead
+                // passes lands in `$1` onwards.
+                "tailscale".to_owned(),
+            ],
+            8422,
+        ),
+        Platform::HERE,
+        None,
+        vec![
+            // The tailnet address is on an interface of its own as well, which
+            // is why the list is not simply the two halves appended.
+            "100.64.0.1".parse().unwrap(),
+            "192.168.1.24".parse().unwrap(),
+        ],
+    );
+
+    let listening = Listening::reading(THIS_DEVICE, reading);
+
+    let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+    assert_eq!(
+        identity(&answered)["addresses"],
+        serde_json::json!([
+            "workbench.tailnet-name.ts.net",
+            "100.64.0.1",
+            "fd7a:115c:a1e0::1",
+            "192.168.1.24",
+        ]),
+        "the tailnet name and address lead, and the address the daemon already \
+         named is not named again by the interface it is on, got:\n{answered}",
     );
 }

@@ -84,6 +84,7 @@ use tokio_rustls::server::TlsStream;
 use verkstead_render::DeviceIdentity;
 
 use crate::device::Device;
+use crate::device::reading::Reading;
 
 /// The port a device is dialled on when nobody has said otherwise, and the
 /// whole of what an operator has to open on a firewall for linking to work.
@@ -219,11 +220,25 @@ impl Listener {
 /// endpoints existed would be telling a stranger what to reach for. That is
 /// the Workbench Key's own arrangement, where a path under `/api/` that no
 /// route answers is refused at the gate rather than missed at the fallback.
-pub fn router(device: Device, members: Members) -> Router {
+pub fn router(device: Device, reading: Reading, members: Members) -> Router {
     Router::new()
         .route(IDENTITY, get(identity))
-        .with_state(device)
+        .with_state(Answering { device, reading })
         .fallback_service(members_only(members))
+}
+
+/// What the identity endpoint answers out of: what this device *is*, and the
+/// machine it is on.
+///
+/// Two handles rather than one, because they are two different kinds of thing
+/// kept two different ways. The id and the certificate are read off the disk
+/// once at the start and do not change under a running server; the name, the OS
+/// and the addresses are read at the moment somebody asks and are kept nowhere
+/// — see [`crate::device::reading`].
+#[derive(Debug, Clone)]
+struct Answering {
+    device: Device,
+    reading: Reading,
 }
 
 /// Everything a membership admits, which today is nothing at all.
@@ -387,11 +402,15 @@ impl Connected<IncomingStream<'_, Handshaken>> for Caller {
 /// that the device naming itself is the device that presented, and the human
 /// compares the same string against what the other machine's operator is
 /// reading off their own screen.
-async fn identity(State(device): State<Device>) -> Json<DeviceIdentity> {
-    Json(DeviceIdentity {
-        device: device.id().to_owned(),
-        fingerprint: device.fingerprint().to_owned(),
-    })
+///
+/// The name, the OS and the addresses beside them are read off the machine as
+/// this is answered rather than held from the start — see
+/// [`crate::device::reading`]. Which is why the handler is `async` for a route
+/// that has nothing to wait on otherwise: the tailnet half of the addresses is
+/// a command run on the machine, and a peer that asked a moment later would get
+/// a different and equally true answer.
+async fn identity(State(answering): State<Answering>) -> Json<DeviceIdentity> {
+    Json(answering.reading.identity(&answering.device).await)
 }
 
 /// This device's certificate and the key that signed it, as the configuration a
