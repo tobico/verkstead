@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Write packaging/ — the desktop entry a launcher lists Verkstead under, and the
-# icons it draws beside it — from the one piece of artwork in assets/icons.
+# icons it draws beside it — from the one piece of artwork in tools/hammer.
 #
 # The same rule as tools/generate-icons.sh, which does this for the viewer's
 # own: there is one piece of artwork and everything else is output, committed so
@@ -10,8 +10,10 @@
 # It writes outside assets/ deliberately. Everything under that directory is
 # vite's publicDir — copied whole into the viewer, which is embedded in every
 # binary including the headless CLI — and a launcher's icons are neither the
-# viewer's to serve nor the CLI's to carry. The one thing that stays there is
-# the artwork itself, which is the viewer's source too.
+# viewer's to serve nor the CLI's to carry. The artwork it reads is outside it
+# for the same reason: it is tools/hammer/render.py's output, and a 1024 square
+# nothing serves would be carried inside every binary for nothing. What stays
+# under assets/ is the cut icons, which the viewer does serve.
 #
 # This directory is entirely this script's output: it is rewritten from nothing
 # on every run, so a size that stops being generated stops being committed.
@@ -28,7 +30,7 @@ cd "$(dirname "$0")/.."
 # because a desktop told two would have two Verksteads.
 APP_ID="net.tobico.Verkstead"
 
-ARTWORK="assets/icons/verkstead-hammer.png"
+ARTWORK="tools/hammer/verkstead-hammer.png"
 OUT="packaging"
 
 rm -rf "$OUT"

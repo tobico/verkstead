@@ -37,6 +37,10 @@ stages 04 and 05 to reuse.
   by the other two — which by the ordering above is this one. The one piece of
   artwork stays where it is: `assets/icons/verkstead-hammer.png` is the
   viewer's own source too.
+  **Amended** (the hammer in Blender): it does not. The blend file is the
+  mark's source now and the PNG is a render of it, so the reason it sat under
+  `assets/` went with that — it moved to `tools/hammer/verkstead-hammer.png`,
+  beside the blend, and out of every binary. The rest of this bullet holds.
 - Release legs are added per packaging stage — this stage builds only the
   Linux one, plus the shared icon generation.
 

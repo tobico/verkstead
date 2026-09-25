@@ -734,7 +734,16 @@ of it:
 
 | Artwork | Cut into | Where it comes from |
 | --- | --- | --- |
-| `icons/verkstead-hammer.png` | `icon-32`, `icon-192`, `icon-512`, `apple-touch-icon`, and every icon under `packaging/` | A 1024 square rendered out of [`tools/hammer/verkstead-hammer.blend`](../tools/hammer/verkstead-hammer.blend) by [`tools/hammer/render.py`](../tools/hammer/render.py). The blend file is the mark's source of truth; the render is what the two cut scripts read. Blender is the one tool here that comes from the machine rather than the dev shell |
+| `tools/hammer/verkstead-hammer.png` | `icon-32`, `icon-192`, `icon-512`, `apple-touch-icon`, and every icon under `packaging/` | A 1024 square rendered out of [`tools/hammer/verkstead-hammer.blend`](../tools/hammer/verkstead-hammer.blend) by [`tools/hammer/render.py`](../tools/hammer/render.py). The blend file is the mark's source of truth; the render is what the two cut scripts read. Blender is the one tool here that comes from the machine rather than the dev shell |
+
+It sits in `tools/hammer/` rather than beside the icons it is cut into, because
+`assets/` is vite's `publicDir`: everything under it is served at the site root
+and, the viewer being embedded, carried inside every binary including the
+headless CLI. Nothing serves the 1024 square — only the two cut scripts read
+it, and they read it from the repository — so a copy of it in every binary
+would be over 600 KB nobody ever asks for. It was under `assets/icons` while it was
+the mark's source and had a claim to be the viewer's too; the blend file is
+that now, and the render is an intermediate like the cut icons are.
 
 The iOS icon is the only output with a field under it and the only one with a
 margin: iOS ignores transparency and composites whatever it is given onto
