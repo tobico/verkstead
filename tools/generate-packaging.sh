@@ -69,10 +69,11 @@ desktop-file-validate "$OUT/$APP_ID.desktop"
 # names them by — which is the layout they are installed into, so a packaging
 # step copies the tree rather than renaming a file per size.
 #
-# The set stops at 512 because the artwork is 545 square: everything here is a
-# downscale, and an icon scaled up is the one that looks wrong. 16 through 48
-# are what a menu and a panel ask for, and the three above them are what a
-# macOS .icns and a Windows .ico want from the same run.
+# The set stops at 512 because that is the largest size a launcher asks for.
+# Everything here is a downscale of a 1024 render, and an icon scaled up is the
+# one that looks wrong. 16 through 48 are what a menu and a panel draw, and the
+# three above them are what a macOS .icns and a Windows .ico want from the same
+# run.
 #
 # Lanczos, a transparent field and `-strip`, for the reasons
 # tools/generate-icons.sh gives: the artwork is fine-lined enough to turn to
@@ -80,16 +81,20 @@ desktop-file-validate "$OUT/$APP_ID.desktop"
 # launcher has no use for the source's colour profile. Stripping is also what
 # makes a second run byte-identical to the first — what it takes out is the
 # timestamp.
+cut() {
+  magick "$ARTWORK" -filter Lanczos -background none \
+    -resize "${1}x${1}" -strip "$2"
+}
+
 for size in 16 24 32 48 64 128 256 512; do
   apps="$OUT/icons/hicolor/${size}x${size}/apps"
   mkdir -p "$apps"
-  magick "$ARTWORK" -filter Lanczos -background none \
-    -resize "${size}x${size}" -strip "$apps/$APP_ID.png"
+  cut "$size" "$apps/$APP_ID.png"
 done
 
-# The macOS icon, which is those same downscales again inside the one container
-# macOS reads an app's icon out of — `Verkstead.app/Contents/Resources`, put
-# there by tools/build-macos-dmg.sh.
+# The macOS icon, which is those same downscales — and one above them — inside
+# the one container macOS reads an app's icon out of:
+# `Verkstead.app/Contents/Resources`, put there by tools/build-macos-dmg.sh.
 #
 # Written here rather than handed to `iconutil` because that tool is a Mac's and
 # this script runs wherever the dev shell does, while the format is a header and
@@ -100,9 +105,8 @@ done
 # macOS asks for a slot by name rather than for the nearest size, so the @2x
 # slots are named as well as the plain ones, each filled by the downscale of the
 # pixel size it asks for. That the two are the same file is what an .iconset
-# built from this artwork would give it too: there is one drawing and everything
-# is a downscale of it. Nothing fills 512@2x — `ic10` is 1024 square and the
-# artwork is 545.
+# built from this artwork would give it too: there is one piece of artwork and
+# everything is a downscale of it.
 ICNS_CHUNKS="
 icp4 16   16pt
 ic11 32   16pt@2x
@@ -113,14 +117,30 @@ ic13 256  128pt@2x
 ic08 256  256pt
 ic14 512  256pt@2x
 ic09 512  512pt
+ic10 1024 512pt@2x
 "
 
 ICNS="$OUT/$APP_ID.icns"
 
-# The PNG a chunk carries, which is the one already written above: the icns is a
-# repackaging of the committed tree rather than a second pass over the artwork,
-# so the icon a Mac draws and the icon a Linux panel draws are the same pixels.
-icns_png() { printf '%s' "$OUT/icons/hicolor/${1}x${1}/apps/$APP_ID.png"; }
+# `ic10` is the one slot the tree above cannot fill. It is 512pt at 2x — 1024
+# pixels, the artwork's own size — and no launcher asks for an icon that big, so
+# there is no committed downscale to repackage. It is cut here instead, into a
+# temporary directory that leaves with the script rather than into `icons/`,
+# where a size nothing installs would only be committed and never drawn.
+ICNS_1024="$(mktemp -d)/$APP_ID-1024.png"
+trap 'rm -rf "$(dirname "$ICNS_1024")"' EXIT
+cut 1024 "$ICNS_1024"
+
+# The PNG a chunk carries: for every slot the launcher tree holds, the downscale
+# already written above, so the icon a Mac draws and the icon a Linux panel
+# draws are the same pixels; and for the one it does not, the 1024 beside it.
+icns_png() {
+  if [ "$1" -gt 512 ]; then
+    printf '%s' "$ICNS_1024"
+  else
+    printf '%s' "$OUT/icons/hicolor/${1}x${1}/apps/$APP_ID.png"
+  fi
+}
 
 # Four bytes, most significant first — the only number this format has. Printed
 # as escapes for a second printf to write, because that is how a shell puts a
