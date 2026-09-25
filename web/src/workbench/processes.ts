@@ -1,5 +1,6 @@
 //! The words a Conversation's Processes are said in, which of them the picker
-//! offers, and which roles each one is run under.
+//! offers, and which roles each one is run under — down to the rows each of
+//! those roles' pickers offers above the Pairings.
 //!
 //! The wire carries a Process as a name rather than a sentence — the record's
 //! own word for what kind of work this is — and what the human reads is the
@@ -53,6 +54,12 @@ export type Roles = {
   uses: Role[];
   /// Those of them that may be picked away — the picker's row that is no
   /// account at all. A role not named here has to be answered with one.
+  ///
+  /// **What the picker draws today**, which is what makes it worth reading
+  /// rather than a claim nothing checks: the two rows the ADR retires — *No
+  /// grilling* when Tinker lands, *No review* on a Review when that stage does
+  /// — come out of this table in the stage that takes them out of the app, so
+  /// the row and the control never say different things in the meantime.
   away: Role[];
   /// And which shape the one **Agent** control takes: a panel where there are
   /// several roles to stack under their labels, and the flat Pairing dropdown
@@ -74,8 +81,11 @@ export type Roles = {
 /// with nothing in its setup row.
 export const ROLES: Record<Process, Roles> = {
   Develop: {
+    // Both of the rows that are no account: *No grilling* goes when Tinker
+    // lands and takes the ungrilled path with it, and until then it is a row
+    // the picker offers.
     uses: ["grilling", "implementation", "review"],
-    away: ["review"],
+    away: ["grilling", "review"],
     control: "panel",
   },
   Investigate: {
@@ -84,8 +94,13 @@ export const ROLES: Record<Process, Roles> = {
     control: "dropdown",
   },
   Review: {
+    // A Review without a review is Fix Merge Issues with the comments
+    // answered, so the ADR gives this row no *No review*. The picker on a
+    // Conversation holding a pull request still offers one, and the stage that
+    // makes Review a Process of its own is what takes it away — this says what
+    // is drawn until then.
     uses: ["implementation", "review"],
-    away: [],
+    away: ["review"],
     control: "panel",
   },
   Tinker: {
@@ -104,6 +119,29 @@ export const ROLES: Record<Process, Roles> = {
 /// picker it might draw.
 export function uses(process: Process, role: Role): boolean {
   return ROLES[process].uses.includes(role);
+}
+
+/// The words a role's picker says the row that runs no session in, where it
+/// offers one: *No grilling* above the grilling Pairings, *No review* above
+/// the review ones.
+///
+/// No entry for the implementation role, which has no such row anywhere —
+/// there is no work without something building it, which is why every
+/// Process's `uses` names it and no Process's `away` can.
+const AWAY: Partial<Record<Role, string>> = {
+  grilling: "No grilling",
+  review: "No review",
+};
+
+/// And the row this Process's picker for this role offers, or `undefined`
+/// where the role has to be answered with an account.
+///
+/// The second question each composer asks of each picker it draws, after
+/// [`uses`]: which rows it offers is the table's as much as whether it is
+/// drawn, so the two cannot come apart — a row a composer wrote in by hand
+/// would go on being offered through the stage that retired it.
+export function away(process: Process, role: Role): string | undefined {
+  return ROLES[process].away.includes(role) ? AWAY[role] : undefined;
 }
 
 /// How an inert Start names the roles it is waiting on, in the middle of the

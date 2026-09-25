@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Process } from "../src/api/types";
 import {
+  away,
   label,
   OFFERED,
   PROCESS,
@@ -40,15 +41,44 @@ describe("the roles a process is run under", () => {
     expect(ROLES.FixMergeIssues.uses).toEqual(["implementation"]);
   });
 
-  /// And which of them the human may answer with nobody at all. A Review
-  /// without a review is Fix Merge Issues with the comments answered, which is
-  /// a different thing to ask for — so its Review role is not one of them.
+  /// And which of them the human may answer with nobody at all, which is what
+  /// each picker's own rows are drawn from — so these are the rows offered
+  /// today rather than the rows the ADR ends with. Two of them are on their way
+  /// out and go from here in the stage that takes them out of the app: *No
+  /// grilling* when Tinker lands, and *No review* on a Review when that stage
+  /// does, a Review without a review being Fix Merge Issues with the comments
+  /// answered.
   it("says which of them may be picked away", () => {
-    expect(ROLES.Develop.away).toEqual(["review"]);
+    expect(ROLES.Develop.away).toEqual(["grilling", "review"]);
     expect(ROLES.Tinker.away).toEqual(["review"]);
-    expect(ROLES.Review.away).toEqual([]);
+    expect(ROLES.Review.away).toEqual(["review"]);
     expect(ROLES.Investigate.away).toEqual([]);
     expect(ROLES.FixMergeIssues.away).toEqual([]);
+  });
+
+  /// The implementation role is on no row's list, there being no work without
+  /// something building it — which is the same fact as every row using it.
+  it("never offers the implementation role a row that runs nothing", () => {
+    for (const process of EVERY) {
+      expect(ROLES[process].away).not.toContain("implementation");
+      expect(away(process, "implementation")).toBeUndefined();
+    }
+  });
+
+  /// And the words the row is said in, which is what a composer asks for rather
+  /// than writing them in itself: a row a picker spelled by hand would go on
+  /// being offered through the stage that retired it.
+  it("says the words each row that runs nothing is offered in", () => {
+    expect(away("Develop", "grilling")).toBe("No grilling");
+    expect(away("Develop", "review")).toBe("No review");
+    expect(away("Review", "review")).toBe("No review");
+  });
+
+  /// And nothing where the role has to be answered with an account.
+  it("offers no row where the table does not name the role", () => {
+    expect(away("Investigate", "review")).toBeUndefined();
+    expect(away("FixMergeIssues", "review")).toBeUndefined();
+    expect(away("Tinker", "grilling")).toBeUndefined();
   });
 
   /// A role nothing draws cannot be picked away from, so every row's `away` is

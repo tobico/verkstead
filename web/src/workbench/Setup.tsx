@@ -109,7 +109,7 @@ import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
-import { label, OFFERED, PROCESS, ROLES, uses } from "./processes";
+import { away, label, OFFERED, PROCESS, ROLES, uses } from "./processes";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -877,7 +877,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   saved={saved()}
                   role="grilling"
                   label={label(props.conversation.process, "grilling")}
-                  away="No grilling"
+                  away={away(props.conversation.process, "grilling")}
                   chosen={pairing.settled(props.conversation.grilling_pairing)}
                   pairing={pairing.under(props.conversation.grilling_pairing)}
                   choose={(id, picked) =>
@@ -909,7 +909,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   saved={saved()}
                   role="review"
                   label={label(props.conversation.process, "review")}
-                  away="No review"
+                  away={away(props.conversation.process, "review")}
                   chosen={pairing.settled(props.conversation.review_pairing)}
                   pairing={pairing.under(props.conversation.review_pairing)}
                   choose={(id, picked) =>
@@ -1061,7 +1061,9 @@ export function ProfileChoices(props: {
 /// `away` is the row a role that can run nothing offers above the pairings,
 /// where it offers one. In the same flat list rather than beside it as a switch,
 /// because it is the same decision: what runs this, and one of the answers is
-/// nobody.
+/// nobody. **Whether there is one, and what it says, is the table's** — see
+/// [`away`](./processes.ts), which the caller asks of each picker it draws
+/// exactly as it asks [`uses`] whether to draw it at all.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];

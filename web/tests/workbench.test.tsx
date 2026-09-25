@@ -184,7 +184,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The words a Process is said in, read here rather than spelled out again: the
 // pane and this assertion about it would otherwise be two opinions about what
 // Develop is called.
-import { OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
+import { away, OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -5657,6 +5657,14 @@ describe("a conversation's pairings", () => {
     expect(offers("Review")).toEqual(["No review", ...READINGS]);
     expect(offers("Grilling")).toEqual(["No grilling", ...READINGS]);
     expect(offers("Implementation")).toEqual(READINGS);
+
+    // And it is the table that put it there rather than the pane: which roles
+    // offer one, and the words it is offered in, are both `ROLES`'s — so a row
+    // the ADR retires goes from the picker when its stage takes it out of the
+    // table, rather than living on in a literal nobody thought to look at.
+    expect(offers("Grilling")[0]).toBe(away(UNCHOSEN.process, "grilling"));
+    expect(offers("Review")[0]).toBe(away(UNCHOSEN.process, "review"));
+    expect(away(UNCHOSEN.process, "implementation")).toBeUndefined();
 
     // And nothing picked yet on any of them, which the closed control says
     // rather than offering it as a row.

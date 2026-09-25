@@ -165,7 +165,7 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
-import { label, ROLES, roles, uses, type Role } from "./processes";
+import { away, label, ROLES, roles, uses, type Role } from "./processes";
 import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
@@ -899,7 +899,7 @@ function Compose(props: {
                           saved={saved()}
                           role="grilling"
                           label={label(process(), "grilling")}
-                          away="No grilling"
+                          away={away(process(), "grilling")}
                           chosen={showing("grilling")}
                           pick={(picked) => change({ grilling: picked })}
                         />
@@ -918,7 +918,7 @@ function Compose(props: {
                           saved={saved()}
                           role="review"
                           label={label(process(), "review")}
-                          away="No review"
+                          away={away(process(), "review")}
                           chosen={showing("review")}
                           pick={(picked) => change({ review: picked })}
                         />
