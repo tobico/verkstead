@@ -43,6 +43,19 @@
 //! Nothing else about the row moves — it is not removed, and its addresses and
 //! its fingerprint are exactly what they were, which is what the next dial
 //! works down.
+//!
+//! **And what a member has yet to be told is a table beside it.** An
+//! announcement is made over a dial, and a dial to a machine that is switched
+//! off reaches nobody — but the thing being announced happened anyway: a human
+//! pressed Allow, and the newcomer is a member here whatever some third device
+//! made of it. So the telling that did not get through is written down as owed,
+//! and the one that did takes the row away. Nothing here retries in a loop; a
+//! debt is paid the next time that member is found answering.
+//!
+//! The same table holds what a renewed certificate is owed on, the device being
+//! announced then being this one rather than a newcomer — which is why what a
+//! row names is the pair *member owed* and *device it has not heard about*
+//! rather than anything about a join.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
@@ -170,6 +183,31 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the member addresses table")?;
+
+    // And what each member has yet to be told. A table rather than a column for
+    // the reason the addresses are one: a member may be owed several tellings
+    // at once — three devices joined while a laptop's lid was shut — and a
+    // column could hold one of them.
+    //
+    // Keyed by the pair, so that owing one telling twice is owing it once: a
+    // row says that this member has not heard about that device, and saying it
+    // again says nothing new.
+    //
+    // No reference to `members` from either column, although both hold a device
+    // id. The device being announced *about* need not be a member of this one
+    // at all — a renewal announces this machine, which is on nobody's own list
+    // — and a foreign key that held for one column and not the other would read
+    // as a rule somebody meant.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS owed_announcements (
+             device TEXT NOT NULL,
+             about  TEXT NOT NULL,
+             PRIMARY KEY (device, about)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the table of what members have yet to be told")?;
 
     Ok(())
 }
@@ -363,6 +401,71 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
         .with_context(|| format!("marking device {device} as answering nothing"))
 }
 
+/// Write down that `device` has yet to be told about `about`.
+///
+/// **What a failed announcement leaves behind.** The announcement itself is a
+/// dial, and a dial to a machine that is off reaches nobody — but a human has
+/// pressed Allow and the device being announced is a member here whatever that
+/// machine made of it, so the telling is owed rather than lost. What pays it is
+/// the next thing that finds this member answering.
+///
+/// Nothing is refused and owing twice is owing once: a row says that this
+/// member has not heard about that device, and a second announcement that also
+/// failed says the same thing again.
+pub async fn owe_announcement(pool: &SqlitePool, device: &str, about: &str) -> Result<()> {
+    let mut tx = writing(pool, "writing down an announcement that was not made").await?;
+
+    sqlx::query("INSERT OR IGNORE INTO owed_announcements (device, about) VALUES (?, ?)")
+        .bind(device)
+        .bind(about)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("writing down that device {device} has not heard about {about}")
+        })?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("writing down that device {device} has not heard about {about}"))
+}
+
+/// And take that away, which is what an announcement that got through does.
+///
+/// Nothing is refused. An announcement that was never owed is one this device
+/// made without anything having gone wrong first, which is the ordinary case:
+/// the row is cleared either way rather than looked for.
+pub async fn announcement_made(pool: &SqlitePool, device: &str, about: &str) -> Result<()> {
+    let mut tx = writing(pool, "clearing an announcement that was made").await?;
+
+    sqlx::query("DELETE FROM owed_announcements WHERE device = ? AND about = ?")
+        .bind(device)
+        .bind(about)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("clearing what device {device} was owed about {about}"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("clearing what device {device} was owed about {about}"))
+}
+
+/// Every member that has yet to be told about `about`, by device id.
+///
+/// The devices rather than the rows, because what is done with the answer is
+/// dialling each of them and a dial reads the member back for itself — and a
+/// member that has since been unlinked has no row to read, so a list of ids is
+/// the honest shape of a debt.
+pub async fn announcements_owed(pool: &SqlitePool, about: &str) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT device FROM owed_announcements WHERE about = ? ORDER BY device")
+            .bind(about)
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("listing the members that have not heard about {about}"))?;
+
+    Ok(rows.into_iter().map(|(device,)| device).collect())
+}
+
 /// Take a device out of the membership, with the addresses it advertised.
 ///
 /// The addresses first, because they point at the row: a member row dropped out
@@ -374,6 +477,16 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
 /// already not a member, and unlinking one twice is not a thing to fail.
 pub async fn forget_member(pool: &SqlitePool, device: &str) -> Result<()> {
     let mut tx = writing(pool, "forgetting a member").await?;
+
+    // What it was owed goes with it, and so does what anybody was owed about
+    // it: a device that is not a member is one nothing here has anything left
+    // to tell, and a debt naming it would be a dial nobody would ever make.
+    sqlx::query("DELETE FROM owed_announcements WHERE device = ? OR about = ?")
+        .bind(device)
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting what device {device} was owed"))?;
 
     sqlx::query("DELETE FROM member_addresses WHERE device = ?")
         .bind(device)

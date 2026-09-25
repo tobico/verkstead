@@ -111,8 +111,8 @@ pub use joins::{
 };
 pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
 pub use members::{
-    Linking, Member, forget_member, member_count, member_holding, member_unreachable, members,
-    record_member,
+    Linking, Member, announcement_made, announcements_owed, forget_member, member_count,
+    member_holding, member_unreachable, members, owe_announcement, record_member,
 };
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;

@@ -509,6 +509,10 @@ const ABOUT: Record<string, readonly string[]> = {
   // modal is read by the shell rather than by a page, and the Devices section
   // is a settings pane this sweep never opens.
   joins: [],
+  // And the cluster moving with no join here to have moved it, which names the
+  // same Devices section and nothing else — a settings pane this sweep never
+  // opens either.
+  devices: [],
 };
 
 describe("what a Nudge is about", () => {

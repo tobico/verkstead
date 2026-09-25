@@ -51,7 +51,9 @@
 //! began it, and says it had nobody to tell. How many are owed is read off the
 //! members this device keeps — see [`Members`]; the announcement that takes
 //! them off that list one at a time is still to come, so every member there is
-//! is owed.
+//! is owed. The announcement of a *newcomer* is here already — see
+//! [`Devices::allow`] — and the record of what a member has yet to be told is
+//! the one the renewal will be taken off.
 //!
 //! **And [`Devices`] is what the human's own browser reads of all this**: this
 //! device and every other device in its cluster, a row apiece, which is the
@@ -72,7 +74,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::{AskingDevice, DevicesView, JoinSettled};
+use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView, JoinSettled};
 use verkstead_store::{AskedJoin, Linking};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
@@ -798,13 +800,24 @@ impl Devices {
     /// **Allow**: let the device that asked into this one's cluster.
     ///
     /// **The membership's first real row, and the call that makes it a link.**
-    /// Three things happen: the asker is recorded as a member out of what it
-    /// said about itself in the join post, the request is let go of, and the
-    /// asker is dialled back and handed this device and every member it holds
-    /// — see [`Peers::settle`]. In that order, because the order is what a
+    /// Four things happen: the asker is recorded as a member out of what it
+    /// said about itself in the join post, the request is let go of, the asker
+    /// is dialled back and handed this device and every member it holds — see
+    /// [`Peers::settle`] — and then every one of those members is told about
+    /// the asker. The first three are in that order because the order is what a
     /// failure between them decides: a member recorded with the request still
     /// held is an Allow the human can press again, and a request let go of with
     /// no member written is a join that has to be made from the beginning.
+    ///
+    /// **The fourth is what joins the newcomer to everybody rather than to this
+    /// device.** One press is the cluster's only gate, so the vouching has to
+    /// be carried by something — and what carries it is the link this device
+    /// already holds to each member: the announcement arrives there over a
+    /// certificate that member has verified, and nobody over there is asked to
+    /// confirm anything. A newcomer that introduced itself would be a stranger
+    /// asking to be recorded, which is the arrangement ADR-0020 turned down.
+    /// See [`Devices::announce`], where a member that answers nothing is dimmed
+    /// and owed the telling rather than failing this press.
     ///
     /// **And a dial back that cannot be made does not undo the press.** The
     /// human pressed Allow and the asker is a member; a laptop that was shut
@@ -833,13 +846,24 @@ impl Devices {
         // What goes over, read before the asker is written down so that the
         // roster is the cluster as it was asked to be joined: this device as it
         // answers for itself, and everybody it was already linked to.
+        //
+        // The rows rather than the identities alone, because the same reading
+        // is both halves of what an Allow does: it is the roster the newcomer
+        // is handed, and it is the list of devices the newcomer is announced to
+        // — and a member written down between the two would be announced to
+        // about itself.
         let introducer = self.reading.identity(&self.device).await;
-        let members = self
-            .members
-            .listed()
-            .await?
-            .into_iter()
-            .map(|linked| linked.identity)
+        let already = self.members.rows().await?;
+        let members = already
+            .iter()
+            .cloned()
+            .map(|member| DeviceIdentity {
+                device: member.device,
+                fingerprint: member.fingerprint,
+                name: member.name,
+                os: member.os,
+                addresses: member.addresses,
+            })
             .collect();
 
         self.members
@@ -889,7 +913,78 @@ impl Devices {
             );
         }
 
+        // And now the others. One press joins the newcomer to everybody, and
+        // this is what carries it: each member is told over the link this
+        // device already holds to it, and records the newcomer without anybody
+        // over there pressing anything — the claim arrived down a link that
+        // device has verified, which is the whole of why it is worth recording.
+        self.announce(
+            &already,
+            &DeviceIdentity {
+                device: held.device.clone(),
+                fingerprint: held.fingerprint.clone(),
+                name: held.name.clone(),
+                os: held.os.clone(),
+                addresses: held.addresses.clone(),
+            },
+        )
+        .await;
+
         Ok(())
+    }
+
+    /// Tell each of `members` about `newcomer`, and write down the tellings
+    /// that did not get through.
+    ///
+    /// **Nothing here can fail the press.** The human pressed Allow and the
+    /// newcomer is a member of this device whatever some third machine made of
+    /// it, so a member that answers nothing is dimmed, is written down as still
+    /// owed the telling, and the next one is dialled. A join that failed
+    /// because somebody's laptop was shut would be a link nobody could make
+    /// while a member was away.
+    ///
+    /// **And nothing here retries.** The debt is the record, and what pays it
+    /// is the next thing that finds that member answering.
+    async fn announce(&self, members: &[verkstead_store::Member], newcomer: &DeviceIdentity) {
+        for member in members {
+            match self.peers.announce(member, newcomer).await {
+                Ok(()) => {
+                    tracing::info!(
+                        device = %member.device,
+                        newcomer = %newcomer.device,
+                        "a member has been told about the device that just joined",
+                    );
+
+                    // Whatever it was owed about this device is paid, which is
+                    // the announcement the task after this one makes when a
+                    // member comes back: the ordinary case owes nothing and
+                    // this clears nothing.
+                    if let Err(why) = self.members.told(&member.device, &newcomer.device).await {
+                        tracing::error!(
+                            %why,
+                            "an announcement that was made could not be cleared as made",
+                        );
+                    }
+                }
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        newcomer = %newcomer.device,
+                        "a member could not be told about the device that just joined, so it \
+                         is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self.members.owed(&member.device, &newcomer.device).await {
+                        tracing::error!(
+                            %why,
+                            "an announcement that was not made could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// **Deny**: settle the request, record nothing, and say so.

@@ -86,6 +86,16 @@ pub enum Nudge {
     /// of an event rather than out of the server.
     Joins,
 
+    /// The cluster moved without anybody here pressing anything: a member of it
+    /// named a device this one had not heard of, and it is a member now.
+    ///
+    /// A kind of its own rather than [`Nudge::Joins`], because there is no join
+    /// on this device to have moved — the press was on some other machine, and
+    /// what arrives here is the announcement that followed it. What it names is
+    /// the Devices section of the Remote access pane, which is where a row
+    /// appears with nothing beside it to explain itself.
+    Devices,
+
     /// The Agent Profiles moved.
     ///
     /// Nothing announces this yet: a Profile is only ever saved or deleted by a

@@ -360,6 +360,13 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     case "joins":
       return [["joins"], ["devices"]];
 
+    // And the cluster moving with no join here to have moved it: a member of it
+    // named a device this one had not heard of, and it is a member now. Nobody
+    // over here pressed anything, so the Devices section is the whole of what
+    // this says — there is a row in it that was not there a moment ago.
+    case "devices":
+      return [["devices"]];
+
     case "profiles":
       return [["profiles"]];
 

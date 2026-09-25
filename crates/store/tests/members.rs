@@ -10,14 +10,18 @@
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Linking, forget_member, member_count, member_holding, member_unreachable, members,
-    open_database, record_member,
+    Linking, announcement_made, announcements_owed, forget_member, member_count, member_holding,
+    member_unreachable, members, open_database, owe_announcement, record_member,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
 /// by rather than by anything read off a machine.
 const B: &str = "0011223344556677889900aabbccddee";
 const C: &str = "ffeeddccbbaa00998877665544332211";
+
+/// And the device they are told about, which is on neither of their lists:
+/// what a debt names is a device rather than a member of this one.
+const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// And the certificates they present, spelled the way this tree spells a
 /// fingerprint: what a member *is* on the peer listener is this string, so a
@@ -277,4 +281,112 @@ async fn a_forgotten_member_is_gone() {
     // And a device that is not a member is already not a member: unlinking one
     // twice is not a thing to fail.
     forget_member(&pool, B).await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// What a member has yet to be told
+// ---------------------------------------------------------------------------
+
+/// A telling that did not get through is owed, and one that did takes the debt
+/// away.
+///
+/// **Which is the whole of what the record is for.** An announcement is a dial,
+/// and a machine that is off is reached by nothing — but the thing being
+/// announced happened anyway, so what the failure leaves behind is a list of
+/// who has not heard rather than a link half made.
+#[tokio::test]
+async fn a_telling_that_did_not_get_through_is_owed_until_it_does() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert!(
+        announcements_owed(&pool, A).await.unwrap().is_empty(),
+        "nothing has been announced, so nobody is owed anything",
+    );
+
+    owe_announcement(&pool, B, A).await.unwrap();
+    owe_announcement(&pool, C, A).await.unwrap();
+
+    assert_eq!(
+        announcements_owed(&pool, A).await.unwrap(),
+        vec![B.to_owned(), C.to_owned()],
+        "both members have yet to hear about the device that joined",
+    );
+
+    announcement_made(&pool, B, A).await.unwrap();
+
+    assert_eq!(
+        announcements_owed(&pool, A).await.unwrap(),
+        vec![C.to_owned()],
+        "and the one that was told is owed nothing",
+    );
+
+    // Owing the same telling twice is owing it once: a row says that this
+    // member has not heard about that device, and a second announcement that
+    // also failed says the same thing again.
+    owe_announcement(&pool, C, A).await.unwrap();
+
+    assert_eq!(
+        announcements_owed(&pool, A).await.unwrap(),
+        vec![C.to_owned()]
+    );
+
+    // And clearing what was never owed is not a thing to fail, which is the
+    // ordinary case: an announcement that got through the first time was never
+    // written down.
+    announcement_made(&pool, B, A).await.unwrap();
+}
+
+/// A debt is about a pair, so a member owed one telling is not owed another.
+#[tokio::test]
+async fn a_debt_names_the_device_it_is_about() {
+    let (_dir, pool) = fresh_pool().await;
+
+    owe_announcement(&pool, C, A).await.unwrap();
+    owe_announcement(&pool, C, B).await.unwrap();
+
+    assert_eq!(
+        announcements_owed(&pool, A).await.unwrap(),
+        vec![C.to_owned()]
+    );
+    assert_eq!(
+        announcements_owed(&pool, B).await.unwrap(),
+        vec![C.to_owned()]
+    );
+
+    announcement_made(&pool, C, A).await.unwrap();
+
+    assert!(
+        announcements_owed(&pool, A).await.unwrap().is_empty(),
+        "the telling that was made is the one that is paid",
+    );
+    assert_eq!(
+        announcements_owed(&pool, B).await.unwrap(),
+        vec![C.to_owned()],
+        "and the other is still owed",
+    );
+}
+
+/// A member taken out of the cluster takes its debts with it, in both
+/// directions: what it was owed, and what anybody was owed about it.
+#[tokio::test]
+async fn an_unlinked_member_is_owed_nothing_and_owed_about_by_nobody() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    owe_announcement(&pool, B, A).await.unwrap();
+    owe_announcement(&pool, C, B).await.unwrap();
+
+    forget_member(&pool, B).await.unwrap();
+
+    assert!(
+        announcements_owed(&pool, A).await.unwrap().is_empty(),
+        "a device that is not a member is one nothing here has left to tell",
+    );
+    assert!(
+        announcements_owed(&pool, B).await.unwrap().is_empty(),
+        "and a debt naming it would be a dial nobody would ever make",
+    );
 }
