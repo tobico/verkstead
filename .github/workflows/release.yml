@@ -703,7 +703,7 @@ jobs:
       #
       # **A screen, deliberately.** A runner has none, and a Verkstead started
       # without one reads that as a session with nowhere to put an icon, serves
-      # anyway, and never starts the toolkit — see `crates/desktop/src/screen.rs`.
+      # anyway, and never starts the toolkit — see `crates/server/src/display.rs`.
       # Which would leave the GTK this bundle carries unopened by this leg: the
       # dialogs are drawn with it and the app's loop is its, and nothing but a
       # run with a screen would ever find out whether what was copied in loads.
@@ -1453,9 +1453,9 @@ jobs:
       # starts it, verb and all.
       #
       # **No screen to arrange**, as on macOS and unlike the AppImage's leg: a
-      # Windows runner has a window station of its own, and `screen` asks the
+      # Windows runner has a window station of its own, and `display` asks the
       # station rather than the environment — see
-      # `crates/desktop/src/screen.rs`. So the app takes its tray path with
+      # `crates/server/src/display.rs`. So the app takes its tray path with
       # nothing started in front of it.
       #
       # **The log is where the answer is**, as in both other legs: nothing about

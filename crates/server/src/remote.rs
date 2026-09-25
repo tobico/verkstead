@@ -119,12 +119,13 @@ pub struct Tailscale {
 
 /// A way for this process to run one command with a privilege it has not got.
 ///
-/// The seam the desktop app reaches through. The press is made in a browser and
-/// the escalation is the app's — the platform's own password dialog, which only
-/// something with a screen in front of it can raise — and this crate knows none
-/// of that: the desktop crate depends on this one rather than the other way
-/// round, so what crosses is a handle handed in as the server starts. See
-/// `verkstead_desktop::elevate`.
+/// The seam an app that was started from an icon reaches through. The press is
+/// made in a browser and the escalation is the platform's own password dialog,
+/// which only something with a display in front of it can raise — so what
+/// crosses is a handle handed in as the server starts, and a server handed none
+/// shows the line instead. See [`crate::elevate`], which is the one
+/// implementation, and [`crate::display`] for the question its callers ask
+/// first.
 ///
 /// **Blocking, and called on a thread that can be waited on.** The whole of
 /// what an implementation does is put a dialog on somebody's screen and wait for
@@ -218,9 +219,9 @@ impl Tailscale {
     /// The same again, with a way to ask this machine for the operator grant
     /// rather than only a line to show for it.
     ///
-    /// What the desktop app hands the server as it starts it, and what nothing
-    /// else hands it: a daemon has nobody at the machine to ask — see
-    /// [`Elevate`], and `verkstead_desktop::Desktop::run`.
+    /// What an app started from an icon hands the server, and what nothing else
+    /// hands it: a daemon has nobody at the machine to ask — see [`Elevate`],
+    /// [`crate::elevate`] and `verkstead_desktop::Desktop::run`.
     pub fn escalating(self, escalation: Arc<dyn Elevate>) -> Tailscale {
         Tailscale {
             escalation: Some(escalation),
