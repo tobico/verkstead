@@ -1,0 +1,20 @@
+# Nothing here is a workspace: this file is where pnpm keeps the settings that
+# used to live in `.npmrc`, and the viewer has one of its own for the same
+# reason.
+#
+# **esbuild builds**, as it does for the viewer: vitest transforms the
+# TypeScript through it, and an esbuild that was not allowed to put its binary
+# in place is a test run that cannot start.
+#
+# **Electron's own install script stays denied.** The package's `postinstall`
+# downloads a platform build of Electron — a couple of hundred megabytes — and
+# nothing in this project runs it: `pnpm start` runs the dev shell's Electron
+# (see `flake.nix`), and CI only lints, typechecks and tests, which want the
+# package for its TypeScript definitions and nothing else. electron-builder's
+# own downloads are the packaging stages' business (ADR-0020), and this is not
+# one of them. Said as a denial rather than left unsaid, because an install
+# script pnpm is ignoring without having been told to is one it refuses the
+# whole install over.
+allowBuilds:
+  esbuild: true
+  electron: false
