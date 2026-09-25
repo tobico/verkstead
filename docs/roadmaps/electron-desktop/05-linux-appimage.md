@@ -44,8 +44,11 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
    tray for Linux.
 4. **The words** — adoption, CONTEXT and releasing rewritten for the app on
    Linux, including what a desktop with no tray host now loses (only the
-   icon) and what COSMIC proof stage 03 recorded. Accepts: nothing in the
-   Linux section names `verkstead desktop` or `AppRun`.
+   icon) and what COSMIC proof stage 03 recorded. CONTEXT's Log Directory
+   entry says **View Logs** is on the tray menu; what opens the file now is
+   that item *or* the Desktop page's button, which is why losing the icon
+   loses nothing but the icon. Accepts: nothing in the Linux section names
+   `verkstead desktop` or `AppRun`.
 
 ## Re-verify at start
 

@@ -6,9 +6,9 @@
 app carrying the two Mac CLI builds joined with `lipo`. Closing the window
 leaves the app in the Dock and a Dock click brings the window back; Cmd+Q
 quits at once. The traffic lights sit to the left of the Wordmark; the
-Desktop page holds the menu bar icon (on by default) and Launch on Startup,
-and nothing else; Launch on Startup is the login-item registration and a
-login start comes up hidden. The `desktop-macos` leg builds, mounts and runs
+Desktop page holds the menu bar icon (on by default), View Logs and Launch on
+Startup, and nothing else; Launch on Startup is the login-item registration
+and a login start comes up hidden. The `desktop-macos` leg builds, mounts and runs
 it, and the Rust launcher script and dmg script are gone.
 
 ## Decisions in force
@@ -17,8 +17,10 @@ it, and the Rust launcher script and dmg script are gone.
   activation policy goes, the app is in the Dock, close hides and activate
   shows. The close radio and the quit warning are not drawn there (Q8a, with
   the human's note dropping the warning too).
-- **The menu bar icon defaults on** (Q8b): one default everywhere, and it is
-  where View Logs lives.
+- **The menu bar icon defaults on** (Q8b): one default everywhere. The menu is
+  where View Logs lives while the icon is shown, and the Desktop page's own
+  button is where it lives when it is not — the same rule stage 03 wrote for
+  the tray.
 - **Traffic lights left of the Wordmark** (Set 847 Q11), inset to the head's
   first row; the sidebar's head leaves room, as stage 04 wrote.
 - **Launch on Startup through Electron's login-item API** (Set 846 Q9a): the
@@ -36,9 +38,10 @@ it, and the Rust launcher script and dmg script are gone.
 1. **Dock behaviour** — regular activation policy, close hides, activate
    shows, Cmd+Q quits without asking, the application menu kept. Accepts: a
    closed window returns from the Dock; Cmd+Q ends the sidecar.
-2. **The page and the lights** — the Desktop page reduced to two controls on
-   `darwin`; the traffic lights positioned in the head row and the inset
-   proven. Accepts: no control under the lights in any pane count.
+2. **The page and the lights** — the Desktop page reduced on `darwin` to the
+   menu bar icon, View Logs and Launch on Startup; the traffic lights
+   positioned in the head row and the inset proven. Accepts: no control under
+   the lights in any pane count; View Logs is reachable with the icon off.
 3. **Login item** — the API arm enacted, hidden start when the icon is shown.
    Accepts: the box reads the registration; a login start shows no window
    while the icon is on.

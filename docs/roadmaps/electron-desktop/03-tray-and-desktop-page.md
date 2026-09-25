@@ -5,12 +5,13 @@
 The app puts an icon in the tray with **Open**, **View Logs** and **Quit**,
 and a new **Desktop** section at the top of the settings — drawn only inside
 the app — holds **When the window is closed** (keep running in the tray, the
-default; ask before quitting; quit), **Show tray icon** and **Launch on
-Startup**. Closing the window does what the radio says; turning the tray off
-greys the tray position and the choice falls to Quit; the tray's Quit never
-asks. Launch on Startup writes the XDG autostart entry on Linux and a login
-start comes up hidden while the tray is shown. Proven on COSMIC and against a
-panel that arrives after the app.
+default; ask before quitting; quit), **Show tray icon**, **Launch on Startup**
+and a **View Logs** button opening the file the tray item opens. Closing the
+window does what the radio says; turning the tray off greys the tray position
+and the choice falls to Quit; the tray's Quit never asks. Launch on Startup
+writes the XDG autostart entry on Linux and a login start comes up hidden
+while the tray is shown. Proven on COSMIC and against a panel that arrives
+after the app.
 
 ## Decisions in force
 
@@ -24,6 +25,12 @@ panel that arrives after the app.
   Cmd+Q quit at once.
 - **The tray menu is Open, View Logs, Quit; a left click opens the window**
   (Q10). Launch on Startup leaves the menu for the page, as the Brief says.
+- **View Logs is on the page too** ([ADR-0020]): a switch somebody can turn
+  off cannot be the only way to a log file, and the desktop most likely to
+  have **Show tray icon** off is the one the tray misbehaved on — which is the
+  machine whose log is worth reading. The button is drawn whatever the tray
+  setting says and on every platform, and it opens what the tray item opens,
+  so the two are one action reached two ways rather than two.
 - **Desktop settings are the app's** (Set 847 Q12): a JSON file under
   Electron's user data, reached over a preload bridge exposing the platform,
   the settings and the startup registration. The page is drawn only where the
@@ -49,8 +56,9 @@ panel that arrives after the app.
 ## Proposed tasks (provisional)
 
 1. **The bridge and the settings file** — preload exposes `platform`, get and
-   set over the JSON, and the startup registration; main enacts them.
-   Accepts: a set survives a restart; a page with no bridge sees nothing.
+   set over the JSON, the startup registration and opening the log; main
+   enacts them. Accepts: a set survives a restart; a page with no bridge sees
+   nothing.
 2. **The tray** — icon from the packaging artwork, the three items, click
    opens. Accepts: a hidden window returns on Open and on click; View Logs
    opens the file or says there is none; Quit quits without asking.
@@ -58,10 +66,11 @@ panel that arrives after the app.
    the fall-through when the tray is off, the native warning. Accepts: each
    position does what it says; tray off with "keep running" chosen quits.
 4. **The Desktop page** — the card at the top of the settings, the route
-   word, the details pane with the radio and two checkboxes, greyed states
-   with their notes, drawn only with the bridge. Accepts: the route test
-   covers it; the viewer suite drives it through a stub bridge; without the
-   bridge the settings page is as it was.
+   word, the details pane with the radio, two checkboxes and the View Logs
+   button, greyed states with their notes, drawn only with the bridge.
+   Accepts: the route test covers it; the viewer suite drives it through a
+   stub bridge; View Logs opens the file with the tray off as readily as with
+   it on; without the bridge the settings page is as it was.
 5. **Launch on Startup on Linux, and the hidden login start** — the XDG entry
    written with the app's own path and a hidden flag, rewritten while present
    at every launch as the tray app did, read for the checkbox. Accepts: the

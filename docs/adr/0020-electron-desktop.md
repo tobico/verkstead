@@ -94,12 +94,19 @@ button's alone — the tray's Quit and Cmd+Q quit at once, because somebody who
 chose Quit has already said what they meant. The tray menu is Open, View Logs
 and Quit, and a left click on the icon opens the window.
 
+**View Logs is the page's as well as the tray's.** A switch somebody can turn
+off cannot be the only way to a log file, and the desktop most likely to have
+it turned off is the one the tray misbehaved on — which is exactly the machine
+whose log is worth reading. So the Desktop page carries a **View Logs** button
+beside the switches, on every platform, opening the file the tray item opens;
+the tray keeps its item for as long as there is a tray.
+
 **A Mac is the platform's own.** The app is a regular Dock app there, the
 menu-bar-only policy the tray app asked for gone: closing the window leaves
 the app in the Dock, and a Dock click brings the window back. So the close
 radio has nothing to choose on a Mac and is not drawn, and neither is the
 warning; the Desktop page there holds the menu bar icon — on by default, one
-rule everywhere and it is where View Logs lives — and Launch on Startup.
+rule everywhere — View Logs beside it, and Launch on Startup.
 
 **A login start comes up hidden while the tray is shown**, the way `--no-open`
 kept a login from being handed a browser window, and shown when it is not.
