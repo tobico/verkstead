@@ -2,8 +2,9 @@
 
 ## Goal
 
-Two Verksteads become one cluster, and a third joins through either. On A,
-Devices has **Add**: type B's address, and A's list shows a pending row,
+Two Verksteads become one cluster, and a third joins through either. On A, the
+Devices section of Remote access has **Add**: type B's address, and A's list
+shows a pending row,
 *Waiting for confirmation on B*, with A's fingerprint and Cancel. On B, every
 open workbench raises a modal — A's name, OS, address and fingerprint, Allow
 and Deny — and B's phones get a push. Allow exchanges certificates, B hands A
@@ -85,7 +86,8 @@ asked once. A member that stops answering stays on the list dimmed
 ## Re-verify at start
 
 - Stage 01 landed: the peer listener, the identity endpoint and the Devices
-  section exist and the verifier takes a member list.
+  section of the Remote access pane exist, and the membership check is per
+  route with something to consult.
 - The nudge stream is still `crates/server/src/nudge.rs` with payload-less
   kinds in `crates/schema/src/nudge.rs` and the invalidation table in
   `web/src/nudge.ts`; a join needs a kind that carries the request id or the
@@ -93,5 +95,6 @@ asked once. A member that stops answering stays on the list dimmed
 - The one modal is still `web/src/Modal.tsx` with the confirm pattern in
   `web/src/repos/RepoList.tsx`.
 - Push is still `crates/server/src/push.rs` with `News` as a closed enum.
-- The Remote access pane's stance — nothing confirmed twice — is the one this
-  section's Unlink deliberately departs from, as Remove on a Repo does.
+- The Remote access pane's own stance — nothing confirmed twice, everything
+  read rather than configured — is what the Devices section sits inside and what
+  its Unlink deliberately departs from, as Remove on a Repo does.

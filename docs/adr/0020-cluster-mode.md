@@ -112,12 +112,15 @@ A member that cannot be reached stays on the list dimmed, reading
 
 ## Discovery
 
-Two sources, both read when the Devices pane opens. **mDNS** in-process with
+Two sources, both read when the Remote access pane is opened, which is where
+the **Devices** section lives — inside that pane rather than beside it, as the
+Brief asked, because linking is how this machine is reached as much as the serve
+and the key are. **mDNS** in-process with
 the `mdns-sd` crate — advertising and browsing `_verkstead._tcp.local`, the
 TXT record carrying id, name, OS and peer port — so there is no avahi or
 Bonjour to depend on. **Tailscale** by reading the peer list from `tailscale
 status --json` and probing each online peer's port 8423 for a device identity,
-in parallel with a short timeout, each time the pane opens rather than on a
+in parallel with a short timeout, each time the pane is opened rather than on a
 schedule. A discovered device is drawn with its name, OS icon, address and
 where it was found, with one press to Add; members are left out. Windows plus
 WSL is the case where discovery may not cross — WSL2 sits behind NAT unless

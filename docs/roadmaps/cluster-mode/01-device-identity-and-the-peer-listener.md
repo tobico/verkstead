@@ -8,10 +8,10 @@ a TLS peer listener of its own, every interface, port 8423, that presents that
 certificate and asks the caller for one without insisting on it; an
 un-gated identity endpoint on that listener answers with the device's id, name,
 OS and addresses; and the
-settings page has a **Devices** section whose list holds this device alone —
-name with an OS icon, *this device*, its addresses, no Unlink. Demonstrable
-end to end: start two servers, curl one's identity from the other's machine,
-open Devices on each and see a WSL read as *Linux (WSL)*.
+**Remote access** pane gains a **Devices** section whose list holds this device
+alone — name with an OS icon, *this device*, its addresses, no Unlink.
+Demonstrable end to end: start two servers, curl one's identity from the other's
+machine, open Remote access on each and see a WSL read as *Linux (WSL)*.
 
 ## Decisions in force
 
@@ -44,9 +44,15 @@ open Devices on each and see a WSL read as *Linux (WSL)*.
   than against the member list. Everything else on this listener is a member's
   or is refused. Stage 01 has the first of the three and refuses the other two
   along with everything else, there being no join to hold yet.
-- **Devices is a card and a pane like every settings section**, following the
-  four-step pattern the Remote access section set: a word in the section list,
-  a card, a `Match` in the details, a read hook.
+- **Devices is a section inside the Remote access pane**, a third one beside
+  the `reach` and `key` sections already there — which is where the Brief put
+  the linking, and linking is how this machine is reached as much as the serve
+  and the key are. So there is no word in `WORDS`, no card and no route of its
+  own: what the pane grows is a section and a reading, and the Remote access
+  card's line says how many devices are linked beside what it already says.
+  A settings section of its own was considered — the pane is long already, and
+  Devices brings a list, Add, Discovered and a pending row — and was not taken:
+  the Brief was specific, and the pane is built out of sections for this.
 - **A device advertises all its addresses** — tailnet name and IP where
   Tailscale is up, LAN IPs — read off the machine at each answer rather than
   configured.
@@ -70,10 +76,12 @@ open Devices on each and see a WSL read as *Linux (WSL)*.
    detection, addresses; the wire type exported to TypeScript.
    - Under WSL the OS reads *Linux (WSL)*; elsewhere the platform's own word.
    - Addresses list the tailnet name and IP first where Tailscale is up.
-4. **The Devices section** — card, pane, route word, the list with this
-   device's row.
+4. **The Devices section** — a third section in the Remote access pane, with
+   its own reading, and the list holding this device's row.
    - The row carries the OS icon and *this device* and offers no Unlink.
-   - The section's line on the card says how many devices are linked.
+   - The Remote access card's line says how many devices are linked.
+   - The section reads nothing of the settings query, as the two beside it do
+     not: what it draws is read off the machine.
 
 ## Re-verify at start
 
@@ -82,9 +90,11 @@ open Devices on each and see a WSL read as *Linux (WSL)*.
 - The one listener is still bound in `crates/server/src/lib.rs` around the
   `--listen` argument, and `rustls` is present only as a `reqwest` feature —
   a server-side TLS stack is new.
-- The settings section pattern is still `WORDS` in
-  `web/src/settings/openings.ts`, a card and a `Match` in
-  `web/src/settings/SettingsPage.tsx`, and a read hook over `useReading`.
+- The Remote access pane is still `web/src/settings/Remote.tsx`, drawn from
+  `SettingsPage.tsx` as `RemoteCard` and `RemotePane`, and still built out of
+  the `reach` and `key` sections with a reading of its own rather than the
+  settings query — which is the shape a third section follows. Nothing is added
+  to `WORDS` in `web/src/settings/openings.ts`.
 - The hostname is still read only in `crates/server/src/onboarding.rs` and
   the platform word only in `crates/server/src/platform.rs`.
 - `nix/module.nix` still has the single `listen` option and the VM test in
