@@ -4,8 +4,8 @@
 //! about is what the app does with a child — how it starts one, what it hands
 //! it, and that it never leaves one behind — and a real server would put a
 //! database and a port in the way of all three. The stand-in records what it
-//! was started with and then sits there, which is the whole of what a sidecar
-//! looks like from here.
+//! was started with and then either sits there or falls over, which between
+//! them are the two lifetimes a sidecar has from here.
 
 import { spawn } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ARGUMENTS, start, type Sidecar } from "../src/sidecar.js";
+import { ARGUMENTS, how, start, type Sidecar } from "../src/sidecar.js";
 
 /// A stand-in `verkstead`, written somewhere of its own and made runnable.
 ///
@@ -26,7 +26,11 @@ import { ARGUMENTS, start, type Sidecar } from "../src/sidecar.js";
 /// `exec`, so that the process the app is holding *is* the one that sits there
 /// — a shell that forked and waited would be a shell the app signals and a
 /// sleep it does not.
-function standIn(): { cli: string; record: string } {
+///
+/// What it does after recording is the variable, because a server that sits
+/// there and a server that falls over are the two lifetimes the app has to tell
+/// apart.
+function standIn(then = "exec sleep 600"): { cli: string; record: string } {
   const where = mkdtempSync(join(tmpdir(), "verkstead-sidecar-"));
   const cli = join(where, "verkstead");
   const record = join(where, "record");
@@ -35,7 +39,7 @@ function standIn(): { cli: string; record: string } {
     [
       "#!/bin/sh",
       `{ echo "$@"; echo "\${VERKSTEAD_DATA_DIR-}"; } > '${record}'`,
-      "exec sleep 600",
+      then,
       "",
     ].join("\n"),
   );
@@ -130,6 +134,33 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     expect(alive(sidecar.pid!)).toBe(false);
   });
 
+  /// Because the server ending is the app quitting, and the line saying so is
+  /// the whole account anybody gets of why: a server that fell over on its own
+  /// reads differently from one the app asked to stop, and the difference is
+  /// what the child handed over as it went.
+  it("says a server that ended on its own exited", async () => {
+    const { cli, record } = standIn("exit 3");
+    started = start(cli);
+    await recorded(record);
+
+    const ending = await started.gone;
+
+    expect(ending).toEqual({ code: 3, signal: null });
+    expect(how(ending)).toContain("status 3");
+  });
+
+  it("says a server that was stopped was killed", async () => {
+    const { cli, record } = standIn();
+    started = start(cli);
+    await recorded(record);
+
+    started.stop();
+    const ending = await started.gone;
+
+    expect(ending).toEqual({ code: null, signal: "SIGTERM" });
+    expect(how(ending)).toContain("SIGTERM");
+  });
+
   /// And the path nobody chose: the app ending without a quit — killed, or
   /// falling over — is still an app that must not leave a server holding the
   /// one port the next launch needs. Asked of a process of its own, because
@@ -147,5 +178,18 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const pid = Number(said.trim());
     expect(pid).toBeGreaterThan(0);
     expect(await gone(pid)).toBe(true);
+  });
+});
+
+/// The two endings no stand-in can be made to have: a clean stop, which a
+/// server asked to go has, and a child that handed over neither a status nor a
+/// signal, which Node's own types leave room for.
+describe("an ending in words", () => {
+  it("has a clean exit read as one", () => {
+    expect(how({ code: 0, signal: null })).toBe("it exited cleanly");
+  });
+
+  it("says so rather than nothing where there is nothing to say", () => {
+    expect(how({ code: null, signal: null })).toBe("it ended without saying how");
   });
 });

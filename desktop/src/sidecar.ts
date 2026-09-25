@@ -26,12 +26,40 @@ export const ARGUMENTS = ["serve", "--desktop"];
 /// How long a stopped sidecar is given to go before it is taken.
 const GRACE = 5_000;
 
+/// How a child left: the status it gave, or the signal that took it. Exactly
+/// one of the two, which is what Node's own `exit` hands over.
+export interface Ending {
+  /// What it exited with, where it exited of its own accord.
+  readonly code: number | null;
+  /// What took it, where something did.
+  readonly signal: NodeJS.Signals | null;
+}
+
+/// An ending in the words the log says it in.
+///
+/// The server ending is the app quitting, so this line is the whole of the
+/// account anybody gets of why the app went — a crash, a `kill`, or a clean
+/// stop all end the same way from here and read differently only because of
+/// this.
+export function how({ code, signal }: Ending): string {
+  if (signal !== null) {
+    return `it was killed by ${signal}`;
+  }
+  if (code === 0) {
+    return "it exited cleanly";
+  }
+  if (code === null) {
+    return "it ended without saying how";
+  }
+  return `it exited with status ${code}`;
+}
+
 /// A running sidecar, and the two things the app does with one.
 export interface Sidecar {
   /// The child's process id, for the app's own logging.
   readonly pid: number | undefined;
-  /// Resolves when the child has gone, whichever way it went.
-  readonly gone: Promise<void>;
+  /// Resolves when the child has gone, with how it went.
+  readonly gone: Promise<Ending>;
   /// Ask it to stop, and take it if it will not.
   stop(): void;
 }
@@ -52,8 +80,8 @@ export function start(cli: string): Sidecar {
     stdio: ["ignore", "inherit", "inherit"],
   });
 
-  const gone = new Promise<void>((ended) => {
-    child.once("exit", () => ended());
+  const gone = new Promise<Ending>((ended) => {
+    child.once("exit", (code, signal) => ended({ code, signal }));
   });
 
   // The last thing this process does, whatever ended it: a quit, an uncaught
