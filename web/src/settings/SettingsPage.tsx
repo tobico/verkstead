@@ -15,6 +15,13 @@
 //! Profiles and the Repos a Conversation is settled against, and last the extra
 //! directories a sandbox is given.
 //!
+//! **And one section above all of those that is not the server's at all**: what
+//! the desktop app does about its own window, drawn only where the page is being
+//! read inside that app and nothing whatever in a browser or on a phone. It
+//! stands at the top because it is about the window in front of the human rather
+//! than about anything Verkstead was told, which is the first thing somebody who
+//! has just installed the app is looking for — see `Desktop.tsx`.
+//!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
 //! *while* work is going on, and a page that took the list away made the human
@@ -54,11 +61,13 @@ import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { CleanupCard, CleanupPane } from "./Cleanup";
+import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
 import { InstructionsCard, InstructionsPane } from "./Instructions";
 import { LanguagesCard, LanguagesPane } from "./Languages";
 import { RemoteCard, RemotePane } from "./Remote";
 import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
+import { bridge } from "./bridge";
 import {
   SETTINGS,
   WORDS,
@@ -107,6 +116,30 @@ export function panes(): JSX.Element {
   );
 }
 
+/// What a path says is open, of the sections this page actually has.
+///
+/// One of them is not always there: the Desktop section is drawn only where the
+/// page is being read inside the desktop app, so `/settings/desktop` names
+/// nothing in a browser — and a path naming a pane this build does not have
+/// leaves the details bare, which is what `openings.ts` says every one of them
+/// comes to. The URL is left alone: it is a record of what was picked rather
+/// than a promise that it is still there.
+///
+/// Read here rather than in `openings.ts`, because the two are different kinds
+/// of question: where a pane stands is arithmetic over a path, and which
+/// sections exist is a fact about the window the page is drawn in. And it is
+/// read here rather than left to the section's own two halves drawing nothing,
+/// because what a narrow window does on a cold load hangs off it: an opening
+/// nothing draws would walk the human into a details pane with no way back out
+/// of it, that way back being the pane's own head.
+function drawn(opening: Opening | null): Opening | null {
+  if (opening === "desktop" && bridge() === null) {
+    return null;
+  }
+
+  return opening;
+}
+
 /// The settings page, whole.
 export function SettingsPage(): JSX.Element {
   const navigate = useNavigate();
@@ -114,7 +147,7 @@ export function SettingsPage(): JSX.Element {
 
   /// What the details pane is showing, read off the path rather than held
   /// beside it, so there is one account of what is open.
-  const opening = createMemo(() => openingAt(where.pathname));
+  const opening = createMemo(() => drawn(openingAt(where.pathname)));
 
   /// Which level a narrow window is showing. The settings themselves when the
   /// page is entered, and the details straight away where the path names one —
@@ -209,6 +242,17 @@ function Settings(props: {
             time. */}
         <UpdateNotice />
 
+        {/* At the top of the lot, and drawn only inside the desktop app: it is
+            the one section here that is about the window the page is being read
+            in rather than about anything Verkstead was told, so it is what
+            somebody who has just opened the app is looking at. In a browser and
+            on a phone it draws nothing at all — there is no bridge on the window
+            to read it over — and the order below is what the page has always
+            been. See `Desktop.tsx`. */}
+        <DesktopCard
+          open={props.opening === "desktop"}
+          press={() => props.select("desktop")}
+        />
         <GitCard
           open={props.opening === "git"}
           press={() => props.select("git")}
@@ -313,6 +357,9 @@ function Details(props: {
 
   return (
     <Switch>
+      <Match when={props.opening === "desktop"}>
+        <DesktopPane back={props.back} />
+      </Match>
       <Match when={props.opening === "git"}>
         <GitPane back={props.back} />
       </Match>
