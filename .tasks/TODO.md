@@ -22,6 +22,6 @@ light — is written into task 02.
 
 ## Tasks
 
-- [ ] 01: The Blender MCP wiring — [details](01-the-blender-mcp-wiring.md)
+- [x] 01: The Blender MCP wiring — [details](01-the-blender-mcp-wiring.md)
 - [ ] 02: The hammer — [details](02-the-hammer.md)
 - [ ] 03: The icon, replaced — [details](03-the-icon-replaced.md)

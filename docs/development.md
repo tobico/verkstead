@@ -745,6 +745,39 @@ edges of its square, and a launcher masking it to a circle would cut the hammer
 and the anvil's horn off. Art with a margin inside it could claim `maskable`
 back.
 
+A session working on that artwork drives Blender over the MCP rather than by
+writing scripts at it, and two committed files are what put that server in
+front of it. [`.mcp.json`](../.mcp.json) names it — `uvx blender-mcp`, with
+`DISABLE_TELEMETRY=1` because the package phones home unless it is told not to,
+and the loopback address and port it dials at the other end — and
+[`.claude/settings.json`](../.claude/settings.json) approves that one server by
+name, an unapproved project server being one a session is prompted about and a
+session having nobody to prompt. They are approved by name rather than with the
+blanket key, so a server somebody adds later is not approved by accident.
+
+Both are committed for good. A session reads them when it starts and never
+again, and Verkstead hands a sandboxed session a copy of the account's
+configuration with its own servers taken out
+([ADR 0011](adr/0011-agent-backends.md)), so the repository's own files are
+the only route: drop them and the next session that has to re-render the icon
+has no Blender.
+
+The server connects to Blender lazily, on the first tool call, and what it
+connects to is [`tools/hammer/serve.py`](../tools/hammer/serve.py) — the addon
+the same package bundles, running inside a Blender and listening on that port.
+Start it before the first tool call and leave it running:
+
+```console
+$ blender -b --python tools/hammer/serve.py &   # 9876, unless -- --port says otherwise
+$ kill %1                                       # closes the socket and unregisters the addon
+```
+
+It is a script rather than an addon installed into a Blender profile because
+Blender here has no window and the bundled addon refuses to start without one —
+its commands run from a timer callback and a background Blender runs no timers.
+The script supplies that timer itself; its own header says the rest, including
+why the virtual display the addon suggests is not an option in a Sandbox.
+
 `packaging/` is the second tree of generated assets, and it sits outside
 `assets/` deliberately. Everything under that directory is `publicDir` — served
 at the web root and, because the viewer is embedded, carried inside every binary
