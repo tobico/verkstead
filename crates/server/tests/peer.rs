@@ -838,6 +838,71 @@ async fn a_machine_with_no_tailscale_answers_with_its_lan_alone() {
     );
 }
 
+/// And two callers asking in quick succession cost one `tailscale` between
+/// them.
+///
+/// The identity endpoint is the one route nobody has to be anybody to read, on
+/// a port facing the LAN, and the tailnet half of its answer is a command run on
+/// this machine — so without a hold over it a stranger turns a request into a
+/// process, as fast as they care to ask. The discovery stage makes that
+/// ordinary rather than hostile: every device on a tailnet probing every other
+/// one each time a pane is opened.
+///
+/// Counted by a script that writes a byte each time it runs, which is the only
+/// way to ask *how many times was this run* — the answer it prints is the same
+/// either way, so an assertion on the addresses would pass whether the hold
+/// worked or not.
+///
+/// Unix only, for the reason the test below is: what stands in for `tailscale`
+/// is a shell script.
+#[cfg(unix)]
+#[tokio::test]
+async fn two_callers_in_quick_succession_cost_one_tailscale() {
+    let counting = tempfile::tempdir().unwrap();
+    let runs = counting.path().join("runs");
+
+    let script = format!(
+        "printf x >> {}; printf '%s' \
+         '{{\"BackendState\":\"Running\",\"Self\":{{\"DNSName\":\"workbench.tailnet-name.ts.net.\",\
+         \"TailscaleIPs\":[\"100.64.0.1\"]}}}}'",
+        runs.display(),
+    );
+
+    let reading = Reading::stated(
+        Tailscale::running(
+            vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                script,
+                "tailscale".to_owned(),
+            ],
+            8422,
+        ),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    );
+
+    let listening = Listening::reading(THIS_DEVICE, reading);
+
+    for _ in 0..3 {
+        let (_, answered) = asking(&listening, Showing::Nothing, peer::IDENTITY).await;
+
+        assert_eq!(
+            identity(&answered)["addresses"],
+            serde_json::json!(["workbench.tailnet-name.ts.net", "100.64.0.1"]),
+            "every caller is answered the same thing, held or read, got:\n{answered}",
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&runs).unwrap().len(),
+        1,
+        "three asks in the same moment should have cost one command between them, or a \
+         stranger turns a request into a process as fast as they can ask",
+    );
+}
+
 /// And where Tailscale *is* up, the tailnet name and address come first: they
 /// are the half a peer on another network can reach.
 ///

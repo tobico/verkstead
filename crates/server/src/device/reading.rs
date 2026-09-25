@@ -15,6 +15,14 @@
 //! machine, where three readings at three moments is an answer that could
 //! describe no machine at all.
 //!
+//! **The tailnet half stands for five seconds all the same** — see
+//! [`HELD_FOR`], which is a bound on what asking costs rather than a cache of
+//! the answer. Reading it is a command run on this machine, and the endpoint
+//! that wants it is the one nobody has to be anybody to read, on a port facing
+//! the LAN: without the hold, a request from a stranger is a process, as fast
+//! as they care to ask. Five seconds is short enough that nothing here is stale
+//! in any sense a peer could notice, and the LAN half is still read every time.
+//!
 //! **Nothing here is configured and nothing is typed.** The name is the
 //! hostname, the OS is the platform's own word — *Linux (WSL)* where the kernel
 //! says so, because a Windows machine and its WSL share a hostname — and the
@@ -29,12 +37,36 @@
 //! front of four machines on the one machine a suite runs on.
 
 use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use tokio::sync::Mutex;
 use verkstead_render::DeviceIdentity;
 
 use crate::device::Device;
 use crate::platform::{self, Platform};
 use crate::remote::Tailscale;
+
+/// How long the tailnet half of the addresses stands before it is read again.
+///
+/// **Because reading it is a process, and asking is free.** The tailnet
+/// addresses come out of `tailscale status --json`, which is a command run on
+/// this machine — and the identity endpoint that wants them is the one route
+/// nobody has to be anybody to read, on a port facing the LAN. Without this,
+/// one request from a stranger is one process, as fast as they care to ask; and
+/// the discovery stage has every device on a tailnet probing every other
+/// device's identity each time a pane is opened.
+///
+/// Five seconds, because what is being avoided is a burst rather than a reading
+/// that is a day old: a pane opened and a peer probing at the same moment cost
+/// one command between them, and a laptop that moved is right again before
+/// anybody has finished noticing. The LAN half is read every time regardless —
+/// it is a syscall, and the reason for the hold does not apply to it.
+///
+/// A failed reading is held as well as a good one. A daemon that is not
+/// answering is exactly when the calls would otherwise pile up, and an empty
+/// list is what every way of not knowing comes to anyway.
+const HELD_FOR: Duration = Duration::from_secs(5);
 
 /// The machine this device is on, as it is read when somebody asks.
 ///
@@ -65,6 +97,28 @@ pub struct Reading {
 
     /// And where the LAN addresses come from — see [`Lan`].
     lan: Lan,
+
+    /// The last tailnet reading and when it was taken, held for [`HELD_FOR`] —
+    /// which is what keeps a stranger's request from being a process.
+    ///
+    /// Shared by every clone rather than one apiece, because the one handle
+    /// this server builds is cloned into both the things that read it: the
+    /// identity endpoint on the peer listener and the Devices section of the
+    /// Remote access pane. What they are describing is one machine, so what
+    /// they hold about it is one reading.
+    ///
+    /// An async lock held across the read, so that two callers arriving
+    /// together cost one command rather than two — which is the half of this a
+    /// hold on its own would not do, and the half that matters when the asking
+    /// is somebody else's.
+    held: Arc<Mutex<Option<Held>>>,
+}
+
+/// The tailnet addresses as they were last read, and when.
+#[derive(Debug, Clone)]
+struct Held {
+    taken: Instant,
+    addresses: Vec<String>,
 }
 
 /// Where the LAN half of the addresses is read.
@@ -92,6 +146,7 @@ impl Reading {
             platform: Platform::HERE,
             kernel: platform::kernel_release(),
             lan: Lan::OfThisMachine,
+            held: Arc::default(),
         }
     }
 
@@ -112,6 +167,7 @@ impl Reading {
             platform,
             kernel,
             lan: Lan::Stated(lan),
+            held: Arc::default(),
         }
     }
 
@@ -141,7 +197,7 @@ impl Reading {
     /// machine with no Tailscale still answers with a list rather than with a
     /// failure.
     async fn addresses(&self) -> Vec<String> {
-        let tailnet = self.tailscale.tailnet().await;
+        let tailnet = self.tailnet().await;
 
         let lan = match &self.lan {
             Lan::OfThisMachine => of_this_machine(),
@@ -149,6 +205,35 @@ impl Reading {
         };
 
         addresses(tailnet, &lan)
+    }
+
+    /// The tailnet half, read afresh or answered out of what was read within
+    /// the last [`HELD_FOR`].
+    ///
+    /// The lock is held across the reading rather than taken twice, so that
+    /// callers arriving together cost one command between them: this is the
+    /// reading a stranger can ask for, and one process per request as fast as
+    /// they care to ask is what the hold is here to stop. What the ones behind
+    /// it wait out is bounded by the deadline `tailscale` is given — see
+    /// [`Tailscale::tailnet`].
+    async fn tailnet(&self) -> Vec<String> {
+        let mut held = self.held.lock().await;
+
+        if let Some(standing) = held
+            .as_ref()
+            .filter(|standing| standing.taken.elapsed() < HELD_FOR)
+        {
+            return standing.addresses.clone();
+        }
+
+        let addresses = self.tailscale.tailnet().await;
+
+        *held = Some(Held {
+            taken: Instant::now(),
+            addresses: addresses.clone(),
+        });
+
+        addresses
     }
 }
 

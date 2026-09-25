@@ -72,6 +72,7 @@
 use std::collections::HashMap;
 use std::process::Output;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::process::Command;
@@ -191,6 +192,16 @@ const RUNNING: &str = "Running";
 /// HTTPS on the tailnet name. Taken off the address that is drawn, because a
 /// URL naming it is a URL saying what its scheme already said.
 const HTTPS: &str = "443";
+
+/// How long `tailscale` is given to answer the one reading a stranger can ask
+/// for — see [`Tailscale::tailnet`] and [`Tailscale::run_within`].
+///
+/// Five seconds, which is a hundred times what asking a daemon on the same
+/// machine what it is called actually takes, and short enough that a daemon
+/// which has wedged is a slow answer rather than a request that never ends. The
+/// pane's own readings have no deadline: those are the human's, behind the key
+/// on the loopback, and one of them may be waiting on a password dialog.
+const ANSWERING: Duration = Duration::from_secs(5);
 
 impl Tailscale {
     /// The real thing: whatever `tailscale` the host has on its PATH, in front
@@ -343,14 +354,17 @@ impl Tailscale {
     /// So every way of not knowing comes to the same empty list, where
     /// [`Tailscale::reading`] tells them apart — that one is a pane with four
     /// things to say about this machine, and this is a list of addresses with
-    /// nothing to say about a machine that has none.
+    /// nothing to say about a machine that has none. A daemon that does not
+    /// answer within [`ANSWERING`] is one of those ways: this is the one
+    /// reading a stranger can ask for, so what a wedged daemon costs is bounded
+    /// here rather than left to whoever is asking.
     ///
     /// Read now rather than held from startup, for the reason the pane's own
     /// reading is: a laptop moves between tailnets and DHCP moves everybody,
     /// and an address remembered from a start weeks ago is an address a peer
     /// would dial into nothing.
     pub(crate) async fn tailnet(&self) -> Vec<String> {
-        let Ok(told) = self.run(&["status", "--json"]).await else {
+        let Ok(told) = self.run_within(&["status", "--json"], ANSWERING).await else {
             return Vec::new();
         };
 
@@ -573,18 +587,54 @@ impl Tailscale {
     /// business writing on the server's own terminal, and both streams are what
     /// this module reads its answer out of.
     async fn run(&self, arguments: &[&str]) -> std::io::Result<Output> {
+        self.command(arguments).output().await
+    }
+
+    /// The same, given `within` to answer in — and killed where it does not.
+    ///
+    /// **For the readings a stranger can ask for.** [`Tailscale::tailnet`] is
+    /// behind the peer listener's identity endpoint, which anybody who can
+    /// reach the port may read, so a call to it is a process somebody else
+    /// started on this machine: without a deadline a daemon that has wedged
+    /// leaves every one of them standing, and they pile up as fast as the
+    /// requests arrive. The pane's own readings are behind the Workbench Key on
+    /// the loopback and go through [`Tailscale::run`] as they always did — a
+    /// serve press may be waiting on a password dialog, and a deadline over that
+    /// would be a grant cut off mid-answer.
+    ///
+    /// `kill_on_drop`, because a timeout that left the process running would be
+    /// this deadline saying the pile-up had stopped while it went on.
+    async fn run_within(&self, arguments: &[&str], within: Duration) -> std::io::Result<Output> {
+        match tokio::time::timeout(within, self.command(arguments).kill_on_drop(true).output())
+            .await
+        {
+            Ok(told) => told,
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("`tailscale` did not answer within {within:?}"),
+            )),
+        }
+    }
+
+    /// `tailscale` with `arguments`, built and not yet run.
+    ///
+    /// Apart from the running so that the two ways of running it — with a
+    /// deadline and without — are one command said once.
+    fn command(&self, arguments: &[&str]) -> Command {
         let (program, before) = self
             .program
             .split_first()
             .expect("a Tailscale is built with a program to run");
 
-        Command::new(program)
+        let mut command = Command::new(program);
+
+        command
             .args(before)
             .args(arguments)
             .unseen()
-            .stdin(std::process::Stdio::null())
-            .output()
-            .await
+            .stdin(std::process::Stdio::null());
+
+        command
     }
 }
 

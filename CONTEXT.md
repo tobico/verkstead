@@ -600,8 +600,13 @@ two rows apart.
 **The addresses are every one a peer could try, in the order to try them**: the
 tailnet name and its addresses first where Tailscale is up, then the LAN
 addresses, with the loopback and the link-local left out and the tailnet
-address not named twice for being on an interface as well. A machine with no
-Tailscale, or one whose daemon is not up, answers with its LAN addresses rather
+address not named twice for being on an interface as well. **The tailnet half
+stands for five seconds** — reading it is a command run on this machine and the
+endpoint that wants it is the one nobody has to be anybody to read, so without
+that a stranger's request is a process, as fast as they care to ask; the LAN
+half is read every time, being a syscall. A machine with no
+Tailscale, or one whose daemon is not up — or whose daemon does not answer
+within five seconds — answers with its LAN addresses rather
 than failing — and a device on neither a tailnet nor a network still answers,
 having an id and a fingerprint, which is what somebody typing an address by
 hand is looking at. The address typed at link time is only the first one ever
