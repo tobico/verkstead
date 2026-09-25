@@ -1244,10 +1244,29 @@ impl StartedBy {
     /// the log file the app's own menu opens. A machine started from a unit file
     /// has no window and nobody to press anything in, and what somebody reading
     /// the journal pastes is the whole link (ADR-0015, as amended).
-    pub fn hands_over_the_link(self) -> key::HandsOverTheLink {
+    ///
+    /// **And `display`, for the sidecar that turns out to have none.** A
+    /// `--desktop` run over SSH or in a container is a sidecar whose app cannot
+    /// be there: Electron will not start without somewhere to draw any more
+    /// than a tray will, so the caller this line is trusting to have opened a
+    /// window on the link has opened nothing. Leaving the link off *there* is
+    /// the redacting-everywhere ADR-0015 turned down — it would leave a machine
+    /// serving a workbench whose only way in is a file nobody has been told to
+    /// go and read. So this is the daemon's line exactly where the sidecar has
+    /// become the daemon, and the one case it fires in is the one case where
+    /// there is no app log for the secret to sit in, the app not being there.
+    ///
+    /// The tray app reaches the same end from the other side, which is why it
+    /// says [`key::HandsOverTheLink::TheCaller`] whatever this machine has on
+    /// it: a tray that cannot be raised is not known about until it has been
+    /// tried, so what that install falls back to is a second line written after
+    /// this one rather than a different first line — see
+    /// `verkstead_desktop::Desktop::run`.
+    pub fn hands_over_the_link(self, display: bool) -> key::HandsOverTheLink {
         match self {
             StartedBy::AnOperator => key::HandsOverTheLink::TheStartupLine,
-            StartedBy::TheDesktopApp => key::HandsOverTheLink::TheCaller,
+            StartedBy::TheDesktopApp if display => key::HandsOverTheLink::TheCaller,
+            StartedBy::TheDesktopApp => key::HandsOverTheLink::TheStartupLine,
         }
     }
 
@@ -1319,10 +1338,17 @@ pub async fn run_on(
     // [`run_on_keyed`] for the caller that arrives having already made this call.
     let key = config.workbench_key()?;
 
+    // Asked once, because both answers below turn on it: whether there is
+    // anywhere on this machine to draw a window. A sidecar with nowhere is a
+    // sidecar whose app is not there to have started it — see [`display`].
+    let display = display::there_is_one();
+
     // And the two things `started_by` decides, both of them behaviour on this
     // side of the socket. The startup line: whether it is this install's handing
     // over of the login link, or the address alone because the caller has opened
-    // a window on one already — see [`StartedBy::hands_over_the_link`].
+    // a window on one already — and the link again where the flag said a caller
+    // would and this machine says none can, which is the sidecar becoming the
+    // daemon. See [`StartedBy::hands_over_the_link`].
     //
     // And how a privilege this process has not got is asked for: the operator
     // grant the Remote access pane wants and the onboarding wizard's one
@@ -1334,8 +1360,8 @@ pub async fn run_on(
         listener,
         config,
         key,
-        started_by.escalation(display::there_is_one()),
-        started_by.hands_over_the_link(),
+        started_by.escalation(display),
+        started_by.hands_over_the_link(display),
     )
     .await
 }
@@ -1639,5 +1665,35 @@ mod tests {
     fn a_serve_without_the_flag_asks_nobody_whatever_the_display_says() {
         assert!(StartedBy::AnOperator.escalation(true).is_none());
         assert!(StartedBy::AnOperator.escalation(false).is_none());
+    }
+
+    /// And the line names the address alone only where the app the flag speaks
+    /// for could be there to have opened a window: the same display the grant
+    /// above is installed on, because Electron will not start without one any
+    /// more than a tray will.
+    #[test]
+    fn the_flag_leaves_the_link_off_the_line_only_where_there_is_a_display() {
+        assert_eq!(
+            StartedBy::TheDesktopApp.hands_over_the_link(true),
+            key::HandsOverTheLink::TheCaller,
+        );
+        assert_eq!(
+            StartedBy::TheDesktopApp.hands_over_the_link(false),
+            key::HandsOverTheLink::TheStartupLine,
+        );
+    }
+
+    /// And a `serve` with no flag on it hands the link over in its line
+    /// whatever this machine has on it, which is the daemon's way and the thing
+    /// ADR-0015 refused to take away: a journal is where a headless machine
+    /// hands one over at all.
+    #[test]
+    fn a_serve_without_the_flag_says_the_link_whatever_the_display_says() {
+        for display in [true, false] {
+            assert_eq!(
+                StartedBy::AnOperator.hands_over_the_link(display),
+                key::HandsOverTheLink::TheStartupLine,
+            );
+        }
     }
 }

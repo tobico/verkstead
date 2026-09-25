@@ -45,6 +45,10 @@ pub struct Serve {
     /// The key is not hidden, only kept off that line: it stays in
     /// `workbench.key` inside the Data Directory the line names, at the mode it
     /// has always had. A `--desktop` run started by hand is read from there.
+    ///
+    /// And where this machine has nowhere to draw a window at all — over SSH,
+    /// in a container — the line carries the whole login link after all: an app
+    /// that could not have started is an app that opened no window on one.
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub desktop: bool,
 
