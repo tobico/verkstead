@@ -46,8 +46,14 @@
 //! the control is the answer coming back. A set the app refuses answers with the
 //! settings unchanged, and the radio goes back where it was.
 //!
-//! **Launch on Startup is not here yet.** It arrives with the registration
-//! behind it, so that nothing on this pane is a control that does nothing.
+//! **Launch on Startup is the registration and nothing else** (Set 846 Q9a). It
+//! is read from the platform through the bridge rather than out of the app's
+//! settings file, so a human who turns it off with their desktop's own settings
+//! has unchecked this box; and where there is nowhere to keep a registration —
+//! an unpackaged run, or a machine that names no configuration directory — the
+//! box is greyed with the reason under it, which is the same shape the greyed
+//! keep-running position has. It is drawn on every platform: what differs
+//! between them is the registration behind it rather than anything here.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch as Choose, type JSX } from "solid-js";
@@ -65,6 +71,7 @@ import {
   bridge,
   type Bridge,
   type DesktopSettings,
+  type Registration,
   type WhenClosed,
 } from "./bridge";
 import styles from "./Desktop.module.css";
@@ -76,6 +83,11 @@ import styles from "./Desktop.module.css";
 /// answers with the settings in force afterwards, which is written straight over
 /// it.
 const KEY = "desktop";
+
+/// And what the startup registration is held under, which is a reading of its
+/// own: it is the platform's rather than the settings file's, and only the pane
+/// draws it.
+const STARTUP = [KEY, "startup"];
 
 /// Each position of the radio, in its own words.
 const WORDS_FOR: Record<WhenClosed, string> = {
@@ -99,6 +111,21 @@ function useDesktop(reach: Bridge) {
   return useReading(() => ({
     queryKey: [KEY],
     queryFn: () => reach.settings(),
+    freshness: "static",
+  }));
+}
+
+/// And how **Launch on Startup** stands, out of the platform's own registration.
+///
+/// Static for [`useDesktop`]'s reason and one of its own: nothing the server has
+/// to say could change a registration with the desktop session, and what moves
+/// this is a tick answering. A desktop's own settings can change it under the
+/// page — which is what a pane opened afresh reads, the registration being asked
+/// of the platform every time rather than remembered anywhere.
+function useStartup(reach: Bridge) {
+  return useReading(() => ({
+    queryKey: STARTUP,
+    queryFn: () => reach.startup(),
     freshness: "static",
   }));
 }
@@ -209,6 +236,7 @@ function Card(props: {
 function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
   const queries = useQueryClient();
   const desktop = useDesktop(props.reach);
+  const starts = useStartup(props.reach);
   const mac = () => props.reach.platform === MAC;
 
   /// A control moved, which saves itself.
@@ -221,6 +249,17 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
     mutationFn: (changed: Partial<DesktopSettings>) => props.reach.set(changed),
     onSuccess: (stands: DesktopSettings) => {
       queries.setQueryData([KEY], stands);
+    },
+  }));
+
+  /// And the box that is the registration itself, which saves itself the same
+  /// way — the answer being how the registration stands once the platform has
+  /// been asked, so a registration it refused is a box that goes back where it
+  /// was with the reason under it.
+  const registering = useMutation(() => ({
+    mutationFn: (on: boolean) => props.reach.register(on),
+    onSuccess: (stands: Registration) => {
+      queries.setQueryData(STARTUP, stands);
     },
   }));
 
@@ -326,6 +365,45 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                 flip={(on) => save.mutate({ trayIcon: on })}
               />
 
+              {/* The registration itself, drawn once the platform has been asked
+                  about it — and on every platform, what differs between them
+                  being the registration behind the box rather than the box. */}
+              <Show when={starts.data}>
+                {(how) => (
+                  <div class={styles.startup}>
+                    <Check
+                      label="Launch on Startup"
+                      on={how().on}
+                      disabled={registering.isPending || !how().possible}
+                      title={how().why}
+                      flip={(on) => registering.mutate(on)}
+                    />
+
+                    {/* Why it will not take a tick, under the box as the close
+                        policy's note is under its group. */}
+                    <Show when={how().why}>
+                      {(why) => <Note class={styles.why}>{why()}</Note>}
+                    </Show>
+
+                    {/* And what the platform said about a registration it would
+                        not make, which the box springing back is otherwise the
+                        whole of. */}
+                    <Show when={how().refused}>
+                      {(refused) => (
+                        <ErrorLine class={styles.failure}>{refused()}</ErrorLine>
+                      )}
+                    </Show>
+                  </div>
+                )}
+              </Show>
+
+              <Show when={starts.isError}>
+                <ErrorLine class={styles.failure}>
+                  Could not read whether Verkstead starts with this machine:{" "}
+                  {starts.error?.message}
+                </ErrorLine>
+              </Show>
+
               {/* Drawn whatever the switch above says and on every platform: a
                   log file reached only through a control somebody can turn off
                   is a log file nobody sends. */}
@@ -339,6 +417,12 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                 </Note>
               </div>
 
+              <Show when={registering.isError}>
+                <ErrorLine class={styles.failure}>
+                  Launch on Startup could not be set:{" "}
+                  {registering.error?.message}
+                </ErrorLine>
+              </Show>
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
                   The setting could not be saved: {save.error?.message}

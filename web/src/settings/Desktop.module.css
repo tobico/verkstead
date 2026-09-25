@@ -95,6 +95,20 @@
   font-size: 0.85rem;
 }
 
+/* The registration that is **Launch on Startup**, under the tray box it stands
+   beside — its own block, because the reason a greyed one will not take a tick
+   belongs to it rather than to the checkbox above. */
+.startup {
+  margin-top: 0.85rem;
+}
+
+/* Why the box will not take one, under it the way the close policy's note sits
+   under its group. */
+.why {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
 /* The way to this run's log file, drawn whatever the switch above says. The
    press and the line under it, the way a duration on the Cleanup pane is its
    field and its label. */

@@ -54,6 +54,7 @@ import {
   POSITIONS,
   type Bridge,
   type DesktopSettings,
+  type Registration,
 } from "../src/settings/bridge";
 import {
   SettingsPage,
@@ -77,6 +78,11 @@ const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
 /// tray to keep running in.
 const DEFAULTS: DesktopSettings = { whenClosed: "tray", trayIcon: true };
 
+/// And the registration a packed app on a machine with somewhere to keep one
+/// reads as — which is what `startup` in `desktop/src/startup.ts` answers there:
+/// it could be registered, and nobody has asked for it to be.
+const UNREGISTERED: Registration = { possible: true, on: false };
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -86,6 +92,8 @@ type Asked = {
   settings: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
   logs: ReturnType<typeof vi.fn>;
+  startup: ReturnType<typeof vi.fn>;
+  register: ReturnType<typeof vi.fn>;
 };
 
 /// The app's own window, stood in for.
@@ -102,8 +110,10 @@ function standingIn(
   held: DesktopSettings = DEFAULTS,
   platform = "linux",
   refuse = false,
+  registration: Registration = UNREGISTERED,
 ): Asked {
   let stands = held;
+  let starts = registration;
 
   const asked: Asked = {
     settings: vi.fn(() => Promise.resolve(stands)),
@@ -114,6 +124,19 @@ function standingIn(
       return Promise.resolve(stands);
     }),
     logs: vi.fn(() => Promise.resolve()),
+    startup: vi.fn(() => Promise.resolve(starts)),
+
+    // The registration is the state, so a tick the platform took is a
+    // registration that reads back the other way — and one it could not make
+    // answers with what is still true and the reason beside it.
+    register: vi.fn((on: boolean) => {
+      if (starts.possible && !refuse) {
+        starts = { possible: true, on };
+      } else if (starts.possible) {
+        starts = { ...starts, refused: "the entry could not be written" };
+      }
+      return Promise.resolve(starts);
+    }),
   };
 
   const bridge: Bridge = {
@@ -121,6 +144,8 @@ function standingIn(
     settings: () => asked.settings() as Promise<DesktopSettings>,
     set: (changed) => asked.set(changed) as Promise<DesktopSettings>,
     logs: () => asked.logs() as Promise<void>,
+    startup: () => asked.startup() as Promise<Registration>,
+    register: (on) => asked.register(on) as Promise<Registration>,
   };
 
   vi.stubGlobal(NAME, bridge);
@@ -357,6 +382,116 @@ describe("the tray", () => {
 
     await screen.findByLabelText("Show menu bar icon");
     expect(screen.queryByLabelText("Show tray icon")).toBeNull();
+  });
+});
+
+describe("Launch on Startup", () => {
+  /// Read from the platform's own registration rather than out of the app's
+  /// settings file (Set 846 Q9a) — which is why there is a reading of its own
+  /// behind this box at all.
+  it("says where the registration stands, and sends a tick", async () => {
+    const asked = standingIn(DEFAULTS, "linux", false, { possible: true, on: false });
+    mountPane();
+
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    expect(asked.startup).toHaveBeenCalled();
+    expect(box.checked).toBe(false);
+
+    fireEvent.click(box);
+
+    await waitFor(() => expect(asked.register).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(box.checked).toBe(true));
+  });
+
+  /// A registration already there is a checked box, whoever made it: the
+  /// platform is asked, so an entry a previous install wrote reads as on.
+  it("is checked where the machine is already registered", async () => {
+    standingIn(DEFAULTS, "linux", false, { possible: true, on: true });
+    mountPane();
+
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    expect(box.checked).toBe(true);
+  });
+
+  /// And nothing is written anywhere else, which is the whole of what *the
+  /// registration is the state* means: a tick of this box is not a set of the
+  /// app's settings.
+  it("writes nothing into the app's settings", async () => {
+    const asked = standingIn();
+    mountPane();
+
+    fireEvent.click(await screen.findByLabelText("Launch on Startup"));
+
+    await waitFor(() => expect(asked.register).toHaveBeenCalled());
+    expect(asked.set).not.toHaveBeenCalled();
+  });
+
+  /// Greyed with the reason under it where there is nowhere to keep a
+  /// registration — an unpackaged run, which is every `pnpm start` a developer
+  /// makes. A box that ticked and did nothing would be the worse answer: what it
+  /// promises is a Verkstead that comes up at the next login.
+  it("is greyed with its note where there is nowhere to keep one", async () => {
+    const why = "Launch on Startup needs an installed Verkstead.";
+    const asked = standingIn(DEFAULTS, "linux", false, { possible: false, on: false, why });
+    const { container } = mountPane();
+
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    expect(box.disabled).toBe(true);
+    screen.getByText(why);
+
+    fireEvent.click(box);
+
+    expect(asked.register).not.toHaveBeenCalled();
+    expect(container.querySelector(`.${styles.why}`)).not.toBeNull();
+  });
+
+  /// And nothing of the sort where there is somewhere: the note is about the
+  /// machine rather than about the box.
+  it("says nothing of the sort where there is somewhere", async () => {
+    standingIn();
+    const { container } = mountPane();
+
+    await screen.findByLabelText("Launch on Startup");
+    expect(container.querySelector(`.${styles.why}`)).toBeNull();
+  });
+
+  /// A registration the platform would not make is a box that goes back where it
+  /// was with what refused it underneath — said rather than thrown, so the words
+  /// are the app's own.
+  it("goes back where it was and says what refused it", async () => {
+    standingIn(DEFAULTS, "linux", true, { possible: true, on: false });
+    mountPane();
+
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    fireEvent.click(box);
+
+    await screen.findByText("the entry could not be written");
+    expect(box.checked).toBe(false);
+  });
+
+  /// Drawn on every platform, what differs between them being the registration
+  /// behind the box rather than the box: Electron's login-item API on a Mac and
+  /// on Windows, the autostart entry on Linux.
+  it("is drawn on every platform", async () => {
+    for (const platform of ["darwin", "win32"] as const) {
+      standingIn(DEFAULTS, platform);
+      const { unmount } = mountPane();
+
+      await screen.findByLabelText("Launch on Startup");
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /// And with the tray off as readily as with it on: this is not a Launch on
+  /// Startup that needs the tray, the login start showing its window where there
+  /// is no icon to reach it by.
+  it("is drawn with the tray off", async () => {
+    standingIn({ whenClosed: "quit", trayIcon: false });
+    mountPane();
+
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    expect(box.disabled).toBe(false);
   });
 });
 

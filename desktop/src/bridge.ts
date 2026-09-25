@@ -13,13 +13,15 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the three channels, and
+//! **What is in this file is what crosses**: the name, the five channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
-//! and what the app *does* about each of the three is `main.ts`'s while what it
-//! *decides* about a set is [`changed`](./settings.js)'s.
+//! and what the app *does* about each of them is `main.ts`'s while what they
+//! *mean* is elsewhere: a set is [`changed`](./settings.js)'s, and the startup
+//! registration is [`startup.ts`](./startup.js)'s.
 
 import type { Settings } from "./settings.js";
+import type { Registration } from "./startup.js";
 
 /// What the bridge is called on the window object: `window.verkstead`.
 ///
@@ -51,12 +53,26 @@ export const SET = "verkstead:set";
 /// reached the other way (ADR-0020).
 export const LOGS = "verkstead:logs";
 
+/// The channel **how Launch on Startup stands** is asked for on.
+///
+/// Apart from [`ASKED`], because it is not one of the app's settings and is
+/// deliberately not kept beside them: the platform's own registration is the
+/// state (Set 846 Q9a), so this is a question put to the platform rather than a
+/// line read out of a file.
+export const STARTUP = "verkstead:startup";
+
+/// And the channel a tick of it is sent on, answering with how it stands
+/// afterwards — the same shape a set of the settings takes, and for the same
+/// reason: what moves the box is the answer rather than the press.
+export const REGISTER = "verkstead:register";
+
 /// What `window.verkstead` is, where there is one.
 ///
-/// Three acts and one value, which is the whole of what the page needs: what
-/// machine this is, the settings read and written, and the log file opened.
-/// Everything asynchronous, because everything but the platform is a question
-/// for the process on the other side of the bridge.
+/// Five acts and one value, which is the whole of what the page needs: what
+/// machine this is, the settings read and written, the log file opened, and the
+/// startup registration read and written. Everything asynchronous, because
+/// everything but the platform is a question for the process on the other side
+/// of the bridge.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
   /// preload where there is a process to read it from.
@@ -82,4 +98,15 @@ export interface Bridge {
   /// **View Logs** performs, and it is drawn on the page whatever the tray
   /// setting says.
   logs(): Promise<void>;
+
+  /// How **Launch on Startup** stands on this machine, read from the platform's
+  /// own registration rather than from anything kept beside it.
+  startup(): Promise<Registration>;
+
+  /// Register or unregister, answering with how it stands afterwards.
+  ///
+  /// A registration the platform refused answers with what is true and the
+  /// reason beside it, so the box goes back where it was and the human is told
+  /// why — see [`Registration`](./startup.js).
+  register(on: boolean): Promise<Registration>;
 }

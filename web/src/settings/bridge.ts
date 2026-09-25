@@ -23,6 +23,12 @@
 //! would be a section drawn out of `undefined`, which is why what is read off
 //! the window is checked for the shape rather than cast into it.
 //!
+//! **And one of the things it reaches is not a setting at all.**
+//! [`Registration`] is read from the platform rather than out of the app's JSON
+//! file: **Launch on Startup** is the registration itself (Set 846 Q9a), so there
+//! is nothing kept beside it to disagree with, and a box drawn from it says what
+//! the machine is actually going to do at the next login.
+//!
 //! What this module holds is the shape and the reading of the window, and
 //! nothing else: the words the section is drawn in are `Desktop.tsx`'s, and what
 //! a set *means* is the app's — see `changed` in `desktop/src/settings.ts`.
@@ -60,6 +66,31 @@ export interface DesktopSettings {
   trayIcon: boolean;
 }
 
+/// How **Launch on Startup** stands on this machine — `Registration` in
+/// `desktop/src/startup.ts`, said again on this side of the bridge.
+///
+/// **There is no setting for this anywhere**, which is the whole shape of it: the
+/// platform's own registration is the state (Set 846 Q9a), so the box is drawn
+/// from reading that registration and a tick writes it. A human who turns it off
+/// with their desktop's own settings has unchecked the box.
+export interface Registration {
+  /// Whether this machine can be registered with at all. A greyed box rather
+  /// than one that ticks and does nothing — an unpackaged run is the case a
+  /// developer meets, and a machine with nowhere to keep an entry is the other.
+  readonly possible: boolean;
+
+  /// Whether Verkstead comes up when the desktop session does.
+  readonly on: boolean;
+
+  /// Why it cannot be, where it cannot — the note under the greyed box.
+  readonly why?: string;
+
+  /// And what refused a registration that was asked for, where this answers one.
+  /// Said rather than thrown, so the line under the box is the app's wording
+  /// rather than a bridge's.
+  readonly refused?: string;
+}
+
 /// What `window.verkstead` is, where there is one.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
@@ -80,6 +111,14 @@ export interface Bridge {
   /// Open this run's log file, or say there is none: the tray item's own act,
   /// reached the other way (ADR-0020).
   logs(): Promise<void>;
+
+  /// How Launch on Startup stands, read from the platform's own registration.
+  startup(): Promise<Registration>;
+
+  /// Register or unregister, answering with how it stands afterwards — so what
+  /// moves the box is the answer rather than the press, here as everywhere else
+  /// on this page.
+  register(on: boolean): Promise<Registration>;
 }
 
 /// The bridge this page is drawn over, or `null` where there is none — which is
@@ -111,6 +150,8 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.platform === "string" &&
     typeof reached.settings === "function" &&
     typeof reached.set === "function" &&
-    typeof reached.logs === "function"
+    typeof reached.logs === "function" &&
+    typeof reached.startup === "function" &&
+    typeof reached.register === "function"
   );
 }

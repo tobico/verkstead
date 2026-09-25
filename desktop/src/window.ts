@@ -37,6 +37,12 @@
 //! makes hiding possible at all, the native warning, and the bounds still being
 //! written down by a close that never completes.
 //!
+//! **And a login start comes up with it off the screen.** The one thing
+//! [`Workbench.hidden`] decides: the window is made, loads and remembers where
+//! it is exactly as ever, and what it does not do is arrive in front of whatever
+//! the human is doing at the moment they log in — the reading `--no-open` made
+//! of a login for the tray app, and [`hidden`](./startup.js)'s to make.
+//!
 //! The decorated window is this stage's; the frameless one with the controls
 //! overlay is the stage after it.
 
@@ -93,6 +99,16 @@ export interface Workbench {
   /// app ships beside itself rather than anything the page names.
   preload: string;
 
+  /// Whether this launch comes up with no window on the screen — a login start
+  /// while there is an icon in the tray, which is [`hidden`](./startup.js)'s
+  /// answer.
+  ///
+  /// The window is made either way, and everything about it is as it always is:
+  /// it loads, it remembers where it is, and Open on the tray is what brings it
+  /// on. What is different is only that nothing arrives over whatever the human
+  /// is doing at the moment they log in.
+  hidden: boolean;
+
   /// What this press of the close button means — [`closing`](./closing.js)'s
   /// answer, asked at the moment of the press rather than once at startup.
   ///
@@ -116,6 +132,12 @@ export function open(workbench: Workbench): BrowserWindow {
     // What the window is called until the document says, which is the product
     // rather than the package this is built from.
     title: "Verkstead",
+
+    // Off the screen where this is a login start with a tray to be reached by,
+    // and on it every other time. A hidden window rather than no window: it is
+    // loading the workbench behind the icon, so Open is a window that is already
+    // there — which is exactly what a close that hides leaves behind.
+    show: !workbench.hidden,
 
     // The menu itself is set — it is what registers copy, paste, zoom, reload
     // and the developer tools — and what is hidden is the bar it would be drawn
@@ -224,14 +246,27 @@ function keeping(window: BrowserWindow, state: string, place: Placement): void {
   // what fills it in, once the window has been framed.
   let drift: Drift = STILL;
 
-  // Measured a moment after opening rather than at once: what is being measured
-  // is the desktop's answer, and the answer is what it has done to the window
-  // by the time it has finished drawing it. The same moment a drag is given to
-  // settle in, for the same reason.
-  const framed = setTimeout(() => {
-    drift = drifted(place, window.getNormalBounds());
-  }, SETTLED);
-  framed.unref();
+  // Measured a moment after the window is on the screen rather than at once:
+  // what is being measured is the desktop's answer, and the answer is what it
+  // has done to the window by the time it has finished drawing it. The same
+  // moment a drag is given to settle in, for the same reason.
+  //
+  // **After it is shown, which a login start is not.** A window that has not
+  // been drawn has not been framed either, so a hidden start measured at once
+  // would read a drift of nothing and write that down — and the next run would
+  // open a window a frame's worth larger than the one the human left.
+  const measure = (): void => {
+    const framed = setTimeout(() => {
+      drift = drifted(place, window.getNormalBounds());
+    }, SETTLED);
+    framed.unref();
+  };
+
+  if (window.isVisible()) {
+    measure();
+  } else {
+    window.once("show", measure);
+  }
 
   const now = (): void => {
     settling = undefined;
