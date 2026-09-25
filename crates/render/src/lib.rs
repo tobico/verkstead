@@ -65,7 +65,7 @@ pub use conversations::{
     stage_list_reached, steer_event, task_list, task_list_event, task_list_reached,
     unreadable_set_event,
 };
-pub use device::DeviceIdentity;
+pub use device::{DeviceIdentity, DevicesView};
 pub use files::{
     FileDeleted, FileDeleting, FileList, FileListsView, FileMade, FileMaking, FileMark,
     FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView, FileStatus, FileStatusView,

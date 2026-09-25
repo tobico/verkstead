@@ -40,6 +40,13 @@
 //! together if nothing renewed it — which is exactly why a default accepted
 //! without looking was the thing ADR-0020 ruled out, along with a validity long
 //! enough never to matter.
+//!
+//! **And [`Devices`] is what the human's own browser reads of all this**: this
+//! device and how many others are linked to it, which is the Devices section of
+//! the Remote access pane. The same answer a stranger reads off the peer
+//! listener's identity endpoint, told to the browser instead — that listener
+//! presents a certificate nothing but another Verkstead has a reason to trust,
+//! so the workbench is where the pane asks.
 
 pub mod reading;
 
@@ -50,7 +57,9 @@ use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
+use verkstead_render::DevicesView;
 
+use crate::peer::Members;
 use crate::settings::write_atomically;
 
 /// What the id's file is called inside the Data Directory, and what the
@@ -284,6 +293,65 @@ impl Device {
     /// And where the certificate is.
     pub fn certificate_path(&self) -> PathBuf {
         self.dir.join(CERTIFICATE_FILE)
+    }
+}
+
+/// What the **Devices** section of the Remote access pane reads: this device,
+/// and how many others are linked to it (ADR-0020).
+///
+/// **The browser's side of the identity endpoint.** A peer reads what this
+/// device is off [`crate::peer::IDENTITY`], over TLS on a port of its own; the
+/// human's browser cannot — that listener presents a certificate nothing but
+/// another Verkstead has any reason to trust, and the workbench is where the
+/// pane is drawn. So the same answer is assembled again over here, out of the
+/// same two handles the peer listener assembles it out of, rather than the
+/// workbench dialling its own peer port to ask itself who it is.
+///
+/// **Held rather than read, and read at the moment it is asked.** The device is
+/// the id and the certificate off the disk, which do not change under a running
+/// server; what a device is *like* — the hostname, the OS and the addresses —
+/// is read per answer, for the reason [`reading`] gives: a laptop moves between
+/// the LAN and the tailnet, and DHCP moves everybody.
+#[derive(Debug, Clone)]
+pub struct Devices {
+    /// What this device is: the id every record names it by and the certificate
+    /// a link is made of.
+    device: Device,
+
+    /// And the machine it is on, as a way of asking rather than as an answer —
+    /// see [`reading::Reading`].
+    reading: reading::Reading,
+
+    /// And who it is linked to, which is what the count on the card comes off.
+    /// Nobody, in every Verkstead this build can make: a member is made by a
+    /// join, and the join is the next stage's — see [`crate::peer::Members`].
+    members: Members,
+}
+
+impl Devices {
+    /// The list a server answers out of: what it is, the machine it is on, and
+    /// its membership.
+    ///
+    /// The same three the peer listener is built from, because they are the
+    /// same three things — what is different is who is asking.
+    pub fn of(device: Device, reading: reading::Reading, members: Members) -> Devices {
+        Devices {
+            device,
+            reading,
+            members,
+        }
+    }
+
+    /// The list as the pane draws it, assembled now.
+    ///
+    /// `async` for the reason the identity endpoint's handler is: the tailnet
+    /// half of the addresses is a command run on this machine, and a pane opened
+    /// a moment later would get a different and equally true answer.
+    pub(crate) async fn listing(&self) -> DevicesView {
+        DevicesView {
+            this: self.reading.identity(&self.device).await,
+            linked: self.members.count(),
+        }
     }
 }
 

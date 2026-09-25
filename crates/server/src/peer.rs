@@ -278,6 +278,17 @@ impl Members {
     fn holds(&self, _fingerprint: &str) -> bool {
         false
     }
+
+    /// And how many of them there are, which is the clause the Remote access
+    /// card carries beside what Tailscale is doing — see
+    /// [`crate::device::Devices`], which is the workbench's side of this.
+    ///
+    /// Nought, for the reason [`Members::holds`] is false: there is no join to
+    /// make a member with, so nought is what there is to count rather than
+    /// what nobody looked for.
+    pub(crate) fn count(&self) -> usize {
+        0
+    }
 }
 
 /// The member gate: everything [`members_only`] carries is a member's or is

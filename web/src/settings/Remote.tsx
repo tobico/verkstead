@@ -79,16 +79,42 @@
 //! needs is the box, the code, the link and the press. What stays under each
 //! control is the one line that is the control's own — and, where the machine is
 //! in a state somebody has to act on, what the machine said about it.
+//!
+//! **And Devices is a third section here rather than a pane of its own**
+//! (ADR-0020). Linking two machines is how this one is reached as much as the
+//! serve and the key are, so it is a section of this pane: nothing is added to
+//! `WORDS`, there is no card and no route. It stands beside [`TheKey`] rather
+//! than inside the Tailscale choice, because a machine that has never heard of
+//! a tailnet has a device identity all the same — and a Devices list that went
+//! away on such a machine would be a cluster feature that appeared to need
+//! Tailscale.
+//!
+//! It reads nothing of the settings query either, for the same reason the two
+//! sections above it do not: a device is not configured. The name is the
+//! hostname, the word for the OS is the platform's own — *Linux (WSL)* where
+//! the kernel says so, which is the one case a hostname cannot tell apart — and
+//! the addresses are read off the machine's interfaces at the moment it
+//! answers. The list holds this device alone until something is linked, and its
+//! row offers no Unlink: there is nothing yet to unlink from.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
+import { faApple, faLinux, faWindows } from "@fortawesome/free-brands-svg-icons";
+import { faDesktop, type IconDefinition } from "@fortawesome/free-solid-svg-icons";
+
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { Copy } from "../Copy";
+import { Icon } from "../Icon";
 import { PaneSticky } from "../Panes";
-import { loadRemote, pressServe, resetKey } from "../api/client";
-import type { RemoteView, ServePress, ServeView } from "../api/types";
+import { loadDevices, loadRemote, pressServe, resetKey } from "../api/client";
+import type {
+  DevicesView,
+  RemoteView,
+  ServePress,
+  ServeView,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -170,6 +196,61 @@ function useRemote() {
   }));
 }
 
+/// And what this Verkstead *is*, read for the two panes that draw that too: the
+/// device this machine runs, and how many others are linked to it.
+///
+/// A read of its own beside the one above rather than a field of it, because
+/// they are two different questions about this machine: what Tailscale is doing
+/// changes when somebody runs a command in a terminal, and what device this is
+/// changes when a link is made or an address moves. Neither is a setting, which
+/// is why neither is in the settings query.
+///
+/// Merged by the device id: what says one row from another is the id, here and
+/// in the list this becomes once anything is linked, so a re-read that found
+/// another device leaves the rows it already drew alone.
+function useDevices() {
+  return useReading(() => ({
+    queryKey: ["devices"],
+    queryFn: loadDevices,
+    freshness: { reconcile: "device" },
+  }));
+}
+
+/// Which mark stands beside a device's name, off the word for its operating
+/// system.
+///
+/// Font Awesome's brand set, drawn through [`Icon`] like every other icon in
+/// the app — so the bundle carries these three and nothing else of it.
+///
+/// Matched on what the word *starts* with, because one of them is not a bare
+/// platform name: a WSL reads *Linux (WSL)* and wears the Linux mark, which is
+/// the whole point of the word — a Windows machine and the WSL on it share a
+/// hostname, and this is what tells the two rows apart.
+///
+/// A word this build has no mark for still draws a row, which is what the
+/// desktop is for: a device is worth listing whether or not its OS is one of
+/// the three anybody here has heard of.
+function osIcon(os: string): IconDefinition {
+  if (os.startsWith("macOS")) return faApple;
+  if (os.startsWith("Windows")) return faWindows;
+  if (os.startsWith("Linux")) return faLinux;
+
+  return faDesktop;
+}
+
+/// How many devices are linked to this one, as a sentence.
+///
+/// The clause the card carries beside what Tailscale is doing — *other*
+/// devices, because this device is the row the list already holds and nothing
+/// is linked to itself. Nought is a sentence rather than a silence: a workbench
+/// that says nothing about devices reads as one that has not heard of them.
+function linked(count: number): string {
+  if (count === 0) return "No other devices are linked.";
+  if (count === 1) return "One other device is linked.";
+
+  return `${count} other devices are linked.`;
+}
+
 /// How things stand, in the one line somebody scanning the page is after.
 ///
 /// The card's line, and the card's alone: the pane below it is the controls
@@ -224,6 +305,7 @@ export function RemoteCard(props: {
   press: () => void;
 }): JSX.Element {
   const remote = useRemote();
+  const devices = useDevices();
 
   return (
     <Choose>
@@ -245,7 +327,18 @@ export function RemoteCard(props: {
           >
             <h2>Remote access</h2>
 
-            <p class={styles.standing}>{standing(told())}</p>
+            {/* The Tailscale sentence and the devices clause in the one line,
+                the clause after whichever of the six the machine turned out to
+                be: it is true of every one of them, so it follows all of them
+                rather than being written into one. Absent until the devices
+                read lands, and absent for good if it fails — what Tailscale is
+                doing is still worth saying on its own. */}
+            <p class={styles.standing}>
+              {standing(told())}{" "}
+              <Show when={devices.data}>
+                {(here) => <>{linked(here().linked)}</>}
+              </Show>
+            </p>
           </CardButton>
         )}
       </Match>
@@ -418,6 +511,13 @@ export function RemotePane(props: {
                   serving on it — so the press that re-issues it must not be a
                   thing the serve box can take away. */}
               <TheKey />
+
+              {/* And the devices, outside that choice for the key's own
+                  reason said about a different thing: a machine with no
+                  Tailscale at all still has an identity of its own, and a list
+                  that vanished on one would be a cluster feature that appeared
+                  to need a tailnet. */}
+              <Devices />
             </div>
           )}
         </Match>
@@ -505,6 +605,77 @@ function TheKey(): JSX.Element {
         </ErrorLine>
       </Show>
     </section>
+  );
+}
+
+/// The devices this workbench is one of, which today is this one.
+///
+/// **A section of this pane rather than a settings section of its own**
+/// (ADR-0020): linking is how this machine is reached as much as the serve and
+/// the key are. So there is nothing added to `WORDS`, no card and no route —
+/// what the pane grows is this and the reading behind it.
+///
+/// **On every state of the pane**, for the reason [`TheKey`] is on every state
+/// of it: a machine that has never heard of a tailnet has a device identity all
+/// the same, and a list that went away on one would say this needed Tailscale.
+///
+/// One row, and nothing to press on it. The name is the hostname and the mark
+/// beside it is the word for the OS — a WSL wears the Linux mark and reads
+/// *Linux (WSL)*, which is the one thing that tells it from the Windows it
+/// shares a hostname with. *This device* is what the row says instead of an
+/// Unlink, there being nothing yet to unlink it from.
+function Devices(): JSX.Element {
+  const devices = useDevices();
+
+  return (
+    <section class={styles.devices}>
+      <Choose>
+        <Match when={devices.isPending}>
+          <Empty>Loading…</Empty>
+        </Match>
+        <Match when={devices.isError}>
+          <ErrorLine class={styles.failure}>
+            Could not read this device: {devices.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={devices.data}>
+          {(here) => <ThisDevice of={here()} />}
+        </Match>
+      </Choose>
+    </section>
+  );
+}
+
+/// The one row the list holds: the OS mark, the name, *this device*, and every
+/// address a peer could reach it on.
+///
+/// The addresses are drawn only where there are any. A device on neither a
+/// tailnet nor a network answers with none, which is an answer rather than a
+/// failure — it still has a name and a mark, and an empty line under them would
+/// say something went wrong.
+function ThisDevice(props: { of: DevicesView }): JSX.Element {
+  return (
+    <ul class={styles.list}>
+      <li class={styles.device}>
+        <Icon
+          of={osIcon(props.of.this.os)}
+          label={props.of.this.os}
+          class={styles.os}
+        />
+
+        <div class={styles.about}>
+          <p class={styles.deviceName}>
+            {props.of.this.name} <span class={styles.here}>this device</span>
+          </p>
+
+          <Show when={props.of.this.addresses.length > 0}>
+            <p class={styles.addresses}>
+              {props.of.this.addresses.join(", ")}
+            </p>
+          </Show>
+        </div>
+      </li>
+    </ul>
   );
 }
 
