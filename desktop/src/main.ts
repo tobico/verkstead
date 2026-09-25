@@ -1,11 +1,12 @@
 //! The app itself: the one file that reads the running application.
 //!
-//! What it does at this stage is the sidecar and nothing around it — find the
-//! headless `verkstead`, start it as `serve --desktop`, wait for the server to
-//! answer, and own the child's lifetime from there. The window that opens on
-//! the workbench is the next task's, and every question this file asks is
-//! answered by a module beside it that vitest can run without an Electron —
-//! see the wall in `eslint.config.js`.
+//! What it does at this stage is find the headless `verkstead`, start it as
+//! `serve --desktop`, wait for the server to answer, and open one window on the
+//! workbench logged in — owning the child's lifetime through all of it. Every
+//! question it asks is answered by a module beside it that vitest can run
+//! without an Electron, and the reads of the running application it makes for
+//! itself are `app` and the process's own environment — see the wall in
+//! `eslint.config.js`, and `window.ts`, which is the other file on it.
 
 import { existsSync } from "node:fs";
 
@@ -13,9 +14,12 @@ import { app, dialog } from "electron";
 
 import { cli, OVERRIDE } from "./cli.js";
 import { healthy, NeverCameUp } from "./health.js";
+import { keyIn } from "./key.js";
 import { say } from "./log.js";
+import { dataDir } from "./platform.js";
 import { start } from "./sidecar.js";
-import { HEALTH } from "./workbench.js";
+import { open } from "./window.js";
+import { HEALTH, ORIGIN } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -41,6 +45,12 @@ async function run(): Promise<void> {
     platform: process.platform,
     env: process.env,
   });
+
+  // The other read of the process environment, made here for the reason that
+  // one is: everything below is a function of what it was handed. The sidecar
+  // inherits this same environment, so this is the directory the server is
+  // about to resolve for itself — and so the one the **Workbench Key** is in.
+  const data = dataDir({ platform: process.platform, env: process.env });
 
   // Before anything is started, so that the app which cannot serve has done
   // nothing at all — and before `whenReady`, because there is nothing to wait
@@ -77,13 +87,26 @@ async function run(): Promise<void> {
     if (!(trouble instanceof NeverCameUp)) {
       throw trouble;
     }
-    // Said rather than shown: the window this would have been drawn over is
-    // the next task's, and the line is what a developer running `pnpm start`
-    // is reading anyway.
+    // Said rather than shown: there is no window to draw a dialog over yet, and
+    // the line is what a developer running `pnpm start` is reading anyway.
     say(`the server never came up — ${trouble.message}`);
     sidecar.stop();
     app.exit(1);
+    return;
   }
+
+  if (data === undefined) {
+    // Which the server refuses to start over, so health would never have
+    // answered and this line is unreachable in practice. Said rather than
+    // assumed: it costs one branch, and it buys a window that says why it is
+    // sitting on a refusal.
+    say("there is nowhere on this machine for a Data Directory, so there is no key to read");
+  }
+
+  // The key is read at every load rather than once here: **Reset key** on the
+  // phone writes that file while this window is open, and a link built from a
+  // secret read at startup is a 401 with extra steps.
+  open({ origin: ORIGIN, secret: () => (data === undefined ? undefined : keyIn(data)) });
 }
 
 // **Started rather than awaited**, and this is not a style. Electron emits

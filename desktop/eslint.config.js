@@ -22,7 +22,12 @@ import parser from "@typescript-eslint/parser";
 
 /// The files allowed to reach the running application. Everything else is a
 /// function of what they hand it.
-const EDGE = ["src/main.ts"];
+///
+/// `main.ts` is the app read off the process: `app`, the dialogs, and the one
+/// read of the environment everything below resolves out of. `window.ts` holds a
+/// `BrowserWindow`, which is a thing rather than a value and cannot be handed in
+/// — what it *decides* is elsewhere, in modules vitest runs.
+const EDGE = ["src/main.ts", "src/window.ts"];
 
 export default [
   {
