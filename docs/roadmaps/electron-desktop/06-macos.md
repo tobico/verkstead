@@ -8,8 +8,8 @@ leaves the app in the Dock and a Dock click brings the window back; Cmd+Q
 quits at once. The traffic lights sit to the left of the Wordmark; the
 Desktop page holds the menu bar icon (on by default), View Logs and Launch on
 Startup, and nothing else; Launch on Startup is the login-item registration
-and a login start comes up hidden. The `desktop-macos` leg builds, mounts and runs
-it, and the Rust launcher script and dmg script are gone.
+and a login start comes up hidden. The `desktop-macos` leg builds, mounts and
+runs it, and the Rust launcher script and dmg script are gone.
 
 ## Decisions in force
 
@@ -60,8 +60,11 @@ it, and the Rust launcher script and dmg script are gone.
    CLI artifacts lipo'd as an extra resource; the leg downloads both, packs,
    mounts and asserts. The Rust dmg and launcher scripts retired. Accepts: the
    leg is green; `Verkstead-launcher` exists nowhere.
-5. **The words** — the Mac sections of adoption and releasing rewritten.
-   Accepts: nothing names the launcher script or `verkstead desktop`.
+5. **The words** — the Mac sections of adoption, releasing and development
+   rewritten, development's build list dropping `tools/build-macos-dmg.sh` and
+   its dmg paragraph describing the packed app — the `LSUIElement` that made it
+   a menu-bar app with no Dock tile among what goes. Accepts: nothing names the
+   launcher script or `verkstead desktop`.
 
 ## Re-verify at start
 

@@ -75,8 +75,10 @@ WiX sources for the Rust msi are gone.
    among the assertions; `tools/verkstead.wxs` and
    `tools/build-windows-msi.sh` retired, the UpgradeCode taken out of the
    first before it goes. Accepts: the leg is green.
-5. **The words** — the Windows sections of adoption and releasing rewritten.
-   Accepts: nothing names the shim.
+5. **The words** — the Windows sections of adoption, releasing and development
+   rewritten, development's build list dropping `tools/build-windows-msi.sh`
+   and its msi paragraph describing what the install now is and which directory
+   is on `PATH`. Accepts: nothing names the shim.
 
 ## Re-verify at start
 

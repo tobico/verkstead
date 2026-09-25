@@ -65,6 +65,12 @@ its shortcuts kept. CI lints, typechecks and tests the project.
 6. **The dev shell and CI** — nixpkgs' electron in `flake.nix`; a `desktop`
    job in `ci.yml` beside `viewer`. Accepts: `pnpm start` runs from a fresh
    shell; CI is green on the branch that adds the project.
+7. **The words** — `docs/development.md`'s account of running the app, which
+   from this stage is `pnpm start` in `desktop/` rather than
+   `cargo run -p verkstead-cli -- desktop --data-dir .`, and the paragraph on
+   what the app puts on the screen, which is a window here and a tray in 03.
+   The packaging and toolkit sections are stages 05 to 08's. Accepts: nothing
+   in the running-it section tells a developer to start the tray app.
 
 ## Re-verify at start
 
