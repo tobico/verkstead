@@ -474,8 +474,16 @@ handed it over already. Nothing about the key itself changes under the flag —
 `workbench.key` in the Data Directory at the mode it always had, which is the one
 place the app reads it from and where a human who started that sidecar by hand
 reads it too. A `serve` with no flag on it is the daemon's line whatever else is
-true of the machine: the flag is said rather than guessed, because a screen is
+true of the machine: the flag is said rather than guessed, because a display is
 not who started this.
+**And the sidecar with no display says the link after all**, which is the same
+fallback the app makes where no tray came up: the app that flag speaks for could
+not have started — nothing draws a window where there is nowhere to put one — so
+a `--desktop` run over SSH or in a container is a caller that handed the link to
+nobody, and the address alone would leave it serving a workbench whose only way
+in is a file nobody has been told to read. The daemon's line exactly where the
+sidecar has become the daemon, and the case it fires in is the one case where
+the app is not there to have a log file for the secret to sit in.
 A session cannot read the file whatever is in it, the log living in the human's
 own local application data and a session running as a local account of
 Verkstead's own.
@@ -1250,8 +1258,16 @@ badge, no Event, and nothing held off. Somebody who means to take the work on by
 hand presses **Stop** first, and the Conversation being **Stopped** is what
 holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
+
+**Never the other sense of the word**, which is somewhere for a window to
+appear: that is a **display** throughout — `$DISPLAY` or `$WAYLAND_DISPLAY` on
+Linux, the window server on a Mac, a visible window station on Windows — and it
+is what says whether a tray icon, a dialog or the platform's own password box
+has anywhere to be drawn. This word is the terminal grid and nothing else, so a
+Verkstead running where nobody is looking has no display rather than no screen.
+See `verkstead_server::display`.
 _Avoid_: terminal (that is the human's own shell — see **Terminal**), console,
-attach view, pane
+attach view, pane, screen (for a display — see above)
 
 **Terminal**:
 A shell of the human's own wherever a session's agent runs, with the Worktree as

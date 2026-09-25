@@ -200,11 +200,21 @@ impl Desktop {
         // than leaving a machine with nothing to log in with: this is what the
         // install *intends*, and the fallback is what it does where the
         // intention turns out not to hold.
+        //
+        // Which is why this arm is said here rather than taken from
+        // [`StartedBy::hands_over_the_link`], where the sidecar's own answer to
+        // a missing display is the daemon's line: the sidecar has nothing after
+        // its startup line, and this app has the line below.
+        //
+        // The grant *is* taken from there, because there is nothing about it
+        // this app answers differently — see [`verkstead_server::StartedBy`],
+        // which is the one place the question is asked now.
+        let started_by = verkstead_server::StartedBy::TheDesktopApp;
         let serving = runtime.spawn(verkstead_server::run_on_keyed(
             listener,
             self.server,
             key.clone(),
-            escalation(verkstead_server::display::there_is_one()),
+            started_by.escalation(verkstead_server::display::there_is_one()),
             HandsOverTheLink::TheCaller,
         ));
 
@@ -304,25 +314,6 @@ impl Desktop {
             Err(_) => Ok(()),
         }
     }
-}
-
-/// How this app asks for a privilege it has not got, or `None` where there is
-/// nobody to ask.
-///
-/// The operator grant the Remote access pane wants is a command run with a
-/// privilege the server has not got, and what an app can do about that is put
-/// the platform's own password dialog in front of it — see
-/// [`verkstead_server::elevate`].
-///
-/// **Only where there is a display to draw one on.** A `verkstead desktop` run
-/// over SSH or in a container is this app with its display missing, which is the
-/// same thing to the pane as a daemon: nobody would see the dialog, so nothing
-/// is raised and the line is shown — which is what a machine with nobody at it
-/// wanted said anyway. The same question the tray is asked, and asked here
-/// rather than read here, so that both answers are answers a test can ask for —
-/// see [`verkstead_server::display::there_is_one`].
-fn escalation(display: bool) -> Option<Arc<dyn verkstead_server::remote::Elevate>> {
-    display.then(|| Arc::new(verkstead_server::elevate::Graphical::here()) as Arc<_>)
 }
 
 /// Where the icon went, which is not always up and not always now.
@@ -569,15 +560,6 @@ impl std::error::Error for Taken {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// An app with a display can ask this machine for the operator grant, and one
-    /// without has nobody to ask — which is a daemon, and is the behaviour the
-    /// Remote access pane had before there was an app at all.
-    #[test]
-    fn the_grant_is_asked_for_only_where_there_is_somebody_to_ask() {
-        assert!(escalation(true).is_some());
-        assert!(escalation(false).is_none());
-    }
 
     /// The port is the whole of what the human can act on, so it is in the
     /// message rather than in the operating system's own words alone.

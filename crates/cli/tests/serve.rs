@@ -795,6 +795,13 @@ fn the_startup_line_carries_a_link_that_lands_logged_in() {
 /// is where the app reads it from and where a human who ran this by hand reads
 /// it too — so a browser that has been there is in at the address that *was*
 /// logged.
+///
+/// **A display is named**, because the flag alone is not what leaves the link
+/// off: an app that could not have started is an app that opened no window, so
+/// the sidecar with nowhere to draw says the link after all — see the test
+/// below. This run says there is somewhere, which is what a run under the real
+/// app has. On Linux that is what naming `DISPLAY` does; the other two
+/// platforms answer yes whatever is said, so it costs them nothing.
 #[test]
 fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
     let tmp = tempfile::tempdir().unwrap();
@@ -810,7 +817,7 @@ fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
             "--data-dir",
             data_dir.to_str().unwrap(),
         ],
-        &[],
+        &[("DISPLAY", ":0")],
     );
 
     // The key out of the file in the Data Directory, which is the whole of how
@@ -843,6 +850,58 @@ fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
     assert!(
         !logged.contains(&key.secret()),
         "and the key is nowhere in what it logged, got:\n{logged}"
+    );
+}
+
+/// **And a sidecar with nowhere to draw says the link after all**, because the
+/// app the flag speaks for could not have started: Electron will not come up
+/// without somewhere to put a window any more than a tray will, so a
+/// `--desktop` run over SSH or in a container is a run whose caller opened a
+/// window on nothing.
+///
+/// The address alone there would be the redacting-everywhere ADR-0015 turned
+/// down: a machine serving a workbench whose only way in is a file nobody has
+/// been told to read. So the sidecar takes the daemon's line exactly where it
+/// has become the daemon — and the case this covers is the one case where there
+/// is no app log for the secret to sit in, the app not being there.
+///
+/// **Linux's alone**, because it is the only platform where the answer can be
+/// no: a Mac draws through the window server every logged-in session has and
+/// says so nowhere, and a Windows runner is on a visible station like any other
+/// process. Nothing about the fallback is Linux's own — it is the same branch
+/// of the same function — so what the other two lose is the premise, not the
+/// coverage. See `verkstead_server::display`.
+///
+/// Said as empty rather than taken away, which is the same answer and one this
+/// suite can give whatever the machine running it has exported: a name exported
+/// without a value is no display, and GTK is no happier with it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_sidecar_with_nowhere_to_draw_says_the_link_as_a_daemon_does() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("sidecar");
+    let port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--desktop",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[("DISPLAY", ""), ("WAYLAND_DISPLAY", "")],
+    );
+
+    let link = serving.login_link();
+    let logged = uncoloured(&serving.stop());
+
+    assert_eq!(
+        workbench_field(&logged),
+        link,
+        "a sidecar nobody could have opened a window on should carry the whole \
+         login link, got:\n{logged}"
     );
 }
 
