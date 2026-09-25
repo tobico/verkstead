@@ -100,19 +100,40 @@ hands it, so that vitest can call it without an application under it. Which is
 what the tests are over — the main process's pure parts, there being no driven
 end-to-end suite (ADR 0020).
 
-What it puts on the screen is one window, and at this stage that is the whole
-of it. It loads the workbench off `127.0.0.1:8422` with nothing about the
-viewer changed to draw inside it; a link that leads off the workbench opens in
-the browser you already have rather than navigating the window away from it;
-and where the window was last time is where it comes back, remembered in the
-app's own user data because where a window sits is a fact about the desk rather
-than about your Verkstead. The menu bar is hidden on Linux and Windows with
-copy, paste, zoom, reload and the developer tools still on their keystrokes —
-Alt brings the bar down — and a Mac keeps the strip at the top of the screen
-that says which application is in front. Closing the window quits the app, and
-so does the server ending. The sidecar's stdout and the app's own lines both go
-to `verkstead.log` under the **Log Directory**, which the app names on the
-terminal as it opens it.
+What it puts on the screen is one window and one icon in the tray. The window
+loads the workbench off `127.0.0.1:8422` with nothing about the viewer changed
+to draw inside it; a link that leads off the workbench opens in the browser you
+already have rather than navigating the window away from it; and where the
+window was last time is where it comes back, remembered in the app's own user
+data because where a window sits is a fact about the desk rather than about
+your Verkstead. The menu bar is hidden on Linux and Windows with copy, paste,
+zoom, reload and the developer tools still on their keystrokes — Alt brings the
+bar down — and a Mac keeps the strip at the top of the screen that says which
+application is in front. The icon's menu is **Open**, **View Logs** and
+**Quit**, a left click on it opens the window, and its **Quit** never asks.
+Closing the window is a choice rather than a quit — keep running in the tray,
+which is the default, ask before quitting, or quit — while the server ending is
+still the app quitting. The sidecar's stdout and the app's own lines both go to
+`verkstead.log` under the **Log Directory**, which the app names on the terminal
+as it opens it and which both **View Logs** open.
+
+**The Desktop section at the top of the settings page is where those choices
+are made**, and it is drawn only inside the app: the page reaches the app over
+a preload bridge on the app's own window, so the same settings page in a
+browser on this machine — or on a phone over the tailnet — has no such section,
+and nothing about any of it is on the wire or in `config.yaml`. It holds **When
+the window is closed**, **Show tray icon**, **Launch on Startup** and a **View
+Logs** button opening the file the tray item opens. What a dev run writes it to
+is `desktop.json`, beside the `window.json` the window's place is kept in, under
+Electron's own user data rather than anywhere `--data-dir` says: deleting it is
+the app back at its defaults. Turning the tray off takes the icon away that
+moment and greys the keep-running position, the choice falling to Quit while
+there is no icon to come back from. **And Launch on Startup is greyed on a run
+from a checkout**, with a note saying it needs an installed Verkstead: what an
+autostart entry could name here is the dev shell's Electron in the nix store
+plus this build directory, which breaks the next time either moves — so the
+whole path is written and under vitest, and the writing is what is refused. Its
+account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 
 **And the Rust tray app is still what a release carries**, on each platform
 until the stage that takes that platform's release leg: the packaging section
