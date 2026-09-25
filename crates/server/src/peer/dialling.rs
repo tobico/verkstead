@@ -14,6 +14,13 @@
 //! takes: a dial presenting a certificate the far end has never acknowledged
 //! would be refused at that end's own gate.
 //!
+//! **With one exception, which is the join.** A device pressing Add has never
+//! met the machine it is asking, so there is no fingerprint to pin it on: that
+//! dial takes whatever certificate turns up, for the one call, and hands back
+//! what it turned out to be — which is the string the two humans then compare by
+//! eye and the string every dial after it is pinned on. See [`Peers::join`] and
+//! [`WhateverIsThere`].
+//!
 //! **And the far end is proved by the fingerprint the member row holds.** There
 //! is no certificate authority anywhere in a cluster, so the pinned fingerprint
 //! is the whole of what says the machine that answered is the device this row is
@@ -55,10 +62,11 @@ use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_t
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::DeviceIdentity;
+use verkstead_render::{DeviceIdentity, JoinHeld};
 use verkstead_store::{Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
+use crate::peer::joining::{JOIN, cancelling};
 use crate::peer::{IDENTITY, Members, PEER_PORT};
 
 /// How long one address has to answer the connection before the next one is
@@ -172,7 +180,7 @@ impl Peers {
         let mut nothing_at = Vec::new();
 
         for address in &member.addresses {
-            let at = format!("https://{}{IDENTITY}", authority(address));
+            let at = reaching(address, IDENTITY);
 
             match dialling.get(&at).send().await {
                 Ok(answered) => return self.took(member, answered).await,
@@ -295,6 +303,105 @@ impl Peers {
         Ok(identity)
     }
 
+    /// Ask the device at `address` to let this one into its cluster, saying
+    /// `saying` of itself — which is the press on **Add**.
+    ///
+    /// **Whatever certificate that address presents is taken, for this one
+    /// call.** There is nothing yet by which to know what the far end's
+    /// certificate ought to be: that is exactly what the two humans are about to
+    /// confirm by eye, and a dial that insisted on a fingerprint first would be
+    /// a link that could only be made between devices already linked. So this is
+    /// the one call in this module that is not pinned — see [`WhateverIsThere`],
+    /// which takes what turns up and says what it was.
+    ///
+    /// **And what turned up is checked against what the far end says it is.** A
+    /// device names the fingerprint of the certificate it presented so that a
+    /// caller can hold the two up beside each other, and one that names another
+    /// is not the device it says it is — the same judgement [`Peers::took`]
+    /// makes of an identity answer, which is the whole of what can be asked of a
+    /// stranger.
+    ///
+    /// The one address rather than a list, because there is no list: what the
+    /// human typed is the only place this device has been told to look, and
+    /// every address the far end has is in the answer — which is what a link
+    /// carries from here on.
+    pub async fn join(&self, address: &str, saying: &DeviceIdentity) -> Result<JoinHeld> {
+        let met = Arc::new(Mutex::new(None));
+        let asking = self.asking(&met)?;
+        let at = reaching(address, JOIN);
+
+        let answered = asking
+            .post(&at)
+            .json(saying)
+            .send()
+            .await
+            .with_context(|| format!("asking the device at {address} to link with this one"))?;
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            let said = answered.text().await.unwrap_or_default();
+
+            bail!(
+                "the device at {address} answered {status} to a request to link: {}",
+                said.trim(),
+            );
+        }
+
+        let held: JoinHeld = answered
+            .json()
+            .await
+            .with_context(|| format!("reading what the device at {address} said to the request"))?;
+
+        let met = met
+            .lock()
+            .expect("nothing panics holding this")
+            .take()
+            .with_context(|| format!("the device at {address} presented no certificate"))?;
+
+        if held.identity.fingerprint != met {
+            bail!(
+                "the device at {address} presented {met} and named {} as its certificate, \
+                 which is a device that is not the one it says it is",
+                held.identity.fingerprint,
+            );
+        }
+
+        Ok(held)
+    }
+
+    /// And take that question back, which is Cancel on the pending row.
+    ///
+    /// **Pinned, where the join was not.** By the time there is anything to
+    /// cancel this device has met the far end's certificate and written it down,
+    /// so a cancel is an ordinary dial against a fingerprint it holds — and it
+    /// has to be, or a machine that had taken that address since would be told
+    /// which link this device was in the middle of making.
+    pub async fn cancel(&self, address: &str, request: &str, expecting: &str) -> Result<()> {
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(expecting, &met)?;
+        let at = reaching(address, &cancelling(request));
+
+        let answered = dialling
+            .post(&at)
+            .send()
+            .await
+            .with_context(|| format!("taking back the request to link with {address}"))?;
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            let said = answered.text().await.unwrap_or_default();
+
+            bail!(
+                "the device at {address} answered {status} to the request being taken back: {}",
+                said.trim(),
+            );
+        }
+
+        Ok(())
+    }
+
     /// The client a dial is made with: this device's certificate to present, the
     /// far end's pinned to `expecting`, and a deadline apiece on reaching a
     /// machine and on being answered by one.
@@ -307,6 +414,37 @@ impl Peers {
         &self,
         expecting: &str,
         met: &Arc<Mutex<Option<String>>>,
+    ) -> Result<reqwest::Client> {
+        self.client(|algorithms| {
+            Arc::new(ThePinnedOne {
+                expecting: expecting.to_owned(),
+                met: Arc::clone(met),
+                algorithms,
+            })
+        })
+    }
+
+    /// And the one a join is made with: the same certificate presented, and
+    /// whatever the far end shows accepted, with what it showed left in `met`.
+    ///
+    /// The one unpinned client in this module, for the reason [`Peers::join`]
+    /// gives — there is nothing to pin it to until the humans have compared the
+    /// fingerprints, and this call is how they come to have one to compare.
+    fn asking(&self, met: &Arc<Mutex<Option<String>>>) -> Result<reqwest::Client> {
+        self.client(|algorithms| {
+            Arc::new(WhateverIsThere {
+                met: Arc::clone(met),
+                algorithms,
+            })
+        })
+    }
+
+    /// What both of those come down to: this device's certificate to present,
+    /// `verifier` deciding what the far end's has to be, and a deadline apiece
+    /// on reaching a machine and on being answered by one.
+    fn client(
+        &self,
+        verifier: impl FnOnce(WebPkiSupportedAlgorithms) -> Arc<dyn ServerCertVerifier>,
     ) -> Result<reqwest::Client> {
         let pem = self.device.certificate().as_bytes();
 
@@ -324,11 +462,7 @@ impl Peers {
             .with_safe_default_protocol_versions()
             .context("settling the protocol versions a peer is dialled over")?
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(ThePinnedOne {
-                expecting: expecting.to_owned(),
-                met: Arc::clone(met),
-                algorithms,
-            }))
+            .with_custom_certificate_verifier(verifier(algorithms))
             .with_client_auth_cert(vec![certificate], key)
             .context("presenting this device's certificate to a peer")?;
 
@@ -344,6 +478,17 @@ impl Peers {
             .build()
             .context("building the client a peer is dialled with")
     }
+}
+
+/// Where a call goes: `path` on the peer listener of whatever is at `address`.
+///
+/// One function for all three of them — the identity read, the join and the
+/// cancel — because the *where* is one question however different the calls
+/// are: an address somebody typed or a device advertised, on the port that
+/// address names or on the peer port, over TLS because there is nothing else on
+/// that listener.
+fn reaching(address: &str, path: &str) -> String {
+    format!("https://{}{path}", authority(address))
 }
 
 /// Where a bare address is dialled: the peer port, unless the address says
@@ -479,6 +624,79 @@ impl ServerCertVerifier for ThePinnedOne {
     }
 }
 
+/// The other half of the pinning: whatever the far end presents is accepted,
+/// and what it was is said.
+///
+/// **For the join and for nothing else.** A device pressing Add has never met
+/// the machine it is about to ask, so there is no fingerprint to check against —
+/// the fingerprint is what this call goes and *fetches*, for the two humans to
+/// compare by eye and for every dial after this one to be pinned on. An
+/// unpinned dial is safe here because nothing is decided by it: the post it
+/// carries writes a question down at the far end, and a human pressing Allow is
+/// what a link is made of.
+///
+/// The certificate met is left in [`WhateverIsThere::met`] because the caller
+/// needs it: it is what is checked against the fingerprint the far end names of
+/// itself, and what is written down as the device's own once the two agree.
+#[derive(Debug)]
+struct WhateverIsThere {
+    /// Where the certificate that turned up is left, as its fingerprint.
+    met: Arc<Mutex<Option<String>>>,
+
+    /// The signature algorithms the provider supports, which is what the two
+    /// signature checks below are run against.
+    algorithms: WebPkiSupportedAlgorithms,
+}
+
+impl ServerCertVerifier for WhateverIsThere {
+    /// Taken, whatever it is — and written down, which is the point of it.
+    ///
+    /// Nothing is asked about a host name, a chain or the validity dates. The
+    /// name a dial goes out under is an address somebody typed; a chain has
+    /// nowhere in a cluster to lead; and a certificate that has run out is
+    /// refused at the far end's own listener, which is where a certificate
+    /// presented to somebody is judged.
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        *self.met.lock().expect("nothing panics holding this") =
+            Some(fingerprint_of_der(end_entity));
+
+        Ok(ServerCertVerified::assertion())
+    }
+
+    /// And that the far end holds the key that signed what it presented, which
+    /// is asked here exactly as it is of a pinned one: without it a certificate
+    /// would be a public file anybody who had read one could replay, and the
+    /// fingerprint the humans go on to compare would be somebody else's.
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algorithms.supported_schemes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +724,40 @@ mod tests {
         assert_eq!(
             authority("workbench.tailnet-name.ts.net"),
             format!("workbench.tailnet-name.ts.net:{PEER_PORT}"),
+        );
+    }
+
+    /// And the address somebody types into **Add** is asked at the peer port
+    /// where it names none, and at the port it names where it names one.
+    ///
+    /// Which is the whole of what a human should have to know about the port:
+    /// every device answers on [`PEER_PORT`] unless its host was told another,
+    /// and an install that was told another is reachable no other way. Asked of
+    /// the join here because that is the call an address is *typed* for — a
+    /// member's addresses were advertised by the machine they belong to.
+    #[test]
+    fn a_typed_address_is_asked_at_the_peer_port_or_at_the_one_it_names() {
+        assert_eq!(
+            reaching("workbench.tailnet-name.ts.net", JOIN),
+            format!("https://workbench.tailnet-name.ts.net:{PEER_PORT}{JOIN}"),
+        );
+        assert_eq!(
+            reaching("192.168.1.31", JOIN),
+            format!("https://192.168.1.31:{PEER_PORT}{JOIN}"),
+        );
+        assert_eq!(
+            reaching("192.168.1.31:9000", JOIN),
+            format!("https://192.168.1.31:9000{JOIN}"),
+        );
+    }
+
+    /// And a cancel goes back to the same address, under the request it is
+    /// taking back.
+    #[test]
+    fn a_cancel_goes_back_to_the_address_the_join_was_asked_at() {
+        assert_eq!(
+            reaching("192.168.1.31:9000", &cancelling("1122334455667788")),
+            "https://192.168.1.31:9000/api/peer/v1/join/1122334455667788/cancel",
         );
     }
 

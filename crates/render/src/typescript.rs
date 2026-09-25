@@ -26,15 +26,16 @@ use crate::{
     DirectoryListing, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
-    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, OnboardingView,
+    OpenPullRequestRepo, PendingJoin, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -414,6 +415,13 @@ fn the_viewers_types_are_written_from_these() {
     // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
+
+    // And the one thing in that section that is pressed rather than read: Add,
+    // which takes an address to go and ask at. What it leaves behind is a
+    // pending row on the reading above — the device being waited on, and whether
+    // the ten minutes it is held for have run out.
+    NewJoin::export_all(&config).unwrap();
+    PendingJoin::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

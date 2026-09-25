@@ -1360,6 +1360,34 @@ export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
 }
 
+/// Ask the device at an address to let this one into its cluster.
+///
+/// The one thing in that section that is pressed rather than read, which is the
+/// same departure Unlink makes beside it and Remove on a Repo made before
+/// either. A port is optional: every device answers on the peer port unless its
+/// host was told another.
+///
+/// What comes back is the section read again, the way a serve press answers —
+/// so the pending row this leaves behind arrives out of this answer rather than
+/// out of a second request. A refusal is the far end's own words for what went
+/// wrong, because what the human can do about a machine that is off and about a
+/// Verkstead that refused are two different things.
+export function addDevice(address: string): Promise<DevicesView> {
+  return post<DevicesView>("/api/ui/devices/joins", { address });
+}
+
+/// And take that request back: Cancel on a row still waiting, Dismiss on one
+/// whose ten minutes have run out.
+///
+/// One call for the two because they are one act at two moments — the human is
+/// done with a request nobody has answered — and which of them it is is a fact
+/// about the row. A second press is not a second thing happening.
+export function cancelJoin(request: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/joins/${encodeURIComponent(request)}/cancel`,
+  );
+}
+
 /// Put this machine's tailnet name in front of the workbench, or take it off
 /// again.
 ///

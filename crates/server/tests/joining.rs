@@ -1,0 +1,639 @@
+//! The first half of a join: A asks, and B holds the question (ADR-0020, *The
+//! join*).
+//!
+//! **Two Verksteads, and every join here is a real dial over a real socket.**
+//! What is being asked is what the product does when somebody types an address
+//! and presses Add — which certificate is presented, which is accepted, what the
+//! far end writes down, and what is left on the pane afterwards — and none of
+//! that is a question a router asked in process can answer. So B stands its peer
+//! listener up on the loopback, and A presses Add through the same workbench
+//! route the browser presses.
+//!
+//! **Nobody presses anything on B.** The modal is a later task and the exchange
+//! is the one after it, so what a pending row can become here is cancelled or
+//! expired and nothing else.
+//!
+//! The machines both devices are on are stated rather than read, for the reason
+//! `tests/devices.rs` states one: what a WSL reads as is the whole point of the
+//! OS word, and the box a suite happens to be running on is the one machine that
+//! cannot be asked about it. Which is also what makes the addresses assertable —
+//! a join carries every address the asking device has, and here that is a list
+//! this file chose.
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use sqlx::SqlitePool;
+use tower::ServiceExt;
+use verkstead_render::DevicesView;
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::open_database;
+use verkstead_server::peer::dialling::Peers;
+use verkstead_server::peer::joining::{HELD, Joins};
+use verkstead_server::peer::{self, Members};
+use verkstead_server::platform::{self, Platform};
+use verkstead_server::remote::Tailscale;
+use verkstead_server::router_answering_devices;
+use verkstead_store::{AskedJoin, HeldJoin, ask_join, asked_joins, held_join, hold_join};
+
+/// Where the pane reads the section, and where its one press goes.
+const DEVICES: &str = "/api/ui/devices";
+const ADD: &str = "/api/ui/devices/joins";
+
+/// The ids the two devices are stated as, so that what a test asserts against is
+/// a string it chose rather than sixteen random bytes — see [`Device::stated`],
+/// which is here for that reason.
+const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
+const B: &str = "0011223344556677889900aabbccddee";
+
+/// What a WSL kernel calls itself, which is the one thing that says one apart
+/// from the Linux it is in every other way — and the case the whole of cluster
+/// mode was written for. A is stated as one so that the OS word travelling with
+/// a join is a word this file chose.
+const WSL_KERNEL: &str = "5.15.167.4-microsoft-standard-WSL2";
+
+/// The addresses A advertises, which is what B has to write down: a join carries
+/// every address the asking device has, in the order to try them.
+const A_ADDRESSES: [&str; 2] = ["192.168.1.24", "10.0.0.7"];
+
+/// The port the workbench is taken to be on, which nothing here asks about: each
+/// reading's Tailscale is built with it and never runs.
+const PORT: u16 = 8422;
+
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// Spent only by the test about an address nobody is at — what that one is
+/// asking is what the press *says* when nobody is home, and waiting out the real
+/// deadline would be time spent on the clock rather than on the question.
+const PATIENCE: Duration = Duration::from_millis(300);
+
+/// A moment well behind any test run: the far side of *has this run out*.
+const LONG_AGO: &str = "2020-01-01T00:00:00Z";
+
+/// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
+/// that is not there, which is what having none *is*.
+fn no_tailscale() -> Tailscale {
+    Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT)
+}
+
+/// One Verkstead: what it is, where it keeps things, and — where it is answering
+/// — the socket another one dials it on.
+struct Verkstead {
+    device: Device,
+    pool: SqlitePool,
+    members: Members,
+    joins: Joins,
+
+    /// The machine it is on, stated: what it answers for itself, and what a
+    /// join it posts carries.
+    reading: Reading,
+
+    /// Where its peer listener landed, for the one that is answering. `None` is
+    /// a Verkstead that only ever does the asking.
+    address: Option<SocketAddr>,
+
+    /// Held for the length of the test: the identity and the database both live
+    /// in it.
+    _dir: tempfile::TempDir,
+}
+
+impl Verkstead {
+    /// A Verkstead with a store of its own and an identity in it, on the machine
+    /// `reading` describes.
+    async fn called(id: &str, reading: Reading) -> Verkstead {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        Verkstead {
+            device: Device::stated(dir.path(), id).unwrap(),
+            members: Members::recorded(pool.clone()),
+            joins: Joins::recorded(pool.clone()),
+            reading,
+            pool,
+            address: None,
+            _dir: dir,
+        }
+    }
+
+    /// The device that presses Add: a WSL, so that the OS word a join carries is
+    /// one this file chose, on the two addresses above.
+    async fn asking() -> Verkstead {
+        Verkstead::called(
+            A,
+            Reading::stated(
+                no_tailscale(),
+                Platform::Linux,
+                Some(WSL_KERNEL.to_owned()),
+                A_ADDRESSES.iter().map(|at| at.parse().unwrap()).collect(),
+            ),
+        )
+        .await
+    }
+
+    /// And the device that is asked, with its peer listener up on a port the
+    /// machine picked — the real one would fight whatever is already on 8423,
+    /// and two of these tests at once would fight each other.
+    async fn answering() -> Verkstead {
+        let mut asked = Verkstead::called(
+            B,
+            Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
+        )
+        .await;
+
+        asked.answer();
+        asked
+    }
+
+    /// Stand the peer listener up, serving what a Verkstead serves.
+    fn answer(&mut self) {
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &self.device)
+            .expect("the loopback on a port the machine picked is free");
+
+        self.address = Some(listener.address());
+
+        tokio::spawn(listener.serving(peer::router(
+            self.device.clone(),
+            self.reading.clone(),
+            self.members.clone(),
+            self.joins.clone(),
+        )));
+    }
+
+    /// Where another device dials it.
+    fn at(&self) -> String {
+        format!(
+            "127.0.0.1:{}",
+            self.address.expect("this Verkstead is answering").port(),
+        )
+    }
+
+    /// The workbench this Verkstead's browser would be talking to, which is what
+    /// Add is pressed through.
+    ///
+    /// Built afresh on each call, and over the same store: a router is a handle
+    /// over the rows rather than a copy of them, so one built after a press reads
+    /// what the press wrote — which is what makes it a stand-in for a restart.
+    fn workbench(&self) -> Router {
+        router_answering_devices(self.pool.clone(), self.devices())
+    }
+
+    /// And the same with every dial given [`PATIENCE`], for the one test about
+    /// an address nobody is at.
+    fn workbench_in_a_hurry(&self) -> Router {
+        router_answering_devices(self.pool.clone(), self.devices().waiting(PATIENCE))
+    }
+
+    fn devices(&self) -> Devices {
+        Devices::of(
+            self.device.clone(),
+            self.reading.clone(),
+            self.members.clone(),
+            self.joins.clone(),
+        )
+    }
+
+    /// How it dials, for the questions that are about a call rather than about a
+    /// press.
+    fn peers(&self) -> Peers {
+        Peers::of(self.device.clone(), self.members.clone())
+    }
+}
+
+/// Press Add against `address`, and hand back what the workbench answered.
+async fn add(app: &Router, address: &str) -> (StatusCode, String) {
+    let body = serde_json::to_vec(&serde_json::json!({ "address": address })).unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(ADD)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// And press Cancel — or Dismiss, which is the same press — on a pending row.
+async fn cancel(app: &Router, request: &str) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{ADD}/{request}/cancel"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// What the section reads, parsed as the type the pane draws.
+async fn listing(app: &Router) -> DevicesView {
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri(DEVICES).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK, "GET {DEVICES}");
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// Add against B's address leaves a pending row on A and a recorded request on
+/// B, and the request holds the whole of what A said about itself.
+///
+/// The one test that is the criterion whole, because the two halves are one
+/// dial: what B wrote down is only there because A's press got that far, and
+/// what A drew is only there because B answered.
+#[tokio::test]
+async fn add_leaves_a_pending_row_here_and_a_request_there() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    let app = asking.workbench();
+    let (status, said) = add(&app, &asked.at()).await;
+
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    // A's side: one pending row, waiting on the device that answered, with the
+    // address that was typed.
+    let listing = listing(&app).await;
+
+    assert_eq!(listing.pending.len(), 1);
+    assert!(
+        listing.members.is_empty(),
+        "nothing has been agreed — a member is made by a press on the other machine",
+    );
+
+    let pending = &listing.pending[0];
+
+    assert_eq!(pending.address, asked.at());
+    assert_eq!(
+        pending.name,
+        platform::hostname(),
+        "the row says which device is being waited on, which is what that device \
+         answered it is shown under",
+    );
+    assert!(!pending.expired, "it has just been asked");
+
+    // And the fingerprint the row draws is this device's own, which is the whole
+    // point of it: the modal on the other machine draws the same string, and the
+    // two are there to be compared by eye.
+    assert_eq!(listing.this.fingerprint, asking.device.fingerprint());
+
+    // B's side: the request, holding what A said and the certificate A presented.
+    let held = held_join(&asked.pool, &pending.request)
+        .await
+        .unwrap()
+        .expect("the device that was asked should be holding the request");
+
+    assert_eq!(held.device, A);
+    assert_eq!(held.name, platform::hostname());
+    assert_eq!(
+        held.os, "Linux (WSL)",
+        "the OS word travels with the join, which is what tells a WSL from the \
+         Windows it shares a hostname with",
+    );
+    assert_eq!(held.addresses, A_ADDRESSES, "every address, in order");
+    assert_eq!(
+        held.fingerprint,
+        asking.device.fingerprint(),
+        "the certificate the handshake took is what is pinned into the request, \
+         and it is what the dial back will be matched against",
+    );
+}
+
+/// The join post reaches a device that holds no membership for the caller, and
+/// posting one does not make it one.
+///
+/// **Which is the whole arrangement.** A join comes from a non-member by
+/// definition — that is what a join is — so the post stands outside the member
+/// gate; and it is still no membership afterwards, because the gate reads the
+/// members table and the join writes a pending request. What that same caller
+/// meets on every gated route is `tests/peer.rs`'s own question, asked there
+/// with a dial that shows an unrecorded certificate: refused, in words that say
+/// it is a membership rather than a missing path.
+#[tokio::test]
+async fn a_join_reaches_a_device_that_holds_no_membership_for_the_caller() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    assert!(
+        !verkstead_store::member_holding(&asked.pool, asking.device.fingerprint())
+            .await
+            .unwrap(),
+        "the caller is a stranger before it posts",
+    );
+
+    let (status, said) = add(&asking.workbench(), &asked.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    assert!(
+        !verkstead_store::member_holding(&asked.pool, asking.device.fingerprint())
+            .await
+            .unwrap(),
+        "and it is still a stranger after — a join asks for a membership rather \
+         than taking one, which is what the press on the other machine is for",
+    );
+}
+
+/// Cancel takes the request off the device that was asked as well as off this
+/// one, and a second press is not a second thing happening.
+#[tokio::test]
+async fn cancel_takes_the_request_off_both_devices() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    let app = asking.workbench();
+    add(&app, &asked.at()).await;
+
+    let request = listing(&app).await.pending[0].request.clone();
+
+    assert_eq!(cancel(&app, &request).await, StatusCode::OK);
+
+    assert!(
+        listing(&app).await.pending.is_empty(),
+        "the row is off the device that pressed it",
+    );
+    assert_eq!(
+        held_join(&asked.pool, &request).await.unwrap(),
+        None,
+        "and the question is off the device that was holding it",
+    );
+
+    assert_eq!(
+        cancel(&app, &request).await,
+        StatusCode::OK,
+        "a second Cancel is not a second thing happening: the row it names is \
+         already gone, and saying so twice is one thing said twice",
+    );
+}
+
+/// A request older than ten minutes reads expired on the row that asked for it,
+/// and is dismissed from it.
+#[tokio::test]
+async fn an_expired_request_reads_so_and_is_dismissed() {
+    let asking = Verkstead::asking().await;
+
+    // Written straight in, because what is being asked about is a request that
+    // was made ten minutes ago and there is no ten minutes to spend on it.
+    ask_join(
+        &asking.pool,
+        &AskedJoin {
+            request: "1122334455667788".to_owned(),
+            address: "192.168.1.31".to_owned(),
+            device: B.to_owned(),
+            name: "workbench".to_owned(),
+            fingerprint: "AA:BB:CC".to_owned(),
+            asked_at: LONG_AGO.to_owned(),
+            expires_at: LONG_AGO.to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let app = asking.workbench();
+    let waiting = listing(&app).await;
+
+    assert_eq!(waiting.pending.len(), 1);
+    assert!(
+        waiting.pending[0].expired,
+        "the ten minutes are up, and the row says so rather than going on reading \
+         waiting for ever",
+    );
+
+    assert_eq!(cancel(&app, "1122334455667788").await, StatusCode::OK);
+
+    assert!(
+        listing(&app).await.pending.is_empty(),
+        "and it is dismissed by the same press that cancels a live one — nothing \
+         is dialled for it, the other device having let go of it already",
+    );
+}
+
+/// And the device that was asked refuses anything naming a request whose ten
+/// minutes have run out.
+#[tokio::test]
+async fn a_request_that_ran_out_is_refused_by_the_device_holding_it() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    // A request that arrived ten minutes ago, pinned on the certificate the
+    // caller below really presents: what refuses this call has to be the expiry
+    // rather than the certificate.
+    hold_join(
+        &asked.pool,
+        &HeldJoin {
+            request: "1122334455667788".to_owned(),
+            device: A.to_owned(),
+            name: "laptop".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: A_ADDRESSES.iter().map(|at| (*at).to_owned()).collect(),
+            fingerprint: asking.device.fingerprint().to_owned(),
+            asked_at: LONG_AGO.to_owned(),
+            expires_at: LONG_AGO.to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let why = asking
+        .peers()
+        .cancel(&asked.at(), "1122334455667788", asked.device.fingerprint())
+        .await
+        .expect_err("a request whose ten minutes are up is one there is nothing to do about");
+
+    assert!(
+        format!("{why:#}").contains("404"),
+        "and it is refused in the same words as a request that was never there, \
+         so that what a caller is told cannot depend on whether the housekeeping \
+         has been round yet, got: {why:#}",
+    );
+}
+
+/// Both records survive a restart of the server holding them, with the ten
+/// minutes counted from when the request was made.
+///
+/// The restart is a fresh set of handles over the same database, which is what a
+/// start really is: nothing here is held in memory, so what the second one reads
+/// is what the first one wrote.
+#[tokio::test]
+async fn both_records_survive_a_restart() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    add(&asking.workbench(), &asked.at()).await;
+
+    let before = asked_joins(&asking.pool).await.unwrap();
+    assert_eq!(before.len(), 1);
+
+    let request = before[0].request.clone();
+    let expires_at = before[0].expires_at.clone();
+
+    // The device that asked, come up again.
+    let again = listing(&asking.workbench()).await;
+
+    assert_eq!(again.pending.len(), 1);
+    assert_eq!(again.pending[0].request, request);
+    assert!(!again.pending[0].expired);
+    assert_eq!(
+        asked_joins(&asking.pool).await.unwrap()[0].expires_at,
+        expires_at,
+        "the moment it runs out at is where it was, rather than ten fresh minutes \
+         counted from the start",
+    );
+
+    // And the device that was asked, likewise: the same request, still pinned on
+    // the certificate the handshake took, read through a handle of its own.
+    let held = held_join(&asked.pool, &request)
+        .await
+        .unwrap()
+        .expect("the request is still held over there");
+
+    assert_eq!(held.fingerprint, asking.device.fingerprint());
+    assert!(
+        asked_joins(&asked.pool).await.unwrap().is_empty(),
+        "and it is holding a question rather than waiting on one — the two sides \
+         of a join are two records",
+    );
+}
+
+/// An address that says which port is dialled at that port.
+///
+/// Which is this suite's whole way of reaching anything: every device here
+/// answers on a port the operating system picked, so every address in every
+/// other test carries one. A bare address goes to the peer port instead — see
+/// `dialling`'s own unit tests, which is where that is asked, there being no way
+/// for a suite to take 8423 without fighting whatever is on it.
+#[tokio::test]
+async fn an_address_that_names_a_port_is_asked_at_it() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    let at = asked.at();
+    assert!(at.contains(':'), "the address carries the port: {at}");
+
+    let app = asking.workbench();
+    let (status, said) = add(&app, &at).await;
+
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+    assert_eq!(listing(&app).await.pending[0].address, at);
+}
+
+/// An address with nothing at it leaves no row and says what happened, in the
+/// words the dial put it in.
+///
+/// Because what the human can do about each way of not getting through is
+/// different — a machine that is off, a Verkstead too old to have the route, one
+/// that refused — and a press that said only *it did not work* would leave them
+/// nothing to act on.
+#[tokio::test]
+async fn an_address_nobody_is_at_leaves_no_row() {
+    let asking = Verkstead::asking().await;
+
+    // A port taken and given straight back, which is a machine that refuses
+    // rather than one that says nothing.
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = taken.local_addr().unwrap();
+    drop(taken);
+
+    let app = asking.workbench_in_a_hurry();
+    let (status, said) = add(&app, &format!("127.0.0.1:{}", nowhere.port())).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(
+        said.contains("127.0.0.1"),
+        "the refusal names the address that answered nothing, got: {said}",
+    );
+    assert!(
+        listing(&app).await.pending.is_empty(),
+        "a request that was never made leaves nothing to cancel",
+    );
+}
+
+/// And an empty address is refused before anything is dialled.
+#[tokio::test]
+async fn an_empty_address_is_refused() {
+    let asking = Verkstead::asking().await;
+
+    let (status, said) = add(&asking.workbench(), "   ").await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        asked_joins(&asking.pool).await.unwrap().is_empty(),
+        "and nothing is written down about it",
+    );
+}
+
+/// A device asking itself is refused, and the question it asked is taken back
+/// off itself.
+///
+/// The pane draws this machine's own addresses a few lines above the box, so
+/// typing one in is an easy mistake — and the state it would otherwise leave is
+/// this workbench raising a modal asking whether to link to this workbench.
+#[tokio::test]
+async fn a_device_cannot_ask_itself() {
+    let mut itself = Verkstead::asking().await;
+    itself.answer();
+
+    let app = itself.workbench();
+    let (status, said) = add(&app, &itself.at()).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(
+        listing(&app).await.pending.is_empty(),
+        "no row is left on the device that asked",
+    );
+    assert!(
+        asked_joins(&itself.pool).await.unwrap().is_empty(),
+        "and none on the device that was asked, which is the same one",
+    );
+}
+
+/// The ten minutes on the row are the ten minutes the ADR says, taken from when
+/// the request was made.
+#[tokio::test]
+async fn the_request_runs_out_ten_minutes_after_it_was_made() {
+    use time::OffsetDateTime;
+    use time::format_description::well_known::Rfc3339;
+
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    let pressed = OffsetDateTime::now_utc();
+    add(&asking.workbench(), &asked.at()).await;
+
+    let rows = asked_joins(&asking.pool).await.unwrap();
+    let expires = OffsetDateTime::parse(&rows[0].expires_at, &Rfc3339).unwrap();
+
+    let held_for = expires - pressed;
+
+    // Measured from just before the press, so the ten minutes are counted from a
+    // moment a hair later than this one — the slack is for that and for nothing
+    // else.
+    assert!(
+        held_for >= HELD && held_for <= HELD + Duration::from_secs(30),
+        "a request is held ten minutes from the moment it was made, and this one \
+         is held for {held_for}",
+    );
+}

@@ -40,6 +40,7 @@ mod deferrals;
 mod deliveries;
 mod endings;
 mod escalations;
+mod joins;
 mod members;
 mod migrations;
 mod pairings;
@@ -102,6 +103,10 @@ pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, 
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
+pub use joins::{
+    AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
+    hold_join, let_go_of_expired_joins, let_go_of_join,
+};
 pub use members::{
     Linking, Member, forget_member, member_count, member_holding, member_unreachable, members,
     record_member,
@@ -835,6 +840,13 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Remote access pane draws a row per member, and a changeover asks it how
     // many are owed an announcement of a new fingerprint.
     members::apply_schema(pool).await?;
+
+    // And the joins in flight, which are what puts a row in that table: a link
+    // asked for and not yet settled, kept on both sides of the asking because
+    // neither side's record is the other's — see [`joins`]. After the members
+    // because what a join becomes is one of those, and hanging off nothing all
+    // the same: a join arrives from a device this one has not met.
+    joins::apply_schema(pool).await?;
 
     // And the one flag on this database that is about nothing on it: whether the
     // human is done with the banner pointing at Remote access. It hangs off

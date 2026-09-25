@@ -1413,6 +1413,13 @@ pub async fn run_on_keyed(
     // cannot be built before there is anything to read.
     let members = peer::Members::recorded(pool.clone());
 
+    // And the joins in flight, which are what puts a row in that membership: a
+    // link asked for and not yet settled, kept on both sides of the asking —
+    // see [`peer::joining::Joins`]. Rows rather than memory, so that a restart
+    // inside the ten minutes a request is held for is a question still being
+    // held rather than one silently dropped.
+    let joins = peer::joining::Joins::recorded(pool.clone());
+
     // And what this Verkstead is, which is read out of that directory or
     // invented into it: the device id every record and URL in a cluster names it
     // by, and the self-signed certificate a link is made of (ADR-0020) — see
@@ -1716,7 +1723,12 @@ pub async fn run_on_keyed(
         // The browser cannot read the identity endpoint itself, that listener
         // presenting a certificate nothing but another Verkstead has a reason
         // to trust, so the answer is assembled over here as well.
-        device::Devices::of(device.clone(), reading.clone(), members.clone()),
+        device::Devices::of(
+            device.clone(),
+            reading.clone(),
+            members.clone(),
+            joins.clone(),
+        ),
     );
 
     // And what the peer listener answers, which is a router of its own rather
@@ -1726,9 +1738,10 @@ pub async fn run_on_keyed(
     // gated on is the rows above: a caller presenting a recorded certificate
     // reaches what a membership admits, and everything else is refused for not
     // being a member's. There is nothing inside the gate yet — the routes a
-    // membership admits arrive with the tasks that need them — so the identity
-    // endpoint is still the whole of what this build answers.
-    let peers = peer::router(device, reading, members);
+    // membership admits arrive with the tasks that need them — so what this
+    // build answers is the identity endpoint and the two routes a join is made
+    // of, which stand outside it because a join comes from a non-member.
+    let peers = peer::router(device, reading, members, joins);
 
     // The workbench and the peer listener together, and on Windows the named
     // pipe beside them: everything a request can ask for over the socket it can

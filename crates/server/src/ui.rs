@@ -41,14 +41,15 @@ use verkstead_render::{
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
     InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, PairingView, Parked,
+    PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -599,6 +600,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And the one thing in that section that is pressed rather than read:
+        // Add, against an address somebody typed. A route of its own beside the
+        // read for the serve switch's reason — it is the half of the section
+        // that changes something, and what it changes is on another machine
+        // entirely — and it answers with that read, made again.
+        //
+        // Under the devices rather than under `remote`, because what it is about
+        // is a device: the pane is where the section happens to live.
+        .route("/api/ui/devices/joins", post(add_device))
+        // And taking one of those back, which is Cancel on a pending row and
+        // Dismiss on one that has run out. One route, because they are one act
+        // seen at two moments — see [`crate::device::Devices::take_back`].
+        .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -5595,6 +5609,71 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
         return unavailable("this server holds no device identity to answer for");
     };
 
+    listed(&devices).await
+}
+
+/// `POST /api/ui/devices/joins` — **Add**: ask the device at an address to let
+/// this one into its cluster (ADR-0020, *The join*).
+///
+/// **The one thing on the Remote access pane that is configured rather than
+/// read**, which is the departure Unlink makes beside it and Remove on a Repo
+/// made before either. Everything else on that pane is the machine read again.
+///
+/// A press rather than a save, like the serve switch above and for its reason:
+/// what it changes is not a setting on this machine but the state of another
+/// one — and what it answers with is the section read again, so the pending row
+/// it leaves behind arrives out of this answer rather than out of a second
+/// request.
+///
+/// **An address that answered nothing is not this server's failure**, so it is
+/// not said as one: a machine that is off, an address nobody is at, a Verkstead
+/// too old to have the route, a Verkstead that refused — all of them are the far
+/// end, and what the human can do about each of them is different. So the
+/// refusal carries what went wrong in the words the dial put it in, for the pane
+/// to draw under the box.
+async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if new.address.trim().is_empty() {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            ApiError::new("an address to ask at is the one thing Add takes"),
+        );
+    }
+
+    if let Err(why) = devices.add(&new.address).await {
+        tracing::info!(address = %new.address, %why, "a request to link was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    listed(&devices).await
+}
+
+/// `POST /api/ui/devices/joins/{request}/cancel` — **Cancel** on a pending row,
+/// and **Dismiss** on one whose ten minutes have run out.
+///
+/// One route for the two because they are one act at two moments — see
+/// [`crate::device::Devices::take_back`], which is also where a second press
+/// being nothing new is settled. It answers with the section read again, the way
+/// the press above does.
+async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.take_back(&request).await {
+        return unavailable(&format!("the request could not be taken back: {why:#}"));
+    }
+
+    listed(&devices).await
+}
+
+/// The Devices section as the pane reads it, which is what all three of the
+/// above answer with: one reading, made at the moment it is asked for.
+async fn listed(devices: &crate::device::Devices) -> HttpResponse {
     let view: DevicesView = match devices.listing().await {
         Ok(view) => view,
         Err(why) => {

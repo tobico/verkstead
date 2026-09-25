@@ -305,3 +305,100 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
+/* Taking a pending request back, drawn quietly: the row is a thing that is
+   happening rather than a thing that went wrong, and Cancel on it is the same
+   weight of press as Reset key — a plain word under the line, rather than a
+   filled button competing with Add below it. */
+.take {
+  margin-top: 0.5rem;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.take:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .take:not(:disabled):hover {
+    text-decoration: underline;
+  }
+}
+
+/* And the box the whole section is here for, set off from the rows above it by
+   the same rule the section itself stands under: it is the one control on this
+   pane that configures rather than reads, and it reads as a form rather than as
+   another row. */
+.adding {
+  margin-top: 1.25rem;
+}
+
+.adding label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* The address and the press beside it, the shape every other typed field on
+   this page has. The address grows and the button does not: what somebody types
+   is a hostname or an IP, and neither is short on a phone. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  flex: none;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled,
+.field input:disabled {
+  cursor: not-allowed;
+}
+
+.field button:disabled {
+  opacity: 0.65;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

@@ -15,9 +15,12 @@
 //! no peer will ever be.
 //!
 //! The same two are what the member gate is asked about, because a membership
-//! is what neither of them has: what the identity endpoint answers them, every
-//! other path on this listener refuses them, and the refusal is read for what
-//! it says as much as for its status.
+//! is what neither of them has: what the identity endpoint answers them, what
+//! the routes behind the gate refuse them with, and that the refusal is read for
+//! what it says as much as for its status. The join post is the one path on this
+//! listener the gate deliberately does not stand over — a join comes from a
+//! non-member by definition — so what is asked of it here is that the gate is
+//! not what answers it, and what it *does* is `tests/joining.rs`'s.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -57,14 +60,18 @@ const SOME_OTHER_DEVICE: &str = "0011223344556677889900aabbccddee";
 /// down as a member and the other is not, which is what the gate tells apart.
 const A_THIRD_DEVICE: &str = "ffeeddccbbaa00998877665544332211";
 
-/// The join post, which is the stage after this one's. Asked for here because
-/// what this stage claims about it is that it is refused along with everything
-/// else — a caller reaching for it meets the gate rather than a missing path.
-const THE_JOIN_TO_COME: &str = "/api/peer/v1/join";
+/// The join post, which now stands *outside* the gate: a join comes from a
+/// device this one holds no membership for, that being what a join is.
+///
+/// Here to be asked the opposite question of the one below — that the gate is
+/// not what answers a caller reaching for it. What the post itself does is
+/// `tests/joining.rs`'s, which presses Add on one Verkstead and reads the
+/// request off another.
+const THE_JOIN: &str = "/api/peer/v1/join";
 
-/// And a path no stage will ever answer, which on this listener is refused the
-/// same way: a caller with no membership has no business being told which of
-/// this device's endpoints exist.
+/// And a path no stage will ever answer, which on this listener is refused as a
+/// membership rather than missed: a caller with no membership has no business
+/// being told which of this device's endpoints exist.
 const NOTHING_ANSWERS_THIS: &str = "/api/peer/v1/nothing-answers-this";
 
 /// A peer listener up on the loopback, with the device it is presenting.
@@ -98,7 +105,12 @@ impl Listening {
     /// tests that are about what this device says of the machine it is on.
     fn reading(id: &str, reading: Reading) -> Listening {
         Listening::serving(id, |device| {
-            peer::router(device, reading, peer::Members::none())
+            peer::router(
+                device,
+                reading,
+                peer::Members::none(),
+                peer::joining::Joins::none(),
+            )
         })
     }
 
@@ -134,7 +146,12 @@ impl Listening {
         );
 
         Listening::standing(dir, device, |device| {
-            peer::router(device, nowhere(), peer::Members::stated(1))
+            peer::router(
+                device,
+                nowhere(),
+                peer::Members::stated(1),
+                peer::joining::Joins::none(),
+            )
         })
     }
 
@@ -153,7 +170,14 @@ impl Listening {
         Listening::within(
             dir,
             device,
-            |device| peer::router(device, nowhere(), peer::Members::none()),
+            |device| {
+                peer::router(
+                    device,
+                    nowhere(),
+                    peer::Members::none(),
+                    peer::joining::Joins::none(),
+                )
+            },
             Some(handshake),
         )
     }
@@ -603,21 +627,20 @@ fn probing(_device: Device) -> Router {
 }
 
 /// The first half of the gate's acceptance: a caller with nothing to show
-/// reaches the identity endpoint — which the suite above proves — and nothing
-/// else on the listener.
+/// reaches the identity endpoint — which the suite above proves — and, of the
+/// routes the gate stands over, nothing at all.
 #[tokio::test]
 async fn a_caller_with_no_certificate_reaches_nothing_but_the_identity() {
     let listening = Listening::with_the_device_called(THIS_DEVICE);
 
-    for path in [THE_JOIN_TO_COME, NOTHING_ANSWERS_THIS] {
-        let (_, answered) = asking(&listening, Showing::Nothing, path).await;
+    let (_, answered) = asking(&listening, Showing::Nothing, NOTHING_ANSWERS_THIS).await;
 
-        assert_eq!(
-            status(&answered),
-            403,
-            "{path} is a member's or is refused, and there is no member, got:\n{answered}",
-        );
-    }
+    assert_eq!(
+        status(&answered),
+        403,
+        "{NOTHING_ANSWERS_THIS} is a member's or is refused, and there is no member, \
+         got:\n{answered}",
+    );
 }
 
 /// And the second: a certificate nothing here has recorded completes the
@@ -628,31 +651,52 @@ async fn a_caller_showing_an_unknown_certificate_is_refused_by_the_gated_routes(
     let listening = Listening::with_the_device_called(THIS_DEVICE);
     let (stranger, _elsewhere) = a_stranger();
 
-    for path in [THE_JOIN_TO_COME, NOTHING_ANSWERS_THIS] {
-        let (_, answered) = asking(&listening, Showing::A(stranger.clone()), path).await;
+    let (_, answered) = asking(&listening, Showing::A(stranger), NOTHING_ANSWERS_THIS).await;
 
-        assert_eq!(
-            status(&answered),
-            403,
-            "a certificate is not a membership — the gate is what holds one, got:\n{answered}",
-        );
-    }
+    assert_eq!(
+        status(&answered),
+        403,
+        "a certificate is not a membership — the gate is what holds one, got:\n{answered}",
+    );
 }
 
-/// What the refusal says, which is the thing the stage after this one reads it
-/// for.
+/// And the join post is not one of those routes.
 ///
-/// A device posting a join has two ways of not getting through: a Verkstead
-/// that will not have it, and a Verkstead too old to have the route at all. It
-/// wants a human to press Allow in the first case and an upgrade on the other
-/// machine in the second, so a refusal that read as a missing path would leave
-/// it unable to say which it had met.
+/// **Which is the whole arrangement** (ADR-0020, *The peer listener, and mutual
+/// TLS*): a join comes from a device this one holds no membership for, that
+/// being what a join *is*, so a gate over it would be a gate no link could ever
+/// be made through. What is asked here is only that the gate is not what answers
+/// a caller reaching for that path — a method this route does not take is turned
+/// away by the route rather than refused as a stranger. What the post itself
+/// does is `tests/joining.rs`'s.
+#[tokio::test]
+async fn the_join_post_is_not_behind_the_gate() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+    let (stranger, _elsewhere) = a_stranger();
+
+    let (_, answered) = asking(&listening, Showing::A(stranger), THE_JOIN).await;
+
+    assert_ne!(
+        status(&answered),
+        403,
+        "a device asking to be let in is a non-member by definition, and the gate \
+         must not be what it meets, got:\n{answered}",
+    );
+}
+
+/// What the refusal says, which is the thing a caller reads it for.
+///
+/// A device reaching for something on this listener has two ways of not getting
+/// through: a Verkstead that will not have it, and a Verkstead too old to have
+/// the route at all. It wants a human in the first case and an upgrade on the
+/// other machine in the second, so a refusal that read as a missing path would
+/// leave it unable to say which it had met.
 #[tokio::test]
 async fn the_refusal_says_it_is_a_membership_rather_than_a_missing_path() {
     let listening = Listening::with_the_device_called(THIS_DEVICE);
     let (stranger, _elsewhere) = a_stranger();
 
-    let (_, answered) = asking(&listening, Showing::A(stranger), THE_JOIN_TO_COME).await;
+    let (_, answered) = asking(&listening, Showing::A(stranger), NOTHING_ANSWERS_THIS).await;
 
     assert_ne!(
         status(&answered),
@@ -1028,7 +1072,13 @@ fn gated_on(id: &str, pool: SqlitePool) -> Listening {
     Listening::serving(id, move |device| {
         let members = peer::Members::recorded(pool);
 
-        peer::router(device, nowhere(), members.clone()).merge(peer::members_only(
+        peer::router(
+            device,
+            nowhere(),
+            members.clone(),
+            peer::joining::Joins::none(),
+        )
+        .merge(peer::members_only(
             Router::new().route(
                 MEMBERS_ONLY,
                 get(

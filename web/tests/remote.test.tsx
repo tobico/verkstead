@@ -55,6 +55,7 @@ import type { DevicesView, RemoteView, ServePress } from "../src/api/types";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
 import devices from "./fixtures/devices.json" with { type: "json" };
 import devicesLinked from "./fixtures/devices-linked.json" with { type: "json" };
+import devicesWaiting from "./fixtures/devices-waiting.json" with { type: "json" };
 import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
 import absent from "./fixtures/remote-absent.json" with { type: "json" };
 import down from "./fixtures/remote-down.json" with { type: "json" };
@@ -95,6 +96,12 @@ const WSL = devicesWsl as DevicesView;
 /// member's row is drawn: dimmed, reading *unreachable*, with everything about
 /// it still on it.
 const LINKED = devicesLinked as DevicesView;
+
+/// And the same device with two joins asked for and neither answered: one still
+/// inside its ten minutes, and one whose ten minutes ran out. Which are the two
+/// ways a pending row is drawn, and neither of them is a member — nothing has
+/// been agreed until somebody at the far end presses.
+const WAITING = devicesWaiting as DevicesView;
 
 /// The login link the serving machine hands out, which is the address with the
 /// key on the end of it.
@@ -827,6 +834,219 @@ one on the LAN",
         String(path).startsWith("/api/ui/settings"),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("adding a device", () => {
+  /// The box and the press, which are the one thing on this pane that is
+  /// configured rather than read.
+  function theAddress(): HTMLInputElement {
+    return screen.getByLabelText("Link another device") as HTMLInputElement;
+  }
+
+  /// The box stands on every state of the pane, for the reason the list does:
+  /// a machine that has never heard of a tailnet has a device of its own, and
+  /// linking two of them is not Tailscale's.
+  it("offers Add on every state of the pane", async () => {
+    for (const [named, told] of [
+      ["with no Tailscale", ABSENT],
+      ["with the daemon down", DOWN],
+      ["serving nothing", OFF],
+    ] as const) {
+      const { unmount } = mountPane(told);
+
+      expect(
+        await waitFor(() => theAddress()),
+        `the machine ${named}`,
+      ).toBeTruthy();
+
+      unmount();
+    }
+  });
+
+  /// And it will not be pressed with nothing typed in it: an empty address is
+  /// nowhere to knock.
+  it("will not be pressed on an empty address", async () => {
+    mountPane(SERVING);
+
+    const press = await waitFor(
+      () => screen.getByText("Add") as HTMLButtonElement,
+    );
+
+    expect(press.disabled).toBe(true);
+
+    fireEvent.input(theAddress(), { target: { value: "192.168.1.31" } });
+
+    expect(press.disabled).toBe(false);
+  });
+
+  /// A press sends the address as typed, and the section redraws out of the
+  /// answer rather than out of a second read: the pending row the press left
+  /// behind is in what came back.
+  it("sends the address and redraws on what came back", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      whenever("/api/ui/devices/joins", json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theAddress()).toBeTruthy());
+
+    fireEvent.input(theAddress(), {
+      target: { value: "laptop.tailnet-name.ts.net" },
+    });
+    fireEvent.click(screen.getByText("Add"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Waiting for confirmation on laptop."),
+      ).toBeTruthy(),
+    );
+
+    const [, sent] = fetching.mock.calls.find(
+      ([path, init]) =>
+        String(path) === "/api/ui/devices/joins" && init?.method === "POST",
+    )!;
+
+    expect(JSON.parse(String(sent?.body))).toEqual({
+      address: "laptop.tailnet-name.ts.net",
+    });
+  });
+
+  /// And the box empties on a press that went through, so the next address is
+  /// typed into an empty one rather than over the last.
+  it("empties the box on a press that went through", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      whenever("/api/ui/devices/joins", json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theAddress()).toBeTruthy());
+
+    fireEvent.input(theAddress(), { target: { value: "192.168.1.31" } });
+    fireEvent.click(screen.getByText("Add"));
+
+    await waitFor(() => expect(theAddress().value).toBe(""));
+  });
+
+  /// A press that did not get through says what the far end said, in the far
+  /// end's own words: a machine that is off, an address nobody is at and a
+  /// Verkstead that would not have it are three different things to do
+  /// something about.
+  it("says what went wrong in the words it came back in", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      whenever(
+        "/api/ui/devices/joins",
+        json({ error: "192.168.1.31 answered nothing" }, 502),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theAddress()).toBeTruthy());
+
+    fireEvent.input(theAddress(), { target: { value: "192.168.1.31" } });
+    fireEvent.click(screen.getByText("Add"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/192\.168\.1\.31 answered nothing/),
+      ).toBeTruthy(),
+    );
+  });
+});
+
+describe("a join waiting to be confirmed", () => {
+  /// The row says which device is being waited on and where this one knocked —
+  /// and it is not a member, because nothing has been agreed.
+  it("says which device is being waited on", async () => {
+    mountPane(SERVING, WAITING);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Waiting for confirmation on laptop."),
+      ).toBeTruthy(),
+    );
+
+    expect(screen.getByText("laptop.tailnet-name.ts.net")).toBeTruthy();
+  });
+
+  /// And it counts for nothing on the card: a request is not a membership until
+  /// somebody at the far end presses, so a Verkstead waiting on two of them is
+  /// still a Verkstead nothing is linked to.
+  it("counts for nothing on the card", async () => {
+    mountCard(SERVING, WAITING);
+
+    await waitFor(() =>
+      expect(screen.getByText(/No other devices are linked\./)).toBeTruthy(),
+    );
+  });
+
+  /// And it draws **this device's** fingerprint, which is the whole point of
+  /// drawing one: the modal on the other machine shows the same string, and the
+  /// pair exists for two people at two screens to compare by eye.
+  it("draws this device's own fingerprint", async () => {
+    mountPane(SERVING, WAITING);
+
+    const drawn = await waitFor(() =>
+      screen.getByText(WAITING.this.fingerprint),
+    );
+
+    expect(
+      drawn.closest("li")?.textContent,
+      "on the row that is waiting rather than on this device's own",
+    ).toContain("Waiting for confirmation on laptop.");
+  });
+
+  /// A request whose ten minutes ran out says so rather than going on reading
+  /// *waiting* for ever, and offers Dismiss where the live one offers Cancel.
+  it("says when a request expired, and offers Dismiss", async () => {
+    mountPane(SERVING, WAITING);
+
+    await waitFor(() =>
+      expect(screen.getByText("The request to desk expired.")).toBeTruthy(),
+    );
+
+    expect(screen.getByText("Cancel")).toBeTruthy();
+    expect(screen.getByText("Dismiss")).toBeTruthy();
+  });
+
+  /// And Cancel takes it back, with the section redrawn out of the press's own
+  /// answer.
+  it("takes a request back on Cancel", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(WAITING),
+      whenever(
+        "/api/ui/devices/joins/1122334455667788/cancel",
+        json(DEVICES),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Waiting for confirmation on laptop."),
+      ).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Waiting for confirmation on laptop."),
+      ).toBeNull(),
+    );
+
+    expect(
+      askedFor(fetching, "/api/ui/devices/joins/1122334455667788/cancel"),
+    ).toBe(1);
   });
 });
 

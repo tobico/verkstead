@@ -40,6 +40,7 @@ use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
 use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
@@ -3486,6 +3487,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "devices-linked.json",
         &a_stated_machine(&get(&linked, "/api/ui/devices").await),
     );
+
+    // And a fourth, with two joins asked for and neither answered: the section
+    // draws a pending row apiece under the members, and the two ways such a row
+    // is drawn — still waiting, and run out — are two rows on one reading.
+    //
+    // Written straight into the table, the way the members above are: what is
+    // being fed to the viewer is the shape a Verkstead answers with while
+    // somebody at another machine has yet to press anything.
+    let (_dir, asking) = a_waiting_devices_app().await;
+    write(
+        "devices-waiting.json",
+        &a_stated_machine(&get(&asking, "/api/ui/devices").await),
+    );
 }
 
 /// What a WSL kernel calls itself, which is the one thing that tells one apart
@@ -3543,7 +3557,12 @@ async fn devices_app_over_a_store(
     );
 
     let device = Device::stated(dir.path(), A_DEVICE).unwrap();
-    let devices = Devices::of(device, reading, Members::recorded(pool.clone()));
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
 
     (dir, pool.clone(), router_answering_devices(pool, devices))
 }
@@ -3606,14 +3625,64 @@ const A_MEMBER: &str = "0011223344556677889900aabbccddee";
 #[cfg(unix)]
 const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 
+/// The same router with two joins asked for and neither answered: one still
+/// inside its ten minutes, and one whose ten minutes ran out.
+///
+/// Both, because those are the two ways a pending row is drawn and a fixture
+/// holding one could only ever draw that one. Neither is a member — nothing has
+/// been agreed until somebody at the far end presses — so this device's list is
+/// itself and two rows that are not devices.
+///
+/// The moments are far enough either side of any run to stay what they are in a
+/// committed file: a fixture whose *waiting* row expired the week after it was
+/// written would be a test that passed once.
+#[cfg(unix)]
+async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+
+    for (request, address, device, name, expires_at) in [
+        (
+            "1122334455667788",
+            "laptop.tailnet-name.ts.net",
+            A_MEMBER,
+            "laptop",
+            "2099-01-01T00:00:00Z",
+        ),
+        (
+            "8877665544332211",
+            "192.168.1.31",
+            ANOTHER_MEMBER,
+            "desk",
+            "2020-01-01T00:00:00Z",
+        ),
+    ] {
+        verkstead_store::ask_join(
+            &pool,
+            &verkstead_store::AskedJoin {
+                request: request.to_owned(),
+                address: address.to_owned(),
+                device: device.to_owned(),
+                name: name.to_owned(),
+                fingerprint: format!("AA:BB:CC:DD:{device}"),
+                asked_at: "2026-09-25T10:00:00Z".to_owned(),
+                expires_at: expires_at.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    (dir, app)
+}
+
 /// One Devices reading with the two things in it that are this run's own
 /// written back out as a machine anybody would recognise.
 ///
 /// The fingerprint is the SHA-256 of a certificate made fresh in a temporary
 /// directory, so it is different every run; the name is the hostname of the box
-/// the suite is on. Both are committed fixtures' enemies, and neither is
-/// anything the Devices section draws differently — the row shows the name, the
-/// OS icon and the addresses, and the fingerprint is the next stage's.
+/// the suite is on. Both are committed fixtures' enemies, and the fingerprint is
+/// what a pending row draws for two people to compare by eye — so the fixture
+/// carries a string somebody chose rather than one this run happened to mint.
 #[cfg(unix)]
 fn a_stated_machine(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();

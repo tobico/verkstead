@@ -1966,7 +1966,21 @@ this: DeviceIdentity,
  * unreachable member counts like any other — it is linked, and a count
  * that left it out would say the cluster had shrunk.
  */
-members: Array<LinkedDevice>, };
+members: Array<LinkedDevice>, 
+/**
+ * And every join this device has asked for and not yet been answered on —
+ * see [`PendingJoin`].
+ *
+ * **Beside the members rather than among them**, because a pending join is
+ * not a device: nothing has been agreed, and a row that sat in the list
+ * looking like a member would be a cluster this device had joined itself
+ * to. The count on the card is the members' alone for the same reason.
+ *
+ * Read at the moment the pane asks, the way the members are: a request
+ * whose ten minutes ran out a second ago reads expired on this answer and
+ * waiting on the one before it, and both are true when they are given.
+ */
+pending: Array<PendingJoin>, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -2728,6 +2742,17 @@ export type NewCompanion = { repo_id: number, };
 export type NewConversation = { repo_id: number, };
 
 /**
+ * What **Add** takes: an address to go and ask at.
+ *
+ * **A port is optional and usually absent.** Every device answers on the peer
+ * port unless its host has been told another, so what somebody types is a
+ * machine's name or its address — and the port is something they should not
+ * have to know. One that carries a port is dialled at it, because an install
+ * that was told to listen elsewhere is reachable no other way.
+ */
+export type NewJoin = { address: string, };
+
+/**
  * The order the human has just dragged the sidebar into: every Conversation
  * they can see, by id, top first.
  *
@@ -3090,6 +3115,43 @@ export type PathsView = {
  * Every configured bind, which is a directory every sandbox gets.
  */
 binds: Array<BindEntry>, };
+
+/**
+ * One join this device is waiting on, as the Devices section draws it.
+ *
+ * **A row that is not a device yet.** It sits under the members with nothing of
+ * a device's own on it — no OS mark and no addresses — because nothing has been
+ * agreed: what is known is where this device knocked, what answered, and that
+ * somebody at the far end has been asked.
+ */
+export type PendingJoin = { 
+/**
+ * What the far end calls this request, which is what Cancel names.
+ */
+request: string, 
+/**
+ * The address that was typed, which is the one place this device has been
+ * told to look for the other.
+ */
+address: string, 
+/**
+ * And what the device at that address said it is shown under, which is what
+ * the row reads *waiting for confirmation on*.
+ */
+name: string, 
+/**
+ * Whether the ten minutes have run out.
+ *
+ * **This device's own reading of the far end's word for the moment**, made
+ * as the pane is answered. Which is why it is a flag here rather than the
+ * moment itself: the page would otherwise be holding a clock, and the row
+ * says one of two things.
+ *
+ * An expired row is drawn as expired and dismissed rather than taken away
+ * on this device's say-so — somebody pressed Add and is owed the answer
+ * that nobody pressed anything back.
+ */
+expired: boolean, };
 
 /**
  * A pending steer as the page receives it: when the press was made, and the

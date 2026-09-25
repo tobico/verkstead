@@ -24,6 +24,7 @@ mod browsing;
 mod conversations;
 mod device;
 mod files;
+mod joining;
 mod onboarding;
 mod profiles;
 mod push;
@@ -70,6 +71,7 @@ pub use files::{
     FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView, FileStatus, FileStatusView,
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
+pub use joining::{JoinHeld, NewJoin, PendingJoin};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
