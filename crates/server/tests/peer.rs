@@ -200,17 +200,14 @@ enum Showing {
     A(Device),
 }
 
-/// Dial `listening`, ask for `path`, and hand back what came of it: the
-/// certificate the server presented, and the response as it arrived.
-async fn asking(
-    listening: &Listening,
-    showing: Showing,
-    path: &str,
-) -> (CertificateDer<'static>, String) {
-    // Whatever the server shows is taken, the way a device linking for the
-    // first time takes it: what proves the far end is the certificate compared
-    // against a fingerprint afterwards, and there is no certificate authority
-    // anywhere in a cluster to check one against.
+/// How a caller dials: taking whatever the server shows, and showing `showing`
+/// of its own.
+///
+/// Whatever the server shows is taken, the way a device linking for the first
+/// time takes it: what proves the far end is the certificate compared against a
+/// fingerprint afterwards, and there is no certificate authority anywhere in a
+/// cluster to check one against.
+fn dialling(showing: Showing) -> ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let algorithms = provider.signature_verification_algorithms;
 
@@ -220,7 +217,7 @@ async fn asking(
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(WhateverTheServerShows { algorithms }));
 
-    let dialling = match showing {
+    match showing {
         Showing::Nothing => dialling.with_no_client_auth(),
         Showing::A(device) => {
             let pem = device.certificate().as_bytes();
@@ -232,15 +229,23 @@ async fn asking(
                 )
                 .expect("a device's own certificate and the key that signed it")
         }
-    };
+    }
+}
 
+/// Dial `listening`, ask for `path`, and hand back what came of it: the
+/// certificate the server presented, and the response as it arrived.
+async fn asking(
+    listening: &Listening,
+    showing: Showing,
+    path: &str,
+) -> (CertificateDer<'static>, String) {
     // Dialled by the name the certificate is made out to, which is the device
     // id — that is what a peer will have to hand, and the only name this
     // certificate has.
     let name = ServerName::try_from(listening.device.id().to_owned()).unwrap();
 
     let connection = TcpStream::connect(listening.address).await.unwrap();
-    let mut secured = TlsConnector::from(Arc::new(dialling))
+    let mut secured = TlsConnector::from(Arc::new(dialling(showing)))
         .connect(name, connection)
         .await
         .expect("the handshake should complete");
@@ -271,6 +276,48 @@ async fn asking(
     secured.read_to_end(&mut answered).await.unwrap();
 
     (presented, String::from_utf8(answered).unwrap())
+}
+
+/// The same dial where what is expected is that it does not work: everything
+/// `asking` does, with the failure handed back instead of unwrapped.
+///
+/// Read to the end rather than stopped at the connect, because a TLS 1.3 client
+/// is finished with its side of the handshake the moment it has sent its
+/// certificate — the server's refusal is an alert that arrives after, so it is
+/// the read that meets it rather than the connect.
+async fn turned_away(listening: &Listening, showing: Showing) -> String {
+    let name = ServerName::try_from(listening.device.id().to_owned()).unwrap();
+
+    let connection = TcpStream::connect(listening.address).await.unwrap();
+
+    let mut secured = match TlsConnector::from(Arc::new(dialling(showing)))
+        .connect(name, connection)
+        .await
+    {
+        Ok(secured) => secured,
+        Err(why) => return why.to_string(),
+    };
+
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        peer::IDENTITY,
+        listening.device.id(),
+    );
+
+    if let Err(why) = secured.write_all(request.as_bytes()).await {
+        return why.to_string();
+    }
+
+    let mut answered = Vec::new();
+
+    match secured.read_to_end(&mut answered).await {
+        Err(why) => why.to_string(),
+        Ok(_) if answered.is_empty() => "the connection was closed".to_owned(),
+        Ok(_) => panic!(
+            "the caller should have been turned away, and was answered:\n{}",
+            String::from_utf8_lossy(&answered),
+        ),
+    }
 }
 
 /// The body of a response read that way: everything past the blank line.
@@ -634,6 +681,52 @@ async fn a_route_can_read_the_certificate_the_handshake_took() {
         "nothing",
         "and nothing where the caller presented nothing, that being an ordinary \
          caller rather than a failure, got:\n{answered}",
+    );
+}
+
+/// A device whose certificate ran out a day ago is refused at the handshake.
+///
+/// This is the one thing the whole renewal rests on. A device makes its
+/// certificate again before the ninety days are up *because* an expired one is
+/// refused here — and nothing in a cluster checks a chain or asks an authority,
+/// while a member list of fingerprints goes on matching a certificate for ever.
+/// So if it is not refused at the handshake it is refused nowhere, and the
+/// validity, the renewal window and the changeover are machinery holding
+/// nothing up.
+///
+/// Stood at with a certificate made with a day of life *behind* it, which is
+/// the same seam a start near the expiry is stood at with — a clock this
+/// process does not keep is the alternative.
+#[tokio::test]
+async fn a_caller_whose_certificate_has_run_out_is_refused_at_the_handshake() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    let expired = Device::stated_good_for(
+        elsewhere.path(),
+        SOME_OTHER_DEVICE,
+        -time::Duration::days(1),
+    )
+    .unwrap();
+
+    turned_away(&listening, Showing::A(expired)).await;
+}
+
+/// And a device whose certificate is inside its validity still gets through,
+/// which is what says the check above is about the dates rather than about
+/// client certificates at all.
+#[tokio::test]
+async fn a_caller_whose_certificate_is_current_still_gets_through() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+    let (stranger, _elsewhere) = a_stranger();
+
+    let (_, answered) = asking(&listening, Showing::A(stranger), peer::IDENTITY).await;
+
+    assert_eq!(
+        identity(&answered)["device"],
+        THIS_DEVICE,
+        "a certificate this device has never seen is still a certificate, and the \
+         handshake is not what decides who is a member, got:\n{answered}",
     );
 }
 

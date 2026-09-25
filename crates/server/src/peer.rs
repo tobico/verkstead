@@ -25,11 +25,15 @@
 //! A verifier that refused every non-member outright was the first shape of
 //! this, and it is the shape a join could never have got through: the device
 //! posting one is a stranger by definition, and the membership it is asking for
-//! is what it has not got yet. What the handshake still insists on is that a
-//! caller presenting a certificate holds the key that signed it — see
-//! [`WhateverArrives`], which checks the signature and nothing else. What the
-//! certificate *means* is a per-route question, and [`gate`] is where it is
-//! asked.
+//! is what it has not got yet. What the handshake still insists on is that the
+//! certificate is a certificate: that the caller holds the key that signed it,
+//! and that it is inside its own validity — see [`WhateverArrives`], which
+//! asks those two and nothing else. The second is where an expired certificate
+//! is refused, which is the whole of what the renewal in [`crate::device`] is
+//! for: nothing in a cluster checks a chain and a member list of fingerprints
+//! would go on matching one for ever, so this is the only place the expiry is a
+//! fact. What the certificate *means* — which device this is, and whether it is
+//! one of ours — is a per-route question, and [`gate`] is where it is asked.
 //!
 //! **The un-gated surface is a list of three, and everything else is a
 //! member's.** The identity endpoint, which asks for no certificate at all;
@@ -86,6 +90,8 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 use verkstead_render::DeviceIdentity;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::FromDer;
 
 use crate::device::Device;
 use crate::device::reading::Reading;
@@ -541,12 +547,24 @@ fn presenting(device: &Device) -> Result<Arc<ServerConfig>> {
 /// one turns up, or none.
 ///
 /// **It decides nothing about who may do what.** That is the whole point: the
-/// request goes out before a path is known, so a verifier refusing here would
-/// be refusing a caller for endpoints it was never reaching for. What it does
-/// do is make the certificate mean something — the signature is checked, so a
-/// caller presenting one has the key that signed it rather than a copy of
-/// somebody else's file — and hand it on. The member list is consulted per
-/// route, over the routes a membership is what admits.
+/// request goes out before a path is known, so a verifier refusing on *who*
+/// this is would be refusing a caller for endpoints it was never reaching for.
+/// The member list is consulted per route, over the routes a membership is what
+/// admits.
+///
+/// **What it does insist on is that the certificate is one at all**, and there
+/// are two halves to that. The signature is checked, so a caller presenting a
+/// certificate has the key that signed it rather than a copy of somebody else's
+/// file. And the validity dates are checked against the clock rustls hands in,
+/// so a certificate that has run out — or has not started — is refused here.
+///
+/// That second half is what the whole renewal rests on. A device re-issues its
+/// certificate before it expires because an expired one is refused at the
+/// handshake; nothing in a cluster checks a chain, so unless it is checked
+/// *here* nothing checks it anywhere, and the validity, the renewal window and
+/// the changeover would be machinery holding nothing up. Refusing it is not
+/// deciding who may do what — it is the same class of question as the signature,
+/// asked of the certificate rather than of the device behind it.
 ///
 /// Nothing is checked against a trust anchor because there is no such thing
 /// here: every certificate in a cluster is self-signed and pinned by
@@ -577,16 +595,22 @@ impl ClientCertVerifier for WhateverArrives {
         &[]
     }
 
-    /// Whatever arrived, taken. Not parsed and not judged: what a certificate
-    /// on this listener means is *which* device it is, and that is a
-    /// fingerprint compared against a member list rather than anything a
-    /// verifier could work out.
+    /// Whatever arrived, taken — so long as it is a certificate and is inside
+    /// its own validity.
+    ///
+    /// *Which* device it is is not asked here: that is a fingerprint compared
+    /// against a member list, and a path this verifier has not been told. What
+    /// *is* asked is the one question a certificate answers about itself, and
+    /// the answer to it is what the renewal exists for — see
+    /// [`current`] and [`crate::device::VALIDITY`].
     fn verify_client_cert(
         &self,
-        _end_entity: &CertificateDer<'_>,
+        end_entity: &CertificateDer<'_>,
         _intermediates: &[CertificateDer<'_>],
-        _now: UnixTime,
+        now: UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
+        current(end_entity, now)?;
+
         Ok(ClientCertVerified::assertion())
     }
 
@@ -617,6 +641,48 @@ impl ClientCertVerifier for WhateverArrives {
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.algorithms.supported_schemes()
     }
+}
+
+/// Whether `certificate` is inside its own validity at `now`, which is the
+/// clock rustls read as the handshake began.
+///
+/// **The one thing the renewal rests on.** A device makes its certificate again
+/// before the ninety days are up because an expired one is refused at the
+/// handshake — and in a cluster nothing checks a chain, nothing asks an
+/// authority, and the member list is a set of fingerprints that goes on
+/// matching a certificate for ever. So this is the only place the expiry is a
+/// fact rather than a date printed in a file, and without it the validity, the
+/// renewal window and the changeover would all be holding nothing up.
+///
+/// A certificate that will not parse is refused here too. It reached this
+/// verifier as a client certificate and is not one, which is a different thing
+/// from the caller that showed nothing at all — that one never comes through
+/// here.
+///
+/// Said as rustls' own two reasons rather than as one, because they are two
+/// different machines to go and look at: an expired certificate is one whose
+/// Verkstead has not been restarted since the renewal window opened, and one
+/// that has not started yet is a clock that is wrong.
+fn current(certificate: &CertificateDer<'_>, now: UnixTime) -> Result<(), rustls::Error> {
+    let (_, parsed) = X509Certificate::from_der(certificate)
+        .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
+
+    let validity = parsed.validity();
+    let now = now.as_secs() as i64;
+
+    if now < validity.not_before.timestamp() {
+        return Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::NotValidYet,
+        ));
+    }
+
+    if now > validity.not_after.timestamp() {
+        return Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::Expired,
+        ));
+    }
+
+    Ok(())
 }
 
 /// The socket with the handshakes already done, which is what axum is handed.

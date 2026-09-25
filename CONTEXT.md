@@ -678,8 +678,12 @@ decides which endpoints a caller reaches: whatever arrives is taken — or
 nothing — and the routes are what act on it. A verifier that refused every
 non-member outright was the first shape of this and is the shape a join could
 never have got through, the device posting one being a stranger by definition.
-What the handshake does insist on is that a caller presenting a certificate
-holds the key that signed it; what it means is a per-route question.
+What the handshake does insist on is that the certificate is a certificate — the
+caller holds the key that signed it, and it is inside its own validity. That
+second check is what the renewal rests on: nothing in a cluster checks a chain
+and a membership is a set of fingerprints that would go on matching one for
+ever, so the handshake is the only place an expiry is a fact rather than a date
+in a file. What the certificate *means* is a per-route question.
 **The identity endpoint is the one route nobody has to be anybody to read**, at
 `/api/peer/v1/identity`: the **Device Id** and the fingerprint of the
 certificate the handshake just presented, so that a caller can check the device
