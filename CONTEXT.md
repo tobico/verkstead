@@ -187,9 +187,10 @@ _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 **Data Directory**:
 The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
-directories, the settings files it is told the human's credentials and identity
-in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the platform's own place for it when nothing says otherwise —
+directories, the **Device** this install is, the settings files it is told the
+human's credentials and identity in, and whatever later stages need to put
+somewhere. Said once, as `--data-dir`, and the platform's own place for it when
+nothing says otherwise —
 `~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
 on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
 that a Verkstead launched from an icon finds what one launched from a shell
@@ -528,6 +529,46 @@ desk and pointing at a phone would otherwise meet the human again on the very
 device it sent them to.
 _Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
 (it is served to a tailnet, never to the internet)
+
+**Device**:
+One Verkstead install, as another one sees it. What it *is* is a **Device Id**
+and a self-signed certificate, both invented at its first start and kept in the
+**Data Directory** beside `workbench.key` — `device.id` and `device.pem`, files
+of their own at mode `0600`, read back at every start after, and an empty one
+counting as one that is not there. Nothing is configured and nothing is typed.
+**The certificate is what a link is made of** rather than a detail of how a
+connection is encrypted: a link between two devices is the two fingerprints
+each side holds, with no bearer token and nothing stored beside the
+certificates. It is good for **ninety days**, said in Verkstead's own code
+rather than inherited from a crate's default, because an expired certificate is
+refused at the handshake and a validity nobody chose is the day every link goes
+down together.
+**Its fingerprint is spelled to be compared by eye**: the SHA-256 of the
+certificate's own bytes as upper-case hex in colon-separated pairs, which is
+what every other tool prints of the same certificate. That is what it is for —
+two people, one reading off a phone and one off a screen, checking that the
+device being linked is the device being offered.
+**What it is shown under is its hostname**, read at each start, with an icon for
+its OS. A WSL reads *Linux (WSL)*, because a Windows machine and its WSL share a
+hostname and the OS is what tells them apart.
+**The startup line names it**: `device=` and `fingerprint=` beside the listen
+address and the **Data Directory**, which is where an operator reads either of
+them off a machine.
+_Avoid_: node, host, machine (a device is an install, and two of them can be on
+one machine), peer (which is what a device is to another device)
+
+**Device Id**:
+What every record and URL names a **Device** by: sixteen random bytes as
+lower-case hex, invented at the first start and never changing. Short enough to
+sit in a URL segment, and spelled in an alphabet no URL and no host name has to
+escape — the certificate is made out to it, in the subject's common name and as
+its one subject alternative name.
+**The tailnet node name and the hostname were both rejected as ids.** The first
+is gone the moment the machine leaves the tailnet; the second collides, a
+Windows machine and its WSL answering to one. Which is why the id is invented
+rather than read off the machine: what a device is *called* can change and can
+be shared, and what a device is *named by* can do neither.
+_Avoid_: name (which is the hostname a device is shown under), uuid, serial
 
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the

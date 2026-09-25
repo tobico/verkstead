@@ -54,6 +54,14 @@ mod continuing;
 
 mod conversations;
 mod deferrals;
+/// What this Verkstead is: the device id and the self-signed certificate made
+/// at its first start and read back at every one after (ADR-0020).
+///
+/// Public for the reason [`key`] is — what a device *is* is the product's own
+/// boundary rather than an implementation detail of an endpoint, and what
+/// proves an identity survives a restart is a suite standing where a start
+/// does.
+pub mod device;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
 mod done;
@@ -1280,6 +1288,18 @@ pub async fn run_on_keyed(
     // human finds out which one that turned out to be.
     let data_dir = config.data_directory()?;
 
+    // And what this Verkstead is, which is read out of that directory or
+    // invented into it: the device id every record and URL in a cluster names it
+    // by, and the self-signed certificate a link is made of (ADR-0020) — see
+    // [`device`]. Both are on the startup line below, the fingerprint because it
+    // is what two machines are checked against each other by.
+    let device = device::Device::issued(&data_dir).with_context(|| {
+        format!(
+            "keeping this device's id and certificate in {}",
+            data_dir.display()
+        )
+    })?;
+
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
     // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
@@ -1428,10 +1448,18 @@ pub async fn run_on_keyed(
     // that hands the link over itself says the address alone here, because its
     // log is a file on a desk that a menu item opens — see
     // [`key::HandsOverTheLink`].
+    //
+    // And what this Verkstead is, on the same line: `device=` is the id every
+    // record and URL in a cluster names it by, and `fingerprint=` is what
+    // another machine's operator checks this one against by eye — the two
+    // together are what makes an identity something an operator can see rather
+    // than something two servers agree about privately (ADR-0020).
     tracing::info!(
         listen = %config.listen,
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
+        device = %device.id(),
+        fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),

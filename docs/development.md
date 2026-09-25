@@ -27,7 +27,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
 **`workbench=` is how you get in.** Every page of the workbench and the viewer's
@@ -35,6 +35,13 @@ own `/api/ui/` namespace answer 401 without the **Workbench Key**, and that link
 is the address with the key on it: paste it once and the browser holds the
 cookie from then on. The key is `workbench.key` in the Data Directory, made at
 the first start and read back at every one after it.
+
+**`device=` and `fingerprint=` are what this install *is*.** The id is invented
+at the first start and read back at every one after it, and it is what every
+record and URL naming a device will name this one by; the fingerprint is its
+self-signed certificate's, in the spelling two people compare one in. Both are
+in the Data Directory beside the key, as `device.id` and `device.pem`, and they
+are good for ninety days ([ADR 0020](adr/0020-cluster-mode.md)).
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
@@ -54,13 +61,13 @@ rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
-directories and the settings files. `--data-dir` says where, or
-`VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own place for it —
-`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
-on macOS — which is what an installed Verkstead wants and not what a dev run
-out of a checkout does: `--data-dir .` is why every command here says it, and
-it keeps the database, the worktrees and the settings beside the checkout where
-they can be deleted with it.
+directories, the two files this device is, and the settings files. `--data-dir`
+says where, or `VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own
+place for it — `~/.local/share/verkstead` on Linux, `~/Library/Application
+Support/Verkstead` on macOS — which is what an installed Verkstead wants and
+not what a dev run out of a checkout does: `--data-dir .` is why every command
+here says it, and it keeps the database, the worktrees and the settings beside
+the checkout where they can be deleted with it.
 
 The desktop app is a verb of that same binary, and the same server: `cargo run
 -p verkstead-cli -- desktop --data-dir .` serves what the command above serves

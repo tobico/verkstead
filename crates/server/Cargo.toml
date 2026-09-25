@@ -66,6 +66,23 @@ rust-embed = { version = "8", features = [
     "interpolate-folder-path",
     "mime-guess",
 ] }
+# The device's own self-signed certificate, made at the first start beside the
+# Workbench Key and read back at every one after it (ADR 0020) — see
+# `src/device.rs`. Making one is new to this tree: `rustls` was here only as
+# reqwest's way of reaching an https endpoint, and nothing generated a
+# certificate at all.
+#
+# Default features off and each named back, so that the signing behind it is
+# `ring` — already in the tree under reqwest's rustls — rather than the
+# `aws_lc_rs` the defaults would also enable, which brings a C toolchain into
+# the build for what ring is doing already. `crypto` is the key pair being
+# generated here rather than handed in, and `pem` is the spelling the file on
+# disk is kept in.
+rcgen = { version = "0.14", default-features = false, features = [
+    "crypto",
+    "pem",
+    "ring",
+] }
 # The engine behind the ignore rules in `settings`: a human's pattern for the
 # comments Wrapping is never to address, compiled against whatever a bot writes
 # on a pull request. This one rather than the `fancy-regex` syntect already
@@ -74,6 +91,14 @@ rust-embed = { version = "8", features = [
 # the text is a stranger's comment, so a backtracking engine would be a way to
 # hang the poll from either end.
 regex = "1"
+# Reading the device's certificate back off the disk: the PEM its file holds,
+# parsed into the DER the fingerprint is a hash of — and the private key beside
+# it, parsed for no other reason than that half a pair is not an identity and a
+# start is the moment to find that out. Already in the tree under reqwest's
+# rustls, so it adds nothing to a build, and the types are the ones a TLS
+# configuration takes: the identity is read into what will present it rather
+# than into something that has to be converted first.
+rustls-pki-types = "1"
 # Comparing the latest release's tag against the version this was built as.
 semver.workspace = true
 serde.workspace = true
@@ -227,3 +252,10 @@ tower = { version = "0.5", features = ["util"] }
 # every such failure reads *it printed nothing*. `env-filter` so that what is
 # printed is this crate's own account rather than sqlx's every statement.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Reading a certificate the way something other than rcgen would, which is what
+# the device suite has to do to be a check at all: `src/device.rs` writes the
+# validity and the device id into the certificate it makes, and a test that read
+# those back out of the same crate's own parameters would be a test of nothing.
+# A dev-dependency rather than a dependency — the server never parses a
+# certificate beyond the DER its fingerprint is a hash of.
+x509-parser = "0.18"
