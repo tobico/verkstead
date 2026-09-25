@@ -26,10 +26,17 @@
 //! Where the window opens is [`bounds.ts`](./bounds.js)'s, out of a file of the
 //! app's own, and the menu whose bar this hides is [`menu.ts`](./menu.js)'s.
 //!
+//! **And closing it is a choice rather than a quit.** What a press of the close
+//! button comes to is [`closing.ts`](./closing.js)'s answer, out of the app's
+//! own settings and the platform — hide the window, ask first, or let the close
+//! happen — and what is here is the three of them enacted: the cancel that
+//! makes hiding possible at all, the native warning, and the bounds still being
+//! written down by a close that never completes.
+//!
 //! The decorated window is this stage's; the frameless one with the controls
 //! overlay is the stage after it.
 
-import { BrowserWindow, screen, shell } from "electron";
+import { BrowserWindow, dialog, screen, shell } from "electron";
 
 import {
   asGiven,
@@ -41,6 +48,7 @@ import {
   remembered,
   STILL,
 } from "./bounds.js";
+import { CANCEL, type Closing, QUIT, WARNING } from "./closing.js";
 import { where } from "./elsewhere.js";
 import { link } from "./key.js";
 import { why } from "./loading.js";
@@ -74,6 +82,17 @@ export interface Workbench {
   /// The file this window's size and position are kept in, under the app's own
   /// user data — a fact about this machine rather than about this Verkstead.
   state: string;
+
+  /// What this press of the close button means — [`closing`](./closing.js)'s
+  /// answer, asked at the moment of the press rather than once at startup.
+  ///
+  /// A function rather than a value because what is behind it moves while the
+  /// window is open: the settings file is read then, so a position set on the
+  /// Desktop page is in force without a restart. It is also where the app says
+  /// *this close is a quit I am already performing* — the tray's Quit and Cmd+Q
+  /// reach this window as a close on their way out, and neither of them is the
+  /// close button.
+  closing: () => Closing;
 }
 
 /// Open the window on the workbench, logged in and where it was left.
@@ -98,6 +117,7 @@ export function open(workbench: Workbench): BrowserWindow {
   window.setMenuBarVisibility(false);
 
   keeping(window, workbench.state, place);
+  policy(window, workbench.closing);
   bound(window, workbench.origin);
 
   // Whether the load now on its way is already an answer to a refusal. Set when
@@ -208,6 +228,65 @@ function keeping(window: BrowserWindow, state: string, place: Placement): void {
       clearTimeout(settling);
     }
     now();
+  });
+}
+
+/// Do what the close policy says about a press of the close button.
+///
+/// **Registered after [`keeping`] on purpose.** A close that hides has to leave
+/// the window's place written down — an app that always keeps running would
+/// otherwise be an app that never remembers its window again — and both
+/// handlers run whether or not this one cancels the close, so which of them
+/// ran first is the whole of what decides it.
+///
+/// **And cancelling is how hiding is done at all.** `close` is the window on
+/// its way out, and the only way to stop it is to say so before the handler
+/// returns — which is why the warning is a synchronous dialog rather than an
+/// awaited one: a `preventDefault` arriving a tick later would arrive at a
+/// window that had already gone.
+function policy(window: BrowserWindow, closing: () => Closing): void {
+  window.on("close", (event) => {
+    const act = closing();
+
+    if (act === "quit") {
+      // Which is also every quit the app performs for itself: the tray's Quit
+      // and Cmd+Q reach the window as a close, and neither is asked about.
+      return;
+    }
+
+    if (act === "hide") {
+      event.preventDefault();
+      window.hide();
+      say("the window is closed, and Verkstead goes on running — the tray is the way back");
+      return;
+    }
+
+    const answered = dialog.showMessageBoxSync(window, {
+      type: "warning",
+      title: "Verkstead",
+      message: WARNING.message,
+      detail: WARNING.detail,
+      buttons: [...WARNING.buttons],
+
+      // The way on is what the dialog opens on, and the way out is what Escape
+      // and the dialog's own close button come to. Both said, because a
+      // platform that draws no default still has to answer a dismissal.
+      defaultId: QUIT,
+      cancelId: CANCEL,
+
+      // Buttons side by side rather than drawn as links, which is what a
+      // question with an action and a way out is on every platform this runs
+      // on.
+      noLink: true,
+    });
+
+    if (answered === CANCEL) {
+      event.preventDefault();
+      say("the warning was answered with Cancel, so the window stays");
+      return;
+    }
+
+    say("the warning was answered with Quit, so Verkstead goes");
   });
 }
 
