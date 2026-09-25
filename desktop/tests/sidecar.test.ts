@@ -16,13 +16,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FILE, heard, keep } from "../src/log.js";
 import { ARGUMENTS, byLine, how, start, type Lines, type Sidecar } from "../src/sidecar.js";
+import { ADDRESS, LISTEN } from "../src/workbench.js";
 
 /// A stand-in `verkstead`, written somewhere of its own and made runnable.
 ///
 /// Where it records what it was started with is written into the script rather
-/// than handed to it: the app hands a sidecar nothing but the environment it
-/// already had, so a test that needed a variable of its own would be testing a
-/// door this has not got.
+/// than handed to it: the app hands a sidecar its arguments and the environment
+/// it already had, so a test that needed a variable of its own would be testing
+/// a door this has not got.
 ///
 /// `exec`, so that the process the app is holding *is* the one that sits there
 /// — a shell that forked and waited would be a shell the app signals and a
@@ -39,7 +40,7 @@ function standIn(then = "exec sleep 600"): { cli: string; record: string } {
     cli,
     [
       "#!/bin/sh",
-      `{ echo "$@"; echo "\${VERKSTEAD_DATA_DIR-}"; } > '${record}'`,
+      `{ echo "$@"; echo "\${VERKSTEAD_DATA_DIR-}"; echo "\${VERKSTEAD_LISTEN-}"; } > '${record}'`,
       then,
       "",
     ].join("\n"),
@@ -48,21 +49,30 @@ function standIn(then = "exec sleep 600"): { cli: string; record: string } {
   return { cli, record };
 }
 
-/// Wait until the stand-in has said what it was started with, which is the
-/// first thing it does.
+/// How many lines the stand-in writes, and so what a complete record is: the
+/// arguments, then each variable the app is asked about. Waited for by count
+/// because a redirect lands a line at a time — a read that took the first line
+/// for the whole record would see every variable as empty and pass whatever the
+/// app did.
+const RECORDED = 3;
+
+/// Wait until the stand-in has written the whole of what it was started with,
+/// which is the first thing it does.
 async function recorded(record: string): Promise<string[]> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
-      const written = readFileSync(record, "utf8");
-      if (written.split("\n").length >= 2) {
-        return written.split("\n");
+      const written = readFileSync(record, "utf8").split("\n");
+      // One more than the lines themselves: the last `echo` leaves a newline,
+      // so a complete record is `RECORDED` lines and an empty tail.
+      if (written.length > RECORDED) {
+        return written;
       }
     } catch {
       // Not written yet.
     }
     await new Promise((on) => setTimeout(on, 10));
   }
-  throw new Error(`the stand-in never wrote ${record}`);
+  throw new Error(`the stand-in never wrote the whole of ${record}`);
 }
 
 /// Wait until `file` holds `line`, which is a pipe read and written after the
@@ -118,12 +128,33 @@ afterEach(async () => {
 // the two platforms the app is developed on, and what it is on Windows is the
 // packaging stages' question rather than this one's.
 describe.skipIf(process.platform === "win32")("the sidecar", () => {
-  it("is started as `serve --desktop` and nothing else", async () => {
+  it("is started as `serve --desktop` on the one address", async () => {
     const { cli, record } = standIn();
-    started = start(cli, heard);
+    started = start(cli, ADDRESS, heard);
 
     const [said] = await recorded(record);
-    expect(said).toBe(ARGUMENTS.join(" "));
+    expect(said).toBe(ARGUMENTS(ADDRESS).join(" "));
+    expect(said).toBe(`serve --desktop --listen ${ADDRESS}`);
+  });
+
+  /// **Told rather than left to the default**, which is the same number: the
+  /// server reads `VERKSTEAD_LISTEN` out of the environment it inherits, and a
+  /// developer with one exported for a `verkstead serve` of their own would
+  /// otherwise get a server the probe, the health wait and the window all know
+  /// nothing about — a listening Verkstead and half a minute of the app saying
+  /// it never came up.
+  it("is told the app's address whatever the environment says", async () => {
+    const { cli, record } = standIn();
+    process.env[LISTEN] = "127.0.0.1:9422";
+    try {
+      started = start(cli, ADDRESS, heard);
+      const [said, , listen] = await recorded(record);
+
+      expect(listen).toBe("127.0.0.1:9422");
+      expect(said).toBe(`serve --desktop --listen ${ADDRESS}`);
+    } finally {
+      delete process.env[LISTEN];
+    }
   });
 
   /// Which is how a checkout run reaches the checkout's data: the app grows no
@@ -133,7 +164,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const { cli, record } = standIn();
     process.env.VERKSTEAD_DATA_DIR = "/srv/somewhere";
     try {
-      started = start(cli, heard);
+      started = start(cli, ADDRESS, heard);
       const [, data] = await recorded(record);
       expect(data).toBe("/srv/somewhere");
     } finally {
@@ -156,7 +187,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
     const said = "2026-09-25T10:00:00.000000Z  INFO verkstead_server: verkstead is listening";
     const { cli, record } = standIn(`echo '${said}'\nexec sleep 600`);
-    started = start(cli, heard);
+    started = start(cli, ADDRESS, heard);
     await recorded(record);
 
     expect(await held(join(where, FILE), said)).toContain(said);
@@ -164,7 +195,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
   it("goes when it is stopped", async () => {
     const { cli, record } = standIn();
-    const sidecar = start(cli, heard);
+    const sidecar = start(cli, ADDRESS, heard);
     await recorded(record);
 
     sidecar.stop();
@@ -179,7 +210,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
   /// what the child handed over as it went.
   it("says a server that ended on its own exited", async () => {
     const { cli, record } = standIn("exit 3");
-    started = start(cli, heard);
+    started = start(cli, ADDRESS, heard);
     await recorded(record);
 
     const ending = await started.gone;
@@ -190,7 +221,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
   it("says a server that was stopped was killed", async () => {
     const { cli, record } = standIn();
-    started = start(cli, heard);
+    started = start(cli, ADDRESS, heard);
     await recorded(record);
 
     started.stop();
@@ -206,9 +237,11 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
   /// there is no other way to end this one and go on asserting.
   it("goes when the app ends without stopping it", async () => {
     const { cli } = standIn();
-    const orphan = spawn(process.execPath, [join(import.meta.dirname, "fixtures", "orphan.mjs"), cli], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const orphan = spawn(
+      process.execPath,
+      [join(import.meta.dirname, "fixtures", "orphan.mjs"), cli, ADDRESS],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
 
     let said = "";
     orphan.stdout.on("data", (chunk: Buffer) => (said += chunk.toString()));

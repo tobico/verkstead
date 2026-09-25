@@ -84,11 +84,14 @@ $ (cd desktop && pnpm install && pnpm start)
 has no flag of its own to say it with: the sidecar inherits the shell the app
 was started from, so `VERKSTEAD_DATA_DIR` is to the app what `--data-dir .` is
 to every other command in this document, and a launch that says nothing gets
-the platform's own place again. Every other setting is the server's the same
-way. An address something is already listening on — the `serve` above, say — is
-a dialog and a nonzero exit rather than a second Verkstead beside the first,
-and a second `pnpm start` is the first window brought forward rather than
-either of those.
+the platform's own place again. Every setting but one is the server's the same
+way — **the exception is the address**, which the app hands the sidecar as
+`--listen 127.0.0.1:8422` rather than inheriting: the app probes that address,
+waits on it and loads it, so a `VERKSTEAD_LISTEN` you have exported for a
+`verkstead serve` of your own is overridden and the log says it was. An address
+something is already listening on — the `serve` above, say — is a dialog and a
+nonzero exit rather than a second Verkstead beside the first, and a second
+`pnpm start` is the first window brought forward rather than either of those.
 
 `pnpm lint`, `pnpm typecheck` and `pnpm test` in that same directory are the
 three things CI runs over it. The lint is one rule and it is the wall around

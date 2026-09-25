@@ -1,28 +1,53 @@
 //! The server, started beside the app and owned by it.
 //!
-//! **`serve --desktop` and nothing else.** The flag is the whole of what the
-//! server is told about who started it (ADR-0020) and every other setting is
-//! the server's own: the child inherits this process's environment, so a
-//! checkout run reaching the checkout's data is `VERKSTEAD_DATA_DIR` in the
-//! shell that started the app, exactly as it is for a `verkstead serve` run by
-//! hand, and a packed app that says nothing gets the platform **Data
-//! Directory**. The app grows no flag for any of it.
+//! **`serve --desktop`, and the address.** The flag is the whole of what the
+//! server is told about who started it (ADR-0020), and the address is the one
+//! thing the app has an opinion about: the port is fixed by decision and the
+//! app probes it, waits on it and loads it, so the server is *told* to bind it
+//! rather than left to resolve it — the child inherits this process's
+//! environment, and a `VERKSTEAD_LISTEN` exported in the shell that started the
+//! app would otherwise put the server somewhere the rest of the app is not
+//! looking. See [`ADDRESS`](./workbench.js), which is the number, and
+//! [`LISTEN`](./workbench.js), which the app reports having overridden.
+//!
+//! **Every other setting is still the server's own.** A checkout run reaching
+//! the checkout's data is `VERKSTEAD_DATA_DIR` in the shell that started the
+//! app, exactly as it is for a `verkstead serve` run by hand, and a packed app
+//! that says nothing gets the platform **Data Directory**. The app grows no
+//! flag for any of it.
 //!
 //! **And the child dies with the app.** Not as a courtesy: the port is fixed,
 //! so a sidecar left running is the next launch meeting a foreign listener on
 //! its own address. Two mechanisms, because the ways out of a process are not
 //! one thing — the app quitting is a [`stop`](Sidecar.stop) the caller makes,
-//! and the process ending for any other reason is the `exit` hook below, which
-//! is the last thing Node runs and takes the child with it. The one gap is
-//! `SIGKILL` on the app itself, which no process can answer for; a terminal's
-//! Ctrl-C is not that, being sent to the whole process group and so to the
-//! child as well.
+//! and the process ending for a reason nobody handled is the `exit` hook below,
+//! which is the last thing Node runs and takes the child with it.
+//!
+//! **Two gaps, and only one of them is nobody's fault.** `SIGKILL` on the app
+//! itself no process can answer for; a terminal's Ctrl-C is not that, being sent
+//! to the whole process group and so to the child as well. The other is
+//! Electron's own `app.exit`, which ends the process without running the `exit`
+//! hook — measured, not assumed — so every path in `main.ts` that takes it
+//! calls [`stop`](Sidecar.stop) first, and the hook is what covers the ways out
+//! nobody wrote down.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 
-/// What the sidecar is started with. Everything else is the server's own.
-export const ARGUMENTS = ["serve", "--desktop"];
+/// What the sidecar is started with, for the address the app serves on.
+/// Everything else is the server's own.
+///
+/// A function of the address rather than a constant holding it, because this
+/// module imports nothing — the fixture in `tests/fixtures/` runs it straight
+/// off the TypeScript, which Node reads by stripping the types and so cannot
+/// follow a `.js` import out of. The one caller that knows the number is the
+/// one that already knows everything else about the running application.
+export const ARGUMENTS = (address: string): string[] => [
+  "serve",
+  "--desktop",
+  "--listen",
+  address,
+];
 
 /// How long a stopped sidecar is given to go before it is taken.
 const GRACE = 5_000;
@@ -139,13 +164,16 @@ function read(stream: Readable | null, said: (line: string) => void): void {
 /// path is the caller's question — a spawn of a path with nothing at it fails
 /// asynchronously, which is a dialog nobody can word.
 ///
+/// **`address` is what the server is told to bind**, for the reason at the top
+/// of this file: the app has one address and it is the app that names it.
+///
 /// **`said` is every line the server logs**, handed over as it says it. The app
 /// passes [`heard`](./log.js), which puts those lines in `verkstead.log` beside
 /// its own — taken as an argument rather than imported so that this module
 /// answers to nothing but a child process, which is what lets the fixture in
 /// `tests/fixtures/` run it straight off the TypeScript.
-export function start(cli: string, said: (line: string) => void): Sidecar {
-  const child = spawn(cli, ARGUMENTS, {
+export function start(cli: string, address: string, said: (line: string) => void): Sidecar {
+  const child = spawn(cli, ARGUMENTS(address), {
     // Nothing on stdin, and both streams read rather than inherited: the log
     // file is the app's to write, so the sidecar's `tracing` output comes
     // through this process and lands in `verkstead.log` beside the app's own

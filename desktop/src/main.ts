@@ -28,10 +28,10 @@ import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
-import { how, start } from "./sidecar.js";
+import { how, type Sidecar, start } from "./sidecar.js";
 import { taken } from "./taken.js";
 import { forward, open } from "./window.js";
-import { ADDRESS, HEALTH, HOST, ORIGIN, PORT } from "./workbench.js";
+import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -72,9 +72,45 @@ function foreign(address: string): void {
 /// it happens in cannot hand it.
 let onscreen: BrowserWindow | undefined;
 
+/// Whether a launch asked for the window while there was not one yet.
+///
+/// A second launch is answered by bringing the window forward, and the window is
+/// not there until the server has answered — which is a first start on a cold
+/// database, so it is seconds rather than an instant. The launch that asked has
+/// already exited by then, so the asking is remembered here and answered by
+/// [`open`] instead: pressing the icon twice while Verkstead is coming up is a
+/// window that arrives, not a press that went nowhere.
+let wanted = false;
+
+/// The sidecar, once there is one — for the ways out that are not a quit.
+///
+/// `will-quit` is what stops it on every ordinary ending, and that handler is
+/// registered over the child itself. This is for the ways out that never reach a
+/// quit: `app.exit`, which ends the process without running either the quit
+/// events or Node's own `exit` hook, so the failure that takes it has to take the
+/// child by hand. See the note at the top of `sidecar.ts`.
+let child: Sidecar | undefined;
+
 /// Whether the app is on its way out under its own steam, so that the child
 /// going is the expected end of a quit rather than news about the server.
 let leaving = false;
+
+/// Stop the sidecar and end this launch with `code`.
+///
+/// **The stop is the point**, because nothing else here does it. `app.exit` runs
+/// neither `will-quit` nor the `exit` hook in `sidecar.ts`, so a refusal that
+/// exited without this would leave a child nobody had signalled — and what
+/// becomes of one is then down to whether it happens to write again: its stdout
+/// is a pipe into this process, so a server still logging takes `SIGPIPE` and a
+/// server sitting quietly does not. A sidecar left holding the one address the
+/// next launch needs is that launch meeting its own server as a foreign listener
+/// and refusing to start, which is far too much to leave to the timing of a log
+/// line.
+function give(code: number): void {
+  leaving = true;
+  child?.stop();
+  app.exit(code);
+}
 
 async function run(): Promise<void> {
   // The one read of the process's own platform and environment, made first
@@ -102,10 +138,17 @@ async function run(): Promise<void> {
   }
 
   app.on("second-instance", () => {
-    say("a second launch — the window already open is brought forward");
-    if (onscreen !== undefined) {
-      forward(onscreen);
+    if (onscreen === undefined) {
+      // Which is a launch while this one is still waiting on the server. Kept
+      // rather than dropped: the window is what was asked for, and it is a
+      // moment away.
+      wanted = true;
+      say("a second launch, and the window is not open yet — it comes up in front");
+      return;
     }
+
+    say("a second launch — the window already open is brought forward");
+    forward(onscreen);
   });
 
   // Closing the window quits, on every platform including the Mac. Stage 03 is
@@ -117,7 +160,7 @@ async function run(): Promise<void> {
   if (await taken(HOST, PORT)) {
     say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
     foreign(ADDRESS);
-    app.exit(1);
+    give(1);
     return;
   }
 
@@ -137,11 +180,24 @@ async function run(): Promise<void> {
   // for in order to put a message on the screen.
   if (!existsSync(path)) {
     missing(path);
-    app.exit(1);
+    give(1);
     return;
   }
 
-  const sidecar = start(path, heard);
+  // The one setting of the server's the app overrides, said where a developer
+  // who exported it will read it: the port is fixed by decision and everything
+  // here probes, waits on and loads that one address, so a server sent
+  // elsewhere would be a Verkstead nothing in this process could find.
+  const elsewhere = machine.env[LISTEN];
+  if (elsewhere !== undefined && elsewhere !== "" && elsewhere !== ADDRESS) {
+    say(
+      `${LISTEN} says ${elsewhere}, and the app serves on ${ADDRESS} — ` +
+        `the sidecar is told ${ADDRESS}`,
+    );
+  }
+
+  const sidecar = start(path, ADDRESS, heard);
+  child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 
   // The app quitting is the sidecar stopping. `will-quit` rather than
@@ -191,9 +247,7 @@ async function run(): Promise<void> {
     // Said rather than shown: there is no window to draw a dialog over yet, and
     // the line is what a developer running `pnpm start` is reading anyway.
     say(`the server never came up — ${trouble.message}`);
-    leaving = true;
-    sidecar.stop();
-    app.exit(1);
+    give(1);
     return;
   }
 
@@ -217,6 +271,13 @@ async function run(): Promise<void> {
     // it is kept beside what Electron keeps here rather than in `config.yaml`.
     state: join(app.getPath("userData"), FILE),
   });
+
+  // And the launch that asked for the window while there was not one yet, which
+  // is a press of the icon over a Verkstead still coming up.
+  if (wanted) {
+    say("the launch that asked while this one was starting gets the window now");
+    forward(onscreen);
+  }
 }
 
 // **Started rather than awaited**, and this is not a style. Electron emits
@@ -224,7 +285,11 @@ async function run(): Promise<void> {
 // `await` here is an app whose `whenReady` never resolves — the sidecar comes
 // up, and then nothing else ever happens. Evaluation finishes; the work goes on
 // in the promise.
+//
+// **The sidecar goes with it, through [`give`]**: by the time anything here can
+// throw there may be a server running, and `app.exit` takes neither the quit
+// events nor Node's `exit` hook with it.
 run().catch((trouble: unknown) => {
   say(`the app could not start — ${String(trouble)}`);
-  app.exit(1);
+  give(1);
 });
