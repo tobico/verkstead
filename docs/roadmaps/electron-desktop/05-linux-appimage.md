@@ -33,8 +33,11 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
 
 1. **The builder configuration** — electron-builder's AppImage target, the
    CLI as an extra resource found by the main process, the app id, icons and
-   desktop entry from `packaging/`. Accepts: a local build from a checkout
-   and a cargo-built CLI runs and serves.
+   desktop entry from `packaging/`. Where the resource lands is a directory of
+   the CLI's own rather than beside the launcher: stage 07 puts that directory
+   on Windows' `PATH` and cannot put the launcher's there, so one layout
+   serves all three platforms. Accepts: a local build from a checkout and a
+   cargo-built CLI runs and serves.
 2. **The release leg** — `desktop-linux` waits on the CLI matrix, downloads
    `verkstead-linux-x64`, packs, and runs the assertions under Xvfb; the
    glibc-floor check goes with the Rust build. Accepts: the leg is green on a

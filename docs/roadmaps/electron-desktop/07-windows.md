@@ -3,8 +3,9 @@
 ## Goal
 
 `Verkstead-x86_64.msi` on a Release installs the Electron app per user under
-`%LOCALAPPDATA%\Programs`, with a Start-menu entry and the install directory
-on the user's PATH, so `verkstead guide` works from a fresh terminal. The
+`%LOCALAPPDATA%\Programs`, with a Start-menu entry and the CLI's own directory
+inside the install on the user's PATH, so `verkstead guide` works from a fresh
+terminal and starts the CLI rather than the app. The
 controls overlay sits at the top-right in the heads' colours; Launch on
 Startup is the Run key through the login-item API; the `desktop-windows` leg
 installs the msi and asserts the install, the record under HKCU, the
@@ -15,9 +16,17 @@ WiX sources for the Rust msi are gone.
 
 - **An msi, through electron-builder's WiX target** ([ADR-0020], Set 848
   Q16): the human kept the msi over the NSIS installer recommended.
-- **The install directory stays on the user's PATH** (Set 850 Q20): a WiX
-  fragment of our own in the build, because the target does not do it alone.
-  The adoption docs promise it and the leg asserts it.
+- **A directory with the CLI in it stays on the user's PATH** (Set 850 Q20): a
+  WiX fragment of our own in the build, because the target does not do it
+  alone. The adoption docs promise it and the leg asserts it.
+- **And it is not the install root**, which is what the promise used to mean.
+  electron-builder names the launcher for the product, so the root holds
+  `Verkstead.exe` — and Windows resolves a `PATH` lookup without regard to
+  case, so a root on `PATH` would make `verkstead guide` start the app. The
+  CLI cannot join it under its own name either: one NTFS directory does not
+  hold `verkstead.exe` and `Verkstead.exe` both. So the CLI gets a directory
+  of its own inside the install, that directory is what the fragment names,
+  and the root goes on `PATH` no more.
 - **Per user, unsigned**, as before: the SmartScreen steps in the adoption
   docs kept.
 - **The overlay and its colours** are stage 04's code, proven here.
@@ -45,9 +54,11 @@ WiX sources for the Rust msi are gone.
    Accepts: the value appears and disappears with the box and names the app's
    own path; a profile carrying the tray app's value comes up registered
    through the API with that value gone, and one carrying none is untouched.
-3. **The msi** — electron-builder's WiX target, per-user, the PATH fragment,
-   the Start-menu entry, the same-version upgrade rule. Accepts: a local build
-   installs under the profile; `verkstead guide` runs from a new terminal.
+3. **The msi** — electron-builder's WiX target, per-user, the CLI in a
+   directory of its own, the PATH fragment naming that directory, the
+   Start-menu entry, the same-version upgrade rule. Accepts: a local build
+   installs under the profile; `verkstead guide` runs from a new terminal and
+   prints the guide rather than opening a window.
 4. **The leg** — `desktop-windows` downloads `verkstead-windows-x64.exe`,
    packs, installs, and asserts; `tools/verkstead.wxs` and
    `tools/build-windows-msi.sh` retired. Accepts: the leg is green.
@@ -59,6 +70,11 @@ WiX sources for the Rust msi are gone.
 - Stage 05 landed; whether 06 has, which decides nothing here.
 - electron-builder's msi target on the pinned version, and how a WiX fragment
   is attached to it.
+- What the launcher exe ends up called, and where stage 05's extra resource
+  puts the CLI inside the packed app — which together decide what the
+  fragment names and whether a rename would do instead.
+- What `docs/adoption.md` says the `PATH` entry is, so the sentence rewritten
+  in task 5 describes the directory that is actually on it.
 - The WiX toolset the runner image carries, against what the target wants.
 - The shim is still in `crates/desktop` and is stage 08's to remove; this
   stage leaves the crate alone.
