@@ -260,13 +260,18 @@ impl Device {
     /// below being atomic, so it is a machine that lost power or a hand that
     /// emptied it, and inventing is the only recovery either of those has.
     ///
-    /// A certificate file that is there and will *not* parse is a failure
-    /// rather than a fresh certificate. That is the one place this parts
-    /// company with the key, which takes any bytes at all: a certificate is
-    /// either read or is nothing, and quietly issuing a new one over the one a
-    /// cluster has pinned is the single act here that cannot be taken back. So
-    /// the start says what it could not read and what deleting the file would
-    /// do, and stops.
+    /// **A file that is there and cannot be read is a failure**, though, and so
+    /// is a certificate file that is there and will not parse. That is where
+    /// this parts company with the key, which takes any bytes at all: quietly
+    /// issuing a fresh identity over the one a cluster has pinned is the single
+    /// act here that cannot be taken back, so a file this start could not get
+    /// at is one it stops over rather than writes past. A `device.pem` left
+    /// owned by root by one start under `sudo` is exactly that file, and the
+    /// directory around it stays writable — so the alternative is not a write
+    /// that fails and reports itself but a rename straight over the certificate
+    /// every linked device is holding. Either way the start says which file it
+    /// was and what deleting it would cost, and stops — see [`read_back`] and
+    /// [`Device::holding`].
     ///
     /// **And the expiry is seen to here**, which is the one thing a start does
     /// *to* an identity it found rather than with it — see [`Device::renewed`],
@@ -280,7 +285,7 @@ impl Device {
         // one found beside an id that had to be invented is a certificate for a
         // device that no longer exists, and a fresh id takes a fresh
         // certificate with it.
-        let (id, kept) = match read_back(&id_path) {
+        let (id, kept) = match read_back(&id_path)? {
             Some(id) => (id, true),
             None => {
                 let id = invented()?;
@@ -294,7 +299,7 @@ impl Device {
         // And then the certificate: the one on disk where the id it was made
         // out to is the id above, and a fresh one everywhere else.
         let certificate = match kept {
-            true => read_back(&certificate_path),
+            true => read_back(&certificate_path)?,
             false => None,
         };
 
@@ -402,7 +407,7 @@ impl Device {
         // every restart during a changeover would otherwise be another
         // fingerprint for the members to acknowledge, and a changeover that
         // never finished.
-        let begun = match read_back(&self.incoming_path()) {
+        let begun = match read_back(&self.incoming_path())? {
             Some(pem) => Some(held(&pem).map_err(|why| {
                 std::io::Error::other(format!(
                     "reading the certificate this device is changing over to, in {}: {why:#} — \
@@ -604,15 +609,37 @@ impl Devices {
 /// What `path` holds, where it holds anything: the file's text trimmed, and
 /// nothing for a file that is not there or is empty.
 ///
-/// An empty file counts as one that is not there — see [`Device::issued`] — and
-/// so does one that could not be read at all, which is the same judgement the
-/// Workbench Key makes: a directory this server cannot read is a directory it
-/// cannot write either, so the write that follows is what reports it, naming
-/// the file it was trying to make rather than the one it failed to find.
-fn read_back(path: &Path) -> Option<String> {
+/// An empty file counts as one that is not there — see [`Device::issued`].
+/// Nothing writes one, the writes here being atomic, so it is a machine that
+/// lost power or a hand that emptied it, and inventing is the only recovery
+/// either of those has.
+///
+/// **A file that *is* there and will not open is a failure**, though, and that
+/// is the one place this parts company with the Workbench Key's own reading.
+/// The key takes any bytes at all and a lost one is re-issued by a press; an
+/// identity is what a cluster has pinned, and writing a fresh one over a
+/// certificate that was sitting right there is the single act in this module
+/// that cannot be taken back. A file this process is not allowed to open — one
+/// left owned by root by a single start under `sudo`, most of all — is not a
+/// file that is missing, and telling the two apart is the whole of the
+/// difference between a start that stops and an install that quietly becomes a
+/// different device. So the start says which file it was and stops, the way one
+/// that will not parse does.
+fn read_back(path: &Path) -> std::io::Result<Option<String>> {
     match std::fs::read_to_string(path) {
-        Ok(text) if !text.trim().is_empty() => Some(text.trim().to_owned()),
-        _ => None,
+        Ok(text) if text.trim().is_empty() => Ok(None),
+        Ok(text) => Ok(Some(text.trim().to_owned())),
+
+        Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => Ok(None),
+
+        Err(why) => Err(std::io::Error::other(format!(
+            "reading {}: {why} — a file that is there and cannot be read is not a file that \
+             is missing, so this start stops rather than inventing an identity over it. Put \
+             it back within reach of the account this server runs as, or delete it and let \
+             the next start make a fresh one — which every device this one is linked to \
+             would then have to be linked to again",
+            path.display(),
+        ))),
     }
 }
 
