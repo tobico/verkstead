@@ -248,8 +248,8 @@ mod ui;
 ///
 /// Public because the tray app spawns too, and it is the tray app that has no
 /// console for a child to inherit — see [`crate::remote::Elevate`], whose one
-/// graphical implementation lives in the desktop crate and runs the platform's
-/// own asking.
+/// graphical implementation is [`crate::elevate`] and runs the platform's own
+/// asking.
 pub mod unseen;
 mod updates;
 mod viewer;
@@ -1250,6 +1250,34 @@ impl StartedBy {
             StartedBy::TheDesktopApp => key::HandsOverTheLink::TheCaller,
         }
     }
+
+    /// And how this server asks the machine for a privilege it has not got,
+    /// where there is anybody to ask — see [`remote::Elevate`], and
+    /// [`elevate::Graphical`], which is what the asking comes to.
+    ///
+    /// **The flag and a display, both.** The operator grant the Remote access
+    /// pane wants, and the one elevated command the onboarding wizard's install
+    /// run raises, are commands this process has no privilege to run — and what
+    /// an app can do about that is put the platform's own password dialog in
+    /// front of one, having somebody at the machine where a daemon has nobody.
+    /// So the flag is half the answer, and it is the half that is said rather
+    /// than guessed: a plain `verkstead serve` hands the `sudo` line back the
+    /// way it always has, whatever else is true of the machine.
+    ///
+    /// `display` is the other half — [`display::there_is_one`], asked by the
+    /// caller rather than read here, so that both answers are answers a test can
+    /// ask for. A sidecar started over SSH or in a container is the app with
+    /// nowhere to draw, and a dialog nobody can see is a press waiting on a
+    /// dismissal that cannot arrive: there nothing is installed and the line is
+    /// shown, which is what a machine with nobody at it wanted said anyway.
+    pub fn escalation(self, display: bool) -> Option<Arc<dyn remote::Elevate>> {
+        match self {
+            StartedBy::AnOperator => None,
+            StartedBy::TheDesktopApp => {
+                display.then(|| Arc::new(elevate::Graphical::here()) as Arc<_>)
+            }
+        }
+    }
 }
 
 /// Take the address, open the database, and serve until the process is stopped.
@@ -1291,20 +1319,22 @@ pub async fn run_on(
     // [`run_on_keyed`] for the caller that arrives having already made this call.
     let key = config.workbench_key()?;
 
-    // And nothing to escalate with, whoever started it: the operator grant the
-    // Remote access pane asks for is a command run with a privilege this process
-    // has not got, and what a server reached through here does about that is
-    // hand the `sudo` line back — see [`remote::Elevate`].
+    // And the two things `started_by` decides, both of them behaviour on this
+    // side of the socket. The startup line: whether it is this install's handing
+    // over of the login link, or the address alone because the caller has opened
+    // a window on one already — see [`StartedBy::hands_over_the_link`].
     //
-    // What `started_by` decides is the startup line: whether it is this
-    // install's handing over of the login link, or the address alone because the
-    // caller has opened a window on one already — see
-    // [`StartedBy::hands_over_the_link`].
+    // And how a privilege this process has not got is asked for: the operator
+    // grant the Remote access pane wants and the onboarding wizard's one
+    // elevated command go through the platform's own password dialog where the
+    // sidecar has a display to draw one on, and hand the `sudo` line back where
+    // a plain `serve` is the daemon it has always been — see
+    // [`StartedBy::escalation`] and [`remote::Elevate`].
     run_on_keyed(
         listener,
         config,
         key,
-        None,
+        started_by.escalation(display::there_is_one()),
         started_by.hands_over_the_link(),
     )
     .await
@@ -1586,5 +1616,28 @@ pub async fn run_on_keyed(
         axum::serve(listener, app)
             .await
             .context("serving Verkstead")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sidecar asks this machine where there is somewhere to draw the asking
+    /// — and shows the line where there is not, a dialog nobody can see being a
+    /// press waiting on a dismissal that cannot arrive.
+    #[test]
+    fn the_flag_installs_the_grant_only_where_there_is_a_display() {
+        assert!(StartedBy::TheDesktopApp.escalation(true).is_some());
+        assert!(StartedBy::TheDesktopApp.escalation(false).is_none());
+    }
+
+    /// And a `serve` with no flag on it is the daemon it has always been,
+    /// whatever the machine it is running on happens to have: the flag is what
+    /// says somebody is at it, and a display is not who started this.
+    #[test]
+    fn a_serve_without_the_flag_asks_nobody_whatever_the_display_says() {
+        assert!(StartedBy::AnOperator.escalation(true).is_none());
+        assert!(StartedBy::AnOperator.escalation(false).is_none());
     }
 }
