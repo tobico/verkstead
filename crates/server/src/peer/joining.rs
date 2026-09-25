@@ -1,0 +1,463 @@
+//! The join, as the device being asked answers it: the post a stranger makes,
+//! the ten minutes the question is held for, and the cancel that takes it back
+//! (ADR-0020, *The join*).
+//!
+//! **This is the second of the three routes outside the member gate**, and the
+//! one the whole arrangement was built around — see [`super::router`]. A join
+//! arrives from a non-member, which is what a join *is*: the membership it is
+//! asking for is the thing it has not got. A handshake that refused every
+//! stranger would be a handshake no link could ever be made through, which is
+//! why the verifier takes whatever arrives and the gate is per route.
+//!
+//! **And it is not un-authenticated for standing outside it.** The certificate
+//! the handshake took is pinned into the request this post creates, and
+//! everything that follows is matched against it: the dial back that answers an
+//! Allow has to meet that certificate, and the cancel below has to be made under
+//! it. What the post is trusted for is nothing at all — it writes down a
+//! question for a human to answer, and a human pressing Allow is the whole of
+//! what a join ever gets past.
+//!
+//! **Ten minutes, counted from when the request was made.** Written down as the
+//! moment it runs out at rather than as a length, so a restart inside those ten
+//! minutes is a question still being held rather than ten fresh minutes — the
+//! human settled that the request survives a restart at all, and a clock that
+//! began again at each start would be the wrong half of keeping it.
+//!
+//! **A call naming a request that has run out is refused in the same words as
+//! one naming a request that was never there.** Which is what lets the expired
+//! rows be swept whenever a fresh one arrives: what a caller is told cannot
+//! depend on whether the housekeeping has been round yet.
+
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use axum::Json;
+use axum::extract::connect_info::ConnectInfo;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use sqlx::SqlitePool;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+use verkstead_render::{DeviceIdentity, JoinHeld, PendingJoin};
+use verkstead_store::{AskedJoin, HeldJoin};
+
+use crate::device::Device;
+use crate::device::reading::Reading;
+
+use super::Caller;
+
+/// Where a device asks to be let into this one's cluster.
+///
+/// Under `/api/peer/` with the identity endpoint, because it is this listener's
+/// own business rather than any of the workbench traffic a member will come to
+/// be served over it.
+pub const JOIN: &str = "/api/peer/v1/join";
+
+/// And where it takes that question back, which is Cancel on the asking
+/// device's pending row.
+///
+/// The request in the path rather than in a body, because it is what is being
+/// acted on. Matched against the certificate the request is holding, so it is
+/// the asker's to cancel and nobody else's — the id need not be a secret, and
+/// is not treated as one.
+pub const CANCEL: &str = "/api/peer/v1/join/{request}/cancel";
+
+/// That same path with a request in it, which is what a dial goes out to.
+pub fn cancelling(request: &str) -> String {
+    format!("/api/peer/v1/join/{request}/cancel")
+}
+
+/// How long a device holds a question its human has not answered.
+///
+/// Ten minutes, which is the ADR's: long enough to walk to the other machine,
+/// and short enough that a request nobody ever saw is not still sitting there
+/// tomorrow. What expires is the *question*, so a human who was not at the
+/// screen presses Add again rather than finding a link they no longer remember
+/// asking for.
+pub const HELD: Duration = Duration::from_secs(10 * 60);
+
+/// The device being asked, as the two routes above answer out of it: what to
+/// say about itself, and where to keep the question.
+#[derive(Debug, Clone)]
+pub(crate) struct Holding {
+    /// What this device is — the id and the certificate off the disk, which is
+    /// what the answer to a join carries so the asker knows who it reached.
+    pub(crate) device: Device,
+
+    /// And the machine it is on, read at the moment it answers — see
+    /// [`crate::device::reading`].
+    pub(crate) reading: Reading,
+
+    /// And where the question is written down.
+    pub(crate) joins: Joins,
+}
+
+/// The joins in flight, as the things that ask after them do: the post that
+/// holds one, the cancel that takes one back, and the Devices section drawing a
+/// pending row for each this device is waiting on.
+///
+/// A handle over the store rather than the pool itself, the way [`super::Members`]
+/// is one and for its reasons: each caller asks its own question rather than
+/// writing its own query, and a router that was never given a database says so
+/// rather than pretending to hold a request it has nowhere to put.
+#[derive(Debug, Clone)]
+pub struct Joins {
+    /// The rows this Verkstead keeps, where it keeps any. `None` is a router
+    /// stood up without a store behind it — see [`Joins::none`].
+    kept: Option<SqlitePool>,
+}
+
+impl Joins {
+    /// The joins this Verkstead really keeps: the rows in `pool`.
+    pub fn recorded(pool: SqlitePool) -> Joins {
+        Joins { kept: Some(pool) }
+    }
+
+    /// And a device with nowhere to keep one.
+    ///
+    /// Which is not a device that refuses links: it is a router stood up without
+    /// a database, which every suite about *which routes there are* builds and
+    /// no running server is. A join posted to one is refused saying so, and the
+    /// two reads answer nothing rather than failing — a pane drawing no pending
+    /// rows is right about a device that is holding none.
+    pub fn none() -> Joins {
+        Joins { kept: None }
+    }
+
+    /// Where the rows are, or the refusal for a device that has nowhere to keep
+    /// one.
+    fn store(&self) -> Result<&SqlitePool> {
+        self.kept
+            .as_ref()
+            .context("this server has no store to keep a join in")
+    }
+
+    /// Hold a question somebody has just asked of this device, having first let
+    /// go of the ones that ran out.
+    ///
+    /// The sweep rides along with the write because this is the moment there is
+    /// a reason for one: a device nobody ever asks has nothing to sweep, and one
+    /// asked twice a year should not be keeping last year's question. It changes
+    /// nothing any caller is told — see the module note.
+    pub(crate) async fn hold(&self, held: &HeldJoin, now: OffsetDateTime) -> Result<()> {
+        let pool = self.store()?;
+
+        verkstead_store::let_go_of_expired_joins(pool, &stamp(now)?)
+            .await
+            .context("letting go of the joins whose ten minutes had run out")?;
+
+        verkstead_store::hold_join(pool, held)
+            .await
+            .with_context(|| format!("holding the join device {} asked", held.device))
+    }
+
+    /// One of them, where it is there and its ten minutes have not run out.
+    ///
+    /// **The two ways of not having it are one answer**, which is the whole of
+    /// why the expiry is read here rather than by each caller: a request that
+    /// was never made and one that has run out are both a request there is
+    /// nothing to do about, and a caller that could tell them apart would be one
+    /// that could ask this device what it had been asked.
+    pub(crate) async fn held(
+        &self,
+        request: &str,
+        now: OffsetDateTime,
+    ) -> Result<Option<HeldJoin>> {
+        let Some(held) = verkstead_store::held_join(self.store()?, request)
+            .await
+            .with_context(|| format!("reading the join held under {request}"))?
+        else {
+            return Ok(None);
+        };
+
+        Ok((!run_out(&held.expires_at, now)).then_some(held))
+    }
+
+    /// Let go of one, which in this task is a cancel from the device that asked.
+    pub(crate) async fn let_go(&self, request: &str) -> Result<()> {
+        verkstead_store::let_go_of_join(self.store()?, request)
+            .await
+            .with_context(|| format!("letting go of the join held under {request}"))
+    }
+
+    /// Write down a join this device has just asked for.
+    pub(crate) async fn ask(&self, asked: &AskedJoin) -> Result<()> {
+        verkstead_store::ask_join(self.store()?, asked)
+            .await
+            .with_context(|| format!("writing down the join asked of {}", asked.address))
+    }
+
+    /// One of those, whether or not its ten minutes have run out.
+    ///
+    /// Unlike [`Joins::held`], because the two sides want different things of an
+    /// expired request: the device holding one has nothing left to do about it,
+    /// and the device that asked has a row to draw and a human to tell.
+    pub(crate) async fn asked(&self, request: &str) -> Result<Option<AskedJoin>> {
+        verkstead_store::asked_join(self.store()?, request)
+            .await
+            .with_context(|| format!("reading the join asked under {request}"))
+    }
+
+    /// Take one off this device's own list, which is what Cancel and a dismissed
+    /// expiry both come down to.
+    pub(crate) async fn forget(&self, request: &str) -> Result<()> {
+        verkstead_store::forget_asked_join(self.store()?, request)
+            .await
+            .with_context(|| format!("forgetting the join asked under {request}"))
+    }
+
+    /// And every one of them as the Devices section draws it.
+    ///
+    /// A device with nowhere to keep a join is waiting on none, which is an
+    /// answer rather than a failure: the pane is drawing what this device is
+    /// holding, and a router with no store is holding nothing.
+    pub(crate) async fn pending(&self, now: OffsetDateTime) -> Result<Vec<PendingJoin>> {
+        let Some(pool) = self.kept.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        Ok(verkstead_store::asked_joins(pool)
+            .await
+            .context("reading the joins this device is waiting on")?
+            .into_iter()
+            .map(|asked| PendingJoin {
+                expired: run_out(&asked.expires_at, now),
+                request: asked.request,
+                address: asked.address,
+                name: asked.name,
+            })
+            .collect())
+    }
+}
+
+/// `POST /api/peer/v1/join` — a device asking to be let into this one's
+/// cluster.
+///
+/// **What it takes is the asker saying what it is**: the id every record in a
+/// cluster names it by, the fingerprint of the certificate it is presenting, the
+/// name and OS word it is shown under, and every address it can be reached on —
+/// which is the same thing it would answer a stranger with on the identity
+/// endpoint, because it is the same thing said.
+///
+/// **What is pinned is the handshake's certificate rather than the one named**,
+/// and the two are checked against each other first. A device that names one
+/// certificate and presents another is not the device it says it is — the same
+/// judgement a dial makes of an identity answer, made here of a join.
+///
+/// What comes back is the request's name, when this device lets go of it, and
+/// what this device is: the asker draws a pending row from it, and its human
+/// compares the fingerprint on that row with the one on the modal over here.
+pub(crate) async fn join(
+    State(holding): State<Holding>,
+    ConnectInfo(caller): ConnectInfo<Caller>,
+    Json(saying): Json<DeviceIdentity>,
+) -> Response {
+    let Some(presented) = caller.fingerprint() else {
+        return refused(
+            StatusCode::FORBIDDEN,
+            "a join has to be posted under the certificate the link would be pinned on, and \
+             this one presented none",
+        );
+    };
+
+    if saying.fingerprint != presented {
+        return refused(
+            StatusCode::FORBIDDEN,
+            "this join names a certificate other than the one it was posted under, which is \
+             a device that is not the one it says it is",
+        );
+    }
+
+    if saying.device.trim().is_empty() {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "a join has to say which device is asking",
+        );
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    let (asked_at, expires_at) = match (stamp(now), stamp(now + HELD)) {
+        (Ok(asked_at), Ok(expires_at)) => (asked_at, expires_at),
+        _ => return unreadable("this device could not say what the time is"),
+    };
+
+    let request = match crate::device::invented() {
+        Ok(request) => request,
+        Err(why) => {
+            tracing::error!(%why, "a join could not be given a name to be answered under");
+
+            return unreadable("this device could not name the request");
+        }
+    };
+
+    let held = HeldJoin {
+        request,
+        device: saying.device,
+        name: saying.name,
+        os: saying.os,
+        addresses: saying.addresses,
+        fingerprint: presented,
+        asked_at,
+        expires_at: expires_at.clone(),
+    };
+
+    if let Err(why) = holding.joins.hold(&held, now).await {
+        tracing::error!(%why, "a join could not be written down, so it is refused");
+
+        return unreadable("this device could not write the request down");
+    }
+
+    tracing::info!(
+        device = %held.device,
+        name = %held.name,
+        fingerprint = %held.fingerprint,
+        request = %held.request,
+        "a device has asked to be let into this one's cluster, and the request is held \
+         until it is answered or its ten minutes run out",
+    );
+
+    Json(JoinHeld {
+        request: held.request,
+        expires: expires_at,
+        identity: holding.reading.identity(&holding.device).await,
+    })
+    .into_response()
+}
+
+/// `POST /api/peer/v1/join/{request}/cancel` — the device that asked, taking
+/// its question back.
+///
+/// **Matched against the certificate the request is holding**, which is the
+/// third thing that certificate is pinned for: the request is the asker's, and
+/// a cancel from anybody else would be a stranger able to reach this port
+/// deciding what this device's human gets to see.
+///
+/// A request that has run out is refused in the same words as one that was never
+/// there, and neither is a failure to have asked about — see the module note.
+pub(crate) async fn cancel(
+    State(holding): State<Holding>,
+    ConnectInfo(caller): ConnectInfo<Caller>,
+    Path(request): Path<String>,
+) -> Response {
+    let held = match holding
+        .joins
+        .held(&request, OffsetDateTime::now_utc())
+        .await
+    {
+        Ok(held) => held,
+        Err(why) => {
+            tracing::error!(%why, "the joins this device is holding could not be read");
+
+            return unreadable("this device could not read what it is holding");
+        }
+    };
+
+    let Some(held) = held else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            "there is no such join request on this device",
+        );
+    };
+
+    if caller.fingerprint().as_deref() != Some(held.fingerprint.as_str()) {
+        return refused(
+            StatusCode::FORBIDDEN,
+            "that join was not asked under the certificate you presented",
+        );
+    }
+
+    if let Err(why) = holding.joins.let_go(&request).await {
+        tracing::error!(%why, "a cancelled join could not be let go of");
+
+        return unreadable("this device could not let go of the request");
+    }
+
+    tracing::info!(
+        device = %held.device,
+        request = %request,
+        "a device has taken back its request to join this one's cluster",
+    );
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// A moment in the spelling both sides of a join write one in: RFC 3339, UTC.
+fn stamp(at: OffsetDateTime) -> Result<String> {
+    at.format(&Rfc3339).context("saying what the time is")
+}
+
+/// Whether `expires_at` is behind `now`.
+///
+/// **A moment this build cannot read counts as run out.** The alternative is a
+/// request held for ever on a row nothing can make sense of, and the cost of
+/// being wrong is a human pressing Add again — which is what they would do about
+/// an expiry anyway.
+pub(crate) fn run_out(expires_at: &str, now: OffsetDateTime) -> bool {
+    match OffsetDateTime::parse(expires_at, &Rfc3339) {
+        Ok(expires) => expires <= now,
+        Err(why) => {
+            tracing::warn!(
+                %why,
+                %expires_at,
+                "a join's expiry cannot be read, so the request counts as run out",
+            );
+
+            true
+        }
+    }
+}
+
+/// A refusal on this listener, said in the plain text the gate's own is said in:
+/// there is no viewer at the far end of this port, only another Verkstead
+/// putting what it was told into a line of its own log.
+fn refused(status: StatusCode, why: &'static str) -> Response {
+    (status, format!("{why}\n")).into_response()
+}
+
+/// And what this device answers when the failure is its own rather than the
+/// caller's, with nothing about it in the answer: a peer can do nothing about
+/// this machine's database, and the line that says which failure it was is in
+/// this machine's log.
+fn unreadable(why: &'static str) -> Response {
+    refused(StatusCode::INTERNAL_SERVER_ERROR, why)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ten minutes are the ADR's, and they are what a request is held for
+    /// rather than what a start counts from.
+    #[test]
+    fn a_request_is_held_ten_minutes() {
+        assert_eq!(HELD, Duration::from_secs(600));
+    }
+
+    /// A moment behind now has run out, and one ahead has not — the comparison
+    /// the whole expiry rests on.
+    #[test]
+    fn a_moment_behind_now_has_run_out() {
+        let now = OffsetDateTime::now_utc();
+
+        assert!(run_out(&stamp(now - HELD).unwrap(), now));
+        assert!(!run_out(&stamp(now + HELD).unwrap(), now));
+    }
+
+    /// And a moment this build cannot read is one it will not go on waiting on.
+    #[test]
+    fn a_moment_that_cannot_be_read_has_run_out() {
+        assert!(run_out("whenever", OffsetDateTime::now_utc()));
+    }
+
+    /// The path a cancel is dialled at is the route that answers it, with the
+    /// request in the one place the route takes one.
+    #[test]
+    fn a_cancel_goes_to_the_route_that_answers_it() {
+        assert_eq!(
+            CANCEL.replace("{request}", "0011223344556677"),
+            cancelling("0011223344556677"),
+        );
+    }
+}

@@ -24,6 +24,7 @@ use verkstead_render::DevicesView;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{open_database, router, router_answering_devices};
@@ -71,7 +72,12 @@ async fn app(reading: Reading) -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap();
 
     let device = Device::stated(dir.path(), THIS_DEVICE).unwrap();
-    let devices = Devices::of(device, reading, Members::recorded(pool.clone()));
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
 
     (dir, pool.clone(), router_answering_devices(pool, devices))
 }

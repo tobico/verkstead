@@ -65,17 +65,21 @@ pub mod reading;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use verkstead_render::DevicesView;
+use verkstead_store::AskedJoin;
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
 use crate::peer::Members;
+use crate::peer::dialling::Peers;
+use crate::peer::joining::Joins;
 use crate::settings::write_atomically;
 
 /// What the id's file is called inside the Data Directory, and what the
@@ -588,19 +592,56 @@ pub struct Devices {
     /// beside them, there being one membership and one answer about it. Rows in
     /// the store, read at the moment the pane asks — see [`crate::peer::Members`].
     members: Members,
+
+    /// And who it has *asked* to be linked to and not yet been answered by,
+    /// which is a row apiece under those — see [`crate::peer::joining::Joins`].
+    joins: Joins,
+
+    /// And how it reaches another device, which is what the one press in this
+    /// section goes out over: Add dials the address somebody typed and posts a
+    /// join, and Cancel dials the same address and takes it back.
+    ///
+    /// Built here out of the two handles above rather than passed in, because
+    /// there is nothing to choose: what a dial presents is this device's own
+    /// certificate and what it writes into is this device's own membership, and
+    /// both are already in hand.
+    peers: Peers,
 }
 
 impl Devices {
-    /// The list a server answers out of: what it is, the machine it is on, and
-    /// its membership.
+    /// The list a server answers out of: what it is, the machine it is on, its
+    /// membership, and the joins it is waiting on.
     ///
-    /// The same three the peer listener is built from, because they are the
-    /// same three things — what is different is who is asking.
-    pub fn of(device: Device, reading: reading::Reading, members: Members) -> Devices {
+    /// The same four the peer listener is built from, because they are the same
+    /// four things — what is different is who is asking.
+    pub fn of(
+        device: Device,
+        reading: reading::Reading,
+        members: Members,
+        joins: Joins,
+    ) -> Devices {
+        let peers = Peers::of(device.clone(), members.clone());
+
         Devices {
             device,
             reading,
             members,
+            joins,
+            peers,
+        }
+    }
+
+    /// The same, giving every dial this section makes `patience` rather than the
+    /// deadlines a running server keeps — see [`Peers::waiting`].
+    ///
+    /// For a suite standing in front of an address nothing answers at: what is
+    /// being asked there is what the press says when nobody is home, and a test
+    /// that waited out the real deadline would be spending its time on the clock
+    /// rather than on the question.
+    pub fn waiting(self, patience: std::time::Duration) -> Devices {
+        Devices {
+            peers: self.peers.waiting(patience),
+            ..self
         }
     }
 
@@ -620,7 +661,120 @@ impl Devices {
         Ok(DevicesView {
             this: self.reading.identity(&self.device).await,
             members: self.members.listed().await?,
+            pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
         })
+    }
+
+    /// **Add**: ask the device at `address` to let this one into its cluster.
+    ///
+    /// The one place on the Remote access pane where something is configured
+    /// rather than read — which is the departure Unlink makes beside it, and the
+    /// one Remove on a Repo made before either.
+    ///
+    /// **Three things happen and the third is what is left behind.** This device
+    /// says what it is; the far end writes that down as a question for its own
+    /// human and answers with what *it* is; and this device writes a pending row
+    /// naming the request, so that Cancel has something to name and the pane has
+    /// something to draw. Nothing has been agreed: no member is recorded here and
+    /// none is recorded there, and what settles it is a press on the other
+    /// machine.
+    ///
+    /// **A device cannot ask itself.** The pane shows this machine's own
+    /// addresses a few lines above the box, so typing one in is an easy mistake
+    /// and a confusing state to be left in — a modal on this workbench asking
+    /// whether to link to this workbench. It cannot be told before the dial,
+    /// there being nothing to compare until the far end has answered, so what is
+    /// done is to take the question straight back off the machine that turned
+    /// out to be this one.
+    pub(crate) async fn add(&self, address: &str) -> Result<()> {
+        let address = address.trim();
+
+        if address.is_empty() {
+            bail!("an address to ask at is the one thing Add takes");
+        }
+
+        let saying = self.reading.identity(&self.device).await;
+        let held = self.peers.join(address, &saying).await?;
+
+        if held.identity.device == self.device.id() {
+            // Taken back rather than left to run out, because the question is
+            // this device's own and it is standing in front of its own human.
+            // A cancel that cannot get through changes nothing: the request runs
+            // out on its own, which is what it was going to do anyway.
+            if let Err(why) = self
+                .peers
+                .cancel(address, &held.request, &held.identity.fingerprint)
+                .await
+            {
+                tracing::info!(%why, "a request this device made to itself could not be taken back");
+            }
+
+            bail!("{address} is this device, and a device is not linked to itself");
+        }
+
+        self.joins
+            .ask(&AskedJoin {
+                request: held.request,
+                address: address.to_owned(),
+                device: held.identity.device,
+                name: held.identity.name,
+
+                // The fingerprint met at the far end, which the answer has just
+                // been checked against — see [`Peers::join`]. What it is *for*
+                // is the dial back that answers an Allow: the machine that dials
+                // this one has to turn out to be the machine this one met.
+                fingerprint: held.identity.fingerprint,
+
+                asked_at: OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .context("saying when this device asked to link")?,
+
+                // The far end's own word for when it lets go, rather than this
+                // device's reckoning — see [`verkstead_render::JoinHeld`].
+                expires_at: held.expires,
+            })
+            .await
+    }
+
+    /// **Cancel** on a pending row, and **Dismiss** on one that has run out:
+    /// take the request back.
+    ///
+    /// **One press rather than two**, because the two are the same act seen at
+    /// two moments — the human is done with a request that has not been answered
+    /// — and which of them it is is a fact about the row rather than a choice.
+    /// What differs is only whether there is anything at the far end left to
+    /// tell: a request that has run out is one the other device has already let
+    /// go of, so nothing is dialled for it.
+    ///
+    /// **A second press is not a second thing happening.** A row this device is
+    /// not waiting on is one it has already stopped waiting on, and saying so
+    /// twice is not a failure — the stance [`verkstead_store::forget_member`]
+    /// takes, for its reason.
+    ///
+    /// **And a far end that cannot be reached does not keep the row.** The human
+    /// has said they are done with it; a row that would not go away because
+    /// somebody's laptop is shut would be the press not working. What is left
+    /// over there runs out inside the ten minutes on its own.
+    pub(crate) async fn take_back(&self, request: &str) -> Result<()> {
+        let Some(asked) = self.joins.asked(request).await? else {
+            return Ok(());
+        };
+
+        if !crate::peer::joining::run_out(&asked.expires_at, OffsetDateTime::now_utc())
+            && let Err(why) = self
+                .peers
+                .cancel(&asked.address, &asked.request, &asked.fingerprint)
+                .await
+        {
+            tracing::info!(
+                %why,
+                request = %asked.request,
+                "a cancelled request could not be taken off the device it was asked of, \
+                 which lets go of it when its ten minutes run out",
+            );
+        }
+
+        self.joins.forget(request).await
     }
 }
 
@@ -663,13 +817,18 @@ fn read_back(path: &Path) -> std::io::Result<Option<String>> {
 
 /// Sixteen bytes of the operating system's own randomness as lower-case hex.
 ///
+/// What a Device Id is, and what a pending join is named by too — see
+/// [`crate::peer::joining`]. One shape for both because they go the same places:
+/// into a URL segment, into a log line, and in front of a person reading one off
+/// a screen.
+///
 /// Hex rather than the base64 the Workbench Key is spelled in, which is the one
 /// place the two part company. The id goes into a URL segment *and* into the
 /// certificate's own subject and subject alternative name, and `_` — which the
 /// URL-safe base64 alphabet has — is not a character a host name may contain.
 /// Hex has nothing either of those has to escape, and it is the alphabet a
 /// person reading an id off a screen is least likely to mistype.
-fn invented() -> std::io::Result<String> {
+pub(crate) fn invented() -> std::io::Result<String> {
     let mut bytes = [0u8; ID_BYTES];
 
     getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;

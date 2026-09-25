@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
+use crate::joining::PendingJoin;
+
 /// One device, as it answers for itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -131,6 +133,19 @@ pub struct DevicesView {
     /// unreachable member counts like any other — it is linked, and a count
     /// that left it out would say the cluster had shrunk.
     pub members: Vec<LinkedDevice>,
+
+    /// And every join this device has asked for and not yet been answered on —
+    /// see [`PendingJoin`].
+    ///
+    /// **Beside the members rather than among them**, because a pending join is
+    /// not a device: nothing has been agreed, and a row that sat in the list
+    /// looking like a member would be a cluster this device had joined itself
+    /// to. The count on the card is the members' alone for the same reason.
+    ///
+    /// Read at the moment the pane asks, the way the members are: a request
+    /// whose ten minutes ran out a second ago reads expired on this answer and
+    /// waiting on the one before it, and both are true when they are given.
+    pub pending: Vec<PendingJoin>,
 }
 
 /// One device linked to this one: what it says it is, and whether the last dial

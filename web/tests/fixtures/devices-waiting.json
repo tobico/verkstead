@@ -1,6 +1,19 @@
 {
   "members": [],
-  "pending": [],
+  "pending": [
+    {
+      "address": "laptop.tailnet-name.ts.net",
+      "expired": false,
+      "name": "laptop",
+      "request": "1122334455667788"
+    },
+    {
+      "address": "192.168.1.31",
+      "expired": true,
+      "name": "desk",
+      "request": "8877665544332211"
+    }
+  ],
   "this": {
     "addresses": [
       "192.168.1.24",

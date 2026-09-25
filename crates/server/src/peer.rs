@@ -40,8 +40,10 @@
 //! the join post, which comes from a non-member by definition and whose
 //! certificate is pinned into the pending request it creates; and the dial-back
 //! answering a join, matched against the certificate that pending request is
-//! holding. The last two are still to come, so the list has one entry today and
-//! [`gate`] stands over everything else — asking [`Members`] of every caller,
+//! holding. The first two are here — see [`joining`], which carries the post and
+//! the cancel that takes a question back, both of them matched against that same
+//! pinned certificate — and the dial-back is still to come. [`gate`] stands over
+//! everything else — asking [`Members`] of every caller,
 //! which is rows now rather than a number nobody wrote. The refusal says what
 //! it is: a caller this device holds no membership for, rather than a path that
 //! is not there. A device posting a join has to be able to tell a Verkstead that
@@ -71,6 +73,7 @@
 //! and every address that row carries tried in the order it was advertised.
 
 pub mod dialling;
+pub mod joining;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -84,7 +87,7 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::serve::IncomingStream;
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -105,6 +108,7 @@ use x509_parser::prelude::FromDer;
 
 use crate::device::Device;
 use crate::device::reading::Reading;
+use joining::Joins;
 
 /// The port a device is dialled on when nobody has said otherwise, and the
 /// whole of what an operator has to open on a firewall for linking to work.
@@ -261,11 +265,14 @@ impl Listener {
 /// Everything this listener answers: the un-gated surface, with everything
 /// else behind [`gate`].
 ///
-/// One route stands outside it for now — the identity endpoint, which is
-/// nobody's, which is why a device nothing has heard of can read it. The join
-/// and the dial-back that answers one come out here beside it when there is a
-/// pending join for either to be matched against; a member's relayed traffic
-/// goes the other way, inside [`members_only`] with the gate over it.
+/// Three routes stand outside it. The identity endpoint, which is nobody's,
+/// which is why a device nothing has heard of can read it; the join post, which
+/// comes from a device this one holds no membership for, that being what a join
+/// is; and the cancel that takes a join back, which comes from the same device
+/// and is matched against the same pinned certificate — see [`joining`]. The
+/// dial-back that answers an Allow comes out here beside them in the task that
+/// adds it. A member's relayed traffic goes the other way, inside
+/// [`members_only`] with the gate over it.
 ///
 /// **What is not a route is refused rather than missed**, because the gate is
 /// the fallback: a path nothing here answers is one this caller has no
@@ -273,10 +280,23 @@ impl Listener {
 /// endpoints existed would be telling a stranger what to reach for. That is
 /// the Workbench Key's own arrangement, where a path under `/api/` that no
 /// route answers is refused at the gate rather than missed at the fallback.
-pub fn router(device: Device, reading: Reading, members: Members) -> Router {
+pub fn router(device: Device, reading: Reading, members: Members, joins: Joins) -> Router {
     Router::new()
         .route(IDENTITY, get(identity))
-        .with_state(Answering { device, reading })
+        .with_state(Answering {
+            device: device.clone(),
+            reading: reading.clone(),
+        })
+        .merge(
+            Router::new()
+                .route(joining::JOIN, post(joining::join))
+                .route(joining::CANCEL, post(joining::cancel))
+                .with_state(joining::Holding {
+                    device,
+                    reading,
+                    joins,
+                }),
+        )
         .fallback_service(members_only(Router::new(), members))
 }
 
