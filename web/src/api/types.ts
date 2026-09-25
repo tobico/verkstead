@@ -1885,7 +1885,48 @@ device: string,
  * phone while another reads off a screen — which is why it is spelled the
  * way every other tool spells one.
  */
-fingerprint: string, };
+fingerprint: string, 
+/**
+ * What this device is *shown* under: the hostname of the machine it is on,
+ * read at the moment this is answered.
+ *
+ * Nothing is configured and nothing is typed. A name somebody could set
+ * would be a name two devices could be given, and what a device is *named
+ * by* is the id above — which was invented precisely because neither the
+ * hostname nor the tailnet node name can be relied on to be anybody's
+ * alone.
+ *
+ * A machine that will not say what it is called reads *this machine*,
+ * which is what the one other sentence naming this box already falls back
+ * to.
+ */
+name: string, 
+/**
+ * And the word for the operating system it is running, which is what
+ * draws the icon beside the name.
+ *
+ * **A WSL reads *Linux (WSL)*, and that is the whole reason this is
+ * here.** A Windows machine and the WSL on it share a hostname, so the
+ * name cannot tell the two apart and this is the only thing that can —
+ * which is the setup cluster mode was written for. Everywhere else it is
+ * the platform's own spelling of itself: *Linux*, *macOS*, *Windows*.
+ */
+os: string, 
+/**
+ * And every address a peer could reach this device on, in the order one
+ * should try them: the tailnet name and its addresses first where
+ * Tailscale is up, then the LAN addresses.
+ *
+ * **All of them, read at each answer rather than configured.** A laptop
+ * moves between the LAN and the tailnet and DHCP moves everybody, so the
+ * address somebody typed to link two devices is only the first one ever
+ * known — this list is what keeps a device that moved reachable.
+ *
+ * Empty is a device on neither a tailnet nor a network, which is an answer
+ * rather than a failure: it still has an id and a fingerprint, and those
+ * are what somebody looking at this is comparing.
+ */
+addresses: Array<string>, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the

@@ -1574,7 +1574,18 @@ pub async fn run_on_keyed(
     // gated on is empty and read from nowhere: this build has no join to make
     // a member with, so the identity endpoint is the whole of what anybody
     // reaches and everything else is refused for not being a member's.
-    let peers = peer::router(device, peer::Members::none());
+    let peers = peer::router(
+        device,
+        // And the machine it is on, read at each answer rather than held from
+        // here: the hostname this device is shown under, the word for its OS,
+        // and every address a peer could reach it on — see [`device::reading`].
+        // Its own `tailscale` handle, because the tailnet half of those
+        // addresses is the same `status --json` the Remote access pane stands
+        // on; the port it is built with is the one the workbench bound, which
+        // is nothing this reading asks about.
+        device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port())),
+        peer::Members::none(),
+    );
 
     // The workbench and the peer listener together, and on Windows the named
     // pipe beside them: everything a request can ask for over the socket it can

@@ -27,12 +27,21 @@
 //! Written atomically at the same mode, whatever is already there read back,
 //! and a fresh one written only where there is nothing.
 //!
+//! **And what a device is *like* is read rather than kept** — see [`reading`],
+//! which is the other half of an identity: the hostname this machine answers
+//! to, the word for the operating system it is running, and every address a
+//! peer could reach it on. None of those is invented and none is written down,
+//! because none of them is a fact about this install that outlives a request:
+//! a laptop moves between the LAN and the tailnet, and DHCP moves everybody.
+//!
 //! **The validity is said here rather than taken from the crate.** Ninety days,
 //! written down in [`VALIDITY`]. An expired certificate is refused at the
 //! handshake, so the number decides when every link in a cluster would go down
 //! together if nothing renewed it — which is exactly why a default accepted
 //! without looking was the thing ADR-0020 ruled out, along with a validity long
 //! enough never to matter.
+
+pub mod reading;
 
 use std::path::{Path, PathBuf};
 

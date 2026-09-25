@@ -24,13 +24,26 @@ base64.workspace = true
 clap.workspace = true
 # The random half of a Conversation's prefilled branch name.
 getrandom.workspace = true
-# What this machine calls itself, for the one sentence that has to name it: the
-# install run's status line, which says whose screen the password dialog is on.
-# The reader may be on a phone on the tailnet, so *this machine* would name
-# nothing. A crate rather than a syscall because the call is a different one on
-# each platform and the answer is one string — `set` is off, nothing here
-# renames anything.
+# What this machine calls itself, which two things name it out of: the install
+# run's status line, which says whose screen the password dialog is on — the
+# reader may be on a phone on the tailnet, so *this machine* would name nothing
+# — and what a device is shown under in a cluster (ADR 0020). One reading for
+# both, in `src/platform.rs`. A crate rather than a syscall because the call is
+# a different one on each platform and the answer is one string — `set` is off,
+# nothing here renames anything.
 hostname = { version = "0.4", default-features = false }
+# This machine's own interfaces, which is the LAN half of the addresses a device
+# advertises (ADR 0020) — see `src/device/reading.rs`. A crate for the reason
+# `hostname` above is one: enumerating them is `getifaddrs` on a Unix and
+# `GetAdaptersAddresses` on Windows, and this is those two behind one call. No
+# socket is opened and nothing is probed — what it reads is what the kernel
+# already knows. It brings nothing new into the build: `libc` and `windows-sys`
+# are the two crates under it and the tree already carries both.
+#
+# Default features, which is that set: `link-local` is off, and what it would
+# add is exactly what this must not advertise — an address no peer off this
+# machine's own link could ever reach.
+if-addrs = "0.15"
 # The watcher behind the `files` Nudge: the Worktrees a Code pane is drawn over,
 # followed while it is attached (ADR 0019) — see `src/watchers.rs`. Each
 # platform's own mechanism rather than a poll, which is the whole reason for a

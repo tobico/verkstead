@@ -30,6 +30,13 @@
 //! `%USERPROFILE%` on Windows, which no `$HOME` on a Windows machine says
 //! anything about.
 //!
+//! **And two things about the machine that are not directories at all**: what
+//! it calls itself, and what its operating system is called. They are here
+//! because each has two readers and one place to be read in — see [`hostname`],
+//! which the install run's status line and this device's own identity both name
+//! a machine out of, and [`os_word`], which is a reading of [`Platform`] itself
+//! and so belongs beside the enum it reads.
+//!
 //! **By hand rather than by crate.** `dirs` would answer Linux and macOS out of
 //! the same environment variables this does, and then answer Windows through a
 //! Win32 known-folder call — which this CI cannot compile, let alone run, until
@@ -87,7 +94,121 @@ impl Platform {
     } else {
         Platform::Linux
     };
+
+    /// What this platform is called where a person reads it: the word beside a
+    /// device's name in the **Devices** list, and the word its identity
+    /// endpoint answers with (ADR-0020).
+    ///
+    /// Each platform's own spelling rather than a house style — `macOS` is how
+    /// Apple writes it and `macos` is how a `cfg` does, and the one that goes
+    /// on a screen is the one the people whose machine it is would write.
+    ///
+    /// Not the whole of the reading: a Linux may be a WSL, which is the one
+    /// case where the word is not the platform's alone — see [`os_word`], which
+    /// is what everything outside this module calls.
+    fn word(self) -> &'static str {
+        match self {
+            Platform::Linux => LINUX,
+            Platform::MacOs => "macOS",
+            Platform::Windows => "Windows",
+        }
+    }
 }
+
+/// What a machine calls itself when it will not say, and what [`hostname`]
+/// falls back to.
+///
+/// The sentence it first went in is *waiting for the password dialog on …*, so
+/// what stands in for a name is the thing that sentence is pointing at — and a
+/// device drawn under it reads the same way, this machine being the one whose
+/// **Devices** row it is.
+pub const NAMELESS: &str = "this machine";
+
+/// What this box calls itself, or [`NAMELESS`] where it will not say.
+///
+/// **One reading for the two things that name this machine.** The install run's
+/// status line says whose screen a password dialog is on — see
+/// [`crate::onboarding`], which reads this at the edge with everything else
+/// about the machine and never again — and a device's identity endpoint answers
+/// what this device is *shown* under, which is this same hostname (ADR-0020).
+/// Nothing is configured and nothing is typed in either of them, so a second
+/// reading written somewhere else would be a second answer to one question.
+///
+/// A crate rather than a syscall because the call is a different one on each
+/// platform and the answer is one string — `set` is off, nothing here renames
+/// anything.
+pub fn hostname() -> String {
+    hostname::get()
+        .ok()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| NAMELESS.to_owned())
+}
+
+/// The word for the platform a device is on, which is the platform's own
+/// everywhere but under WSL.
+///
+/// **A WSL reads *Linux (WSL)*, and that is what this exists for.** A Windows
+/// machine and the WSL on it share a hostname, so the name cannot tell the two
+/// apart and the OS is the only thing that can — which is the setup the whole
+/// of cluster mode was written for (ADR-0020). A WSL that read plainly *Linux*
+/// would be a **Devices** list with two rows nobody could tell apart.
+///
+/// `kernel_release` is what the kernel calls itself, and `None` is every
+/// platform that has no such reading — see [`kernel_release`]. It is passed
+/// rather than read here so that every arm of this is an ordinary unit test on
+/// whatever machine the suite is on: what a Linux runner would answer about
+/// itself is the one answer a test of this must not stand on.
+pub fn os_word(platform: Platform, kernel_release: Option<&str>) -> String {
+    let wsl = platform == Platform::Linux
+        && kernel_release.is_some_and(|release| release.to_lowercase().contains(MICROSOFT));
+
+    match wsl {
+        true => format!("{LINUX} (WSL)"),
+        false => platform.word().to_owned(),
+    }
+}
+
+/// What the kernel on this machine calls itself, where it is a machine that
+/// says: the release string, which under WSL has Microsoft's own name in it.
+///
+/// Linux and nothing else. The other two platforms have no such file and no WSL
+/// to find with it, and a `uname` run on them would be a process started to be
+/// ignored.
+///
+/// Nothing where the file is not there or will not read, which is a Linux that
+/// will not say what kernel it is running — and a Linux is what it would have
+/// read as anyway: the detection is the whole of what this is for, and a
+/// missing answer is not one.
+pub fn kernel_release() -> Option<String> {
+    if Platform::HERE != Platform::Linux {
+        return None;
+    }
+
+    std::fs::read_to_string(KERNEL_RELEASE)
+        .ok()
+        .map(|release| release.trim().to_owned())
+}
+
+/// The word the two Linux readings share, said once so that *Linux (WSL)* is
+/// that same word with a parenthesis after it rather than a second spelling of
+/// it.
+const LINUX: &str = "Linux";
+
+/// Where Linux keeps the kernel release, which is the one file that says
+/// whether this is a WSL.
+///
+/// `/proc` rather than `uname`, for the reason the distribution is read out of
+/// `/etc/os-release` rather than out of a command — see [`crate::onboarding`]:
+/// a file is read without a process being started, and this one is read on the
+/// way to answering a request.
+const KERNEL_RELEASE: &str = "/proc/sys/kernel/osrelease";
+
+/// What a WSL kernel release has in it and no kernel anybody else builds does:
+/// Microsoft's own name, in whatever case that release spells it — WSL1 writes
+/// `Microsoft` and WSL2 writes `microsoft-standard-WSL2`, so the comparison is
+/// made on a lowered copy of both.
+const MICROSOFT: &str = "microsoft";
 
 /// The environment values the platform directories are resolved out of, as they
 /// were read: nothing here has been judged yet, because which of them is worth
@@ -409,6 +530,49 @@ fn set(value: Option<&Path>) -> Option<&Path> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a WSL2 kernel calls itself, and what a WSL1 one does — the two
+    /// spell Microsoft's name differently, and neither of them is the word
+    /// this comparison is written in.
+    const WSL2: &str = "5.15.167.4-microsoft-standard-WSL2";
+    const WSL1: &str = "4.4.0-19041-Microsoft";
+
+    /// And what an ordinary Linux kernel calls itself, which has nothing of the
+    /// kind in it.
+    const ORDINARY: &str = "6.6.87.2-generic";
+
+    #[test]
+    fn a_wsl_reads_as_one() {
+        assert_eq!(os_word(Platform::Linux, Some(WSL2)), "Linux (WSL)");
+        assert_eq!(
+            os_word(Platform::Linux, Some(WSL1)),
+            "Linux (WSL)",
+            "the first WSL spelled it with a capital, and the release is compared \
+             lowered for that reason",
+        );
+    }
+
+    #[test]
+    fn every_other_machine_reads_as_its_own_platform() {
+        assert_eq!(os_word(Platform::Linux, Some(ORDINARY)), "Linux");
+        assert_eq!(
+            os_word(Platform::Linux, None),
+            "Linux",
+            "a Linux that will not say what kernel it is running is a Linux, which \
+             is what it would have read as anyway",
+        );
+        assert_eq!(os_word(Platform::MacOs, None), "macOS");
+        assert_eq!(os_word(Platform::Windows, None), "Windows");
+    }
+
+    /// The kernel release is only ever a Linux's, so a Windows carrying one
+    /// that mentions Microsoft — which every Windows would — is still a
+    /// Windows rather than a WSL.
+    #[test]
+    fn only_a_linux_can_be_a_wsl() {
+        assert_eq!(os_word(Platform::Windows, Some(WSL2)), "Windows");
+        assert_eq!(os_word(Platform::MacOs, Some(WSL2)), "macOS");
+    }
 
     /// An environment holding `home` and nothing else, which is what a Unix
     /// machine that has never heard of XDG has.

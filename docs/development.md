@@ -52,13 +52,23 @@ route on it is the identity endpoint, which anybody may read —
 
 ```console
 $ curl -k https://127.0.0.1:8423/api/peer/v1/identity
-{"device":"86f1933fecb070cbee865fbb84819d14","fingerprint":"3F:0A:…"}
+{"device":"86f1933fecb070cbee865fbb84819d14","fingerprint":"3F:0A:…","name":"workbench",
+ "os":"Linux","addresses":["workbench.tailnet-name.ts.net","100.64.0.1","192.168.1.24"]}
 ```
 
 `-k` because the certificate is self-signed and made out to the device id
 rather than to an address: in a cluster what proves the far end is that
 fingerprint compared against the one the other machine printed, and there is no
 certificate authority anywhere in it to check a chain against.
+
+The three after the fingerprint are read off the machine as that request is
+answered rather than configured anywhere: `name` is the hostname, `os` is the
+platform's own word — a WSL reads `Linux (WSL)`, a Windows machine and the WSL
+on it sharing a hostname — and `addresses` is everywhere a peer could reach this
+device, the tailnet name and address first where Tailscale is up and the LAN
+behind them. Ask it again from another machine on the same tailnet and it says
+the same thing; ask it off a laptop that has moved and the addresses have
+moved with it.
 
 Every other path on that port answers `403` and says so, whatever you present
 and whether or not a route answers it: everything but the identity endpoint is

@@ -548,9 +548,9 @@ certificate's own bytes as upper-case hex in colon-separated pairs, which is
 what every other tool prints of the same certificate. That is what it is for —
 two people, one reading off a phone and one off a screen, checking that the
 device being linked is the device being offered.
-**What it is shown under is its hostname**, read at each start, with an icon for
-its OS. A WSL reads *Linux (WSL)*, because a Windows machine and its WSL share a
-hostname and the OS is what tells them apart.
+**What it is shown under is its hostname**, with an icon for its OS and the
+addresses it can be reached on beside it — the **Device Reading**, which is read
+off the machine as it is answered rather than kept anywhere.
 **The startup line names it**: `device=` and `fingerprint=` beside the listen
 address and the **Data Directory**, which is where an operator reads either of
 them off a machine.
@@ -569,6 +569,31 @@ Windows machine and its WSL answering to one. Which is why the id is invented
 rather than read off the machine: what a device is *called* can change and can
 be shared, and what a device is *named by* can do neither.
 _Avoid_: name (which is the hostname a device is shown under), uuid, serial
+
+**Device Reading**:
+What a **Device** says about the machine it is on, as against what it *is*:
+its **name**, its **OS** and its **addresses**. None of the three is
+configured, none is typed, and none is written down — they are read at the
+moment the identity endpoint answers, because a laptop moves between the LAN
+and the tailnet and DHCP moves everybody.
+**The name is the hostname**, the same reading the install run's status line
+names a machine by, and a machine that will not say what it is called reads
+*this machine*.
+**The OS is the platform's own word** — *Linux*, *macOS*, *Windows* — except
+under WSL, which reads ***Linux (WSL)*** and is detected from the kernel
+release. That case is the reason the reading exists at all: a Windows machine
+and the WSL on it share a hostname, so the OS is the only thing that tells the
+two rows apart.
+**The addresses are every one a peer could try, in the order to try them**: the
+tailnet name and its addresses first where Tailscale is up, then the LAN
+addresses, with the loopback and the link-local left out and the tailnet
+address not named twice for being on an interface as well. A machine with no
+Tailscale, or one whose daemon is not up, answers with its LAN addresses rather
+than failing — and a device on neither a tailnet nor a network still answers,
+having an id and a fingerprint, which is what somebody typing an address by
+hand is looking at. The address typed at link time is only the first one ever
+known: this list is what keeps a device that moved reachable.
+_Avoid_: device info, device metadata, machine details, the device's profile
 
 **Peer Listener**:
 The second listener, and the one another **Device** dials: TLS on every
@@ -598,7 +623,8 @@ holds the key that signed it; what it means is a per-route question.
 `/api/peer/v1/identity`: the **Device Id** and the fingerprint of the
 certificate the handshake just presented, so that a caller can check the device
 naming itself is the device that presented and a human can compare the
-fingerprint by eye. It asks for no certificate at all, which is what makes
+fingerprint by eye — and the **Device Reading** beside them, which is what says
+which machine that is and where else it could have been dialled. It asks for no certificate at all, which is what makes
 linking possible — the human types an address, and what comes back is the device
 they are about to link to, before anything has been agreed between the two
 machines.
