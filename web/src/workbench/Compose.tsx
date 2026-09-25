@@ -139,6 +139,7 @@ import {
   BranchField,
   CompanionChoice,
   ForRepo,
+  ProcessPicker,
   ProfileChoices,
   RULE,
   RepoChoice,
@@ -832,6 +833,23 @@ function Compose(props: {
                 )}
               </RepoOptions>
             </Show>
+
+            {/* Then what kind of work it is, which is the same question asked
+                before there is a record for an answer to be about — and the one
+                field in this row that is *not* remembered per repo: the
+                pairings are the same answer most of the time, and a Process is
+                the one thing about a Conversation likeliest to differ from the
+                last. So it stands on Develop for every repo, and a picker left
+                on it sends nothing when this is created.
+
+                Settled over a loaded pull request, the way the Repo above it
+                is: what a take-up makes is a Review, which is what the
+                Conversation *is* rather than anything picked here. */}
+            <ProcessPicker
+              chosen={pull() !== null ? "Review" : state().process ?? "Develop"}
+              disabled={make.isPending || pull() !== null}
+              pick={(picked) => change({ process: picked })}
+            />
 
             {/* And the three accounts, one trigger each — the same three
                 questions, asked before there is a record for an answer to be

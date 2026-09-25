@@ -29,6 +29,7 @@
    readable width, so a narrow one puts what is left over on the next line. */
 .repoOption,
 .repoSelect,
+.processChoice,
 .profileChoice {
   flex: 1 1 9rem;
   min-width: 0;
@@ -105,6 +106,7 @@
    What either does under the pointer is left alone, that being the only thing
    saying a borderless trigger can be pressed. */
 .optionPick > button,
+.processPick > button,
 .repoSelectPick > button {
   padding: 0 0.6rem 0.15rem;
   background: none;
@@ -126,6 +128,14 @@
 .optionPick > [role="listbox"] {
   min-width: 30rem;
   max-width: min(40rem, calc(100vw - 2.5rem));
+}
+
+/* And the Process control, whose rows are one word apiece: it asks for the
+   readable width the repo names do rather than the pairings' double one, which
+   is a width measured for "Claude Code Fable 5 — Work". */
+.processPick > [role="listbox"] {
+  min-width: 12rem;
+  max-width: min(20rem, calc(100vw - 2.5rem));
 }
 
 /* The Repo control before there is a repo, which is a listbox where the picked
@@ -324,6 +334,7 @@
 .baseBranch .failure,
 .addCompanion .failure,
 .repoSelect .failure,
+.processChoice .failure,
 .profileChoice .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -373,6 +384,8 @@
 .repoOption > button:focus-visible,
 .optionPick > button:focus-visible,
 .optionPick > button[aria-expanded="true"],
+.processPick > button:focus-visible,
+.processPick > button[aria-expanded="true"],
 .repoSelectPick > button:focus-visible,
 .repoSelectPick > button[aria-expanded="true"] {
   outline: none;
@@ -381,6 +394,7 @@
 
 .repoOption > button:focus-visible .optionLabel,
 .optionPick > button:focus-visible .optionLabel,
+.processPick > button:focus-visible .optionLabel,
 .repoSelectPick > button:focus-visible .optionLabel {
   color: var(--ink);
 }

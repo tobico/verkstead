@@ -2,21 +2,21 @@
 //! drawn along the bottom edge of the box the Brief is written in.
 //!
 //! The branch the work will be done on, the branch it will come off, the other
-//! repos it works alongside, and the pairings its sessions run under. Every
-//! one of them is a fact about the Conversation rather than about any one Event,
-//! and every one of them is the human's to change for as long as it is still
-//! drafting.
+//! repos it works alongside, what kind of work it is, and the pairings its
+//! sessions run under. Every one of them is a fact about the Conversation
+//! rather than about any one Event, and every one of them is the human's to
+//! change for as long as it is still drafting.
 //!
 //! **A row of options rather than a form under the Brief.** Setting a
 //! Conversation up and kicking it off are one act, and the act is written in
-//! one box — so the whole of the setup is four dropdowns inside that box's
+//! one box — so the whole of the setup is five dropdowns inside that box's
 //! bottom edge, each a dimmed label over its value, and what a reader takes off
-//! them at a glance is the sentence *this repo, these three accounts*. The
-//! panel behind the first of them is where the rest of it lives: the branch,
-//! the base and the companion repos are all answers to *which code*, and one
-//! trigger for the four of them is what keeps the row down to what it says. See
-//! [`Composer`](./Composer.tsx) for the box, and [`SetupNotes`] for what the
-//! setup has to say that is not a control.
+//! them at a glance is the sentence *this repo, this kind of work, these three
+//! accounts*. The panel behind the first of them is where the rest of it lives:
+//! the branch, the base and the companion repos are all answers to *which
+//! code*, and one trigger for the four of them is what keeps the row down to
+//! what it says. See [`Composer`](./Composer.tsx) for the box, and
+//! [`SetupNotes`] for what the setup has to say that is not a control.
 //!
 //! Once grilling starts none of this is drawn at all: the server freezes every
 //! one of them at that moment, so nothing taken away was still actionable, and
@@ -65,6 +65,7 @@ import {
   listBranches,
   listProfiles,
   listRepos,
+  pickProcess,
   removeCompanion,
   renameBranch,
   renameCompanionBranch,
@@ -85,6 +86,8 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
+  Process,
+  ProcessPicked,
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
@@ -97,6 +100,7 @@ import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { AUTOMATIC, chosen } from "./naming";
+import { OFFERED, PROCESS } from "./processes";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -120,6 +124,21 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
   HoldingPullRequest:
     "The pull request being wrapped up is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
+};
+
+/// And saying what kind of work it is.
+///
+/// The first three are the Repo switch's own two questions said again, because
+/// they are the same two: a Conversation with a worktree is not one a dropdown
+/// rewrites. The fourth is a refusal of a different kind — nothing about *this*
+/// Conversation is wrong, and nothing the human does makes that Process
+/// pickable, so what it says is what they are waiting on.
+export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
+  Picked: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The branch exists by now, so what kind of work this is has been settled.",
+  NotLanded: "Verkstead cannot run that process yet.",
 };
 
 /// And a base branch.
@@ -198,6 +217,12 @@ export function Setup(props: {
           *which code*, and a row of four separate triggers for them would be a
           row about one repository read as four things. */}
       <RepoOption conversation={props.conversation} />
+
+      {/* Then what kind of work it is, which is what the accounts under it are
+          asked in service of: which roles a Conversation uses is its Process's,
+          so the Process is read before them and after the repository it is
+          about. */}
+      <ProcessOption conversation={props.conversation} />
 
       {/* And the three accounts, one trigger each. */}
       <Profiles conversation={props.conversation} />
@@ -655,6 +680,122 @@ export function RepoChoice(props: {
     </div>
   );
 }
+
+/// What kind of work this Conversation is for, on a Conversation: the pick
+/// saves itself the moment it is touched, the way the pairings beside it do.
+///
+/// Drawn whatever state the round is in, [`RepoOption`]'s reason — once the
+/// branch is cut the server refuses the press and the control says so by being
+/// disabled, because which Process the work is is still a fact worth reading.
+/// And disabled for a second reason the repo picker is disabled for: a
+/// Conversation that took a pull request up *is* a Review, which is what the
+/// take-up made it rather than anything a dropdown here chose.
+function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<ProcessPicked | null>(null);
+
+  const say = useMutation(() => ({
+    mutationFn: (picked: Process) =>
+      pickProcess(props.conversation.id, picked),
+    onSuccess: (outcome: ProcessPicked) => {
+      if (outcome !== "Picked") {
+        setRefused(outcome);
+        // Refused about the Conversation the pick was about: reading it again
+        // is both the correction — the control goes back to the Process the
+        // record says — and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  /// Whether the branch has been cut, which is [`RepoOption`]'s own reading of
+  /// the same fact: a worktree is made with the branch and forgotten only by
+  /// closing.
+  const branched = () => props.conversation.worktree !== null;
+
+  /// And whether the Process was settled by the pull request this Conversation
+  /// is holding rather than by anybody's pick.
+  const holding = () => props.conversation.adopting_pull_request !== null;
+
+  return (
+    <ProcessPicker
+      chosen={props.conversation.process}
+      disabled={branched() || holding() || say.isPending}
+      pick={(picked) => say.mutate(picked)}
+    >
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {PROCESS_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={say.isError}>
+        <ErrorLine class={styles.failure}>
+          The process could not be picked: {say.error?.message}
+        </ErrorLine>
+      </Show>
+    </ProcessPicker>
+  );
+}
+
+/// The control itself: one option of the row, *Process* as its label and what
+/// kind of work this is as its value.
+///
+/// Presentational and shared, for [`RepoOptions`]'s reason — the compose page
+/// asks the same question before there is a Conversation for an answer to be
+/// about. What a pick *does* is the caller's, and so is everything said under
+/// it.
+///
+/// One row for now. Which Processes it offers is [`OFFERED`]'s, and the server
+/// keeps the other list — a Process is offered only once its stage has landed,
+/// as an agent type is offered only once it can launch the real thing.
+export function ProcessPicker(props: {
+  chosen: Process;
+  pick: (picked: Process) => void;
+  disabled?: boolean;
+  /// What the caller has to say under it — the refusals above all, which are
+  /// facts about the caller's record rather than about this control.
+  children?: JSX.Element;
+}): JSX.Element {
+  /// The rows, and whatever is chosen wherever the list does not hold it —
+  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation that took
+  /// a pull request up reads *Review*, which cannot be picked until its own
+  /// stage lands, and a control showing nothing there would be the row missing
+  /// the one thing that tells a Review apart.
+  const options = (): Process[] =>
+    OFFERED.includes(props.chosen) ? OFFERED : [props.chosen, ...OFFERED];
+
+  return (
+    <div class={styles.processChoice}>
+      {/* A [`Listbox`] rather than a `<select>`, for the reason every other
+          control in this row is one: what is shown and what would be sent
+          cannot come apart, and a native control in the composer box would be
+          the one thing in it drawn as a form. The label goes inside the handle
+          as the pairings' do — a dimmed word over its value, and the pair of
+          them one thing to press. */}
+      <Listbox
+        id="conversation-process"
+        class={styles.processPick}
+        heading={{ words: "Process", class: styles.optionLabel }}
+        options={options()}
+        value={(process) => process}
+        label={(process) => PROCESS[process]}
+        chosen={props.chosen}
+        disabled={props.disabled}
+        pick={(picked) => props.pick(picked as Process)}
+      />
+
+      {props.children}
+    </div>
+  );
+}
+
 /// What a Rust repository loses on a server with no sccache: the compiling.
 ///
 /// Drawn only where all three hold — the repository is a Cargo workspace, the
