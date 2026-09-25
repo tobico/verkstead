@@ -82,6 +82,15 @@
             nixosSystem = nixpkgs.lib.nixosSystem;
             system = pkgs.stdenv.hostPlatform.system;
           };
+          # And the peer listener's two options, whose other half is the same
+          # kind of question: a machine is booted with its firewall open or
+          # shut and never both, so what an `openFirewall = false` host is left
+          # with is asked of the evaluation rather than of a second VM.
+          module-peer = pkgs.callPackage ./nix/module-peer.nix {
+            module = self.nixosModules.verkstead;
+            nixosSystem = nixpkgs.lib.nixosSystem;
+            system = pkgs.stdenv.hostPlatform.system;
+          };
         }
       );
 

@@ -631,6 +631,12 @@ machines.
 **Two Verksteads on one machine want a port each**, as they want a `--listen`
 each: an address somebody else is already on refuses the start rather than
 letting a server come up answering half of what it promised.
+**On NixOS it is an option and a firewall rule**: `peerListen` beside `listen`
+in the module, and `openFirewall` on by default, which opens the port that
+option named and nothing else. A NixOS host firewalls by default, so a module
+that left it shut would ship a listener nothing could reach — which is a linking
+that cannot happen, with nothing on either machine saying why. A host that says
+its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
