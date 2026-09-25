@@ -17649,6 +17649,36 @@ describe("the configuration on the brief's pane", () => {
     expect(configuration().Process).toBe("Review");
   });
 
+  /// And a fact per role that Process is run under, off the same table the
+  /// composer draws its pickers from: a Review never grills, so a pane reading
+  /// out who would have grilled it would be naming the account of a session
+  /// that will not exist — beside a composer that has stopped asking for one.
+  it("names only the roles the process is run under", async () => {
+    theGrillingStanding({ process: "Review" });
+    await openBrief(GRILLING);
+
+    await waitFor(() =>
+      expect(configuration().Implementation).toBe("Claude Code Opus 5 — opus"),
+    );
+    expect(configuration().Review).toBe("Claude Code Sonnet 5 — sonnet");
+
+    expect(uses("Review", "grilling")).toBe(false);
+    expect(Object.keys(configuration())).not.toContain("Grilling");
+  });
+
+  /// And all three under Develop, which is the Process every draft gets while
+  /// it is the only one offered.
+  it("names all three where the process uses all three", async () => {
+    theGrillingStanding({ process: "Develop" });
+    await openBrief(GRILLING);
+
+    await waitFor(() =>
+      expect(Object.keys(configuration())).toEqual(
+        expect.arrayContaining(["Grilling", "Implementation", "Review"]),
+      ),
+    );
+  });
+
   /// A profile chosen before models were paired beside them is half a choice,
   /// and the pane says the half there is: the backend and the account, with no
   /// model invented for it. The name is said whatever the list holds — with no
