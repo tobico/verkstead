@@ -19,6 +19,6 @@ Roadmap stage: [01: Process on the record](docs/roadmaps/processes/01-process-on
 
 ## Tasks
 
-- [ ] 01: The Process on the record — [details](01-the-record.md)
+- [x] 01: The Process on the record — [details](01-the-record.md)
 - [ ] 02: The word on the wire, and where it is read back — [details](02-the-word-on-the-wire.md)
 - [ ] 03: The picker, drawn twice — [details](03-the-picker.md)
