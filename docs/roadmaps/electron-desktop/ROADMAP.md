@@ -27,7 +27,7 @@ platform takes its release leg, and 08 retires it only once none is left.
 
 ## Stages
 
-- [ ] 01: The sidecar flag — [brief](01-sidecar-flag.md) *(in progress: `roadmaps/electron-desktop/01-sidecar-flag`)*
+- [x] 01: The sidecar flag — [brief](01-sidecar-flag.md)
 - [ ] 02: The Electron shell — [brief](02-electron-shell.md)
 - [ ] 03: Tray, close policy and the Desktop page — [brief](03-tray-and-desktop-page.md)
 - [ ] 04: Client-side decorations — [brief](04-decorations.md)
