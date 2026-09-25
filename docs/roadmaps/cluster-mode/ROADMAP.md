@@ -26,7 +26,7 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 
 ## Stages
 
-- [ ] 01: Device identity and the peer listener — [brief](01-device-identity-and-the-peer-listener.md) *(in progress: `roadmaps/cluster-mode/01-device-identity-and-the-peer-listener`)*
+- [x] 01: Device identity and the peer listener — [brief](01-device-identity-and-the-peer-listener.md)
 - [ ] 02: Linking — [brief](02-linking.md)
 - [ ] 03: Discovery — [brief](03-discovery.md)
 - [ ] 04: The relay — [brief](04-the-relay.md)
