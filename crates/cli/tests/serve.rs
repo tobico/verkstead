@@ -784,6 +784,182 @@ fn the_startup_line_carries_a_link_that_lands_logged_in() {
     );
 }
 
+/// And `--desktop` is the install whose line does not carry it: the app that
+/// started this sidecar read the key out of the Data Directory and opened its
+/// own window on the link before the server was up, so the line names the
+/// address alone and the secret stays out of a log file a menu item opens
+/// (ADR-0015, as amended; ADR-0020).
+///
+/// The key is kept off that line rather than hidden. It is in its own file in
+/// the Data Directory the same line names, at the mode it has always had, which
+/// is where the app reads it from and where a human who ran this by hand reads
+/// it too — so a browser that has been there is in at the address that *was*
+/// logged.
+#[test]
+fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("sidecar");
+    let port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--desktop",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[],
+    );
+
+    // The key out of the file in the Data Directory, which is the whole of how
+    // anything under the app comes to hold one — and read back through the
+    // server's own reader, so a key this test had invented for itself would open
+    // nothing.
+    let key = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the server writes its key as it starts");
+
+    let landed = ureq::get(format!("{}/api/ui/repos", serving.url))
+        .header("Cookie", key.cookie())
+        .call()
+        .expect("the workbench is served under the flag as it is without it");
+
+    assert_eq!(
+        landed.status().as_u16(),
+        200,
+        "the key in {} is the running server's, which is what the app opens its \
+         window with",
+        key.path().display()
+    );
+
+    let logged = uncoloured(&serving.stop());
+
+    assert_eq!(
+        workbench_field(&logged),
+        serving.url,
+        "the sidecar's line names the workbench address alone, got:\n{logged}"
+    );
+    assert!(
+        !logged.contains(&key.secret()),
+        "and the key is nowhere in what it logged, got:\n{logged}"
+    );
+}
+
+/// What the startup line said the workbench is: the whole login link where that
+/// line is the handing over, and the address alone where the caller has already
+/// done it.
+///
+/// The field rather than a substring of the line, because one of the two answers
+/// is a prefix of the other: an address and the same address with a key on it
+/// both `contains` the address.
+fn workbench_field(logged: &str) -> String {
+    logged
+        .split("workbench=")
+        .nth(1)
+        .unwrap_or_else(|| panic!("the startup line says what the workbench is, got:\n{logged}"))
+        .split_whitespace()
+        .next()
+        .expect("a field with a value")
+        .to_owned()
+}
+
+/// And the flag changes the line and nothing else: what the app's sidecar serves
+/// is what `verkstead serve` serves, from the same binary an agent then asks
+/// with.
+///
+/// Every request here holds the key the server wrote into its Data Directory,
+/// which is the one the app reads out of that file — see
+/// [`Serve::cookie`].
+#[test]
+fn a_desktop_run_serves_the_workbench_and_answers_an_ask() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("sidecar");
+    let port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--desktop",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[],
+    );
+
+    let conversation = serving.asking_from(&repo_with_a_commit(tmp.path()));
+
+    let waiting = ask(&serving, conversation, tmp.path());
+    serving.await_answer(conversation, 1, ANSWER);
+
+    let output = waiting.wait_with_output().unwrap();
+    eprintln!(
+        "verkstead ask stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.status.success(),
+        "the ask should have been answered, got {:?}",
+        output.status
+    );
+
+    let printed = String::from_utf8(output.stdout).unwrap();
+    let response = Response::from_yaml(&printed)
+        .unwrap_or_else(|error| panic!("stdout should be a Response: {error}\n{printed}"));
+    assert_eq!(response.answers[0].selected, Some(1));
+
+    serving.stop();
+}
+
+/// The flag is documented as the desktop app's and nobody else's: a human
+/// reading the help of the verb a unit file starts has to be told this one is
+/// not theirs to pass.
+#[test]
+fn the_help_says_the_desktop_flag_belongs_to_the_app() {
+    let help = flowed(&stdout(&run(&["serve", "--help"])));
+
+    for phrase in [
+        "--desktop",
+        "Run as the desktop app's sidecar",
+        "The desktop app's flag and nobody else's",
+    ] {
+        assert!(
+            help.contains(phrase),
+            "`verkstead serve --help` should say {phrase:?}, got:\n{help}"
+        );
+    }
+}
+
+/// And it is not the tray verb's: that one hands the link over in-process, so a
+/// flag saying the caller is the app would be a flag saying nothing.
+#[cfg(feature = "desktop")]
+#[test]
+fn the_desktop_verb_does_not_take_the_flag() {
+    let help = flowed(&stdout(&run(&["desktop", "--help"])));
+
+    assert!(
+        !help.contains("--desktop"),
+        "`verkstead desktop --help` should not name the flag at all, got:\n{help}"
+    );
+
+    let refusal = String::from_utf8(run(&["desktop", "--desktop"]).stderr).unwrap();
+
+    assert!(
+        refusal.contains("--desktop"),
+        "and passing it there should be refused by name, got:\n{refusal}"
+    );
+}
+
+/// `help` with every run of whitespace flattened to one space.
+///
+/// clap wraps the help to a width, so a phrase a test is reading may have a
+/// newline and a column of indentation somewhere in the middle of it.
+fn flowed(help: &str) -> String {
+    help.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[test]
 fn rust_log_overrides_the_default_filter() {
     let tmp = tempfile::tempdir().unwrap();

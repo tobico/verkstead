@@ -462,6 +462,20 @@ handing over is the browser and **Open**, so a run with neither says the link
 itself rather than serving a workbench nobody can get into. And a browser that
 would not open is reported by the address, at startup and at a press alike — a
 line about a failure is that file on that desk, and is nobody's only way in.
+**And the sidecar's line redacts for the same reason, on the flag's word.**
+`verkstead serve --desktop` is the server the desktop app starts beside itself
+(ADR-0020), and the flag is the whole of what it knows about who started it: the
+app reads the key out of the **Data Directory** before there is a server to ask
+one of and opens its own window on the link, so the line names the address alone
+and the log file the app's own **View Logs** opens carries no login. Three
+installs, therefore, and two answers: the daemon's line hands the link over
+because nobody is at the machine, and both installs with somebody at it have
+handed it over already. Nothing about the key itself changes under the flag —
+`workbench.key` in the Data Directory at the mode it always had, which is the one
+place the app reads it from and where a human who started that sidecar by hand
+reads it too. A `serve` with no flag on it is the daemon's line whatever else is
+true of the machine: the flag is said rather than guessed, because a screen is
+not who started this.
 A session cannot read the file whatever is in it, the log living in the human's
 own local application data and a session running as a local account of
 Verkstead's own.
