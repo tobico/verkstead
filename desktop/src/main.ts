@@ -24,11 +24,13 @@ import { app, dialog, type BrowserWindow } from "electron";
 import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
+import { closing } from "./closing.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
+import { FILE as DESKTOP, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import { taken } from "./taken.js";
 import { lower, raise } from "./tray.js";
@@ -97,6 +99,17 @@ let child: Sidecar | undefined;
 /// going is the expected end of a quit rather than news about the server.
 let leaving = false;
 
+/// Whether a quit is already under way, which is what a close arriving during
+/// one means.
+///
+/// **Because a quit closes the window on its way out.** The tray's Quit, Cmd+Q
+/// and the sidecar's ending all reach `app.quit`, and every one of them ends up
+/// at the same `close` event the close button raises — so an app that read the
+/// policy there would hide its window instead of quitting, or put the warning
+/// up in front of somebody who had just chosen Quit. The warning is the close
+/// button's alone (ADR-0020), and this is what makes that true.
+let quitting = false;
+
 /// Stop the sidecar and end this launch with `code`.
 ///
 /// **The stop is the point**, because nothing else here does it. `app.exit` runs
@@ -153,11 +166,31 @@ async function run(): Promise<void> {
     forward(onscreen);
   });
 
-  // Closing the window quits, on every platform including the Mac. There is a
-  // tray to keep running in now, but nothing yet that says whether the human
-  // wants to — the choice is the app's own settings' to make (ADR-0020) and
-  // those arrive next, with the Dock behaviour that goes with them.
+  // Every window gone is the app going, and the close policy is what decides
+  // whether a close ever reaches this: where closing means keep running, the
+  // window is hidden rather than closed and nothing here fires; where it means
+  // quit, the window really was the last of the app. A Mac reaches it only on
+  // its way out under Cmd+Q, its close always being a hide.
   app.on("window-all-closed", () => app.quit());
+
+  // And a Dock activation is the window coming back, which is the other half of
+  // what closing means on a Mac (ADR-0020): the app is a regular Dock app now,
+  // so pressing its icon there is the same act as Open on the tray. Registered
+  // everywhere, being a Mac's event to emit.
+  app.on("activate", () => {
+    if (onscreen === undefined) {
+      wanted = true;
+      return;
+    }
+    forward(onscreen);
+  });
+
+  // `before-quit` rather than `will-quit`: this one comes before the windows
+  // are closed, and what it is here for is the close that a quit is about to
+  // cause.
+  app.on("before-quit", () => {
+    quitting = true;
+  });
 
   if (await taken(HOST, PORT)) {
     say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
@@ -268,31 +301,44 @@ async function run(): Promise<void> {
     say("there is nowhere on this machine for a Data Directory, so there is no key to read");
   }
 
+  // Electron's own user data, which is this machine's and never the server's:
+  // where the window sits and what closing it means are facts about the desk in
+  // front of the human, so both are kept beside what Electron keeps here rather
+  // than in `config.yaml` (ADR-0020).
+  const userData = app.getPath("userData");
+  const desk = join(userData, DESKTOP);
+
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
   const window = open({
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
+    state: join(userData, FILE),
 
-    // Electron's own user data, which is this machine's and never the server's:
-    // where the window sits is a fact about the desk in front of the human, so
-    // it is kept beside what Electron keeps here rather than in `config.yaml`.
-    state: join(app.getPath("userData"), FILE),
+    // Read at the moment of the press, for the reason the key is: the settings
+    // file is what the Desktop page writes, and a policy read once at startup
+    // would be a radio nobody could see the effect of without a restart. A quit
+    // already under way is not a press at all.
+    closing: () => (quitting ? "quit" : closing(settings(desk), machine.platform)),
   });
   onscreen = window;
 
-  // And then the icon, which is the other way to this window — and, once the
-  // close policy arrives, the only one while it is off the screen. Shown
-  // unconditionally here: **Show tray icon** is a setting that comes with the
-  // page it lives on, and a switch with nothing behind it would be worse than a
-  // tray that is honestly always on.
-  raise({
-    icon: artwork(install),
-    kept,
-    open: () => forward(window),
-    quit: () => app.quit(),
-  });
+  // And then the icon, which is the other way to this window and the only one
+  // while it is off the screen — which is why the close policy falls to Quit
+  // without it. Shown unless this machine has said otherwise: turning **Show
+  // tray icon** off while the app is running is the bridge's to enact, and what
+  // is read here is where the last run left it.
+  if (settings(desk).trayIcon) {
+    raise({
+      icon: artwork(install),
+      kept,
+      open: () => forward(window),
+      quit: () => app.quit(),
+    });
+  } else {
+    say("the desktop settings say no tray icon, so there is none — and closing the window quits");
+  }
 
   // And the launch that asked for the window while there was not one yet, which
   // is a press of the icon over a Verkstead still coming up.
