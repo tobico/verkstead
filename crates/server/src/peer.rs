@@ -43,12 +43,16 @@
 //! there. A device posting a join has to be able to tell a Verkstead that will
 //! not have it from one too old to have the route at all.
 //!
-//! **The accept loop never waits on a handshake.** Each connection's is run in
-//! a task of its own and the completed ones are queued, because
-//! [`axum::serve::Listener::accept`] is one call at a time: a caller that
-//! opened a socket and then said nothing would otherwise hold the whole peer
-//! listener behind it, and this port answers a LAN that may not be the human's
-//! alone.
+//! **The accept loop never waits on a handshake, and no handshake waits for
+//! ever.** Each connection's is run in a task of its own and the completed ones
+//! are queued, because [`axum::serve::Listener::accept`] is one call at a time:
+//! a caller that opened a socket and then said nothing would otherwise hold the
+//! whole peer listener behind it, and this port answers a LAN that may not be
+//! the human's alone. And each of those tasks is given [`HANDSHAKE`] and no
+//! longer, because the same caller holds a task and a descriptor while it says
+//! nothing — with no deadline, how long that lasts is the caller's to decide,
+//! and a host on the LAN can open sockets until this process is out of
+//! descriptors and the workbench has gone with it.
 //!
 //! **And no ALPN is offered**, so every caller comes out of the handshake
 //! speaking HTTP/1.1. What this listener will carry is a member's whole
@@ -112,6 +116,22 @@ pub const IDENTITY: &str = "/api/peer/v1/identity";
 /// fixed amount of memory rather than whatever it likes.
 const HANDSHAKEN: usize = 32;
 
+/// How long a caller has to get through the handshake before the connection is
+/// let go of.
+///
+/// **Because a connection nobody finishes costs this process something until
+/// somebody does.** Each handshake is a task and a descriptor, and which of
+/// them ever completes is the caller's to decide — so without a deadline a host
+/// on the LAN opens sockets, says nothing, and holds a task and a descriptor
+/// each for as long as it likes. Running out of descriptors takes the workbench
+/// down with this listener, the two being served out of one process.
+///
+/// Ten seconds, which is a handshake over a link bad enough that the call after
+/// it would not have worked either, and nowhere near long enough to be worth
+/// anybody's while to sit in. A caller let go of here is free to dial again,
+/// which is what a device on a slow link does.
+const HANDSHAKE: Duration = Duration::from_secs(10);
+
 /// How long an accept that failed waits before going round again.
 ///
 /// The same second the named pipe's listener waits and axum waits, and for the
@@ -140,6 +160,11 @@ pub struct Listener {
     /// The certificate it presents and the verifier that takes whatever the
     /// caller shows, settled once at the bind and shared by every connection.
     presenting: Arc<ServerConfig>,
+
+    /// How long a caller has to get through the handshake — [`HANDSHAKE`] on a
+    /// running server, and whatever a suite says when it is standing where a
+    /// caller has gone quiet.
+    handshake: Duration,
 }
 
 impl Listener {
@@ -168,7 +193,19 @@ impl Listener {
             socket,
             address,
             presenting,
+            handshake: HANDSHAKE,
         })
+    }
+
+    /// The same listener, giving a caller `handshake` to get through the
+    /// handshake in rather than [`HANDSHAKE`].
+    ///
+    /// For a suite standing where a caller has opened a socket and gone quiet:
+    /// what is being asked is that the connection is let go of at all, and ten
+    /// seconds of a test waiting to watch it happen would be ten seconds spent
+    /// on the clock rather than on the question.
+    pub fn handshaking_within(self, handshake: Duration) -> Listener {
+        Listener { handshake, ..self }
     }
 
     /// Where it is listening, which is what the startup line says and what a
@@ -191,7 +228,7 @@ impl Listener {
             .context("handing the peer listener's socket to the runtime")?;
 
         axum::serve(
-            Handshaken::over(socket, self.presenting, self.address),
+            Handshaken::over(socket, self.presenting, self.address, self.handshake),
             // With a [`Caller`] beside every request, which is how the
             // certificate the handshake took gets out of the connection and
             // into a route. It is a fact about the connection rather than
@@ -595,15 +632,22 @@ struct Handshaken {
 }
 
 impl Handshaken {
-    /// Start accepting on `socket`, securing what arrives with `presenting`.
+    /// Start accepting on `socket`, securing what arrives with `presenting`
+    /// and giving each caller `handshake` to get through it in.
     fn over(
         socket: tokio::net::TcpListener,
         presenting: Arc<ServerConfig>,
         address: SocketAddr,
+        handshake: Duration,
     ) -> Handshaken {
         let (done, completed) = mpsc::channel(HANDSHAKEN);
 
-        tokio::spawn(accepting(socket, TlsAcceptor::from(presenting), done));
+        tokio::spawn(accepting(
+            socket,
+            TlsAcceptor::from(presenting),
+            done,
+            handshake,
+        ));
 
         Handshaken { address, completed }
     }
@@ -641,12 +685,16 @@ impl axum::serve::Listener for Handshaken {
 /// Accept for ever, handing each connection its own handshake.
 ///
 /// Nothing here waits on one. A caller that opens a socket and says nothing
-/// holds its own task and nobody else's, and what it costs this process is one
-/// pending handshake until the connection is dropped at the other end.
+/// holds its own task and nobody else's — and holds it for [`HANDSHAKE`] and
+/// not a moment longer, because how long that is is this end's to decide rather
+/// than the caller's: a task and a descriptor apiece, handed out to whoever asks
+/// and given back when they feel like it, is a port anybody on the LAN can run
+/// this process out of descriptors through.
 async fn accepting(
     socket: tokio::net::TcpListener,
     securing: TlsAcceptor,
     done: mpsc::Sender<(TlsStream<TcpStream>, SocketAddr)>,
+    handshake: Duration,
 ) {
     loop {
         let (connection, from) = match socket.accept().await {
@@ -664,11 +712,11 @@ async fn accepting(
         let done = done.clone();
 
         tokio::spawn(async move {
-            match securing.accept(connection).await {
+            match tokio::time::timeout(handshake, securing.accept(connection)).await {
                 // A full queue holds this task rather than dropping the
                 // connection: the caller has completed a handshake and is
                 // waiting to be answered, and the wait is the backpressure.
-                Ok(secured) => {
+                Ok(Ok(secured)) => {
                     let _ = done.send((secured, from)).await;
                 }
 
@@ -677,8 +725,22 @@ async fn accepting(
                 // trust a self-signed certificate, or a device whose clock is
                 // wrong — none of them this server's to do anything about, and
                 // all of them things a reachable port sees.
-                Err(what) => {
+                Ok(Err(what)) => {
                     tracing::debug!(%from, %what, "a caller did not complete the peer handshake");
+                }
+
+                // And one that ran out of time is the same thing said a
+                // different way: the connection is dropped here, which is what
+                // closes the socket and gives the descriptor back. A device on
+                // a link this slow dials again, and a caller that never meant
+                // to finish has cost this process [`HANDSHAKE`] and nothing
+                // more.
+                Err(_) => {
+                    tracing::debug!(
+                        %from,
+                        "a caller opened a connection and did not get through the peer \
+                         handshake in time",
+                    );
                 }
             }
         });
