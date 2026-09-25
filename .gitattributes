@@ -4,6 +4,7 @@
 * text=auto eol=lf
 
 # The files git should neither look inside nor convert.
-*.png  binary
-*.ico  binary
-*.icns binary
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.blend binary
