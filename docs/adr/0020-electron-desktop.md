@@ -152,8 +152,12 @@ desktop that misbehaves.
 **A top-level `desktop/` pnpm project beside `web/`, built by
 electron-builder** into the same three artifacts, unsigned as before: a
 universal dmg, an x86_64 AppImage, and an msi through electron-builder's WiX
-target with a fragment of our own adding the install directory to the user's
-PATH, which today's msi does and the adoption docs promise. Each release leg
+target with a fragment of our own putting the CLI on the user's PATH, which
+today's msi does and the adoption docs promise. What goes on it is the CLI's
+own directory inside the install rather than the install root: the root holds
+a launcher electron-builder names for the product, Windows resolves `PATH`
+without regard to case, and a `verkstead` that started the window instead of
+printing the guide would be the promise kept backwards. Each release leg
 launches the packed app and asserts what it asserted of the tray app — it
 serves, the binary inside answers `ask`, and its log says the window and the
 tray came up. The main process's pure parts are under vitest, and so is the
