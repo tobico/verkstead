@@ -17403,14 +17403,32 @@ describe("the configuration on the brief's pane", () => {
   /// Nothing of it reaches the row at all — `ConversationEntry` carries no
   /// Process — so the check is that the list the human finds a Conversation by
   /// reads exactly as it always did.
+  ///
+  /// Whole words rather than substrings. A card's spoken label carries the
+  /// state word, and `Investigating` is a Lifecycle state the processes
+  /// roadmap brings in — which holds `Investigate` inside it. What is being
+  /// checked is that a card never *says* a Process, not that its letters never
+  /// turn up inside a longer word, and a sweep that could not tell the two
+  /// apart would fail here for something that has nothing to do with Processes.
   it("is the only place the process is said", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    /// Whether this text says that word, as a word of its own.
+    const says = (text: string, word: string): boolean =>
+      new RegExp(`(^|\\W)${word}(\\W|$)`).test(text);
+
     for (const card of await cards(container)) {
+      // Off the button rather than off the row around it: the label is the
+      // card's own, and reading it from the `<li>` would be reading an
+      // attribute nothing ever sets and passing whatever it held.
+      const spoken =
+        card.querySelector(`.${sidebar.open}`)!.getAttribute("aria-label") ?? "";
+      expect(spoken).not.toBe("");
+
       for (const word of Object.values(PROCESS)) {
-        expect(card.textContent).not.toContain(word);
-        expect(card.getAttribute("aria-label") ?? "").not.toContain(word);
+        expect(says(card.textContent ?? "", word)).toBe(false);
+        expect(says(spoken, word)).toBe(false);
       }
     }
   });
