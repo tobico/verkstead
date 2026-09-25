@@ -9,11 +9,12 @@
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
 //! **The order at the top of [`run`] is the lifecycle**, and it is an order
-//! rather than a sequence of conveniences: the lock, so that a second launch is
-//! the first window brought forward and never a second sidecar; then the
-//! address, which the lock is what makes an unambiguous question; then the
-//! binary; and only then a child. Everything before the child is an app that
-//! can refuse having made nothing at all.
+//! rather than a sequence of conveniences: the log file, so that every line
+//! below it is in the file somebody will be asked to send; then the lock, so
+//! that a second launch is the first window brought forward and never a second
+//! sidecar; then the address, which the lock is what makes an unambiguous
+//! question; then the binary; and only then a child. Everything before the
+//! child is an app that can refuse having made nothing at all.
 
 import { existsSync } from "node:fs";
 
@@ -22,8 +23,8 @@ import { app, dialog, type BrowserWindow } from "electron";
 import { cli, OVERRIDE } from "./cli.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
-import { say } from "./log.js";
-import { dataDir } from "./platform.js";
+import { heard, keep, say } from "./log.js";
+import { dataDir, logDir } from "./platform.js";
 import { how, start } from "./sidecar.js";
 import { taken } from "./taken.js";
 import { forward, open } from "./window.js";
@@ -73,10 +74,24 @@ let onscreen: BrowserWindow | undefined;
 let leaving = false;
 
 async function run(): Promise<void> {
-  // First, and before anything is started: a second launch of the app is this
-  // one's window brought forward, and the launch that asked exits having made
-  // nothing. It is also what the probe below rests on — with this held, a
-  // listener on the address cannot be another copy of this app.
+  // The one read of the process's own platform and environment, made first
+  // because everything below is a function of these two values — and the
+  // sidecar inherits this same environment, so what the server is about to
+  // resolve for itself is what these resolve here.
+  const machine = { platform: process.platform, env: process.env };
+
+  // And the log file before anything has anything to say, so that every line
+  // this run makes is in it — including the one a launch that hands over says
+  // on its way out. Where it went it says for itself, on the terminal as well
+  // as in the file; a machine with nowhere to put one says that instead, and
+  // goes on running.
+  keep(logDir(machine));
+
+  // First of the app's own steps, and before anything is started: a second
+  // launch of the app is this one's window brought forward, and the launch
+  // that asked exits having made nothing. It is also what the probe below
+  // rests on — with this held, a listener on the address cannot be another
+  // copy of this app.
   if (!app.requestSingleInstanceLock()) {
     say("Verkstead is already running, so this launch hands over to it");
     app.quit();
@@ -107,15 +122,12 @@ async function run(): Promise<void> {
     packaged: app.isPackaged,
     entry: import.meta.dirname,
     resources: process.resourcesPath,
-    platform: process.platform,
-    env: process.env,
+    ...machine,
   });
 
-  // The other read of the process environment, made here for the reason that
-  // one is: everything below is a function of what it was handed. The sidecar
-  // inherits this same environment, so this is the directory the server is
-  // about to resolve for itself — and so the one the **Workbench Key** is in.
-  const data = dataDir({ platform: process.platform, env: process.env });
+  // The directory the server is about to resolve for itself, and so the one the
+  // **Workbench Key** is in.
+  const data = dataDir(machine);
 
   // Before anything is started, so that the app which cannot serve has done
   // nothing at all — and before `whenReady`, because there is nothing to wait
@@ -126,7 +138,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  const sidecar = start(path);
+  const sidecar = start(path, heard);
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 
   // The app quitting is the sidecar stopping. `will-quit` rather than

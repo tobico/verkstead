@@ -19,6 +19,7 @@
 //! child as well.
 
 import { spawn, type ChildProcess } from "node:child_process";
+import type { Readable } from "node:stream";
 
 /// What the sidecar is started with. Everything else is the server's own.
 export const ARGUMENTS = ["serve", "--desktop"];
@@ -67,18 +68,94 @@ export interface Sidecar {
 /// Whether the child is still there to be signalled.
 const running = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
 
+/// A stream being read a line at a time.
+export interface Lines {
+  /// Whatever the pipe just handed over.
+  feed(chunk: string): void;
+  /// The stream ended: what is left is a last line that carried no newline.
+  end(): void;
+}
+
+/// Read whole lines out of a stream that arrives in chunks.
+///
+/// A pipe hands over bytes as they arrive rather than events as they were
+/// logged, and one `tracing` line can cross two chunks as easily as two lines
+/// can share one. The log file rolls between lines, so lines are what it has to
+/// be handed.
+export function byLine(onLine: (line: string) => void): Lines {
+  let rest = "";
+
+  const said = (line: string): void => {
+    // A Windows sidecar's own line endings are not the log file's.
+    onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+  };
+
+  return {
+    feed(chunk) {
+      rest += chunk;
+
+      for (let end = rest.indexOf("\n"); end >= 0; end = rest.indexOf("\n")) {
+        said(rest.slice(0, end));
+        rest = rest.slice(end + 1);
+      }
+    },
+
+    end() {
+      if (rest === "") {
+        return;
+      }
+
+      const last = rest;
+      rest = "";
+      said(last);
+    },
+  };
+}
+
+/// Read one of the child's streams to `said`, a line at a time.
+///
+/// Decoded by the stream rather than by the reader, so a character split across
+/// two chunks arrives as one character rather than as two broken ones —
+/// Verkstead's own messages have em-dashes in them, which is the same reason
+/// the log file carries a byte-order mark.
+function read(stream: Readable | null, said: (line: string) => void): void {
+  if (stream === null) {
+    return;
+  }
+
+  const lines = byLine(said);
+
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk: string) => lines.feed(chunk));
+
+  // What a sidecar taken mid-line had said: the stream ends without a newline
+  // and the last thing it said is the account of why the app is going with it.
+  stream.once("end", () => lines.end());
+}
+
 /// Start the server beside this app.
 ///
 /// The binary is [`cli`](./cli.js)'s answer, and whether anything is at that
 /// path is the caller's question — a spawn of a path with nothing at it fails
 /// asynchronously, which is a dialog nobody can word.
-export function start(cli: string): Sidecar {
+///
+/// **`said` is every line the server logs**, handed over as it says it. The app
+/// passes [`heard`](./log.js), which puts those lines in `verkstead.log` beside
+/// its own — taken as an argument rather than imported so that this module
+/// answers to nothing but a child process, which is what lets the fixture in
+/// `tests/fixtures/` run it straight off the TypeScript.
+export function start(cli: string, said: (line: string) => void): Sidecar {
   const child = spawn(cli, ARGUMENTS, {
-    // Nothing on stdin, and both streams through to this process's own: the
-    // sidecar's `tracing` output lands beside the app's lines wherever the app
-    // was started from. The log file that takes both is a later task's.
-    stdio: ["ignore", "inherit", "inherit"],
+    // Nothing on stdin, and both streams read rather than inherited: the log
+    // file is the app's to write, so the sidecar's `tracing` output comes
+    // through this process and lands in `verkstead.log` beside the app's own
+    // lines. Both of them, because what a server says as it falls over goes to
+    // stderr and that is the half most worth having in the file.
+    stdio: ["ignore", "pipe", "pipe"],
   });
+
+  read(child.stdout, said);
+  read(child.stderr, said);
 
   const gone = new Promise<Ending>((ended) => {
     child.once("exit", (code, signal) => ended({ code, signal }));

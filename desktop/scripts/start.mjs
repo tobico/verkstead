@@ -52,7 +52,9 @@ if (found === undefined) {
 }
 
 // The app is this directory, and every argument after `pnpm start --` is the
-// app's own. `inherit`, so the app's lines and the sidecar's land where the
-// developer is reading.
+// app's own. `inherit`, so that what Electron itself has to say lands where
+// the developer is reading. The app's own lines and the sidecar's go to
+// `verkstead.log` under the Log Directory instead — the app names that file on
+// this same stream as it opens it, which is the one line that goes both ways.
 const app = spawn(found, [".", ...process.argv.slice(2)], { stdio: "inherit" });
 app.on("exit", (code, signal) => process.exit(signal !== null ? 1 : (code ?? 0)));
