@@ -20,7 +20,8 @@ $ nix develop
 ```
 
 Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
-`git`, and the `node` and `pnpm` the viewer is built with.
+`git`, the `node` and `pnpm` the viewer is built with, and the Electron the
+desktop app runs on.
 
 ### 2. Build the viewer and start the server (terminal 1)
 
@@ -62,48 +63,65 @@ out of a checkout does: `--data-dir .` is why every command here says it, and
 it keeps the database, the worktrees and the settings beside the checkout where
 they can be deleted with it.
 
-The desktop app is a verb of that same binary, and the same server: `cargo run
--p verkstead-cli -- desktop --data-dir .` serves what the command above serves
-and opens the viewer in your browser as it comes up. `--no-open` leaves the
-browser alone, and every other flag is the server's own, because the app *is*
-the server ([ADR 0012](adr/0012-desktop-tray-binary.md), as amended) — started
-with nothing said it is the platform's Data Directory again, which is what a
-machine that installed it wants and not what a checkout does. The tray half is
-`crates/desktop`, a library the CLI carries behind its default-on `desktop`
-feature: a build that says nothing gets both halves, which is what makes every
-image that can serve one that can also `ask`, and `--no-default-features` is
-the headless build the musl CLI and the nix package take. It is the one crate
-here that links a system toolkit — GTK on Linux, which is why the workspace
-builds in the dev shell and nowhere else here; AppKit on a Mac and Win32 on
-Windows, which are those platforms' own and want nothing installed. An address
-something is already listening on — the command above, say — is a dialog and a
-nonzero exit rather than a second Verkstead beside the first.
+The desktop app is the Electron project in [`desktop/`](../desktop), started
+with `pnpm start` from this shell ([ADR 0020](adr/0020-electron-desktop.md),
+which supersedes ADR 0012). It finds the headless `verkstead` the workspace
+built, brings it up beside itself as `serve --desktop`, waits for the server to
+answer on `/api/v1/health` and opens one window on the workbench already logged
+in — the **Workbench Key** read out of the **Data Directory** rather than
+pasted. So it wants the two commands above run first: the viewer built, because
+the server serves it, and the CLI compiled, because that binary is what the app
+starts. Nothing at `target/debug/verkstead` is a dialog naming the path it
+looked at, and `VERKSTEAD_CLI` names a binary somewhere else — a release build,
+or the one a Release shipped.
 
-What it puts on the screen is an icon in the system tray, and the menu on it is
-**Open** — the viewer again, in your browser — **View Logs**, which opens the
-file the server's log goes to instead of a stdout nobody launched from an icon
-will read, **Launch on Startup**, and **Exit**, which stops Verkstead where it
-stands the way stopping the systemd unit does. Run it where there is no screen
-to put an icon on, over SSH or under a test, and it is the server and the open
-and no more: a warning in the log, and everything else exactly as it was.
+```console
+$ export VERKSTEAD_DATA_DIR=$PWD   # the checkout, which is what --data-dir . says above
+$ (cd desktop && pnpm install && pnpm start)
+```
 
-**Launch on Startup** is a checkbox over the platform's own registration — your
-desktop's autostart entry at `~/.config/autostart/net.tobico.Verkstead.desktop`
-here, a launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` on
-macOS, a `net.tobico.Verkstead` value under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows — and that
-registration is the whole of the state: checking the box writes it, unchecking
-removes it, turning it off in your desktop's own settings unchecks it, and no
-setting of Verkstead's own keeps a second copy of the answer. Every
-launch rewrites it while it is there, with the path of the executable that is
-running and the `desktop` verb behind it — one image has more than one way in
-now — so a binary you moved heals its own entry the next time you start it by
-hand. What it writes starts the app with `--no-open`: a login is not a
-moment to be handed a browser window. The one thing the box cannot see is the
-platform's own second opinion about it — macOS's Login Items list, which
-`launchd` keeps in a database rather than in the file, and Windows' Startup tab
-in Task Manager, which Explorer records under `StartupApproved`: switch
-Verkstead off in either and the box goes on showing what the registration says.
+**The Data Directory is said through the environment here**, because the app
+has no flag of its own to say it with: the sidecar inherits the shell the app
+was started from, so `VERKSTEAD_DATA_DIR` is to the app what `--data-dir .` is
+to every other command in this document, and a launch that says nothing gets
+the platform's own place again. Every other setting is the server's the same
+way. An address something is already listening on — the `serve` above, say — is
+a dialog and a nonzero exit rather than a second Verkstead beside the first,
+and a second `pnpm start` is the first window brought forward rather than
+either of those.
+
+`pnpm lint`, `pnpm typecheck` and `pnpm test` in that same directory are the
+three things CI runs over it. The lint is one rule and it is the wall around
+Electron: everything the app decides is a function of values the entry file
+hands it, so that vitest can call it without an application under it. Which is
+what the tests are over — the main process's pure parts, there being no driven
+end-to-end suite (ADR 0020).
+
+What it puts on the screen is one window, and at this stage that is the whole
+of it. It loads the workbench off `127.0.0.1:8422` with nothing about the
+viewer changed to draw inside it; a link that leads off the workbench opens in
+the browser you already have rather than navigating the window away from it;
+and where the window was last time is where it comes back, remembered in the
+app's own user data because where a window sits is a fact about the desk rather
+than about your Verkstead. The menu bar is hidden on Linux and Windows with
+copy, paste, zoom, reload and the developer tools still on their keystrokes —
+Alt brings the bar down — and a Mac keeps the strip at the top of the screen
+that says which application is in front. Closing the window quits the app, and
+so does the server ending. The sidecar's stdout and the app's own lines both go
+to `verkstead.log` under the **Log Directory**, which the app names on the
+terminal as it opens it.
+
+**And the Rust tray app is still what a release carries**, on each platform
+until the stage that takes that platform's release leg: the packaging section
+below builds it, `crates/desktop` is its tray half behind the CLI's default-on
+`desktop` feature — a build that says nothing gets both halves, which is what
+makes every image that can serve one that can also `ask`, and
+`--no-default-features` is the headless build the musl CLI and the nix package
+take — and it is the one crate here that links a system toolkit, GTK on Linux,
+which is why the workspace builds in the dev shell and nowhere else here.
+Its own account is [ADR 0012](adr/0012-desktop-tray-binary.md) and CONTEXT.md's
+**Startup Registration**, which is where **Launch on Startup** is written down;
+nothing in this section starts it.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -501,9 +519,9 @@ a serve set up by hand reads on that page exactly as one set up from it would.
 Where the press is refused for want of the operator grant — Tailscale allows a
 serve from nobody but root and the tailnet's operator — the pane shows the
 `sudo tailscale set --operator=…` that lifts it, and the next press is the
-re-try. A `cargo run -p verkstead-cli -- desktop` puts that through `pkexec`
-instead, an app having somebody at the machine to ask where a `serve` started
-in a terminal has not.
+re-try. The desktop app puts that through `pkexec` instead — its sidecar
+is a `serve --desktop`, and the flag is how the server knows there is somebody
+at the machine to ask, where a `serve` started in a terminal has not.
 
 ## The dev loop
 
