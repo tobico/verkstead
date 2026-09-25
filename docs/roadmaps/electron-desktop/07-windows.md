@@ -44,6 +44,15 @@ WiX sources for the Rust msi are gone.
 - **The Windows Installer version stays three numbers**, so the package must
   still allow an upgrade from a version reading the same as its own
   ([releasing.md]).
+- **And the UpgradeCode is carried over**, not regenerated:
+  `{A4727089-F5B9-40A6-A196-1856E8D6827A}`, out of `tools/verkstead.wxs`
+  before this stage retires it. It is the one identifier that says two
+  packages are the same product, and electron-builder's target derives its own
+  from the app id unless it is told. Derived afresh, an upgrade would install
+  beside the Rust msi rather than over it — two install directories, two PATH
+  entries, two Start-menu entries and two rows in **Installed apps** — against
+  what `docs/adoption.md` promises in as many words: a newer msi replaces the
+  copy that is there rather than standing beside it.
 
 ## Proposed tasks (provisional)
 
@@ -56,12 +65,16 @@ WiX sources for the Rust msi are gone.
    through the API with that value gone, and one carrying none is untouched.
 3. **The msi** — electron-builder's WiX target, per-user, the CLI in a
    directory of its own, the PATH fragment naming that directory, the
-   Start-menu entry, the same-version upgrade rule. Accepts: a local build
-   installs under the profile; `verkstead guide` runs from a new terminal and
-   prints the guide rather than opening a window.
+   Start-menu entry, the carried-over UpgradeCode, the same-version upgrade
+   rule. Accepts: a local build installs under the profile; `verkstead guide`
+   runs from a new terminal and prints the guide rather than opening a window;
+   installing it over a Rust msi leaves one product, one PATH entry and one
+   Start-menu entry.
 4. **The leg** — `desktop-windows` downloads `verkstead-windows-x64.exe`,
-   packs, installs, and asserts; `tools/verkstead.wxs` and
-   `tools/build-windows-msi.sh` retired. Accepts: the leg is green.
+   packs, installs, and asserts, the upgrade over the last Release's msi
+   among the assertions; `tools/verkstead.wxs` and
+   `tools/build-windows-msi.sh` retired, the UpgradeCode taken out of the
+   first before it goes. Accepts: the leg is green.
 5. **The words** — the Windows sections of adoption and releasing rewritten.
    Accepts: nothing names the shim.
 
@@ -76,6 +89,9 @@ WiX sources for the Rust msi are gone.
 - What `docs/adoption.md` says the `PATH` entry is, so the sentence rewritten
   in task 5 describes the directory that is actually on it.
 - The WiX toolset the runner image carries, against what the target wants.
+- Whether electron-builder's target takes an UpgradeCode as configuration or
+  wants the fragment to carry it, and what `tools/verkstead.wxs` still says
+  the code is — it is the only record of it once that file is gone.
 - The shim is still in `crates/desktop` and is stage 08's to remove; this
   stage leaves the crate alone.
 - What `crates/desktop/src/startup/run_key.rs` writes today — the value's name
