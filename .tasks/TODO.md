@@ -29,4 +29,4 @@ Roadmap stage: [02: The Electron shell](docs/roadmaps/electron-desktop/02-electr
 - [x] 04: Lifecycle — [details](04-lifecycle.md)
 - [x] 05: The log file — [details](05-the-log-file.md)
 - [x] 06: Window manners — [details](06-window-manners.md)
-- [ ] 07: The words — [details](07-the-words.md)
+- [x] 07: The words — [details](07-the-words.md)
