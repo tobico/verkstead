@@ -800,10 +800,7 @@ export function readFileStatus(id: number): Promise<FileStatusView> {
 /// out of the repository by the server rather than out of its database — the
 /// commit is in git, which is what a commit is — where the summary was kept by
 /// the sweep that recorded the commit.
-export function loadCommitPane(
-  id: number,
-  event: number,
-): Promise<CommitPane> {
+export function loadCommitPane(id: number, event: number): Promise<CommitPane> {
   return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
@@ -955,17 +952,13 @@ export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
   return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
 }
 
-
 /// Move a drafting Conversation onto another registered Repo.
 ///
 /// Which Repo is the whole of what goes out, the way an added companion is:
 /// what follows — the base back on the new repo's rule, and a companion that
 /// has just become this Conversation's own Repo going away — is the server's to
 /// do rather than this page's to ask for.
-export function switchRepo(
-  id: number,
-  repoId: number,
-): Promise<RepoSwitched> {
+export function switchRepo(id: number, repoId: number): Promise<RepoSwitched> {
   return post<RepoSwitched>(`/api/ui/conversations/${id}/repo`, {
     repo_id: repoId,
   });
@@ -1016,7 +1009,6 @@ export function removeCompanion(
     {},
   );
 }
-
 
 /// Say how far into one of them the work may reach.
 export function setCompanionMode(
@@ -1118,9 +1110,7 @@ export function closeAndArchiveConversation(
 /// Nothing is sent with it either — which Conversation it is is the whole of
 /// what the press says, and whether it is one to put away is the server's to
 /// answer.
-export function archiveConversation(
-  id: number,
-): Promise<ConversationArchived> {
+export function archiveConversation(id: number): Promise<ConversationArchived> {
   return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
 }
 
@@ -1389,6 +1379,24 @@ export function cancelJoin(request: string): Promise<DevicesView> {
   );
 }
 
+/// **Unlink**: take a device out of this cluster, for everybody.
+///
+/// A membership rather than a set of pairs (ADR-0020), so this is not cutting
+/// this device's own half of a link: every member drops the same device, and
+/// the device itself is told to let go of the lot of them. Which is why it is
+/// asked once before it is called — one card over the page, naming the device,
+/// as Remove on a Repo is — and why nothing about it can be taken back.
+///
+/// A member that is not answering is unlinked exactly as one that is: it simply
+/// cannot be told, and nothing waits on telling it. So what comes back is the
+/// section read again, the way the two presses above answer, rather than
+/// anything some third machine made of the press.
+export function unlinkDevice(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/members/${encodeURIComponent(device)}/unlink`,
+  );
+}
+
 /// And the other side of a join: every device asking to be let into *this*
 /// one's cluster.
 ///
@@ -1571,9 +1579,7 @@ export async function pushKey(): Promise<string> {
 }
 
 /// Hand this device's subscription over, so a Set arriving can reach it.
-export function subscribePush(
-  subscription: Subscription,
-): Promise<Subscribed> {
+export function subscribePush(subscription: Subscription): Promise<Subscribed> {
   return post<Subscribed>("/api/ui/push/subscribe", subscription);
 }
 

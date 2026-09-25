@@ -627,6 +627,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // fact in a worse place.
         .route("/api/ui/devices/asking/{request}/allow", post(allow_join))
         .route("/api/ui/devices/asking/{request}/deny", post(deny_join))
+        // And the other press on a row, which is the one that undoes: Unlink,
+        // asked once over the page as Remove on a Repo is. Spelled the way
+        // that one is — the thing, and what is being done to it — rather than
+        // as a `DELETE` on the row, because that is how every press in this
+        // API is spelled and a second spelling would be a second convention.
+        .route(
+            "/api/ui/devices/members/{device}/unlink",
+            post(unlink_device),
+        )
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -5680,6 +5689,32 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
 
     if let Err(why) = devices.take_back(&request).await {
         return unavailable(&format!("the request could not be taken back: {why:#}"));
+    }
+
+    listed(&devices).await
+}
+
+/// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
+/// out of this cluster, for everybody (ADR-0020, *A cluster is a membership*).
+///
+/// **The second of the two departures the Remote access pane makes** from
+/// *nothing is confirmed twice, everything is read rather than configured* —
+/// Add above is the first — and it departs for the reason Remove on a Repo
+/// does: it cannot be taken back. The asking is the browser's, over the page,
+/// and by the time this is called the human has already said yes.
+///
+/// **Not a failure when the far ends cannot be reached.** The press is about
+/// this cluster rather than about a call: the device is dropped here, every
+/// member that answers is told, and the ones that do not are owed the telling
+/// — so this answers with the section read again rather than with what some
+/// third machine made of it. See [`crate::device::Devices::unlink`].
+async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.unlink(&device).await {
+        return unavailable(&format!("the device could not be unlinked: {why:#}"));
     }
 
     listed(&devices).await

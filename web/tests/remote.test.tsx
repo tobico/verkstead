@@ -105,7 +105,8 @@ const WAITING = devicesWaiting as DevicesView;
 
 /// The login link the serving machine hands out, which is the address with the
 /// key on the end of it.
-const LINK = "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key";
+const LINK =
+  "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -223,9 +224,7 @@ describe("the pane", () => {
     mountPane(DOWN);
 
     await waitFor(() =>
-      expect(
-        screen.getByText(/sudo systemctl start tailscaled/),
-      ).toBeTruthy(),
+      expect(screen.getByText(/sudo systemctl start tailscaled/)).toBeTruthy(),
     );
 
     // And what to do about it, which is the one command that is the human's.
@@ -421,9 +420,7 @@ describe("the serve checkbox", () => {
 
     // And the grant goes with the refusal it belonged to: there is nothing left
     // for anybody to run.
-    expect(
-      screen.queryByText("sudo tailscale set --operator=ada"),
-    ).toBeNull();
+    expect(screen.queryByText("sudo tailscale set --operator=ada")).toBeNull();
   });
 
   /// The page that arrived over the serve cannot take it away: unticking from
@@ -443,9 +440,9 @@ describe("the serve checkbox", () => {
 
     // With the reason on it, because a box that will not be pressed and says
     // nothing about why is one somebody goes looking for the bug in.
-    expect(
-      theBox().closest("label")?.getAttribute("title"),
-    ).toMatch(/opened over the tailnet/);
+    expect(theBox().closest("label")?.getAttribute("title")).toMatch(
+      /opened over the tailnet/,
+    );
 
     fireEvent.click(theBox());
 
@@ -460,7 +457,10 @@ describe("the serve checkbox", () => {
   /// And the same machine read from the machine itself unticks as it always
   /// did: nothing is being cut off, and the desktop app is this case too.
   it("unticks from a page opened on localhost", async () => {
-    const fetching = theMachinePressed(SERVING, { press: "Done", reading: OFF });
+    const fetching = theMachinePressed(SERVING, {
+      press: "Done",
+      reading: OFF,
+    });
     mounting(() => <RemotePane back={vi.fn()} />);
 
     await waitFor(() => expect(theBox().checked).toBe(true));
@@ -722,14 +722,22 @@ describe("the devices section", () => {
     expect(screen.getAllByText("this device").length).toBe(1);
   });
 
-  /// Nothing to press on a member's row either. Unlink is a later stage's, and
-  /// a row with nothing on it is what this one draws.
-  it("offers no Unlink on a member either", async () => {
+  /// And a press on every member's row and on no other: two members on the
+  /// fixture, two Unlinks, with this device's own row carrying none.
+  it("offers an Unlink on every member's row and on no other", async () => {
     mountPane(SERVING, LINKED);
 
     await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
 
-    expect(screen.queryByText("Unlink")).toBeNull();
+    const presses = screen.getAllByText("Unlink");
+
+    expect(presses.length, "one apiece for the two members").toBe(2);
+    expect(
+      presses.some((press) =>
+        press.closest("li")?.textContent?.includes("this device"),
+      ),
+      "and none of them on the row that is this machine",
+    ).toBe(false);
   });
 
   /// A member the last dial found nothing at reads *unreachable*, and only that
@@ -750,16 +758,22 @@ one on the LAN",
     ).toBe(1);
   });
 
-  /// And it is still the whole row: the mark, the name and the addresses are all
-  /// drawn, because none of them has stopped being true and the row is where an
-  /// Unlink will be pressed.
+  /// And it is still the whole row: the mark, the name, the addresses and the
+  /// press, because none of them has stopped being true — a machine that is
+  /// never coming back is most of what an Unlink is for, so the one row
+  /// somebody needs the press on is the one row it must not be missing from.
   it("leaves everything on an unreachable member's row", async () => {
     mountPane(SERVING, LINKED);
 
-    await waitFor(() => expect(screen.getByText("unreachable")).toBeTruthy());
+    const away = await waitFor(() => screen.getByText("unreachable"));
 
     expect(theMark("Linux (WSL)")).toBeTruthy();
     expect(screen.getByText("172.29.0.14")).toBeTruthy();
+
+    const press = away.closest("li")?.querySelector("button");
+
+    expect(press?.textContent, "and the Unlink is drawn on it").toBe("Unlink");
+    expect(press?.disabled, "and works exactly as any other's").toBe(false);
   });
 
   /// The case the whole of cluster mode was written for: a Windows machine and
@@ -954,9 +968,7 @@ describe("adding a device", () => {
     fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() =>
-      expect(
-        screen.getByText(/192\.168\.1\.31 answered nothing/),
-      ).toBeTruthy(),
+      expect(screen.getByText(/192\.168\.1\.31 answered nothing/)).toBeTruthy(),
     );
   });
 });
@@ -1071,6 +1083,197 @@ describe("a join waiting to be confirmed", () => {
   });
 });
 
+/// **Unlink**: a device taken out of the cluster for everybody, asked once
+/// before it happens.
+///
+/// The second of the two departures this pane makes from *nothing is confirmed
+/// twice* — Add is the first — and it departs for the reason Remove on a Repo
+/// does: it cannot be taken back. So what is asked here is the asking as much
+/// as the press: that nothing goes out until the card has been answered, that
+/// the card names the device rather than saying *this one*, and that every way
+/// out of it but the one button leaves the cluster alone.
+describe("unlinking a device", () => {
+  /// The member the fixture's presses are about: the Mac, which is the first
+  /// of its two members and the one that is answering.
+  const LAPTOP = LINKED.members[0]!.identity.device;
+
+  /// What the section reads once that one has gone, which is what the press
+  /// answers with — the list the server read again, already a row shorter.
+  const AFTER: DevicesView = {
+    ...LINKED,
+    members: LINKED.members.slice(1),
+  };
+
+  /// The press on a row asks rather than acts, and the card names the device it
+  /// would take away: the list it was pressed in is behind it, so a card
+  /// reading *Unlink this device?* would be asking about whichever row the
+  /// human remembers pressing.
+  it("asks before anything goes out, naming the device", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(LINKED),
+      whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+
+    await waitFor(() =>
+      expect(screen.getByText("Unlink laptop?")).toBeTruthy(),
+    );
+
+    expect(
+      askedFor(fetching, `/api/ui/devices/members/${LAPTOP}/unlink`),
+      "and nothing has gone out while the card is up",
+    ).toBe(0);
+  });
+
+  /// And the card says what the press really does, which is the one thing about
+  /// it somebody could be wrong about: it is not this device's own half of a
+  /// link being cut.
+  it("says that the device leaves the cluster for everybody", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+
+    const said = await waitFor(() =>
+      screen.getByText(/leaves the cluster for every device in it/),
+    );
+
+    expect(said.textContent).toContain("told to forget the rest");
+  });
+
+  /// The press on the card is what acts, and the section is redrawn out of its
+  /// own answer rather than out of a second request.
+  it("unlinks the device the card named, and redraws the list", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(LINKED),
+      whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+
+    await waitFor(() =>
+      expect(screen.getByText("Unlink laptop?")).toBeTruthy(),
+    );
+
+    fireEvent.click(
+      screen.getAllByText("Unlink").find((press) => press.closest("dialog"))!,
+    );
+
+    await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+
+    expect(askedFor(fetching, `/api/ui/devices/members/${LAPTOP}/unlink`)).toBe(
+      1,
+    );
+  });
+
+  /// And the way back leaves the cluster alone, which is the whole of what
+  /// asking is for.
+  it("leaves the cluster alone on Keep it", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(LINKED),
+      whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+
+    await waitFor(() =>
+      expect(screen.getByText("Unlink laptop?")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByText("Keep it"));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Unlink laptop?")).toBeNull(),
+    );
+
+    expect(screen.getByText("laptop"), "the row is where it was").toBeTruthy();
+    expect(askedFor(fetching, `/api/ui/devices/members/${LAPTOP}/unlink`)).toBe(
+      0,
+    );
+  });
+
+  /// And after the last member goes, the list is this device's row alone and
+  /// the section reads as it did before anything was linked.
+  it("leaves this device alone on the list once the last member goes", async () => {
+    const last = LINKED.members[1]!.identity.device;
+
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice({ ...LINKED, members: LINKED.members.slice(1) }),
+      whenever(`/api/ui/devices/members/${last}/unlink`, json(DEVICES), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("unreachable")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getAllByText("Unlink").find((press) => press.closest("dialog"))!,
+      ),
+    );
+
+    await waitFor(() => expect(screen.queryByText("unreachable")).toBeNull());
+
+    expect(screen.getByText("this device")).toBeTruthy();
+    expect(
+      screen.queryByText("Unlink"),
+      "and nothing left to press, which is the list before anything was linked",
+    ).toBeNull();
+    expect(askedFor(fetching, `/api/ui/devices/members/${last}/unlink`)).toBe(
+      1,
+    );
+  });
+
+  /// A server that could not answer at all is said under the list, in its own
+  /// words: what the human can do about a workbench that is down is different
+  /// from what they can do about anything else.
+  it("says what went wrong where the press could not be made", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(LINKED),
+      whenever(
+        `/api/ui/devices/members/${LAPTOP}/unlink`,
+        json(
+          { error: "this server holds no device identity to answer for" },
+          503,
+        ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByText("Unlink")[0]!);
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getAllByText("Unlink").find((press) => press.closest("dialog"))!,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/The device could not be unlinked/)).toBeTruthy(),
+    );
+
+    expect(screen.getByText("laptop"), "and the row stays drawn").toBeTruthy();
+  });
+});
+
 describe("the devices clause on the card", () => {
   /// It reads right after every one of the six sentences the card says about
   /// Tailscale, rather than being written into one of them: what it says is
@@ -1161,8 +1364,9 @@ describe("the devices clause on the card", () => {
 function scanned(code: Element): string | null {
   const size = Number(code.getAttribute("viewBox")?.split(" ")[2]);
   const dark = new Set(
-    [...(code.querySelector("path")?.getAttribute("d") ?? "").matchAll(MODULE)]
-      .map(([, x, y]) => `${x},${y}`),
+    [
+      ...(code.querySelector("path")?.getAttribute("d") ?? "").matchAll(MODULE),
+    ].map(([, x, y]) => `${x},${y}`),
   );
 
   // Four pixels a module, which is more than jsQR's own minimum and less than
@@ -1173,9 +1377,7 @@ function scanned(code: Element): string | null {
 
   for (let y = 0; y < width; y++) {
     for (let x = 0; x < width; x++) {
-      const on = dark.has(
-        `${Math.floor(x / scale)},${Math.floor(y / scale)}`,
-      );
+      const on = dark.has(`${Math.floor(x / scale)},${Math.floor(y / scale)}`);
       const at = (y * width + x) * 4;
 
       pixels[at] = pixels[at + 1] = pixels[at + 2] = on ? 0 : 255;

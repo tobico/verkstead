@@ -78,6 +78,7 @@ pub mod announcing;
 pub mod dialling;
 pub mod exchange;
 pub mod joining;
+pub mod unlinking;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -91,7 +92,7 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::serve::IncomingStream;
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -335,10 +336,19 @@ pub fn router(
             Router::new()
                 .route(announcing::MEMBERS, post(announcing::announced))
                 .with_state(announcing::Told {
-                    device,
+                    device: device.clone(),
                     members: members.clone(),
-                    nudges,
-                }),
+                    nudges: nudges.clone(),
+                })
+                .merge(
+                    Router::new()
+                        .route(unlinking::MEMBER, delete(unlinking::dropped))
+                        .with_state(unlinking::Dropping {
+                            device,
+                            members: members.clone(),
+                            nudges,
+                        }),
+                ),
             members,
         ))
 }
@@ -366,9 +376,10 @@ struct Answering {
 /// that reads as working code. So there is one call, and everything that goes
 /// through it is gated.
 ///
-/// One route on this listener so far — the announcement in [`announcing`],
-/// which is the first call a member makes to another — with the unlink
-/// broadcast and the renewal to follow it. It is public all the same, because
+/// Two routes on this listener so far, and they are one membership said both
+/// ways: the announcement in [`announcing`], which puts a device on this one's
+/// list, and the unlink in [`unlinking`], which takes one off it — with the
+/// renewal to follow them. It is public all the same, because
 /// the suite stands its own one-line route behind the real gate: what is being
 /// asked of the gate is which callers get *through* it, and the path no route
 /// answers is what tells a refusal from a miss.
@@ -606,13 +617,81 @@ impl Members {
     /// A stated membership has no rows and no debts. It is a number, and a
     /// suite standing on one is asking about a changeover rather than about a
     /// member.
-    pub(crate) async fn owed(&self, device: &str, about: &str) -> Result<()> {
+    pub(crate) async fn owed(
+        &self,
+        device: &str,
+        about: &str,
+        telling: verkstead_store::Telling,
+    ) -> Result<()> {
         match &self.recorded {
-            Recorded::InTheStore(pool) => verkstead_store::owe_announcement(pool, device, about)
+            Recorded::InTheStore(pool) => {
+                verkstead_store::owe_announcement(pool, device, about, telling)
+                    .await
+                    .with_context(|| {
+                        format!("writing down that device {device} has not heard about {about}")
+                    })
+            }
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And everything `device` has yet to be told, which is what a dial that
+    /// got through to it asks — see
+    /// [`verkstead_store::announcements_owed_to`].
+    ///
+    /// **The trigger rather than a loop.** Nothing here retries on a timer: a
+    /// member that was off is caught up the moment something finds it
+    /// answering, and something dials a member whenever the cluster does
+    /// anything at all.
+    pub(crate) async fn owing(
+        &self,
+        device: &str,
+    ) -> Result<Vec<(String, verkstead_store::Telling)>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::announcements_owed_to(pool, device)
                 .await
-                .with_context(|| {
-                    format!("writing down that device {device} has not heard about {about}")
-                }),
+                .with_context(|| format!("reading what device {device} has yet to be told")),
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Take a device out of the membership — see
+    /// [`verkstead_store::forget_member`], which takes its addresses and its
+    /// debts with it.
+    ///
+    /// **What an Unlink does here, and what being told about one does.** The
+    /// two are the same act arriving from two directions: the human pressed it
+    /// on this workbench, or a member this device holds a link to says the
+    /// cluster has dropped that device. A membership is not a set of pairs, so
+    /// there is one answer to both.
+    ///
+    /// Nothing is refused, the stance the store takes: unlinking a device that
+    /// is not a member is not a thing to fail.
+    pub(crate) async fn forget(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::forget_member(pool, device)
+                .await
+                .with_context(|| format!("forgetting device {device}")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And forget the lot of them, which is what this device does when a member
+    /// tells it that it has been unlinked — see
+    /// [`verkstead_store::forget_every_member`].
+    ///
+    /// The leaver's own half. Every other device in the cluster has dropped
+    /// this one, so every one of them would refuse it at the gate; what is left
+    /// here is a list of machines that no longer hold this device, and holding
+    /// it would be a Devices section that lied.
+    pub(crate) async fn forget_everybody(&self) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::forget_every_member(pool)
+                .await
+                .context("forgetting every device this one was linked to"),
 
             Recorded::Stated(_) => Ok(()),
         }
