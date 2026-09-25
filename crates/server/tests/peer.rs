@@ -13,10 +13,18 @@
 //! the occasion — what an unknown device presents is exactly what a device
 //! presents, and a stranger made some other way would be a stranger of a shape
 //! no peer will ever be.
+//!
+//! The same two are what the member gate is asked about, because a membership
+//! is what neither of them has: what the identity endpoint answers them, every
+//! other path on this listener refuses them, and the refusal is read for what
+//! it says as much as for its status.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::Router;
+use axum::extract::ConnectInfo;
+use axum::routing::get;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
@@ -38,6 +46,16 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// been linked to, which in this stage is every device there is.
 const SOME_OTHER_DEVICE: &str = "0011223344556677889900aabbccddee";
 
+/// The join post, which is the stage after this one's. Asked for here because
+/// what this stage claims about it is that it is refused along with everything
+/// else — a caller reaching for it meets the gate rather than a missing path.
+const THE_JOIN_TO_COME: &str = "/api/peer/v1/join";
+
+/// And a path no stage will ever answer, which on this listener is refused the
+/// same way: a caller with no membership has no business being told which of
+/// this device's endpoints exist.
+const NOTHING_ANSWERS_THIS: &str = "/api/peer/v1/nothing-answers-this";
+
 /// A peer listener up on the loopback, with the device it is presenting.
 ///
 /// The port is the operating system's rather than 8423: a suite that took the
@@ -54,8 +72,15 @@ struct Listening {
 }
 
 impl Listening {
-    /// Stand one up, serving until the test is over.
+    /// Stand one up serving what a Verkstead serves, until the test is over.
     fn with_the_device_called(id: &str) -> Listening {
+        Listening::serving(id, |device| peer::router(device, peer::Members::none()))
+    }
+
+    /// And one serving `answering` instead, for the questions that are about
+    /// what a route on this listener can read rather than about which routes
+    /// there are.
+    fn serving(id: &str, answering: impl FnOnce(Device) -> Router) -> Listening {
         let dir = tempfile::tempdir().unwrap();
         let device = Device::stated(dir.path(), id).unwrap();
 
@@ -63,7 +88,7 @@ impl Listening {
             .expect("the loopback on a port the machine picked is free");
         let address = listener.address();
 
-        tokio::spawn(listener.serving(peer::router(device.clone())));
+        tokio::spawn(listener.serving(answering(device.clone())));
 
         Listening {
             address,
@@ -164,6 +189,15 @@ fn body(answered: &str) -> &str {
         .split_once("\r\n\r\n")
         .expect("a response has a head and a body")
         .1
+}
+
+/// And its status, which is what says a refusal apart from a miss.
+fn status(answered: &str) -> u16 {
+    answered
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("a response starts with a status line, got:\n{answered}"))
 }
 
 /// A certificate's fingerprint in the spelling the device module prints one:
@@ -309,5 +343,135 @@ async fn a_caller_that_opens_a_socket_and_says_nothing_holds_nobody_up() {
         body(&answered).contains(THIS_DEVICE),
         "the silent connection should have held up its own task and nobody else's, \
          got:\n{answered}",
+    );
+}
+
+/// A device this one has never heard of, standing where a stranger stands.
+///
+/// The directory comes back with it because the identity lives in it: dropped
+/// early, the certificate goes out from under the handle still presenting it.
+fn a_stranger() -> (Device, tempfile::TempDir) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let stranger = Device::stated(elsewhere.path(), SOME_OTHER_DEVICE).unwrap();
+
+    (stranger, elsewhere)
+}
+
+/// Where the probe router below says what the handshake handed it.
+const PRESENTED: &str = "/presented";
+
+/// A router that is nothing but a route reading its caller.
+///
+/// Stood up instead of the real one because the real one has nowhere to say
+/// this: the identity endpoint answers a caller that has shown nothing, and
+/// everything that *does* read a certificate is a stage away. What is being
+/// checked is the shape — that the certificate the handshake took is there to
+/// be read by the time a route runs — and a route of one line is the whole of
+/// that question.
+fn probing(_device: Device) -> Router {
+    Router::new().route(
+        PRESENTED,
+        get(
+            |ConnectInfo(caller): ConnectInfo<peer::Caller>| async move {
+                caller.fingerprint().unwrap_or_else(|| "nothing".to_owned())
+            },
+        ),
+    )
+}
+
+/// The first half of the gate's acceptance: a caller with nothing to show
+/// reaches the identity endpoint — which the suite above proves — and nothing
+/// else on the listener.
+#[tokio::test]
+async fn a_caller_with_no_certificate_reaches_nothing_but_the_identity() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+
+    for path in [THE_JOIN_TO_COME, NOTHING_ANSWERS_THIS] {
+        let (_, answered) = asking(&listening, Showing::Nothing, path).await;
+
+        assert_eq!(
+            status(&answered),
+            403,
+            "{path} is a member's or is refused, and there is no member, got:\n{answered}",
+        );
+    }
+}
+
+/// And the second: a certificate nothing here has recorded completes the
+/// handshake — the suite above proves that too — and is refused by every route
+/// the gate stands over.
+#[tokio::test]
+async fn a_caller_showing_an_unknown_certificate_is_refused_by_the_gated_routes() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+    let (stranger, _elsewhere) = a_stranger();
+
+    for path in [THE_JOIN_TO_COME, NOTHING_ANSWERS_THIS] {
+        let (_, answered) = asking(&listening, Showing::A(stranger.clone()), path).await;
+
+        assert_eq!(
+            status(&answered),
+            403,
+            "a certificate is not a membership — the gate is what holds one, got:\n{answered}",
+        );
+    }
+}
+
+/// What the refusal says, which is the thing the stage after this one reads it
+/// for.
+///
+/// A device posting a join has two ways of not getting through: a Verkstead
+/// that will not have it, and a Verkstead too old to have the route at all. It
+/// wants a human to press Allow in the first case and an upgrade on the other
+/// machine in the second, so a refusal that read as a missing path would leave
+/// it unable to say which it had met.
+#[tokio::test]
+async fn the_refusal_says_it_is_a_membership_rather_than_a_missing_path() {
+    let listening = Listening::with_the_device_called(THIS_DEVICE);
+    let (stranger, _elsewhere) = a_stranger();
+
+    let (_, answered) = asking(&listening, Showing::A(stranger), THE_JOIN_TO_COME).await;
+
+    assert_ne!(
+        status(&answered),
+        404,
+        "a refusal a caller cannot tell from a missing route is a refusal it \
+         cannot act on, got:\n{answered}",
+    );
+
+    assert!(
+        body(&answered).contains("not a member"),
+        "the refusal should name what it is — a caller that is not a member of \
+         this device's cluster, got:\n{answered}",
+    );
+}
+
+/// The certificate the handshake accepted is readable by a route, which is
+/// what the join of the stage after this pins into the pending request it
+/// creates.
+///
+/// Read as its fingerprint rather than as the bytes, because that is the
+/// comparison the member list and the human both make — and because a
+/// fingerprint worked out on this side from the device's own file is a
+/// different path to the same string, rather than the same string handed back.
+#[tokio::test]
+async fn a_route_can_read_the_certificate_the_handshake_took() {
+    let listening = Listening::serving(THIS_DEVICE, probing);
+    let (stranger, _elsewhere) = a_stranger();
+
+    let (_, answered) = asking(&listening, Showing::A(stranger.clone()), PRESENTED).await;
+
+    assert_eq!(
+        body(&answered),
+        stranger.fingerprint(),
+        "the route should read the certificate the caller presented, got:\n{answered}",
+    );
+
+    let (_, answered) = asking(&listening, Showing::Nothing, PRESENTED).await;
+
+    assert_eq!(
+        body(&answered),
+        "nothing",
+        "and nothing where the caller presented nothing, that being an ordinary \
+         caller rather than a failure, got:\n{answered}",
     );
 }
