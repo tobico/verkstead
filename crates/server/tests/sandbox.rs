@@ -4193,40 +4193,40 @@ async fn a_session_looks_for_a_program_where_an_npm_install_puts_one() {
     );
 }
 
-/// And where that image was packed with the libraries it runs over, a session
-/// still finds one `verkstead` and nothing beside it: the launcher that points
-/// the loader at them and execs the image behind it.
+/// And an image running out of a mounted AppImage is handed over as *itself*:
+/// the file on the `PATH`, no launcher in front of it, and nothing of the
+/// bundle's bound in beside it.
 ///
-/// **The AppImage is the whole of why there is a launcher.** It carries GTK and
-/// everything under it because the machine it lands on may have none of them,
-/// and `AppRun` points the loader there before it execs the binary — but a
-/// session gets no `AppRun` and no such variable, so the file alone is a binary
-/// that cannot load on exactly the machine the artifact was made for.
+/// **This is a reading turned round rather than a new one.** The Rust AppImage
+/// was a GTK binary with no rpath, so the server read the runtime's `$APPDIR`,
+/// wrote a two-line launcher that pointed the loader at the `usr/lib` packed
+/// beside the image, put *that* on a session's `PATH` and bound those libraries
+/// in. Every condition of it is still true of the AppImage the Electron app is
+/// packed as — an absolute `$APPDIR`, the image under it, a `usr/lib` beside it
+/// — and none of the intent is: that directory holds the Electron bundle's own
+/// libraries, and the image is the static musl CLI, which has no loader to
+/// point anywhere (ADR-0020).
 ///
-/// So the libraries go in with it, and the loader is pointed at them for the one
-/// binary that needs them rather than for the session: what is in that directory
-/// is `libz`, `libexpat` and forty more besides GTK, and a session whose `git`
-/// and `rustc` loaded those instead of the machine's would be a session with a
-/// quietly re-pointed toolchain. This is that, asked of a shell inside: what the
-/// image saw, and what everything else in the sandbox did not.
+/// So the reading is gone, and this is what a session gets instead, asked of a
+/// shell inside: one `verkstead`, which is the image and not a script, with no
+/// `/verkstead/lib` for anything in the sandbox to load out of.
 #[tokio::test]
-async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
+async fn an_image_inside_an_appimage_is_handed_over_as_itself() {
     let mut fixture = grilling().await;
 
-    // An AppDir as `tools/build-appimage.sh` packs one: the image under
-    // `usr/bin`, and in `usr/lib` beside it a file standing in for the
-    // libraries — what a test can ask of a loader path is what is on it, and a
-    // real ELF would prove no more than a name does.
+    // An AppDir as electron-builder packs one: the CLI in a directory of its
+    // own under the mount, and `usr/lib` beside it holding the bundle's
+    // libraries — a file standing in for them, what a test can ask of a loader
+    // path being what is on it.
     let appdir = fixture.state.path().join("appdir");
-    let bin = appdir.join("usr/bin");
+    let bin = appdir.join("resources/cli");
     let lib = appdir.join("usr/lib");
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&lib).unwrap();
-    std::fs::write(lib.join("libpacked-with-it.so.0"), "not really an ELF\n").unwrap();
+    std::fs::write(lib.join("libthe-bundles-own.so.0"), "not really an ELF\n").unwrap();
 
-    // Which says what it was given to load over as well as which build it is:
-    // the launcher is what put that there, and the image is where it can be
-    // read back.
+    // Which says which build it is and what it was left to load over — the
+    // second being what a launcher would have set and nothing else does.
     let image = bin.join("verkstead");
     std::fs::write(
         &image,
@@ -4236,8 +4236,7 @@ async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     fixture.verkstead = Executable::at(Platform::HERE, image, fixture.state.path())
-        .expect("the image was just written")
-        .bundling(fixture.state.path(), Some(&appdir));
+        .expect("the image was just written");
 
     let sandbox = fixture.sandbox(vec![]);
 
@@ -4248,31 +4247,33 @@ async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
         say found "$found"
         say ran "$(verkstead)"
         say beside "$(ls "$(dirname "$found")")"
-        say packed "$(ls /verkstead/lib)"
+        say packed "$(ls /verkstead/lib 2>&1 || true)"
         say session-loader "${LD_LIBRARY_PATH-nothing}"
         "#,
     );
 
     assert_eq!(
         reported["found"], "/verkstead/bin/verkstead",
-        "a bare `verkstead` is still the one thing on the server's own PATH entry"
+        "a bare `verkstead` is the one thing on the server's own PATH entry"
     );
     assert_eq!(
-        reported["ran"], "the-servers-own over /verkstead/lib",
-        "and running it runs the server's own image, over the libraries it was packed with"
+        reported["ran"], "the-servers-own over nothing",
+        "and running it runs the server's own image with nothing said to the loader — no \
+         launcher stands in front of it"
     );
     assert_eq!(
         reported["beside"], "verkstead",
-        "the image itself is behind the launcher rather than beside it on the PATH"
+        "which is the whole of what that PATH entry holds"
     );
-    assert_eq!(
-        reported["packed"], "libpacked-with-it.so.0",
-        "the libraries a session gets are the ones the image was packed with"
+    assert!(
+        reported["packed"].contains("No such file or directory"),
+        "and none of the bundle's libraries are bound in for anything in the sandbox to \
+         load out of: {:?}",
+        reported["packed"],
     );
     assert_eq!(
         reported["session-loader"], "nothing",
-        "and the session's own environment says nothing to the loader, so nothing else \
-         it runs loads out of that directory"
+        "the session's own environment saying nothing to the loader either"
     );
 }
 

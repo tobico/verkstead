@@ -63,6 +63,7 @@ import {
 } from "./startup.js";
 import { taken } from "./taken.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
+import { APPDIR, stripped, unmounted } from "./unmounted.js";
 import { forward, open } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
 
@@ -384,7 +385,21 @@ async function run(): Promise<void> {
     );
   }
 
-  const sidecar = start(path, ADDRESS, heard);
+  // And the environment the sidecar gets, which is this process's own with the
+  // AppImage's doing taken out of it — see [`unmounted`]. Said where it did
+  // something, because a bundle's directories reaching a session's `PATH` or a
+  // host binary's loader is the kind of trouble nobody thinks to suspect the app
+  // of.
+  const passed = unmounted(machine.env);
+  const stripping = stripped(machine.env, passed);
+  if (stripping.length > 0) {
+    say(
+      `this run came out of ${machine.env[APPDIR]}, so the sidecar is handed ` +
+        `${stripping.join(", ")} with the mount taken out of them`,
+    );
+  }
+
+  const sidecar = start(path, ADDRESS, heard, passed);
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 

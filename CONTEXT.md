@@ -240,11 +240,9 @@ everything else on the network it sits on, which was never a boundary drawn on
 purpose — and what took the exception away is that a session there runs as an
 ordinary local account, reaching the network the way everything else on that
 machine does. The `verkstead` a session asks with
-is the running server's own image, first on the `PATH` inside, so the CLI a
-session asks with and the server it asks are one build and cannot disagree
-about a schema — with the libraries that image was packed with, where it was
-packed with any, reached through a launcher of Verkstead's own so that nothing
-else the session runs loads out of them. What
+is the running server's own image, first on the `PATH` inside and the one file
+on that entry, so the CLI a session asks with and the server it asks are one
+build and cannot disagree about a schema. What
 it asks *through* is the loopback, scoped to the Conversation it is asking
 from — except on Windows, where it is a **named pipe** the server opens beside
 its socket and names in the session's environment, in the same

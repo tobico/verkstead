@@ -4,8 +4,8 @@
 //! server is told about who started it (ADR-0020), and the address is the one
 //! thing the app has an opinion about: the port is fixed by decision and the
 //! app probes it, waits on it and loads it, so the server is *told* to bind it
-//! rather than left to resolve it — the child inherits this process's
-//! environment, and a `VERKSTEAD_LISTEN` exported in the shell that started the
+//! rather than left to resolve it — the child gets the environment the app was
+//! started in, and a `VERKSTEAD_LISTEN` exported in the shell that started the
 //! app would otherwise put the server somewhere the rest of the app is not
 //! looking. See [`ADDRESS`](./workbench.js), which is the number, and
 //! [`LISTEN`](./workbench.js), which the app reports having overridden.
@@ -15,6 +15,11 @@
 //! app, exactly as it is for a `verkstead serve` run by hand, and a packed app
 //! that says nothing gets the platform **Data Directory**. The app grows no
 //! flag for any of it.
+//!
+//! **The environment is handed in rather than inherited**, which is what lets
+//! the app take the AppImage's own doing out of it first — see
+//! [`unmounted`](./unmounted.js), which is what `main.ts` passes through. What
+//! a child gets here is what it was given and nothing this module resolved.
 //!
 //! **And the child dies with the app.** Not as a courtesy: the port is fixed,
 //! so a sidecar left running is the next launch meeting a foreign listener on
@@ -172,7 +177,17 @@ function read(stream: Readable | null, said: (line: string) => void): void {
 /// its own — taken as an argument rather than imported so that this module
 /// answers to nothing but a child process, which is what lets the fixture in
 /// `tests/fixtures/` run it straight off the TypeScript.
-export function start(cli: string, address: string, said: (line: string) => void): Sidecar {
+///
+/// **`env` is the child's whole environment**, for the reason at the top of this
+/// file: the app passes [`unmounted`](./unmounted.js) of its own, so that a
+/// packed run does not pass the bundle's directories on to a server and to every
+/// session under it.
+export function start(
+  cli: string,
+  address: string,
+  said: (line: string) => void,
+  env: Partial<Record<string, string>>,
+): Sidecar {
   const child = spawn(cli, ARGUMENTS(address), {
     // Nothing on stdin, and both streams read rather than inherited: the log
     // file is the app's to write, so the sidecar's `tracing` output comes
@@ -180,6 +195,7 @@ export function start(cli: string, address: string, said: (line: string) => void
     // lines. Both of them, because what a server says as it falls over goes to
     // stderr and that is the half most worth having in the file.
     stdio: ["ignore", "pipe", "pipe"],
+    env,
   });
 
   read(child.stdout, said);

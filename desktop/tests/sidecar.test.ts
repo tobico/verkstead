@@ -16,14 +16,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FILE, heard, keep } from "../src/log.js";
 import { ARGUMENTS, byLine, how, start, type Lines, type Sidecar } from "../src/sidecar.js";
+import { unmounted } from "../src/unmounted.js";
 import { ADDRESS, LISTEN } from "../src/workbench.js";
 
 /// A stand-in `verkstead`, written somewhere of its own and made runnable.
 ///
 /// Where it records what it was started with is written into the script rather
-/// than handed to it: the app hands a sidecar its arguments and the environment
-/// it already had, so a test that needed a variable of its own would be testing
-/// a door this has not got.
+/// than handed to it, because where that file goes is the test's business rather
+/// than the app's — what the app hands a sidecar is its arguments and an
+/// environment, and the environment is what several of these are about.
 ///
 /// `exec`, so that the process the app is holding *is* the one that sits there
 /// — a shell that forked and waited would be a shell the app signals and a
@@ -40,7 +41,8 @@ function standIn(then = "exec sleep 600"): { cli: string; record: string } {
     cli,
     [
       "#!/bin/sh",
-      `{ echo "$@"; echo "\${VERKSTEAD_DATA_DIR-}"; echo "\${VERKSTEAD_LISTEN-}"; } > '${record}'`,
+      `{ echo "$@"; echo "\${VERKSTEAD_DATA_DIR-}"; echo "\${VERKSTEAD_LISTEN-}"; ` +
+        `echo "\${LD_LIBRARY_PATH-}"; echo "\${PATH-}"; } > '${record}'`,
       then,
       "",
     ].join("\n"),
@@ -54,7 +56,7 @@ function standIn(then = "exec sleep 600"): { cli: string; record: string } {
 /// because a redirect lands a line at a time — a read that took the first line
 /// for the whole record would see every variable as empty and pass whatever the
 /// app did.
-const RECORDED = 3;
+const RECORDED = 5;
 
 /// Wait until the stand-in has written the whole of what it was started with,
 /// which is the first thing it does.
@@ -130,7 +132,7 @@ afterEach(async () => {
 describe.skipIf(process.platform === "win32")("the sidecar", () => {
   it("is started as `serve --desktop` on the one address", async () => {
     const { cli, record } = standIn();
-    started = start(cli, ADDRESS, heard);
+    started = start(cli, ADDRESS, heard, unmounted(process.env));
 
     const [said] = await recorded(record);
     expect(said).toBe(ARGUMENTS(ADDRESS).join(" "));
@@ -147,7 +149,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const { cli, record } = standIn();
     process.env[LISTEN] = "127.0.0.1:9422";
     try {
-      started = start(cli, ADDRESS, heard);
+      started = start(cli, ADDRESS, heard, unmounted(process.env));
       const [said, , listen] = await recorded(record);
 
       expect(listen).toBe("127.0.0.1:9422");
@@ -164,12 +166,46 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const { cli, record } = standIn();
     process.env.VERKSTEAD_DATA_DIR = "/srv/somewhere";
     try {
-      started = start(cli, ADDRESS, heard);
+      started = start(cli, ADDRESS, heard, unmounted(process.env));
       const [, data] = await recorded(record);
       expect(data).toBe("/srv/somewhere");
     } finally {
       delete process.env.VERKSTEAD_DATA_DIR;
     }
+  });
+
+  /// And out of a packed AppImage it inherits everything but the mount: what
+  /// `AppRun` led the loader and the `PATH` with is gone from the child, and
+  /// what the human had exported is still there.
+  ///
+  /// The whole of the rule is `unmounted.test.ts`'s. This is the door it is
+  /// applied at, asked of a real child: the app hands a sidecar the answer, so a
+  /// spawn that resolved an environment of its own would pass every test in that
+  /// file and still put the bundle's libraries on a server's loader path.
+  it("hands a packed run's child the environment with the mount out of it", async () => {
+    const { cli, record } = standIn();
+    const appdir = "/tmp/.mount_Verksomething";
+
+    // The machine's own `PATH` is still in it, exactly as `AppRun` leaves it:
+    // the stand-in execs a `sleep`, so a test that took the whole of it away
+    // would be a test about a missing program.
+    const machines = process.env.PATH ?? "/usr/bin:/bin";
+
+    started = start(
+      cli,
+      ADDRESS,
+      heard,
+      unmounted({
+        APPDIR: appdir,
+        LD_LIBRARY_PATH: `${appdir}/usr/lib`,
+        PATH: `${appdir}:${appdir}/usr/sbin:${machines}`,
+      }),
+    );
+
+    const [, , , loader, path] = await recorded(record);
+
+    expect(loader).toBe("");
+    expect(path).toBe(machines);
   });
 
   /// The other half of the log file: the app writes it, and what the *server*
@@ -187,7 +223,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
     const said = "2026-09-25T10:00:00.000000Z  INFO verkstead_server: verkstead is listening";
     const { cli, record } = standIn(`echo '${said}'\nexec sleep 600`);
-    started = start(cli, ADDRESS, heard);
+    started = start(cli, ADDRESS, heard, unmounted(process.env));
     await recorded(record);
 
     expect(await held(join(where, FILE), said)).toContain(said);
@@ -195,7 +231,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
   it("goes when it is stopped", async () => {
     const { cli, record } = standIn();
-    const sidecar = start(cli, ADDRESS, heard);
+    const sidecar = start(cli, ADDRESS, heard, unmounted(process.env));
     await recorded(record);
 
     sidecar.stop();
@@ -210,7 +246,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
   /// what the child handed over as it went.
   it("says a server that ended on its own exited", async () => {
     const { cli, record } = standIn("exit 3");
-    started = start(cli, ADDRESS, heard);
+    started = start(cli, ADDRESS, heard, unmounted(process.env));
     await recorded(record);
 
     const ending = await started.gone;
@@ -221,7 +257,7 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
 
   it("says a server that was stopped was killed", async () => {
     const { cli, record } = standIn();
-    started = start(cli, ADDRESS, heard);
+    started = start(cli, ADDRESS, heard, unmounted(process.env));
     await recorded(record);
 
     started.stop();
