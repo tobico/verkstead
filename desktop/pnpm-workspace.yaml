@@ -10,11 +10,21 @@
 # downloads a platform build of Electron — a couple of hundred megabytes — and
 # nothing in this project runs it: `pnpm start` runs the dev shell's Electron
 # (see `flake.nix`), and CI only lints, typechecks and tests, which want the
-# package for its TypeScript definitions and nothing else. electron-builder's
-# own downloads are the packaging stages' business (ADR-0020), and this is not
-# one of them. Said as a denial rather than left unsaid, because an install
-# script pnpm is ignoring without having been told to is one it refuses the
-# whole install over.
+# package for its TypeScript definitions and nothing else. The Electron that
+# gets *packed* is electron-builder's own download of the version this package
+# pins — see `electron-builder.yml`, which says why it must not be the dev
+# shell's — and that happens inside `pnpm run pack` rather than on every
+# install. Said as a denial rather than left unsaid, because an install script
+# pnpm is ignoring without having been told to is one it refuses the whole
+# install over.
+#
+# **And `electron-winstaller`'s is denied with it.** That package arrives under
+# electron-builder and is the Squirrel.Windows target's; its install script
+# fetches Squirrel's own binaries. Windows gets an msi through the WiX target
+# instead (ADR-0020), so nothing here will ever build a Squirrel installer —
+# and what the script would do meanwhile is download a Windows toolchain onto
+# every machine that installs this project, Linux runners included.
 allowBuilds:
   esbuild: true
   electron: false
+  electron-winstaller: false
