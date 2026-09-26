@@ -339,7 +339,9 @@ const written = (
 function useProfiles() {
   return useReading(() => ({
     queryKey: ["profiles"],
-    queryFn: listProfiles,
+    // This device's own: the Profiles pane is the settings page's, and a member's
+    // accounts are configured on the member.
+    queryFn: () => listProfiles(null),
     freshness: { reconcile: "id" },
   }));
 }

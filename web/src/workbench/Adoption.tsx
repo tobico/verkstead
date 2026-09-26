@@ -29,6 +29,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { companionRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
@@ -97,21 +98,26 @@ export function Adoption(props: {
   adopting: NonNullable<ConversationView["adopting"]>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<Adopted | null>(null);
 
   const adopt = useMutation(() => ({
-    mutationFn: () => adoptRoadmap(props.conversation.id),
+    mutationFn: () => adoptRoadmap(device(), props.conversation.id),
     onSuccess: (outcome: Adopted) => {
       // Whatever it came back with, the page is read again: what adopting did
       // is a conversation that has moved, and what refused it is a repository
       // that has moved — and reading it again is the correction either way.
       setRefused(outcome === "Adopted" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "abandoned-roadmaps"),
+      });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
     },
   }));
 

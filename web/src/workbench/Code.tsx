@@ -457,6 +457,7 @@ import { Empty, ErrorLine } from "../notices";
 // by, the readings under them being held above this pane rather than in a
 // query — see `whenFilesMove`, which is where the reasoning is.
 import { whenFilesMove } from "../nudge";
+import { keyOf, useDevice } from "../reaching";
 import { Attached } from "./Attached";
 import { Editor } from "./Editor";
 import { load } from "./editing";
@@ -827,6 +828,8 @@ export function Code(props: {
   /// because the pane it gives the window to is.
   maximise?: { on: boolean; set: (on: boolean) => void };
 }): JSX.Element {
+  const device = useDevice();
+
   /// Which of this Conversation's terminals are live.
   ///
   /// Read when the pane opens rather than followed: the register is the
@@ -850,11 +853,14 @@ export function Code(props: {
   /// details pane for another, both in the one tick — finds nothing to come
   /// back to either.
   const held = useQueryClient();
-  const holding = () => ["terminals", props.conversation.id];
+  // Under the device with the Conversation, for the reason every key here
+  // carries one: ids collide by construction, and a register keyed by a bare id
+  // would offer a member's shells as this device's.
+  const holding = () => keyOf(device(), "terminals", props.conversation.id);
 
   const terminals = useReading(() => ({
     queryKey: holding(),
-    queryFn: () => listTerminals(props.conversation.id),
+    queryFn: () => listTerminals(device(), props.conversation.id),
     freshness: "static",
     gcTime: 0,
   }));
@@ -885,7 +891,7 @@ export function Code(props: {
   // a restarted server or a connection that dropped rather than a detach — see
   // [`ATTACH_AGAIN`], which is where the waits and the reason for them are.
   createEffect(() => {
-    const at = filesSocket(props.conversation.id);
+    const at = filesSocket(device(), props.conversation.id);
 
     let attached: WebSocket | undefined;
     let waiting: ReturnType<typeof setTimeout> | undefined;
@@ -1996,7 +2002,7 @@ export function Code(props: {
 
     opening = true;
 
-    return openTerminal(props.conversation.id)
+    return openTerminal(device(), props.conversation.id)
       .then((outcome) => {
         if (typeof outcome === "string") {
           stand(TERMINAL_REFUSAL[outcome]);
@@ -2359,7 +2365,7 @@ export function Code(props: {
     // is a question about the disk, and this is the disk answering.
     unbar(path);
 
-    return readFile(props.conversation.id, path)
+    return readFile(device(), props.conversation.id, path)
       .then((reading) => {
         if (keeping) {
           setReadings((was) => ({ ...was, [path]: reading }));
@@ -2464,7 +2470,7 @@ export function Code(props: {
       return Promise.resolve();
     }
 
-    return readFile(props.conversation.id, path)
+    return readFile(device(), props.conversation.id, path)
       .then((reading) => {
         if (readings()[path] !== was || saving.has(path) || same(was, reading)) {
           return;
@@ -2511,7 +2517,7 @@ export function Code(props: {
   // readings are held above this pane with the tabs and the text nobody has
   // saved. Let go of with the pane, so one that is not drawn reads nothing.
   createEffect(() => {
-    onCleanup(whenFilesMove(props.conversation.id, follow));
+    onCleanup(whenFilesMove(device(), props.conversation.id, follow));
   });
 
   /// Save one, which is what Ctrl+S does.
@@ -2540,7 +2546,7 @@ export function Code(props: {
 
     saving.add(path);
 
-    return writeFile(props.conversation.id, path, read.version, text)
+    return writeFile(device(), props.conversation.id, path, read.version, text)
       .then((written) => {
         if (typeof written !== "string" && "Written" in written) {
           // Onto what was just put there, at the version it now has: the tab is
@@ -2666,7 +2672,7 @@ export function Code(props: {
   /// terminal that has ended, and the tab goes when its socket closes like any
   /// other.
   const end = (tab: number, asked: boolean): Promise<void> =>
-    closeTerminal(props.conversation.id, tab, asked)
+    closeTerminal(device(), props.conversation.id, tab, asked)
       .then((outcome) => {
         setAsking(outcome === "Busy" ? tab : undefined);
       })
@@ -3351,7 +3357,11 @@ export function Code(props: {
                       />
                     ) : tab.terminal > 0 ? (
                       <Attached
-                        at={terminalSocket(props.conversation.id, tab.terminal)}
+                        at={terminalSocket(
+                          device(),
+                          props.conversation.id,
+                          tab.terminal,
+                        )}
                         showing={shown()}
                         scrollback={SCROLLBACK}
                         over={over()[tab.terminal]}

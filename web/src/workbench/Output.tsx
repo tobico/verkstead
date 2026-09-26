@@ -66,6 +66,7 @@ import { listProfiles, loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { followBottom } from "../scrolling";
 import { Mark } from "./Mark";
 import styles from "./Output.module.css";
@@ -111,10 +112,17 @@ export function Output(props: {
   /// built again, and a cursor belongs to the record it was read from.
   let read: { of: number; record: TranscriptView } | undefined;
 
+  const device = useDevice();
+
   const transcript = useReading(() => ({
     // The Event is in the key, so opening another session's output is another
     // query rather than the same one showing the wrong session for a moment.
-    queryKey: ["transcript", props.conversation.id, props.output.id],
+    queryKey: keyOf(
+      device(),
+      "transcript",
+      props.conversation.id,
+      props.output.id,
+    ),
 
     // And only while it is the record being read. A Transcript is the whole of
     // what a session said — half a megabyte of it on a session that has been
@@ -135,6 +143,7 @@ export function Output(props: {
     queryFn: async () => {
       const before = read?.of === props.output.id ? read.record : undefined;
       const arrived = await loadTranscript(
+        device(),
         props.conversation.id,
         props.output.id,
         before?.cursor,
@@ -184,8 +193,14 @@ export function Output(props: {
   };
 
   const capture = useReading(() => ({
-    queryKey: ["capture", props.conversation.id, props.output.id],
-    queryFn: () => loadCapture(props.conversation.id, props.output.id),
+    queryKey: keyOf(
+      device(),
+      "capture",
+      props.conversation.id,
+      props.output.id,
+    ),
+    queryFn: () =>
+      loadCapture(device(), props.conversation.id, props.output.id),
     // Only for the session that left no Transcript. A second request every time
     // a pane is opened would be a request for something nobody is going to read.
     enabled: transcript.data !== undefined && !spoke(),
@@ -218,8 +233,8 @@ export function Output(props: {
   // and while it is in flight the name is said, that being the answer that can
   // never misattribute a run.
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
     freshness: { reconcile: "id" },
   }));
 

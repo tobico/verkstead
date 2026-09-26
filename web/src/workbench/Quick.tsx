@@ -54,6 +54,7 @@ import { Modal } from "../Modal";
 import { listFiles } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { MOST, matching, type Found } from "./matching";
 import styles from "./Quick.module.css";
 import chrome from "../picking.module.css";
@@ -118,11 +119,16 @@ export function Quick(props: {
   /// straight back to the next opening — which is the stale list this is
   /// written to avoid.
   const held = useQueryClient();
-  const holding = () => ["file-list", props.conversation];
+  const device = useDevice();
+  // The device is in the key for the reason it is in every key of a
+  // Conversation's: ids collide by construction, so a palette keyed by a bare id
+  // would offer a member's files under this device's Conversation of the same
+  // number.
+  const holding = () => keyOf(device(), "file-list", props.conversation);
 
   const files = useReading(() => ({
     queryKey: holding(),
-    queryFn: () => listFiles(props.conversation),
+    queryFn: () => listFiles(device(), props.conversation),
     freshness: "static",
     gcTime: 0,
   }));

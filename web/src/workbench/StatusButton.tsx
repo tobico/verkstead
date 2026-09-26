@@ -46,6 +46,7 @@ import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 import { Icon } from "../Icon";
 import type { ConversationView } from "../api/types";
+import { useDevice } from "../reaching";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS, parked } from "./conditions";
 import { pressed } from "./eager";
@@ -150,7 +151,9 @@ export function StatusButton(props: {
   // *Closed* at once, and the menu behind the button offering the rows a closed
   // Conversation has. See `eager.ts`, and `Actions.tsx`, where the rows do the
   // same to what they are handed.
-  const said = createMemo(() => status(pressed(props.conversation)));
+  const device = useDevice();
+
+  const said = createMemo(() => status(pressed(device(), props.conversation)));
 
   return (
     <Actions

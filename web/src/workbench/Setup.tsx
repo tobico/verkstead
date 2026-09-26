@@ -109,6 +109,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import { keyOf, useDevice } from "../reaching";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
@@ -477,9 +478,11 @@ export function RepoSelect(props: {
   disabled?: boolean;
   pick: (repoId: number) => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat, for [`RepoChoice`]'s reason: a
     // Nudge landing while the human has the rows down must not take their
@@ -599,25 +602,31 @@ function RepoPicker(props: {
   disabled: boolean;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<RepoSwitched | null>(null);
 
   const move = useMutation(() => ({
-    mutationFn: (repoId: number) => switchRepo(props.conversation.id, repoId),
+    mutationFn: (repoId: number) =>
+      switchRepo(device(), props.conversation.id, repoId),
     onSuccess: (outcome: RepoSwitched) => {
       if (outcome !== "Switched") {
         setRefused(outcome);
         // Refused about one of the two lists this control was drawn over: the
         // registry it picked out of, or the Conversation the pick was about.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
       // The whole panel is about the repo that has just changed — and so is the
       // sidebar row and every pane head, which read the same record.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
   }));
@@ -675,9 +684,11 @@ export function RepoChoice(props: {
   /// control.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat, for [`CompanionChoice`]'s reason:
     // a Nudge landing while the human has the dropdown open must not take their
@@ -887,6 +898,8 @@ function UncachedCompiles(props: {
 /// it, and an invitation to go and save one is no use behind a trigger nobody
 /// has a reason to press.
 function AgentOption(props: { conversation: ConversationView }): JSX.Element {
+  const device = useDevice();
+
   return (
     <ProfileChoices>
       {(saved) => (
@@ -917,7 +930,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   chosen={pairing.chosen(props.conversation.grilling_pairing)}
                   pairing={props.conversation.grilling_pairing}
                   choose={(id, picked) =>
-                    chooseGrillingPairing(id, pairing.choice(picked))
+                    chooseGrillingPairing(device(), id, pairing.choice(picked))
                   }
                 />
               </Show>
@@ -932,7 +945,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   )}
                   pairing={props.conversation.implementation_pairing}
                   choose={(id, picked) =>
-                    chooseImplementationPairing(id, pairing.choice(picked))
+                    chooseImplementationPairing(device(), id, pairing.choice(picked))
                   }
                 />
               </Show>
@@ -949,7 +962,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   chosen={pairing.settled(props.conversation.review_pairing)}
                   pairing={pairing.under(props.conversation.review_pairing)}
                   choose={(id, picked) =>
-                    chooseReviewPairing(id, pairing.role(picked))
+                    chooseReviewPairing(device(), id, pairing.role(picked))
                   }
                 />
               </Show>
@@ -1050,9 +1063,11 @@ export function AgentOptions(props: {
 export function ProfileChoices(props: {
   children: (saved: Accessor<ProfileEntry[]>) => JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
 
     // Merged by the id each row carries flat, for the pickers below: a rebuilt
     // `<option>` is a new element in a `<select>` the human may have open, and
@@ -1111,6 +1126,7 @@ function PairingPicker(props: {
   choose: (id: number, picked: string) => Promise<ProfileChosen>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
@@ -1121,12 +1137,16 @@ function PairingPicker(props: {
         setRefused(outcome);
         // Chosen from a list this option read a moment ago: reading it again
         // is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "profiles"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1299,6 +1319,7 @@ type Row = {
 /// said, and what it did is the name in the field and in the sidebar.
 function BranchName(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   // What has been typed, or nothing if nothing has been: the field follows the
   // Conversation until the first keystroke and follows itself after it, so a
@@ -1335,7 +1356,8 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   };
 
   const rename = useMutation(() => ({
-    mutationFn: (branch: string) => renameBranch(props.conversation.id, branch),
+    mutationFn: (branch: string) =>
+      renameBranch(device(), props.conversation.id, branch),
     onSuccess: (outcome: BranchRenamed) => {
       if (outcome !== "Renamed") {
         setRefused(outcome);
@@ -1343,7 +1365,9 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
     // Whatever became of it, the field may have been typed into while it was in
@@ -1595,9 +1619,11 @@ export function BasePicker(props: {
   /// control.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const branches = useReading(() => ({
-    queryKey: ["repos", props.repo.id, "branches"],
-    queryFn: () => listBranches(props.repo.id),
+    queryKey: keyOf(device(), "repos", props.repo.id, "branches"),
+    queryFn: () => listBranches(device(), props.repo.id),
 
     // Merged by position, there being no key on a string: a branch that is
     // still there is the same string, so the option drawn for it survives a
@@ -1654,25 +1680,33 @@ export function BasePicker(props: {
 /// The branch the work itself comes off.
 function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<BaseRecorded | null>(null);
 
   const record = useMutation(() => ({
     mutationFn: (branch: string | null) =>
-      setBaseBranch(props.conversation.id, branch),
+      setBaseBranch(device(), props.conversation.id, branch),
     onSuccess: (outcome: BaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
         // Picked out of a list this panel read a moment ago: reading it again
         // is both the correction and the explanation.
         void queries.invalidateQueries({
-          queryKey: ["repos", props.conversation.repo.id, "branches"],
+          queryKey: keyOf(
+            device(),
+            "repos",
+            props.conversation.repo.id,
+            "branches",
+          ),
         });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1719,6 +1753,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
 /// a repository out would leave the human hunting for one that is registered.
 function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionAdded | null>(null);
 
@@ -1729,20 +1764,25 @@ function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
   const [picked, setPicked] = createSignal("");
 
   const add = useMutation(() => ({
-    mutationFn: (repoId: number) => addCompanion(props.conversation.id, repoId),
+    mutationFn: (repoId: number) =>
+      addCompanion(device(), props.conversation.id, repoId),
     onSuccess: (outcome: CompanionAdded) => {
       if (outcome !== "Added") {
         setRefused(outcome);
         // Every refusal is about one of two lists this control was drawn over:
         // the registered Repos, or the conversation the row would hang off.
         // Reading both again is the correction and the explanation together.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     onSettled: () => setPicked(""),
   }));
@@ -1790,9 +1830,11 @@ export function CompanionChoice(props: {
   /// What the caller has to say under it, the refusals above all.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat: a rebuilt `<option>` is a new
     // element in a `<select>` the human may have open, and a Nudge landing
@@ -1888,19 +1930,22 @@ function Companion(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionRemoved | null>(null);
 
   const forget = useMutation(() => ({
     mutationFn: () =>
-      removeCompanion(props.conversation.id, props.companion.repo.id),
+      removeCompanion(device(), props.conversation.id, props.companion.repo.id),
     onSuccess: (outcome: CompanionRemoved) => {
       setRefused(outcome === "Removed" ? null : outcome);
 
       // Either way: what came back is about a conversation this panel read a
       // moment ago, so reading it again is both the correction and — where the
       // row is simply gone — the whole of what there was to do.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1984,12 +2029,18 @@ function CompanionBase(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionBaseRecorded | null>(null);
 
   const record = useMutation(() => ({
     mutationFn: (branch: string | null) =>
-      setCompanionBase(props.conversation.id, props.companion.repo.id, branch),
+      setCompanionBase(
+        device(),
+        props.conversation.id,
+        props.companion.repo.id,
+        branch,
+      ),
     onSuccess: (outcome: CompanionBaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
@@ -1997,14 +2048,23 @@ function CompanionBase(props: {
         // the companion repository's branches, or the conversation the row
         // hangs off. Reading both again is the correction and the explanation.
         void queries.invalidateQueries({
-          queryKey: ["repos", props.companion.repo.id, "branches"],
+          queryKey: keyOf(
+            device(),
+            "repos",
+            props.companion.repo.id,
+            "branches",
+          ),
         });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -2045,12 +2105,18 @@ function CompanionAccess(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionModeChosen | null>(null);
 
   const choose = useMutation(() => ({
     mutationFn: (mode: CompanionMode) =>
-      setCompanionMode(props.conversation.id, props.companion.repo.id, mode),
+      setCompanionMode(
+        device(),
+        props.conversation.id,
+        props.companion.repo.id,
+        mode,
+      ),
     onSuccess: (outcome: CompanionModeChosen) => {
       setRefused(outcome === "Chosen" ? null : outcome);
 
@@ -2058,7 +2124,9 @@ function CompanionAccess(props: {
       // moment ago, and the switch draws what the record says rather than what
       // was pressed — so reading it again is both the correction and the way
       // the flip lands.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -2108,6 +2176,7 @@ function CompanionBranch(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [named, setNamed] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<CompanionBranchRenamed | null>(
@@ -2143,6 +2212,7 @@ function CompanionBranch(props: {
   const rename = useMutation(() => ({
     mutationFn: (branch: string) =>
       renameCompanionBranch(
+        device(),
         props.conversation.id,
         props.companion.repo.id,
         branch,
@@ -2164,7 +2234,9 @@ function CompanionBranch(props: {
         setAsked(null);
       }
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     // Whatever became of it, the field may have been typed into while it was in
     // flight — so the moment one save is done the next is considered.
