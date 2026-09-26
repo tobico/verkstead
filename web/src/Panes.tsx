@@ -45,6 +45,19 @@
 //! of the frame that measures itself: how wide it is in rem is what turns a
 //! pane's minimum into a share the widths can be held against, and it is
 //! measured again whenever the window changes shape under the panes.
+//!
+//! And the last thing here that is the frame's rather than any pane's: keeping
+//! its outermost heads clear of the window's own controls. The app's window has
+//! no title bar, so the platform draws its controls over a corner of the page
+//! (ADR-0020) — and which head is at that corner is a fact about the layout
+//! rather than about a pane. The sidebar is leftmost where there is a list to
+//! pick from, the record is where there is none, the details pane is rightmost
+//! always, and the one pane a narrow window shows is both at once. Those are
+//! the distinctions this file already makes for its columns and its dividers,
+//! so the two insets arrive on the frame as variables the way the column widths
+//! do and `Panes.module.css` hands each of them to the head that stands at that
+//! edge. How much room the controls take at all is `controls.ts`'s, and outside
+//! the app it is none.
 
 import {
   Show,
@@ -56,6 +69,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { controls, reserved } from "./controls";
 import styles from "./Panes.module.css";
 import {
   ALL_THREE,
@@ -270,6 +284,15 @@ export function Panes(props: {
     onCleanup(() => watching.disconnect());
   });
 
+  /// How much room the platform's own window controls take at each edge of the
+  /// window, which the heads standing at those edges have to be padded clear of.
+  ///
+  /// Followed rather than read once: the rectangle the page is left at load is
+  /// not always the true one, and a maximise, an unmaximise and a resize each
+  /// change it. Nothing at all outside the app, where there is no overlay to
+  /// ask — see `controls.ts`.
+  const taken = controls();
+
   /// The frame as the arithmetic asks about it: how much room there is, and how
   /// many panes are sharing it.
   const frame = (): Frame => ({
@@ -359,6 +382,17 @@ export function Panes(props: {
       : { "--pane-sidebar": `${shown().sidebar}%` };
   };
 
+  /// And everything the frame carries on itself, which is those two kinds of
+  /// variable and nothing else: how wide its columns stand, and how much of each
+  /// edge the window's controls have taken. Nothing where it comes to neither —
+  /// a browser below the first breakpoint — so the element is left exactly as
+  /// bare as it was before either of them existed.
+  const carried = () => {
+    const named = { ...columns(), ...reserved(taken()) };
+
+    return Object.keys(named).length > 0 ? named : undefined;
+  };
+
   return (
     <div
       class={[
@@ -374,7 +408,7 @@ export function Panes(props: {
         .join(" ")}
       data-pane={props.pane}
       ref={element}
-      style={columns()}
+      style={carried()}
     >
       <Show when={picking()}>
         <section
