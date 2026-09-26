@@ -374,8 +374,8 @@ _Avoid_: daemon, sccache daemon, build server, compiler service
 
 **Log Directory**:
 The other directory of Verkstead's own outside the Data Directory: where the
-desktop app writes the server's log file, because the stdout of a tray app
-launched from an icon goes nowhere and a file has to have somewhere to be.
+desktop app writes the log file, because the stdout of an app launched from an
+icon goes nowhere and a file has to have somewhere to be.
 Where it is is the platform's and nothing says otherwise —
 `~/.local/state/verkstead` on Linux (`$XDG_STATE_HOME` where that is set to an
 absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
@@ -392,9 +392,12 @@ byte-order mark** — a fresh one and each roll both, and a run appending to one
 that already has content adds none: Verkstead's own messages have em-dashes in
 them, and the viewers Windows opens a `.log` in read a file with no mark in the
 machine's code page, which is mojibake to the very person being asked to report
-what it says. The server itself keeps logging to stdout
-wherever it was started from — where the events go is the starting binary's
-call — and `RUST_LOG` filters the file exactly as it filters that stdout.
+what it says. **The server keeps logging to stdout and the app reads it**:
+nothing about a `verkstead serve`'s own logging changes, and what goes in the
+file is those lines with the app's own beside them, interleaved as they
+happened — the app saying it started a sidecar, the server saying it is
+listening, the app saying the window is opening on it. `RUST_LOG` filters the
+file exactly as it filters that stdout.
 **A machine that names nowhere to put one is not refused**: it gets no file, the
 app says so and logs to standard error instead, and the menu item says the same
 rather than opening nothing — a Verkstead with nowhere for a log file has only
@@ -490,7 +493,10 @@ Verkstead's own.
 **Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
-device that could reach the server at all. One secret with a press behind it,
+device that could reach the server at all. **The desktop app's own window lets
+itself back in**: a 401 on its frame's own navigation is the file read again and
+the link loaded again, once per navigation, so a reset made from the phone costs
+that window a reload rather than a restart. One secret with a press behind it,
 rather than a key per device or a key that expires.
 _Avoid_: password, login, token, API key, session
 

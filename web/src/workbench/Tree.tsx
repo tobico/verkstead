@@ -710,15 +710,34 @@ export function Tree(props: {
   const read = (path: string): Promise<void> => {
     setReading((was) => (was.includes(path) ? was : [...was, path]));
 
+    /// And whether the folder is still one this mount is reading, asked of the
+    /// answer before it is written down.
+    ///
+    /// A folder shut while its read was out is left shut, the way a Nudge's
+    /// re-read leaves one — see [`again`]. The press is what says whether a
+    /// folder is open, and a listing put back after it would be the press
+    /// undone: the caret would come back, and the rows under it with it.
+    ///
+    /// **A pane taken down while the read was out is not that**, which is why
+    /// this is asked of `reading` rather than of the mount. Shutting a folder
+    /// takes its path out of that list, and a tree that simply went away leaves
+    /// it there — so what lands after a swap still lands in the keeping, and the
+    /// folder is open when the pane comes back.
+    const still = (): boolean => reading().includes(path);
+
     return (
       listFolder(props.conversation, path)
         .then((listing) => {
+          if (!still()) return;
+
           setHeld((was) => ({ ...was, [path]: listing }));
         })
         // A request that never landed is a folder that says why it is empty, the
         // way a folder the server refused does: the sentence is the server's
         // where there is one, and this is the sentence there is instead.
         .catch((error: Error) => {
+          if (!still()) return;
+
           setHeld((was) => ({
             ...was,
             [path]: { Unreadable: { why: error.message } },

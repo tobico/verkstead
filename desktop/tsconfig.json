@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    // Electron 43 carries Node 22, and the dev shell's Node is 24: what is
+    // compiled here runs in one of those two and never in a browser, so the
+    // library is the language's alone — no DOM, and `@types/node` for the
+    // process, the child and the filesystem.
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    // Compiled rather than bundled (ADR-0020), so the emitted files are what
+    // Node resolves: `nodenext` is what makes a relative import carry the `.js`
+    // it will be read by. The package is `"type": "module"` and Electron has
+    // loaded an ESM main process since 28.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    // Typecheck only. `tsconfig.build.json` is the one that emits, and it says
+    // so by turning this off — so `pnpm typecheck` can read the tests and the
+    // config files without them landing in `dist/`.
+    "noEmit": true,
+
+    // The viewer's, word for word: what is strict there is strict here.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}
