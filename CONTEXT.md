@@ -414,20 +414,27 @@ What says Verkstead comes up when the machine's desktop session does, and what
 unticks — the tray menu is **Open**, **View Logs** and **Quit**, and startup is
 not among them. The platform's own, and the platform's alone: an XDG autostart
 entry named for the app id on Linux
-(`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
-launch agent on macOS. **It is the state rather than a copy of it** — the box
+(`~/.config/autostart/net.tobico.Verkstead.desktop`), and the login item the
+platform keeps on the other two — the Run key on Windows, and on macOS what the
+tray app's hand-written launch agent is taken over into. **It is the state rather than a copy of it** — the box
 is drawn from reading it, checking writes it and unchecking removes it, and
 neither settings file has an entry for this or ever will: a human who turns it
 off with their desktop's own settings has unchecked the box, and Verkstead
 agrees with them rather than argues. **Every launch rewrites it while it is
-there**, with the path of the executable that is running and the `desktop` verb
-that is the app — one image has more than one way in, and a registration naming
-the path alone would start a Verkstead that printed the Guide — so a binary that
-was moved — downloaded again elsewhere, an AppImage put somewhere else — heals
-its own registration the next time it is started by hand; a machine that never
-asked for one is left alone. What it starts is an ordinary launch of the app
-with the browser left alone, because a login is not a moment to be handed a
-browser window.
+there**, with the path of the app that is running and no verb in front of it —
+the app is the one way into itself, where the tray app's binary had several and
+the registration had to say which — so an app that was moved — downloaded again
+elsewhere, an AppImage put somewhere else — heals its own registration the next
+time it is started by hand; a machine that never asked for one is left alone.
+**And what a login start comes to is a Verkstead with no window on the screen**
+while there is an icon in the tray to reach it by, and one with a window where
+there is not: a window arriving over whatever the human is doing at every login
+is what gets the box unticked, and an app with neither an icon nor a window is a
+Verkstead nobody can reach. Which is a reading of the login rather than a
+**Launch on Startup** that needs the tray. **Each platform says a login start
+its own way**: Linux's entry and the Run key on Windows are command lines and
+carry a flag, while a Mac's login item carries no arguments and is asked whether
+it started the run.
 _Avoid_: autostart setting, startup preference, run at login option
 
 **Desktop Settings**:
