@@ -720,8 +720,9 @@ impl Members {
     /// being announced happened whatever some third machine made of it — a
     /// human pressed Allow, and the newcomer is a member here — so a member
     /// that was off is owed the telling rather than the join being undone. What
-    /// pays it is the next thing that finds that member answering, which is the
-    /// task after this one's to build.
+    /// pays it is the next thing that finds that member answering — see
+    /// [`crate::device::Devices::caught_up`], which is run against every member
+    /// a dial gets through to and says everything that member missed.
     ///
     /// A stated membership has no rows and no debts. It is a number, and a
     /// suite standing on one is asking about a changeover rather than about a
