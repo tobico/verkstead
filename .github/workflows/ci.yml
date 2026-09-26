@@ -484,3 +484,196 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # **Temporary, and for this branch alone: `release.yml`'s `desktop-macos` leg,
+  # run end to end on a Mac.** Drop this job before the branch merges.
+  #
+  # That workflow cannot be rehearsed from a branch. It is dispatch-only, and its
+  # `prepare` job checks out `main` whatever ref started the run and pushes a
+  # version commit to it, so a dispatch from here would build main's tree and run
+  # main's leg. What is left is to run the leg's own steps somewhere a Mac will
+  # have them, which is here — and the one thing that cannot come along is the
+  # `build` matrix the leg downloads its two halves from, so those are compiled
+  # on this runner instead. Every step after the pack is the leg's, word for word:
+  # what is being asked is whether the assertions hold against a dmg this
+  # configuration packed.
+  #
+  # `macos-15` as the leg is, which is also the Apple silicon image: half of what
+  # is packed here is cross-compiled to the other Apple target, one SDK carrying
+  # both.
+  the-macos-dmg-leg:
+    name: The dmg leg (temporary)
+    runs-on: macos-15
+    env:
+      DMG: target/electron/out/Verkstead-universal.dmg
+      MOUNT: target/electron/mounted
+      APP: target/electron/mounted/Verkstead.app
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The viewer, which the release's own leg never fetches: it is embedded
+      # into each CLI half at compile time, and in a Release those halves arrive
+      # already carrying it. Here they are compiled, so it has to be built first.
+      - name: Set up the viewer
+        uses: ./.github/actions/setup-pnpm-project
+
+      # A bigger heap than this runner's Node takes by default: the three vite
+      # builds OOM at around 2 GB on a macOS runner, where the release's viewer
+      # leg is an `ubuntu-24.04` and never meets the limit.
+      - name: Build the viewer
+        working-directory: web
+        env:
+          NODE_OPTIONS: --max-old-space-size=5120
+        run: pnpm build
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: macos-dmg-leg
+
+      # What the `build` matrix hands the leg, built here instead — the same
+      # `--no-default-features` headless binary each of those rows ships, for
+      # both Apple targets.
+      - name: Build both halves of the sidecar
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --no-default-features \
+              --package verkstead-cli --target "$target"
+          done
+
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # The leg's own pack, less the `chmod` it puts back on two files that came
+      # out of a zip: what cargo wrote here is executable already.
+      - name: Pack the app
+        working-directory: desktop
+        run: |
+          pnpm run pack \
+            ../target/aarch64-apple-darwin/release/verkstead \
+            ../target/x86_64-apple-darwin/release/verkstead
+          ls -l ../target/electron/out
+
+      - name: The dmg mounts
+        run: |
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
+          ls -l "$MOUNT"
+          ls -l "$APP/Contents"
+
+      - name: The binary inside answers ask and guide
+        run: |
+          binary="$APP/Contents/Resources/cli/verkstead"
+
+          help=$("$binary" ask --help)
+          printf '%s\n' "$help"
+          case "$help" in
+            *"Question Set"*) ;;
+            *)
+              echo "::error::The binary inside the dmg does not answer ask."
+              exit 1
+              ;;
+          esac
+
+          guide=$("$binary" guide)
+          case "$guide" in
+            *"Asking the human"*) ;;
+            *)
+              echo "::error::The binary inside the dmg does not print the Guide."
+              printf '%s\n' "$guide"
+              exit 1
+              ;;
+          esac
+
+      - name: The signature survived the packing
+        run: |
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign --verify --strict "$APP/Contents/Resources/cli/verkstead"
+
+      - name: The bundle's icon resolves
+        run: |
+          resources="$APP/Contents/Resources"
+          iconset="$RUNNER_TEMP/Verkstead.iconset"
+
+          icon=$(plutil -extract CFBundleIconFile raw -o - \
+            "$APP/Contents/Info.plist") || {
+            echo "::error::The bundle's Info.plist has no CFBundleIconFile."
+            exit 1
+          }
+          echo "CFBundleIconFile is $icon"
+
+          if ! ls "$resources" | grep -qxF "$icon"; then
+            echo "::error::CFBundleIconFile names $icon," \
+              "which is no file in Contents/Resources."
+            ls -l "$resources"
+            exit 1
+          fi
+
+          iconutil --convert iconset --output "$iconset" \
+            "$resources/$icon" || {
+            echo "::error::iconutil will not read $icon:" \
+              "macOS would draw the generic icon."
+            exit 1
+          }
+          ls -l "$iconset"
+
+      - name: The window comes up, the icon goes into the menu bar, and the viewer is inside
+        timeout-minutes: 5
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+        run: |
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+
+          key=the-key-this-leg-states
+          mkdir -p "$VERKSTEAD_DATA_DIR"
+          printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
+
+          "$APP/Contents/MacOS/Verkstead" &
+          app=$!
+          document=$(curl --fail --silent --show-error \
+            --retry 20 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
+            http://127.0.0.1:8422/)
+
+          for _ in $(seq 100); do
+            if grep -q "the window is opening on" "$log" 2> /dev/null &&
+              grep -q "the icon is in the tray" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          kill "$app" || true
+
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The app served a document with no bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+          for said in "the window is opening on" "the icon is in the tray"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              cat "$log" 2> /dev/null || echo "There is no log at $log."
+              exit 1
+            fi
+          done
+          cat "$log"
+
+      - name: Unmount the dmg
+        if: always()
+        run: |
+          if hdiutil info | grep -qF "$PWD/$MOUNT"; then
+            hdiutil detach "$PWD/$MOUNT" ||
+              hdiutil detach -force "$PWD/$MOUNT"
+          fi

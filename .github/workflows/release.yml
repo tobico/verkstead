@@ -854,101 +854,124 @@ jobs:
           path: ${{ env.APPIMAGE }}
           if-no-files-found: error
 
-  # The macOS desktop artifact: the same app the AppImage carries, drawn over
-  # AppKit instead of GTK and inside the disk image a Mac download arrives as.
-  # A leg of its own rather than two rows in the matrix above, for the reason
-  # `desktop-linux` gives about itself — what it uploads is a bundle rather
-  # than a bare binary, and nothing about it is that matrix's shape.
+  # The macOS desktop artifact: the same Electron app the AppImage carries,
+  # drawn over AppKit instead of GTK and inside the disk image a Mac download
+  # arrives as. A leg of its own rather than two rows in the matrix above, for
+  # the reason `desktop-linux` gives about itself — what it uploads is a packed
+  # bundle rather than a bare binary, it wants a window server, and nothing
+  # about it is that matrix's shape.
   #
-  # **One runner builds both Macs.** The app is universal, which is two builds
-  # with `lipo` over them, and an Apple host cross-compiles to the other Apple
-  # architecture — one SDK carries both, and clang is told which by `-arch`. So
-  # this leg builds both halves itself rather than joining the two macOS legs
-  # of the matrix in a third job: those build the same package with the
-  # `desktop` feature off, which is the headless CLI, and a job that fetched
-  # them would be wrapping a binary with no tray in it. `macos-15` is the Apple
-  # silicon image, which is the half more people download.
+  # **It waits on the whole `build` job**, as `desktop-linux` does and for the
+  # reason ADR-0020 gives: what goes inside is `verkstead-macos-x64` and
+  # `verkstead-macos-arm64`, the two binaries that matrix already built and ran,
+  # downloaded here and joined rather than built a second time — so the sidecar
+  # a session is handed is the artifact a downloader gets. A `needs` cannot name
+  # one row of a matrix, so it names the job. The viewer artifact is not wanted
+  # beside them: the viewer is embedded in each of those binaries at compile
+  # time, so fetching the CLI fetches the viewer with it.
+  #
+  # **And it compiles nothing**, which is most of what this leg used to be: no
+  # Rust toolchain, no `targets: aarch64-apple-darwin, x86_64-apple-darwin`, no
+  # cache of its own, and no `web/dist` to fetch first. `lipo` is still here —
+  # a universal app carries a universal sidecar — but over two downloads rather
+  # than two builds, and inside `desktop/scripts/pack.mjs` rather than in a
+  # script of this leg's own, so that a developer packing from a checkout packs
+  # the way this does.
+  #
+  # `macos-15` all the same: `lipo`, `hdiutil`, `codesign` and `iconutil` are
+  # the operating system's own tools, and that image is the Apple silicon one —
+  # the half more people download.
   desktop-macos:
     name: Verkstead-universal.dmg
-    needs: [prepare, viewer]
+    needs: [prepare, build]
     runs-on: macos-15
     env:
-      # Where `tools/build-macos-dmg.sh` leaves it, said once; and where the
-      # steps below mount it to reach what is inside. Both under `target/`,
-      # which is where that script puts everything it makes.
-      DMG: target/macos/Verkstead-universal.dmg
-      MOUNT: target/macos/mounted
+      # Where `pnpm run pack` leaves it, where the steps below mount it, and the
+      # bundle inside that mount: three paths said once each, because every step
+      # below packs, mounts, reads or uploads one of them. Under `target/`, which
+      # is where `desktop/electron-builder.yml` puts everything it makes.
+      DMG: target/electron/out/Verkstead-universal.dmg
+      MOUNT: target/electron/mounted
+      APP: target/electron/mounted/Verkstead.app
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           # The bump commit, as every leg does — see the `viewer` job.
           ref: ${{ needs.prepare.outputs.sha }}
 
-      # As every other leg does, and for the same reason: the viewer is
-      # embedded at compile time out of `web/dist`, which the checkout leaves
-      # empty. The desktop app is the server in-process, so it carries the
-      # viewer too.
-      - name: Fetch the viewer
+      # The same pins the viewer's leg and `ci.yml` take — see the action. The
+      # Electron this packs is not the one installed here: that package's
+      # download is denied in `desktop/pnpm-workspace.yaml`, and
+      # electron-builder fetches the pinned build itself — see
+      # `desktop/electron-builder.yml`.
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # Both halves of the sidecar, which is the whole reason this leg waits on
+      # the matrix. Two steps because an artifact is fetched by name and these
+      # are two artifacts; into the one directory because what the pack is given
+      # is two paths beside each other.
+      - name: Fetch the Apple silicon CLI this app carries
         uses: actions/download-artifact@v8.0.1
         with:
-          name: viewer
-          path: web/dist
+          name: verkstead-macos-arm64
+          path: sidecar
 
-      # The same pin as everywhere else, and both Apple targets rather than the
-      # runner's own: this leg compiles the app twice and joins the halves, so
-      # the standard library for the architecture this runner is not has to be
-      # here as well as its own. `tools/build-macos-dmg.sh` looks for both
-      # before it compiles either, so a target that was never installed is said
-      # in a moment rather than after the long half of the build.
-      - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Fetch the Intel CLI this app carries
+        uses: actions/download-artifact@v8.0.1
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          name: verkstead-macos-x64
+          path: sidecar
 
-      # A cache key of its own, as every leg has: this is a sixth dependency
-      # tree — the two Apple targets with the GUI crates in them — and a key it
-      # shared with the matrix's macOS legs would have them evicting each other.
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          key: dmg
-
-      # The script the dev shell runs, unchanged and unexplained here: the two
-      # builds, the `lipo` over them, the bundle around that and the image
-      # around that are all `tools/build-macos-dmg.sh`'s to say. Including the
-      # checks it makes on itself — that the executable holds both
-      # architectures, that the `Info.plist` it wrote is one, and that the
-      # bundle verifies against the signature it sealed it with.
-      - name: Build the dmg
-        run: tools/build-macos-dmg.sh
-
-      # Opened the way a download is opened, rather than reaching for the
-      # `Verkstead.app` the script left beside the image: what the assertions
-      # below run is the file this leg uploads, and the app inside it is a copy
-      # that was made before the image was packed and could differ from it.
+      # **Two paths rather than `VERKSTEAD_CLI`**, which is the one thing a
+      # Mac's pack says differently from the other two platforms': the app is
+      # universal, so the sidecar inside it is too, and the `lipo` that joins
+      # them is `desktop/scripts/pack.mjs`'s (ADR-0020). Either order — `lipo`
+      # reads each half's architecture off the half — and that script reads both
+      # architectures back off what it wrote, a `lipo` given one input writing a
+      # perfectly good single-architecture file.
       #
-      # At a path this job names rather than the `/Volumes/Verkstead` the
-      # volume name would otherwise take, so that the steps below have one path
-      # to say whatever else this runner has mounted; and `-nobrowse` because
-      # there is no Finder here for it to appear in.
-      - name: Mount the dmg
+      # **The executable bit is put back on each half first.** An artifact is a
+      # zip and a zip carries no mode, so what arrived above is a pair of
+      # binaries nothing can spawn. The mode the sidecar goes in with is not
+      # these: `lipo` neither reads nor copies it, and the script states 0755
+      # over the file it writes. But a half nothing can run is the first thing
+      # anybody debugging this leg would try to run, and the bit costs a line.
+      - name: Pack the app
+        working-directory: desktop
+        env:
+          ARM64: ${{ github.workspace }}/sidecar/verkstead-macos-arm64
+          X64: ${{ github.workspace }}/sidecar/verkstead-macos-x64
+        run: |
+          chmod +x "$ARM64" "$X64"
+          pnpm run pack "$ARM64" "$X64"
+          ls -l ../target/electron/out
+
+      # **Mounted, because everything asserted below is asserted of the file
+      # that is uploaded** — rather than of the `Verkstead.app` the pack left
+      # beside the image, which is the copy that was made before the image was
+      # packed and could differ from it. Opened the way a download is opened.
+      #
+      # At a path this job names rather than the `/Volumes/Verkstead` the volume
+      # name would otherwise take, so that the steps below have one path to say
+      # whatever else this runner has mounted; `-readonly` because that is what
+      # a downloader's is; and `-nobrowse` because there is no Finder here for
+      # it to appear in.
+      - name: The dmg mounts
         run: |
           mkdir -p "$MOUNT"
           hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
           ls -l "$MOUNT"
+          ls -l "$APP/Contents"
 
-      # Which is the tray app's help, the launcher having supplied the verb: it
-      # is the only half of this bundle that entering it as a bundle can reach.
-      - name: The app runs
-        run: |
-          "$MOUNT/Verkstead.app/Contents/MacOS/Verkstead-launcher" --help
-
-      # And the other half, which nothing going through the launcher can ask
-      # for: what a session spawned by this app runs is the binary beside that
-      # script, by path, saying a verb of its own. The two halves being one file
-      # is the invariant the sandbox stands on (ADR-0012, as amended) — a bundle
-      # carrying the tray alone would come up, serve, draw its icon, pass every
-      # assertion beside this one, and hand each session it spawned a binary
-      # with no `ask` in it.
+      # The half of this download a *session* gets, and the invariant the
+      # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
+      # the binary inside the mounted image, by path, saying a verb of its own. A
+      # bundle carrying the window alone would come up, serve, draw its icon,
+      # pass every other assertion here, and hand each session it spawned a
+      # binary with no `ask` in it.
       #
       # Both of the verbs an agent has rather than the exit status alone: the
       # help is read for what only `ask`'s prints, and the Guide for its own
@@ -956,7 +979,7 @@ jobs:
       # fails here rather than passing.
       - name: The binary inside answers ask and guide
         run: |
-          binary="$MOUNT/Verkstead.app/Contents/MacOS/verkstead"
+          binary="$APP/Contents/Resources/cli/verkstead"
 
           help=$("$binary" ask --help)
           printf '%s\n' "$help"
@@ -978,49 +1001,50 @@ jobs:
               ;;
           esac
 
-      # And that what a downloader mounts is still sealed.
-      # `tools/build-macos-dmg.sh` verifies the bundle it signed; this verifies
-      # the copy that was packed, which is a different question now that the
-      # bundle's executable is a script — a signature over one lives in an
-      # extended attribute rather than inside the file, so a copy that dropped
-      # it would leave an app whose seal disagrees with what is under it. That
-      # is the "damaged" a Mac refuses to open rather than the "unidentified
-      # developer" it offers a way past, and it is worth failing a tag over.
+      # And that what a downloader mounts is still sealed. The reason this was
+      # first written is gone — the bundle's executable was a shell script, whose
+      # signature lives in an extended attribute a copy can drop, and it is a
+      # real Mach-O again — but it is kept, because an Apple silicon Mac refuses
+      # to execute a Mach-O carrying no signature at all, and a seal broken by
+      # the pack or by the image is the "damaged" a Mac will not open rather than
+      # the "unidentified developer" it offers a way past. Which is worth failing
+      # a tag over.
+      #
+      # Over the bundle and over the sidecar inside it: the pack signs the app
+      # and everything electron-builder knows to be in it, and the sidecar is an
+      # extra resource that arrived from another job.
       - name: The signature survived the packing
         run: |
-          codesign --verify --strict --verbose=2 "$MOUNT/Verkstead.app"
-          codesign --verify --strict \
-            "$MOUNT/Verkstead.app/Contents/MacOS/verkstead"
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign --verify --strict "$APP/Contents/Resources/cli/verkstead"
 
       # And that the icon a downloader drags into Applications resolves to a
       # file macOS can read. The Finder icon is the one thing about this bundle
-      # that nothing running the app can tell you about — v0.1.2 shipped a
-      # sound icns under a `CFBundleIconFile` naming no file at all, passed
-      # every assertion beside this one, and drew the generic app icon on every
-      # Mac that downloaded it.
+      # that nothing running the app can tell you about — v0.1.2 shipped a sound
+      # icns under a `CFBundleIconFile` naming no file at all, passed every
+      # assertion beside this one, and drew the generic app icon on every Mac
+      # that downloaded it.
       #
-      # Read off the mounted plist rather than out of
-      # `tools/build-macos-dmg.sh`: the point is a Mac reading back what was
-      # written, so the name is taken from the bundle and looked for in the
-      # bundle. Exactly, and against the directory listing rather than with
-      # `[ -f ]` alone — the volume is HFS+, which is case-insensitive, so a
-      # test that only opened the file would pass on a name macOS's own
-      # lookup would not.
+      # Read off the mounted plist rather than out of the configuration that
+      # wrote it: the point is a Mac reading back what was packed, so the name is
+      # taken from the bundle and looked for in the bundle. Exactly, and against
+      # the directory listing rather than with `[ -f ]` alone — the volume is
+      # HFS+, which is case-insensitive, so a test that only opened the file
+      # would pass on a name macOS's own lookup would not.
       #
-      # Then `iconutil` over the file, which is the other half of resolving:
-      # a name pointing at an icns the system cannot parse draws the same
+      # Then `iconutil` over the file, which is the other half of resolving: a
+      # name pointing at an icns the system cannot parse draws the same
       # placeholder as a name pointing at nothing. Its output goes to the
-      # runner's temp because the image is mounted read-only, under a name
-      # ending in `.iconset`, which is the extension that conversion writes
-      # and the only one it accepts.
+      # runner's temp because the image is mounted read-only, under a name ending
+      # in `.iconset`, which is the extension that conversion writes and the only
+      # one it accepts.
       - name: The bundle's icon resolves
         run: |
-          app="$MOUNT/Verkstead.app"
-          resources="$app/Contents/Resources"
+          resources="$APP/Contents/Resources"
           iconset="$RUNNER_TEMP/Verkstead.iconset"
 
           icon=$(plutil -extract CFBundleIconFile raw -o - \
-            "$app/Contents/Info.plist") || {
+            "$APP/Contents/Info.plist") || {
             echo "::error::The bundle's Info.plist has no CFBundleIconFile."
             exit 1
           }
@@ -1041,24 +1065,28 @@ jobs:
           }
           ls -l "$iconset"
 
-      # The two halves of what a human downloads this file for, asserted on one
-      # run of it: an icon in the menu bar, and the viewer behind it.
+      # What a human downloads this file for, asserted on one run of the app out
+      # of the mount: a window, an icon in the menu bar, and the viewer behind
+      # both.
       #
-      # **No screen to arrange**, which is the one place this is shorter than
-      # the AppImage's assertion: a macOS runner is a logged-in session with a
-      # window server of its own, and macOS says so nowhere in the environment
-      # — so `screen::there_is_one` answers yes there without asking, and the
-      # app takes its tray path with nothing started in front of it.
+      # **No screen to arrange**, which is the one place this is shorter than the
+      # AppImage's assertion: a macOS runner is a logged-in session with a window
+      # server of its own, so the window really opens and the icon really reaches
+      # the menu bar with nothing started in front of them.
       #
-      # **The log is where the answer is**, as it is there: nothing about the
-      # menu bar is visible from outside the process, so the app says so itself
-      # — one line on the way up, and a warning on each of the ways it can end
-      # without an icon. The Log Directory on macOS is `~/Library/Logs/Verkstead`
-      # — see `crates/server/src/platform.rs` — which a runner has a home for
-      # and needs nothing said about; the file is taken away first all the same,
-      # so that a line found in it is this run's.
+      # **The app takes no flags**, so this is the whole command line: there is
+      # no `--no-open`, no `--listen` and no `--data-dir` on it — the window is
+      # what it opens instead of a browser, the port is the server's own, and
+      # `$VERKSTEAD_DATA_DIR` is how the directory is said. Which is the server's
+      # own variable, and what the app hands its sidecar.
       #
-      # `--no-open` stays: there is a browser on this machine and nobody at it.
+      # **The log is where the answers are**: neither the window coming up nor
+      # the icon being raised is visible from outside the process, so the app
+      # says both itself — see `desktop/src/window.ts` and `desktop/src/tray.ts`.
+      # The Log Directory on macOS is `~/Library/Logs/Verkstead` — see
+      # `crates/server/src/platform.rs` — which a runner has a home for and needs
+      # nothing said about; the file is taken away first all the same, so that a
+      # line found in it is this run's.
       #
       # `--retry-connrefused` rather than a sleep, as in every other leg: the
       # app is up when it answers.
@@ -1067,40 +1095,44 @@ jobs:
       # draws it has a screen for are drawn as dialogs, and a dialog nobody
       # dismisses would hold the job until the runner's own six hours were up
       # rather than failing in front of whoever tagged.
-      - name: The tray comes up, and the viewer is inside the dmg
+      - name: The window comes up, the icon goes into the menu bar, and the viewer is inside
         timeout-minutes: 5
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
         run: |
           log="$HOME/Library/Logs/Verkstead/verkstead.log"
           rm -f "$log"
 
           # The Workbench Key, as in the matrix's serving assertion and for the
-          # reason said there: the app answers 401 to a request that has shown
-          # nothing, and a key written into the Data Directory before the start
-          # is the key the app adopts.
+          # reason said there: the server answers 401 to a request that has
+          # shown nothing, and a key written into the Data Directory before the
+          # start is the key it adopts. The window reads the same file.
           key=the-key-this-leg-states
-          mkdir -p "$RUNNER_TEMP/desktop"
-          printf '%s\n' "$key" > "$RUNNER_TEMP/desktop/workbench.key"
+          mkdir -p "$VERKSTEAD_DATA_DIR"
+          printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
 
-          "$MOUNT/Verkstead.app/Contents/MacOS/Verkstead-launcher" --no-open \
-            --listen 127.0.0.1:8422 --data-dir "$RUNNER_TEMP/desktop" &
+          "$APP/Contents/MacOS/Verkstead" &
           app=$!
           document=$(curl --fail --silent --show-error \
-            --retry 10 --retry-delay 1 --retry-connrefused \
+            --retry 20 --retry-delay 1 --retry-connrefused \
             --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
-          # The icon is raised on the main thread while the server comes up on
-          # another, so the viewer answering is no promise that the tray has
-          # finished either way yet. Waited for here rather than read after the
-          # kill, where whichever won the race would be the answer.
-          for _ in $(seq 50); do
-            if grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+          # The window is opened once the server answers and the icon is raised
+          # beside it, so the document above is no promise that either has
+          # happened yet. Waited for here rather than read after the kill, where
+          # whichever won the race would be the answer.
+          for _ in $(seq 100); do
+            if grep -q "the window is opening on" "$log" 2> /dev/null &&
+              grep -q "the icon is in the tray" "$log" 2> /dev/null; then
               break
             fi
             sleep 0.2
           done
 
-          kill "$app"
+          # Whatever it has got to: an app that ended on its own is a failure the
+          # assertions below name, rather than one for `kill` to report first.
+          kill "$app" || true
 
           # As in every other leg: an absent viewer is a 503 that `--fail` has
           # already caught, and this is the rest of it — the document vite wrote
@@ -1114,21 +1146,25 @@ jobs:
               ;;
           esac
 
-          # And the menu bar, out of the app's own log. Read for the line rather
-          # than against the warnings, so that a log which was never written
-          # fails here rather than passing for want of anything to find in it.
-          if ! grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
-            echo "::error::The app did not raise a tray icon."
-            cat "$log" 2> /dev/null || echo "There is no log at $log."
-            exit 1
-          fi
+          # And the two lines, out of the app's own log. Read for what is there
+          # rather than against what is not, so that a log which was never
+          # written — no log directory, and the app's events on a standard error
+          # nobody kept — fails here rather than passing for want of anything to
+          # find in it.
+          for said in "the window is opening on" "the icon is in the tray"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              cat "$log" 2> /dev/null || echo "There is no log at $log."
+              exit 1
+            fi
+          done
           cat "$log"
 
-      # Before the upload and whatever the assertions said, because the mount
-      # is inside the directory the artifact is read out of and nothing else on
-      # this runner would take it down. Asked of `hdiutil` first: a run that
-      # failed before the image was built has nothing attached, and a detach of
-      # nothing is an error about the wrong thing.
+      # Before the upload and whatever the assertions said, because the mount is
+      # inside the directory the artifact is read out of and nothing else on this
+      # runner would take it down. Asked of `hdiutil` first: a run that failed
+      # before the image was packed has nothing attached, and a detach of nothing
+      # is an error about the wrong thing.
       - name: Unmount the dmg
         if: always()
         run: |
@@ -1145,12 +1181,12 @@ jobs:
           fi
 
       # Under the `desktop-` artifact prefix, for the reason the AppImage's
-      # upload gives: that prefix is what keeps a desktop asset out of the
-      # count `publish` makes of the bare binaries, whatever the file inside is
+      # upload gives: that prefix is what keeps a desktop asset out of the count
+      # `publish` makes of the bare binaries, whatever the file inside it is
       # called. `publish` is where the file's own name is written down.
       #
-      # A zip carries no symlink and no mode, and neither does a Release asset
-      # — but a dmg is a filesystem in a file, so what comes back out of this
+      # A zip carries no symlink and no mode, and neither does a Release asset —
+      # but a dmg is a filesystem in a file, so what comes back out of this
       # artifact is the image itself with the app, the `/Applications` symlink
       # and every mode either of them has still inside it. Which is the other
       # half of why a Mac download is an image rather than a folder.
@@ -1172,7 +1208,7 @@ jobs:
   # human would, and asserts what the install left behind.
   #
   # A leg of its own, for the reason both other desktop legs are: what it
-  # uploads is the desktop app rather than a bare CLI, and it is a seventh
+  # uploads is the desktop app rather than a bare CLI, and it is a sixth
   # dependency tree — the Windows host target with the GUI crates in it, which
   # the `verkstead-windows-x64.exe` row of the matrix above builds none of.
   # That row is untouched by any of this: the standalone CLI exe is still the
