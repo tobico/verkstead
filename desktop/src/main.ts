@@ -420,6 +420,12 @@ async function run(): Promise<void> {
   // takes neither with it.
   app.on("will-quit", () => {
     leaving = true;
+    // Said before either is done, so that the file somebody sends ends with the
+    // app going rather than simply stopping: Cmd+Q on a Mac takes the whole app
+    // with no dialog and no close of anybody's making, and a log whose last line
+    // is whatever happened to be logged first says nothing about which of the
+    // ways out this was.
+    say("Verkstead is quitting — the icon comes down and the sidecar is stopped");
     lower();
     sidecar.stop();
   });
