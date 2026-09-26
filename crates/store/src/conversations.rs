@@ -2516,6 +2516,51 @@ pub async fn adopted_pull_request(
     )
 }
 
+/// Write down the pull request a Conversation is taking up.
+///
+/// The row [`start_pull_request_adoption`] wrote when a pull request was loaded
+/// off a menu, written at the press instead: a **Review** names its target in
+/// the Brief, and what GitHub answered about it is not known until the press
+/// asks. Which makes this row two things rather than bookkeeping — it is what
+/// lets a Draft through the one door into Wrapping (see
+/// [`super::record_pull_request`]), and it is what a Conversation's Process is
+/// read back as for the whole of its life (see [`process`]).
+///
+/// An upsert, for [`set_process`]'s reason: one pull request per Conversation
+/// by the primary key, and a press that ran again over a take-up that refused
+/// partway is the same Conversation taking up whatever it names now.
+///
+/// Nothing is refused for. What may be taken up is the caller's question and is
+/// settled long before this — a Conversation past drafting has a worktree, and
+/// the move this row is written for is what refuses a second one.
+pub async fn hold_pull_request(
+    pool: &SqlitePool,
+    id: i64,
+    pull_request: &AdoptedPullRequest,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO pull_request_adoptions (conversation_id, number, title, url, head, base)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET
+             number = excluded.number,
+             title  = excluded.title,
+             url    = excluded.url,
+             head   = excluded.head,
+             base   = excluded.base",
+    )
+    .bind(id)
+    .bind(pull_request.number)
+    .bind(&pull_request.title)
+    .bind(&pull_request.url)
+    .bind(&pull_request.head)
+    .bind(&pull_request.base)
+    .execute(pool)
+    .await
+    .with_context(|| format!("recording the pull request Conversation {id} is taking up"))?;
+
+    Ok(())
+}
+
 /// Which of the three roles a Pairing is being chosen for.
 ///
 /// The word the `pairing_models` table holds, and the column the Profile half

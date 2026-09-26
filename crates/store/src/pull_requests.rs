@@ -817,6 +817,42 @@ pub async fn held_pull_requests(pool: &SqlitePool) -> Result<HashMap<(i64, i64),
         .collect())
 }
 
+/// Which Conversation already has this Repo's pull request on its record, where
+/// one has.
+///
+/// [`held_pull_requests`]'s question asked of one pull request, which is what a
+/// press asks: a take-up names a Repo and a number, and there is one
+/// Conversation per piece of work — so a number another Conversation is already
+/// on is refused leading there rather than taken up a second time over the same
+/// branch.
+///
+/// By the Repo and the number together, because that pair is what a pull
+/// request *is* to Verkstead: `#41` names something else in the next repository
+/// along, or nothing at all.
+///
+/// **Every Conversation**, whatever state it is in — Done and Closed included,
+/// for [`held_pull_requests`]'s reason: a pull request stays on the record it
+/// was written to, and a second wrap-up over the same branch would be two of
+/// them pushing to it whether or not the first has finished.
+pub async fn conversation_on_pull_request(
+    pool: &SqlitePool,
+    repo_id: i64,
+    number: i64,
+) -> Result<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT conversation_id FROM pull_requests WHERE repo_id = ? AND number = ?",
+    )
+    .bind(repo_id)
+    .bind(number)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading which Conversation is already on pull request {number} of Repo {repo_id}")
+    })?;
+
+    Ok(row.map(|(conversation_id,)| conversation_id))
+}
+
 /// Write down how the pull request's checks are, and say whether that is news.
 ///
 /// Called on every poll of the checks watcher, which is every half minute for as

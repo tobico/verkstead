@@ -27,12 +27,14 @@
 //! refused is a different thing to go and do about it, which is why they are
 //! named one at a time.
 
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { createSignal, Show, type JSX } from "solid-js";
 
 import { takeUpPullRequest } from "../api/client";
 import type { ConversationView, TakenUp } from "../api/types";
 import { ErrorLine, Note } from "../notices";
+import { pathOf } from "./openings";
 import { companionRefusal } from "./Timeline";
 import styles from "./TakeUp.module.css";
 
@@ -104,7 +106,15 @@ export function HeldPullRequest(props: {
 /// has pushed to and a branch somebody is standing on are three different jobs,
 /// and only the human can tell which they are looking at.
 export const TAKE_UP_REFUSAL: Record<
-  Exclude<TakenUp, { Companion: unknown } | { CheckedOutElsewhere: unknown }>,
+  Exclude<
+    TakenUp,
+    | { Companion: unknown }
+    | { CheckedOutElsewhere: unknown }
+    | { AnotherRepository: unknown }
+    | { NoSuchPullRequest: unknown }
+    | { GitHubRefused: unknown }
+    | { AlreadyHeld: unknown }
+  >,
   string
 > = {
   TakenUp: "",
@@ -112,6 +122,10 @@ export const TAKE_UP_REFUSAL: Record<
   NotDrafting: "This conversation has already been started.",
   NotHoldingOne:
     "This conversation is holding no pull request, so there is nothing for it to wrap up.",
+  NoTarget:
+    "The brief names no pull request — write one in, by its link or as #number.",
+  Fork:
+    "That pull request's branch is in a fork, so nothing fixed here could be pushed to it.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
@@ -132,20 +146,67 @@ export const TAKE_UP_REFUSAL: Record<
 
 /// What to say about a take-up that was refused.
 ///
-/// The two that carry something with them say it, because in each the thing
+/// The ones that carry something with them say it, because in each the thing
 /// carried is the whole of what makes it actionable: which repository a
-/// companion's failing was in, and *where* the head branch is already checked
-/// out.
+/// companion's failing was in, *where* the head branch is already checked out,
+/// which repository a link named, which number GitHub had nothing open under,
+/// and what `gh` itself said.
+///
+/// One of them carries a conversation instead, and this says the sentence
+/// without the way there: the line under the press is where the link goes, and
+/// it is drawn by [`TakeUpRefusal`].
 export function takeUpRefusal(outcome: TakenUp): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }
 
+    if ("AnotherRepository" in outcome) {
+      return `That link is a pull request of ${outcome.AnotherRepository.named}, which is not the repo this conversation is on.`;
+    }
+
+    if ("NoSuchPullRequest" in outcome) {
+      return `This repo has nothing open under #${outcome.NoSuchPullRequest.number} — it may have been merged, closed, or never opened.`;
+    }
+
+    if ("GitHubRefused" in outcome) {
+      return `GitHub could not be asked about that pull request: ${outcome.GitHubRefused.why}.`;
+    }
+
+    if ("AlreadyHeld" in outcome) {
+      return "That pull request is already another conversation's, and there is one conversation per piece of work.";
+    }
+
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;
   }
 
   return TAKE_UP_REFUSAL[outcome];
+}
+
+/// The same, as the line a composer draws under its press — which is the one
+/// place a refusal has room for a way out of itself.
+///
+/// The pull request another conversation holds is what that is for: there is
+/// one conversation per piece of work, so what this refusal offers is the one
+/// that has it rather than a second wrap-up over the same branch. Every other
+/// refusal is the sentence and nothing else.
+export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
+  const held = (): number | null =>
+    typeof props.outcome === "object" && "AlreadyHeld" in props.outcome
+      ? props.outcome.AlreadyHeld.conversation
+      : null;
+
+  return (
+    <Show when={held()} fallback={takeUpRefusal(props.outcome)}>
+      {(conversation) => (
+        <>
+          That pull request is already{" "}
+          <A href={pathOf(conversation())}>another conversation's</A>, and there
+          is one conversation per piece of work.
+        </>
+      )}
+    </Show>
+  );
 }
 
 /// The press that takes the held pull request up, where `Start grilling` stands

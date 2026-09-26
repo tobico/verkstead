@@ -701,6 +701,102 @@ pub(crate) fn pull_request(
     })
 }
 
+/// One pull request of a repository, by its number, as the host's `gh` answers
+/// for that repository's origin.
+///
+/// What a **Review** is started on: the Brief names a number — see
+/// [`crate::targets`] — and this is the whole of what GitHub has to say about
+/// it before the take-up can run. [`open_pull_requests`]'s fields for one pull
+/// request rather than a list of them, minus the two that only ever drew a row:
+/// nothing here is a Brief any more, the Brief being the human's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Numbered {
+    pub(crate) number: i64,
+    pub(crate) title: String,
+
+    /// Where it is — and, with it, which repository `gh` answered about: a pull
+    /// request's URL carries its owner and its repository, which is what a URL
+    /// the human named is checked against. See [`crate::targets::repository_in`].
+    pub(crate) url: String,
+
+    /// The branch the work is on, unqualified — `tobi/steer` rather than
+    /// `origin/tobi/steer`.
+    pub(crate) head: String,
+
+    /// And the branch it goes into.
+    pub(crate) base: String,
+
+    /// Whether the head branch is in another repository — a fork. Such a pull
+    /// request cannot be pushed to over `origin`, so a wrap-up over it would
+    /// have nowhere to put a fix.
+    pub(crate) fork: bool,
+
+    /// Whether GitHub still has it open. A merged or closed pull request is
+    /// answered by number exactly as an open one is, and it is nothing to wrap
+    /// up: the caller refuses it by the same name a number nothing is open
+    /// under is refused by.
+    pub(crate) open: bool,
+}
+
+/// The pull request `number` names in `repo`, as the host's `gh` answers.
+///
+/// `gh pr view <n>` rather than a search: the number and the Repo's own origin
+/// are together the whole of what a pull request *is* to Verkstead, and `gh` is
+/// what decides which GitHub repository a directory speaks for — see
+/// [`open_pull_requests`], which leaves that decision in the same hands and for
+/// the same reason.
+///
+/// A number GitHub has nothing under at all comes back as [`Trouble`], which is
+/// `gh`'s own way of saying so; a number it has something closed or merged
+/// under comes back with [`Numbered::open`] false. The two are one refusal to
+/// the human and are told apart here because only one of them is an error.
+pub(crate) fn pull_request_numbered(
+    gh: &Gh,
+    repo: &Path,
+    number: i64,
+) -> Result<Numbered, Trouble> {
+    /// What `--json number,title,url,headRefName,baseRefName,isCrossRepository,state`
+    /// comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Viewed {
+        number: i64,
+        title: String,
+        url: String,
+        head_ref_name: String,
+        base_ref_name: String,
+        #[serde(default)]
+        is_cross_repository: bool,
+
+        /// `OPEN`, `CLOSED` or `MERGED`, in GitHub's own spelling.
+        state: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "number,title,url,headRefName,baseRefName,isCrossRepository,state",
+        ],
+    )?;
+
+    let viewed: Viewed = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(Numbered {
+        number: viewed.number,
+        title: viewed.title,
+        url: viewed.url,
+        head: viewed.head_ref_name,
+        base: viewed.base_ref_name,
+        fork: viewed.is_cross_repository,
+        open: viewed.state.eq_ignore_ascii_case("open"),
+    })
+}
+
 /// One open pull request in a repository, as `gh pr list` gives it.
 ///
 /// Everything a row of the *Wrap up a pull request* level draws, plus the one

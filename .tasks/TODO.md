@@ -20,7 +20,7 @@ Roadmap stage: [05: Review](docs/roadmaps/processes/05-review.md)
 
 ## Tasks
 
-- [ ] 01: Review on the picker, and a pull request taken up at Start — [details](01-review-taken-up-at-start.md)
+- [x] 01: Review on the picker, and a pull request taken up at Start — [details](01-review-taken-up-at-start.md)
 - [ ] 02: The Target field — [details](02-the-target-field.md)
 - [ ] 03: A bare branch — [details](03-a-bare-branch.md)
 - [ ] 04: Retirements — [details](04-retirements.md)

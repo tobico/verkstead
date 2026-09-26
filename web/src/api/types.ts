@@ -5194,7 +5194,7 @@ export type Subscribed = "Stored" | "Incomplete";
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
 
 /**
- * What became of pressing the take-up on a Draft holding a pull request.
+ * What became of pressing Start on a **Review** Draft.
  *
  * [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
  * named the same way for the same reason: a human is at the workbench pressing
@@ -5205,8 +5205,29 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * refuses an adoption is a name being *taken*; a pull request's head branch is
  * the whole point, so what refuses a take-up is that branch holding something
  * origin does not, or somebody else standing on it.
+ *
+ * And the ones in front of all of those, which an adoption has no equivalent
+ * of: a stage is named by the row that was pressed, where a Review's target is
+ * named in the Brief and resolved through `gh` at the press. So this list
+ * begins with what the Brief said and what GitHub made of it.
  */
-export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoTarget" | { "AnotherRepository": { 
+/**
+ * The `owner/repo` the URL said, as it was written.
+ */
+named: string, } } | { "NoSuchPullRequest": { 
+/**
+ * The number that was asked about.
+ */
+number: number, } } | { "GitHubRefused": { 
+/**
+ * Why, in the sentence the server put it in.
+ */
+why: string, } } | "Fork" | { "AlreadyHeld": { 
+/**
+ * The Conversation that has it, for the way there.
+ */
+conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */

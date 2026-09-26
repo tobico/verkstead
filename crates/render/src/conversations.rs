@@ -4512,7 +4512,7 @@ pub enum Adopted {
     },
 }
 
-/// What became of pressing the take-up on a Draft holding a pull request.
+/// What became of pressing Start on a **Review** Draft.
 ///
 /// [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
 /// named the same way for the same reason: a human is at the workbench pressing
@@ -4523,6 +4523,11 @@ pub enum Adopted {
 /// refuses an adoption is a name being *taken*; a pull request's head branch is
 /// the whole point, so what refuses a take-up is that branch holding something
 /// origin does not, or somebody else standing on it.
+///
+/// And the ones in front of all of those, which an adoption has no equivalent
+/// of: a stage is named by the row that was pressed, where a Review's target is
+/// named in the Brief and resolved through `gh` at the press. So this list
+/// begins with what the Brief said and what GitHub made of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum TakenUp {
@@ -4535,9 +4540,51 @@ pub enum TakenUp {
     /// It is past drafting, so it has been taken up once already — or closed.
     NotDrafting,
 
-    /// It is holding no pull request, which is every Conversation that began
-    /// with a Brief and a grilling. There is nothing here to wrap up.
+    /// It is neither a Review nor one of the Drafts that were started holding a
+    /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
+
+    /// The Brief names no pull request at all — no
+    /// `github.com/<owner>/<repo>/pull/<n>` URL in it and no bare `#<n>` —
+    /// so there is nothing for this Review to take up.
+    NoTarget,
+
+    /// The Brief's URL names a pull request of another repository, and `gh`
+    /// answers for this Repo's origin. Which repository it named is the whole
+    /// of what the human needs: either the URL is the wrong one, or this
+    /// Conversation is on the wrong Repo.
+    AnotherRepository {
+        /// The `owner/repo` the URL said, as it was written.
+        named: String,
+    },
+
+    /// GitHub has nothing open under that number in this Repo — never opened,
+    /// or merged or closed since the Brief was written.
+    NoSuchPullRequest {
+        /// The number that was asked about.
+        number: i64,
+    },
+
+    /// GitHub could not be asked at all: no `gh` on the PATH, nobody logged in,
+    /// no GitHub remote, a GitHub that would not answer. In `gh`'s own words,
+    /// because which of those it is, is the whole of what to go and fix.
+    GitHubRefused {
+        /// Why, in the sentence the server put it in.
+        why: String,
+    },
+
+    /// The pull request's head branch is in a fork, so nothing a wrap-up did
+    /// could be pushed to it — the fixes would have nowhere to go.
+    Fork,
+
+    /// Another Conversation is already on that pull request, and there is one
+    /// Conversation per piece of work. Which one is the whole of what the
+    /// human needs: the way on is that Conversation rather than a second one
+    /// over the same branch.
+    AlreadyHeld {
+        /// The Conversation that has it, for the way there.
+        conversation: i64,
+    },
 
     /// No Agent Profile is chosen for the implementation, which is what a red
     /// check and a conflict are fixed under.

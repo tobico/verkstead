@@ -17,7 +17,7 @@ import type { Process } from "../api/types";
 
 /// What each Process is called on the page.
 ///
-/// All five, including the two nothing offers yet: the wire carries every one
+/// All five, including the one nothing offers yet: the wire carries every one
 /// of them, so a record naming one this viewer refused to word would be a pane
 /// with a hole in it.
 export const PROCESS: Record<Process, string> = {
@@ -37,9 +37,14 @@ export const PROCESS: Record<Process, string> = {
 /// is offered in the first place. A stage that brings a Process to life adds to
 /// both, and each of them is written knowing the other is there.
 ///
-/// Three rows for now. A Process is offered only once its stage has landed, as an
+/// Four rows for now. A Process is offered only once its stage has landed, as an
 /// agent type is offered only once it can launch the real thing.
-export const OFFERED: Process[] = ["Develop", "Tinker", "Investigate"];
+export const OFFERED: Process[] = [
+  "Develop",
+  "Tinker",
+  "Investigate",
+  "Review",
+];
 
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside
@@ -55,11 +60,9 @@ export type Roles = {
   /// Those of them that may be picked away — the picker's row that is no
   /// account at all. A role not named here has to be answered with one.
   ///
-  /// **What the picker draws today**, which is what makes it worth reading
-  /// rather than a claim nothing checks: the row the ADR still retires — *No
-  /// review* on a Review, when that stage lands — comes out of this table in
-  /// the stage that takes it out of the app, so the row and the control never
-  /// say different things in the meantime.
+  /// **What the picker draws**, which is what makes it worth reading rather
+  /// than a claim nothing checks: a row comes out of the app by coming out of
+  /// this table, so the row and the control cannot say different things.
   away: Role[];
   /// And which shape the one **Agent** control takes: a panel where there are
   /// several roles to stack under their labels, and the flat Pairing dropdown
@@ -94,13 +97,11 @@ export const ROLES: Record<Process, Roles> = {
     control: "dropdown",
   },
   Review: {
-    // A Review without a review is Fix Merge Issues with the comments
-    // answered, so the ADR gives this row no *No review*. The picker on a
-    // Conversation holding a pull request still offers one, and the stage that
-    // makes Review a Process of its own is what takes it away — this says what
-    // is drawn until then.
+    // No row that is no account: a Review without a review is Fix Merge Issues
+    // with the comments answered, so the review here is answered with a Pairing
+    // or the press waits. The one Process of the four that offers none.
     uses: ["implementation", "review"],
-    away: ["review"],
+    away: [],
     control: "panel",
   },
   Tinker: {

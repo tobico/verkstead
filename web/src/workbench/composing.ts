@@ -484,10 +484,15 @@ export async function create(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
       );
-    } else if (pull !== null) {
+    } else if (pull !== null || state.process === "Review") {
       // The third kickoff, and the one that starts no session: the take-up puts
       // the Conversation on the pull request's head branch and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
+      //
+      // Two pages reach it. One is holding a pull request loaded off the menu;
+      // the other is composing a **Review**, which names its target in the brief
+      // and has the server read it at the press. One press on a composer, so
+      // both are the same button and the same endpoint.
       const outcome = await takeUpPullRequest(id);
       said(
         outcome === "TakenUp",

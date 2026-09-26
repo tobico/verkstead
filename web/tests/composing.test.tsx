@@ -833,7 +833,7 @@ describe("the process a compose page is composing under", () => {
     expect(showing("Process")).toBe("Develop");
   });
 
-  /// Three rows for now. A Process is offered only once its stage has landed, as
+  /// Four rows for now. A Process is offered only once its stage has landed, as
   /// an agent type is offered only once it can launch the real thing.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -843,7 +843,7 @@ describe("the process a compose page is composing under", () => {
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
     expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate", "Review"]);
   });
 
   /// The server applies its own reading to the Conversation it creates — no row
@@ -2635,7 +2635,10 @@ describe("wrapping up a pull request from the compose page", () => {
     fireEvent.input(box, { target: { value: "# Rate limiting\n\nAnd my own note.\n" } });
 
     await openAgent(container);
-    pick("Review", "No review");
+    // An account rather than *No review*: a page holding a pull request is
+    // composing a Review, and a Review without a review is Fix Merge Issues —
+    // so that row is offered nowhere on this picker.
+    pick("Review", "Claude Code Fable 5 — fable");
 
     fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
 
@@ -2657,7 +2660,7 @@ describe("wrapping up a pull request from the compose page", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
-      ).toEqual({ pairing: null }),
+      ).toEqual({ pairing: { profile_id: 1, model: "claude-fable-5" } }),
     );
 
     // The two the pull request answers for itself, and the grilling it never
