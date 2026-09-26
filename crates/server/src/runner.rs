@@ -1953,7 +1953,9 @@ pub(crate) async fn following_up(
     // read the safe way round for this — a store that will not answer reads as
     // open and as not marked — so a record that cannot be asked leaves the stop
     // below exactly as it was.
-    if !open(&state, conversation_id).await && marked(&state, conversation_id).await {
+    if !open(&state, conversation_id).await
+        && marked(&state, conversation_id, store::Lifecycle::FollowUp).await
+    {
         tracing::info!(
             conversation_id,
             event_id,
@@ -2053,7 +2055,7 @@ pub(crate) async fn follow_up_again(
 /// one that ends in its own wrap-up, and empty branches are one that finished
 /// with nothing to carry.
 async fn owed_a_pull_request(state: &AppState, conversation_id: i64) -> bool {
-    if !marked(state, conversation_id).await {
+    if !marked(state, conversation_id, store::Lifecycle::FollowUp).await {
         return false;
     }
 
@@ -2293,22 +2295,30 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 /// Worktree is writable all the same, because finding things out means writing
 /// probes and running them.
 ///
+/// **What ends it is the human saying there is nothing else**: the newest round
+/// they answered carries the mark, the session says it is done, and the
+/// Conversation is Done — see [`found_out`]. A signal without the mark is refused
+/// so that the next round goes to them as a Set, and the refusal is worded for an
+/// investigation rather than for a follow-up; a signal over whatever scratch the
+/// Worktree holds is taken, that being what the session was sent to write. See
+/// [`crate::done::Evidence::Investigated`], which carries both.
+///
 /// **A session that is gone is a stop**, which is the follow-up's rule and the
 /// responding rule under it: no other session is ever sent to finish somebody
 /// else's, so what this one had got to and what it made of the last answer are
 /// beyond asking. The Notice says what happened and any question it left the
 /// human holding goes off with it.
 ///
+/// Unless it is an ending rather than a gone session, which is read the way a
+/// follow-up's is: an agent that signals and exits before the grace beside this
+/// has run out ends first, so the record is asked once more — no Set standing
+/// open, and the newest round marked — and an investigation that reads as
+/// finished lands Done instead of stopping.
+///
 /// **And so is one that will not ask.** A session that goes idle without a Set
 /// open leaves the human holding a Conversation they can neither answer nor end,
 /// so it is spoken to, and the human told where it will not answer. The session
 /// is left running for them to move.
-///
-/// **What ends it is the human saying there is nothing else**, which lands the
-/// Conversation where this Investigating came from — the ending is not written
-/// yet. Until it is, a signal the human's mark bears out ends the session and
-/// leaves the Conversation in Investigating for the stall sweep to raise, in the
-/// words [`crate::stalls::driving`] keeps for this state.
 pub(crate) async fn investigating(
     state: AppState,
     conversation_id: i64,
@@ -2340,13 +2350,13 @@ pub(crate) async fn investigating(
     let pace = state.sessions.pace();
 
     // The signal is checked against the human's mark and nothing on the branch,
-    // an investigation committing nothing by instruction — see
-    // [`crate::done::Evidence::NothingElse`], whose reading this shares until the
-    // ending gives an investigation one of its own.
+    // an investigation committing nothing by instruction — and taken over
+    // whatever scratch it wrote on the way, which is what parts this from a
+    // follow-up's mark. See [`crate::done::Evidence::Investigated`].
     let expecting = state.signals.expecting(
         conversation_id,
         event_id,
-        crate::done::Evidence::NothingElse,
+        crate::done::Evidence::Investigated,
         crate::done::Ends::WithItsWork,
     );
     let signal = expecting.signal();
@@ -2377,18 +2387,8 @@ pub(crate) async fn investigating(
 
     let Some(ended) = ended else {
         // The human has said there is nothing else and the session has finished
-        // its round. Where the Conversation goes from here is the ending, which
-        // is not written yet: the session is ended, and what is left is a
-        // Conversation in Investigating with nothing driving it for the sweep to
-        // raise.
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "the investigating session signalled and its round is over",
-        );
-
-        state.sessions.end(conversation_id).await;
-        return;
+        // its round, so the investigation is over.
+        return found_out(&state, conversation_id).await;
     };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped
@@ -2402,6 +2402,28 @@ pub(crate) async fn investigating(
             "the investigating session was stopped from outside, so nothing is said about it",
         );
         return;
+    }
+
+    // The session is over on its own account, which is not by itself an
+    // investigation left unfinished. The human may have said there was nothing
+    // else and the agent gone before the grace beside this had run out — which is
+    // the ordinary shape of a session that finishes its turn rather than idling.
+    // So the record is asked once more before this is read as an investigation
+    // nobody is left to have, exactly as a follow-up's is — see [`following_up`],
+    // whose two questions these are, read the same safe way round: a store that
+    // will not answer reads as open and as not marked, so a record that cannot be
+    // asked leaves the stop below exactly as it was.
+    if !open(&state, conversation_id).await
+        && marked(&state, conversation_id, store::Lifecycle::Investigating).await
+    {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the investigating session finished on a round the human had already \
+             marked, so the investigation is over rather than gone",
+        );
+
+        return found_out(&state, conversation_id).await;
     }
 
     // And anything it left the human holding goes off as the stop is raised. The
@@ -2427,6 +2449,61 @@ pub(crate) async fn investigating(
         Some(event_id),
     )
     .await;
+}
+
+/// The human has nothing else they want found out: end the session, and land the
+/// Conversation Done.
+///
+/// **Directly, and nothing is dispatched.** No wrap-up, no watchers, no
+/// `submitting` session and no pull request sent for: an investigation writes
+/// nothing down on the branch, so there is nothing for a wrap-up to be about and
+/// nothing to carry anywhere. The move and the line on the Timeline are the whole
+/// of it, and the Worktree stays as it does for any Done Conversation — with
+/// whatever scratch the session left in it, which every Set's Diff has already
+/// shown.
+///
+/// **Nothing is pushed to the devices and nothing is stamped unseen either**,
+/// which is what parts this from a wrap-up settling: the human ended this
+/// themselves a moment ago by ticking **Nothing else**. See [`finished`], which is
+/// the same ending a Tinker that built nothing gets, for the same reason.
+///
+/// The session is ended first, as a follow-up's is, so that nothing is left
+/// holding the Worktree while the move is written.
+async fn found_out(state: &AppState, conversation_id: i64) {
+    tracing::info!(
+        conversation_id,
+        "the human has nothing else they want found out, so the investigation is over and its \
+         session is being ended",
+    );
+
+    state.sessions.end(conversation_id).await;
+
+    match store::investigation_done(&state.pool, conversation_id).await {
+        Ok(store::Investigated::Finished) => {}
+        Ok(outcome) => {
+            tracing::info!(
+                conversation_id,
+                ?outcome,
+                "there was no investigation left to end, so nothing was moved",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "landing an investigation that is over failed");
+            return;
+        }
+    }
+
+    tracing::info!(
+        conversation_id,
+        "the investigation is over and nothing was built, so the work is done",
+    );
+
+    // The Timeline has a move on it and the card reads differently, and an open
+    // page should say so without being reloaded.
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
 }
 
 /// What a stop over a gone investigating session says beyond how it went.
@@ -2614,15 +2691,25 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> bool {
     }
 }
 
-/// Whether the newest round the human answered carries the Nothing-else mark.
+/// Whether the newest round the human answered inside `within`'s own window
+/// carries the Nothing-else mark.
 ///
-/// A store that will not answer reads as *not marked*, which leaves the
-/// follow-up running: the same way round as [`open`], read from the other side.
-pub(crate) async fn marked(state: &AppState, conversation_id: i64) -> bool {
-    match store::nothing_else(&state.pool, conversation_id).await {
+/// `within` is the state the rounds are being had in — [`Lifecycle::FollowUp`]
+/// for a follow-up, [`Lifecycle::Investigating`] for an investigation — because
+/// each windows its rounds by the newest move into itself and a Conversation can
+/// have been through both. See [`store::nothing_else`].
+///
+/// A store that will not answer reads as *not marked*, which leaves the rounds
+/// running: the same way round as [`open`], read from the other side.
+pub(crate) async fn marked(
+    state: &AppState,
+    conversation_id: i64,
+    within: store::Lifecycle,
+) -> bool {
+    match store::nothing_else(&state.pool, conversation_id, within).await {
         Ok(marked) => marked,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a follow-up was over failed");
+            tracing::error!(error = ?error, conversation_id, ?within, "reading whether the rounds were over failed");
             false
         }
     }

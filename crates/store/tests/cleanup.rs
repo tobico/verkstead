@@ -580,7 +580,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap();
 
     assert!(
-        nothing_else(pool, id).await.unwrap(),
+        nothing_else(pool, id, Lifecycle::FollowUp).await.unwrap(),
         "the round is marked as over",
     );
 

@@ -2363,6 +2363,82 @@ fn an_investigating_round_then_gone(prompts: &Path) -> String {
     )
 }
 
+/// And the same leaving on a round the human *has* marked, having talked past the
+/// rescue's grace on the way out and never said it was done.
+///
+/// The investigation's own [`A_MARKED_ROUND_THEN_GONE`], and what it is for is
+/// the same: the session going is the only thing that can land this anywhere, so
+/// what the ending reads is the record asked once more rather than a signal.
+fn an_investigating_round_marked_then_gone(prompts: &Path) -> String {
+    format!(
+        "SAYING='finding it out'\n\
+         printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         LEFT=20\n\
+         while [ $LEFT -gt 0 ]; do \
+         printf 'still tidying up\n'; sleep 0.1; LEFT=$((LEFT - 1)); done\n\
+         printf 'that is that, then\n'\n",
+        prompts = quoted(prompts),
+    )
+}
+
+/// One that writes probes and leaves every one of them where it wrote them —
+/// modified, staged and untracked — then puts its round, says it is done once it
+/// has been answered, and idles.
+///
+/// Which is what the instruction asks of an investigating session: find out by
+/// writing and running whatever it takes, and commit none of it. The scratch it
+/// leaves is what the ending is taken over.
+fn an_investigating_round_over_scratch(prompts: &Path) -> String {
+    format!(
+        "SAYING='finding it out'\n\
+         printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf 'a probe\n' >> README.md\n\
+         printf 'staged\n' > probe.md\n\
+         git add probe.md\n\
+         printf 'stray\n' > scratch.md\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         printf 'that is what it counts, then\n'\n\
+         : > /tmp/verkstead/done\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
+/// And one that says it is done before the human has marked anything: it keeps
+/// the refusal, puts another round, and signals again once that one comes back
+/// marked.
+///
+/// The investigation's own [`SIGNALS_BEFORE_THE_MARK`], and the same two markers
+/// standing in for the two Answers arriving — a stub cannot idle on a Blocking
+/// Ask and wake up.
+fn an_investigating_round_before_the_mark(prompts: &Path) -> String {
+    format!(
+        "SAYING='finding it out'\n\
+         printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         : > /tmp/verkstead/done\n\
+         while ! grep -q 'nothing else' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done\n\
+         cp /tmp/verkstead/done-said /tmp/verkstead/refused\n\
+         rm -f /tmp/verkstead/done\n\
+         rm -f /tmp/verkstead/asked\n\
+         SAYING='one more thing to look at then'\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/again ]; do sleep 0.1; done\n\
+         printf 'that is the whole of it\n'\n\
+         : > /tmp/verkstead/done\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
 /// The same over a repository `seed` has committed into before the Conversation
 /// is started — see [`Seeded`], which is where the moment is explained.
 ///
@@ -23746,6 +23822,207 @@ async fn resume_investigates_again_on_the_brief_and_the_rounds_answered() {
         relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
         "which is the round it asked before it went: {relaunched:?}",
     );
+}
+
+/// An investigation ends on the human's mark and the session's signal, over
+/// whatever scratch it wrote — and it lands **Done** with nothing dispatched.
+///
+/// The scratch is the point. Finding something out means writing probes and
+/// running them, and the skill's instruction is to commit none of it: the session
+/// leaves a modified file, a staged one and an untracked one behind it, and the
+/// signal is taken all the same. Every Set's Diff has already shown the human the
+/// lot of it, and the Worktree goes with the close.
+///
+/// And nothing is asked for beyond the move: no wrap-up, no watchers, no
+/// `submitting` session and no pull request anywhere — there is nothing on the
+/// branch to carry to one. The Worktree stays where it is, with the scratch still
+/// in it, as it does for any Done Conversation.
+#[tokio::test]
+async fn an_investigation_ends_over_its_scratch_and_lands_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round_over_scratch(&written_to)).await;
+
+    fixture.running().await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("an investigation is cut a Worktree to write probes in")
+            .path,
+    );
+    let cut_from = git(&worktree, &["rev-parse", "HEAD"]);
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !view.working,
+        "the session was ended as the investigation ended, so nothing is left \
+         holding the Worktree",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: an investigation that ends on the human's own mark \
+         is not one that went: {:?}",
+        notices(&view),
+    );
+    assert!(
+        pull_requests(&view).is_empty(),
+        "and no pull request was asked for anywhere: there is nothing on the \
+         branch to carry to one: {:?}",
+        pull_requests(&view),
+    );
+    assert!(
+        commits(&view).is_empty(),
+        "which is the branch holding nothing past the commit it was cut from: {:?}",
+        commits(&view),
+    );
+
+    assert_eq!(
+        git(&worktree, &["rev-parse", "HEAD"]),
+        cut_from,
+        "the branch is exactly where the start left it",
+    );
+
+    let scratch = git(&worktree, &["status", "--porcelain"]);
+
+    assert!(
+        view.worktree.is_some_and(|worktree| !worktree.missing),
+        "and the Worktree is still there, as any Done Conversation's is",
+    );
+    assert!(
+        scratch.contains("README.md")
+            && scratch.contains("probe.md")
+            && scratch.contains("scratch.md"),
+        "with the probes still in it, uncommitted: {scratch:?}",
+    );
+
+    let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+
+    assert_eq!(
+        prompts(&written).len(),
+        1,
+        "and one session ran from first to last: nothing was dispatched over the \
+         ending: {:?}",
+        prompts(&written),
+    );
+}
+
+/// An investigating session's signal while the newest answered round carries no
+/// mark is refused in the investigation's own words, and the investigation goes
+/// on to its next round — ending once that round comes back marked.
+///
+/// Whether there is anything else they want found out is the human's to say, so
+/// an investigating session cannot end itself however finished it believes it is.
+/// The mechanism is the follow-up's and the sentence is not: what the agent is
+/// told is that there is more to find out, and what to do about it is to put the
+/// next round up as a Set.
+#[tokio::test]
+async fn an_investigations_signal_without_the_mark_is_refused_in_its_own_words() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round_before_the_mark(&written_to)).await;
+
+    fixture.running().await;
+
+    let first = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(first).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let said = refused(&fixture).await;
+
+    assert!(
+        said.contains("the human has not said there is nothing else"),
+        "the refusal says why: {said:?}",
+    );
+    assert!(
+        said.contains("more they want found out"),
+        "in the investigation's words rather than the follow-up's: {said:?}",
+    );
+    assert!(
+        !said.contains("follow-up"),
+        "which is not what this is: {said:?}",
+    );
+    assert!(
+        said.contains("verkstead ask"),
+        "and that the next round goes to them as a Set: {said:?}",
+    );
+
+    let second = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Investigating,
+        "the refused signal ended nothing",
+    );
+
+    assert_eq!(fixture.answer_ending(second).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and the investigation ended on its signal rather than stopping: {:?}",
+        notices(&view),
+    );
+    assert!(!view.working, "with nothing left holding the Worktree");
+}
+
+/// And an investigating session that finishes on a round the human had already
+/// marked is an investigation that is *over* rather than one nobody is left to
+/// have.
+///
+/// The mark is read where the session ends as well as where it idles, which is
+/// the whole of what tells the two apart — the follow-up's rule, read in
+/// Investigating's own window. An interactive agent that decides there is nothing
+/// left to do exits zero, so a session going by itself without a Done signal can
+/// be the ordinary shape of an investigation ending: read without the mark it
+/// would put a stop on the Timeline of a Conversation the human had finished
+/// with.
+///
+/// The stub talks past the rescue's grace after it is answered and never signals,
+/// so nothing else here can end it: the session going is the only way this one
+/// lands anywhere.
+#[tokio::test]
+async fn an_investigating_session_that_finishes_on_the_mark_lands_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round_marked_then_gone(&written_to)).await;
+
+    fixture.running().await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: a session that finished on the human's own mark is an \
+         investigation that ended rather than one that is gone: {:?}",
+        notices(&view),
+    );
+    assert!(!view.working, "and nothing is left holding the Worktree");
 }
 
 /// A Tinker whose round commits, waits to be answered, says it is done and

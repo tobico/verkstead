@@ -1064,6 +1064,27 @@ pub enum Ending {
     NoSuchConversation,
 }
 
+/// What became of ending an investigation, which is one place and one only.
+///
+/// An investigation is a question about the code answered without changing it,
+/// so there is nothing on the branch for a landing to depend on and nothing to
+/// decide: it is Done. See [`investigation_done`], and [`Ending`] beside it,
+/// whose follow-up is reached two ways and so lands two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Investigated {
+    /// Landed: the Conversation is Done and the move is on its Timeline, with
+    /// its Worktree left as any Done Conversation's is.
+    Finished,
+
+    /// It is not investigating anything, so there is no investigation here to
+    /// end — closed out from under the session, or steered somewhere else while
+    /// this was deciding.
+    NotInvestigating,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
 /// What became of pressing **Resolve conflicts** on a finished Conversation's
 /// pull request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4284,6 +4305,57 @@ async fn out_of_follow_up(
         Lifecycle::Wrapping => Ending::Wrapped,
         _ => Ending::Finished,
     })
+}
+
+/// End an investigation, because the human has said there is nothing else they
+/// want found out.
+///
+/// The move and the line on the Timeline are the whole of it. An investigation
+/// answers a question about the code and writes nothing down on the branch, so
+/// there is no pull request to carry anything to and nothing for a wrap-up to be
+/// about: the Conversation is Done, and its Worktree stays as it is for any Done
+/// Conversation. Whatever scratch the session left in it is the scratch every
+/// Set's Diff has already shown.
+///
+/// Refused for anything but Investigating, as every move here is refused outside
+/// the state it leaves: a Conversation closed or steered out from under the
+/// session is not one to finish.
+///
+/// No `pushed`, and no settles put back to waiting: there is nothing anywhere
+/// that could have been pushed, and a Conversation that gets here is on no pull
+/// request.
+///
+/// One transaction, as every move is: a Conversation that says Done always has
+/// the move on its Timeline to say when it got there.
+pub async fn investigation_done(pool: &SqlitePool, id: i64) -> Result<Investigated> {
+    let mut tx = super::writing(pool, "ending an investigation").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Investigated::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Investigating {
+        return Ok(Investigated::NotInvestigating);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Done.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} out of investigating"))?;
+
+    moved(&mut tx, id, Lifecycle::Done).await?;
+
+    tx.commit().await.context("ending an investigation")?;
+
+    Ok(Investigated::Finished)
 }
 
 /// Send a Done Conversation back to wrapping up, because the human pressed
