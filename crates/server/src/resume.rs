@@ -383,9 +383,17 @@ pub(crate) async fn resume(
         // outlives the session having it is the Timeline. See
         // [`crate::follow_ups`].
         //
-        // No pull request is read for here. The steer that opened this refused
-        // without one, and a follow-up is about the branch rather than about the
-        // record of it: what the session is sent to do is the brief.
+        // **Unless the follow-up is over and its pull request is what is
+        // missing**, which is a Tinker whose ending sent for one and got nowhere
+        // — the state stays Follow-up until that pull request is recorded, so a
+        // press or a restart landing in that window has an ending to finish
+        // rather than a round to start. Asked there rather than here, because it
+        // is the runner's own reading and the two must agree: see
+        // [`crate::runner::follow_up_again`].
+        //
+        // The brief is read for either way. It costs one read of the Timeline,
+        // and a Conversation in this state with nothing to pick up is one the
+        // press should say so about by name rather than one it acts on halfway.
         Lifecycle::FollowUp => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -397,7 +405,7 @@ pub(crate) async fn resume(
 
             starting(state, conversation_id, resuming).await?;
 
-            tokio::spawn(crate::runner::following_up(
+            tokio::spawn(crate::runner::follow_up_again(
                 state.clone(),
                 conversation_id,
                 follow_up,

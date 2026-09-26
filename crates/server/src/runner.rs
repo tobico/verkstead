@@ -1160,7 +1160,9 @@ async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Opti
 /// a function: a run that stopped short of its push and a human pressing Resume
 /// on one are the same Conversation wanting the same thing, and answering them
 /// differently would mean the press was worth less than the run. See
-/// [`to_a_pull_request`] for the first and [`nothing_left`] for the second.
+/// [`to_a_pull_request`] for the first and [`nothing_left`] for the second — and
+/// [`over`] and [`follow_up_again`], which are a **Tinker**'s ending and the
+/// press on one that got this far and no further.
 ///
 /// **Once per go.** What follows the session is GitHub asked again, and what it
 /// says then is the whole of it: a pull request wraps the Conversation up, and no
@@ -1991,11 +1993,90 @@ pub(crate) async fn following_up(
     .await;
 }
 
+/// Pick a follow-up up again, or finish the ending that was left half-made.
+///
+/// **The way in for a press and for a restart**, which is what makes it worth a
+/// function of its own: a Conversation standing in Follow-up is usually one whose
+/// session went away mid-conversation, and starting another is exactly right for
+/// that. But it is not the only thing that state means any more.
+///
+/// A **Tinker** whose rounds are over sits in Follow-up while the `submitting`
+/// session sent for its pull request runs, and goes on sitting there where that
+/// session left none — `gh` logged out, a push that failed — because a stop
+/// leaves a Conversation where it is. Both of those read the same way: the newest
+/// round marked **Nothing else**, no pull request, and work standing on the
+/// branches. Which is the ending's own reading — see [`over`], whose three
+/// questions these are — and what it says is that the follow-up is finished with
+/// and the pull request is the one thing still owed.
+///
+/// So the press asks for that rather than for another round, and a restart does
+/// the same. Which is the promise [`asked_for_a_pull_request`] makes in its own
+/// words — *what they have then is Resume, and a press is another go through
+/// here* — and one the state alone could not keep, a Tinker being the one ending
+/// that sends for a pull request from outside a wrap-up.
+///
+/// Anything the reading cannot be sure of falls through to the follow-up, which
+/// is where the state would have sent it anyway: a Conversation nobody can read,
+/// an unmarked round, branches with nothing on them. None of those is an ending
+/// left half-made.
+pub(crate) async fn follow_up_again(
+    state: AppState,
+    conversation_id: i64,
+    follow_up: FollowUp,
+    driving: Driving,
+) {
+    if owed_a_pull_request(&state, conversation_id).await {
+        tracing::info!(
+            conversation_id,
+            "this follow-up is over and its work is on no pull request, so a session is being \
+             sent to open one rather than another round started",
+        );
+
+        // Held across the session and the wrap-up it starts, for the reason
+        // [`over`] holds it across the same call.
+        let _driving = driving;
+
+        return asked_for_a_pull_request(&state, conversation_id).await;
+    }
+
+    following_up(state, conversation_id, follow_up, driving).await
+}
+
+/// Whether a Conversation in Follow-up is one whose ending got as far as owing a
+/// pull request and no further.
+///
+/// [`over`]'s three questions asked again, in the cheap order: the mark first
+/// because it is a row, the pull request next because it is a row too, and the
+/// branches last because they are git. Every one of them has to say yes — an
+/// unmarked round is a follow-up still being had, a pull request already there is
+/// one that ends in its own wrap-up, and empty branches are one that finished
+/// with nothing to carry.
+async fn owed_a_pull_request(state: &AppState, conversation_id: i64) -> bool {
+    if !marked(state, conversation_id).await {
+        return false;
+    }
+
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation a follow-up is on failed");
+            return false;
+        }
+    };
+
+    if on_a_pull_request(state, &conversation).await != Some(false) {
+        return false;
+    }
+
+    holds_commits(state, &conversation).await
+}
+
 /// What a stop over a gone follow-up session says beyond how it went.
 ///
 /// [`store::Decision::Verkstead`], as every stop written here is: what to do
 /// about it is the human's, and steering is what they have.
-const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
+const NOBODY_FOLLOWING_UP: &str ="nobody is left to ask you anything or to act on what you say, and any question it had \
      put to you has been closed unanswered";
 
 /// The human has said there is nothing else: end the session, and land the
@@ -2046,24 +2127,8 @@ async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Dri
         }
     };
 
-    // The Conversation's own repository's, which is the pull request that makes a
-    // wrap-up: a companion's is something a wrap-up covers rather than something
-    // to end into. A steer into Follow-up is refused without one, so this is
-    // exactly the question *is this a Tinker's branch* — asked of the record,
-    // because a Tinker that has already been round once is on a pull request and
-    // ends the ordinary way.
-    let on_a_pull_request = match store::pull_request(
-        &state.pool,
-        conversation_id,
-        conversation.repo.id,
-    )
-    .await
-    {
-        Ok(found) => found.is_some(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a follow-up's work is on a pull request failed");
-            return;
-        }
+    let Some(on_a_pull_request) = on_a_pull_request(state, &conversation).await else {
+        return;
     };
 
     if on_a_pull_request {
@@ -2206,6 +2271,31 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
     state.nudges.announce(Nudge::Conversation {
         conversation: conversation_id,
     });
+}
+
+/// Whether the Conversation's own work is on a pull request, or `None` where the
+/// record would not say.
+///
+/// The Conversation's own repository's, which is the pull request that makes a
+/// wrap-up: a companion's is something a wrap-up covers rather than something to
+/// end into. A steer into Follow-up is refused without one, so this is exactly
+/// the question *is this a Tinker's branch* — asked of the record, because a
+/// Tinker that has already been round once is on a pull request and ends the
+/// ordinary way.
+///
+/// Asked by the ending and by the press that picks a follow-up up again — see
+/// [`over`] and [`follow_up_again`] — because the two have to agree about which
+/// kind of follow-up this is. What each does about `None` is its own: the ending
+/// lands nothing it cannot be sure about, and the press falls back to the
+/// follow-up it was always going to start.
+async fn on_a_pull_request(state: &AppState, conversation: &store::Conversation) -> Option<bool> {
+    match store::pull_request(&state.pool, conversation.id, conversation.repo.id).await {
+        Ok(found) => Some(found.is_some()),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = conversation.id, "reading whether a follow-up's work is on a pull request failed");
+            None
+        }
+    }
 }
 
 /// Whether the follow-up's rounds committed anything anywhere the work reaches:

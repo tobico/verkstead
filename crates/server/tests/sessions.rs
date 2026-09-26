@@ -23700,6 +23700,144 @@ async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for
     );
 }
 
+/// A Tinker whose round commits, and whose `submitting` session stops short of the
+/// pull request until `opened` is there — the second go being the one that pushes.
+///
+/// Which is what a Resume over a stop is: the human logs `gh` in, presses, and the
+/// one thing still owed is asked for again.
+fn a_tinker_whose_submit_stops_short_once(opened: &Path, asked_twice: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    if [ -f {asked_twice} ]; then
+        printf 'the branch is pushed and the pull request is open\n'
+        printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+        exit 0
+    fi
+    : > {asked_twice}
+    printf 'gh is not logged in, so I have pushed nothing\n'
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    printf 'a limiter\n' >> limiter.md
+    git add -A
+    git commit --quiet -m 'feat: count what the limiter rejects'
+    SAYING='following it up'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        asked_twice = quoted(asked_twice),
+    )
+}
+
+/// Resume on a Tinker whose ending left no pull request asks for the pull request
+/// again rather than starting another round.
+///
+/// **The state alone cannot say which of the two this is.** A Tinker stays in
+/// Follow-up until the pull request its ending sent for is recorded, so a press
+/// that read only the state would start a fresh follow-up session over a
+/// Conversation the human has already ticked **Nothing else** on — and the one
+/// thing actually missing would go on missing. The mark, the absent pull request
+/// and the commits on the branch are what tell them apart, which is the ending's
+/// own reading asked again.
+///
+/// Which is also the promise the run makes about a finish that stopped short of
+/// its push: what the human has then is Resume, and a press is another go at the
+/// one thing left. This is that promise kept for the one ending that sends for a
+/// pull request from outside a wrap-up.
+#[tokio::test]
+async fn resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_another_round() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let asked_twice = spill.path().join("asked-once-already");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The ending sends for the pull request, that session leaves none, and the run
+    // stops where it stands — which is still Follow-up, the move being the
+    // recording of a pull request that never happened.
+    let view = fixture
+        .until(|view| (!notices(view).is_empty()).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "a stop leaves the Conversation where it is, and the ending had not moved it yet",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session asked for so far, and it got nowhere",
+    );
+
+    // Nobody is asking as the next session starts, which is what keeps a follow-up
+    // session talking until the test puts its round up — so a press that wrongly
+    // started one would be plain to see rather than hanging.
+    fixture.asked_nothing();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the press asked for the one thing that was missing, and got it",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        2,
+        "which is a second go at the pull request rather than a second follow-up",
+    );
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "and no round was put to the human over a follow-up they had already \
+         finished: {:?}",
+        sets(&view).len(),
+    );
+}
+
 /// And one that committed in an earlier session and nothing at all in the session
 /// that ended lands in Wrapping too.
 ///
