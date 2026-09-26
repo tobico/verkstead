@@ -49,6 +49,7 @@ import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
+import { takeOver } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
@@ -545,8 +546,20 @@ async function run(): Promise<void> {
     // flag the other two carry on their command lines.
     openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
 
+    // And what macOS 13's `SMAppService` says about the registration beside
+    // `openAtLogin`: a human who switched Verkstead off in System Settings is
+    // `requires-approval`, which is a registration that starts nothing.
+    status: () => app.getLoginItemSettings().status,
+
     register: (asked) => app.setLoginItemSettings(asked),
   };
+
+  // The tray app's launch agent, taken over once — before anything below reads
+  // the registration, because on a machine that had that app the agent is what
+  // the human asked for and the API has never heard of it. Nothing at all on
+  // the other two platforms, and nothing where there is no agent to find, which
+  // is every machine from the version this ships in onwards.
+  takeOver(registering, login);
 
   const starts = startup(registering, login);
 
@@ -582,7 +595,17 @@ async function run(): Promise<void> {
   // Mac saying its login item started this — read against the tray, because the
   // icon is the whole of what makes a hidden app reachable (ADR-0020). Read
   // before the window is opened, that being the one thing it decides.
-  const unseen = hidden(process.argv, settings(desk), starts.atLogin());
+  const atLogin = starts.atLogin();
+
+  // Said whatever comes of it, because a Mac's login start is the one that
+  // carries nothing on the command line: the log is the only place it shows
+  // that the platform was asked and what it answered, and a window that came up
+  // over somebody's login is read here first.
+  if (atLogin) {
+    say("macOS says its own login item is what started this run");
+  }
+
+  const unseen = hidden(process.argv, settings(desk), atLogin);
   if (unseen) {
     say("this launch is a login's and there is an icon in the tray, so no window comes up");
   }

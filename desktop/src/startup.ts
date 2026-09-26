@@ -24,7 +24,18 @@
 //! rather than a file — the app is always a bundle now, which is what the tray
 //! app's hand-written plist was working around. Those two arms are written here
 //! and proven in stages 06 and 07; the registration is still the state there,
-//! the box being drawn from reading it back through the same call.
+//! the box being drawn from reading it back through the same call. That plist is
+//! still on the machines the tray app ran on, and it is taken over once at a
+//! launch — [`launchd.ts`](./launchd.js), which is the only thing on a Mac that
+//! is a file at all.
+//!
+//! **And on a Mac the platform can hold a registration that is there off.**
+//! `setLoginItemSettings` is `SMAppService` on macOS 13 and up, so a human who
+//! switches Verkstead off under Login Items in System Settings leaves a
+//! registration whose `status` reads `requires-approval` — off, and off in a way
+//! nothing this app can call puts back. That is [`HELD`]: the box greyed with
+//! the one place it can be turned on again named under it, rather than a tick
+//! that would write a registration the system is already ignoring.
 //!
 //! **And nowhere at all on an unpackaged run**, whatever the platform (Q2). What
 //! a registration could name from a checkout is the dev shell's Electron in the
@@ -102,6 +113,18 @@ const UNPACKAGED =
   "checkout, and a registration made here would name a build that will not be " +
   "there the next time the machine starts.";
 
+/// Why a registration that is there starts nothing, on a Mac where the human
+/// has switched it off in System Settings.
+///
+/// Worded for the human reading it under a greyed box, and naming the one place
+/// it can be put right: the registration exists and `SMAppService` is holding it
+/// for the human's approval, so there is nothing for a tick here to write that
+/// the system is not already ignoring.
+const HELD =
+  "macOS is holding Verkstead's login item for your approval, so it will not " +
+  "start with your session. Switch Verkstead on under Login Items in System " +
+  "Settings to start it there.";
+
 /// And why a machine may have nowhere to keep one — the tray app's own wording,
 /// for the same situation.
 const NOWHERE =
@@ -146,6 +169,11 @@ export interface Registration {
   readonly on: boolean;
 
   /// Why it cannot be, where it cannot — the note the greyed box carries.
+  ///
+  /// Three of them now: the machine with nowhere to keep a registration, the
+  /// run with nothing worth registering, and the Mac whose registration the
+  /// platform is holding for the human's approval. Each is a box that would
+  /// have taken a tick and done nothing.
   readonly why?: string;
 
   /// What refused a registration that was asked for, where this is the answer to
@@ -218,9 +246,31 @@ export interface LoginItem {
   /// the flag.
   openedAtLogin(): boolean;
 
+  /// What macOS says about the registration beside `openAtLogin` —
+  /// `app.getLoginItemSettings().status`.
+  ///
+  /// **A Mac's question, and macOS 13's.** `setLoginItemSettings` is
+  /// `SMAppService` there, which has states `openAtLogin` alone cannot describe:
+  /// a human who switches Verkstead off under Login Items in System Settings
+  /// leaves the registration in place and `requires-approval` behind it, which
+  /// is a Verkstead that will not start and will not be made to start by
+  /// registering again. [`HELD`] is what the box says then.
+  ///
+  /// `undefined` where the platform says nothing — Windows, whose registration
+  /// is a Run key, and a Mac before 13.
+  status(): LoginStatus | undefined;
+
   /// Register or unregister — `app.setLoginItemSettings`.
   register(asked: LoginAsked): void;
 }
+
+/// What macOS 13's own registration says about itself: Electron's `status`,
+/// word for word.
+///
+/// `enabled` is a registration that will start Verkstead, `requires-approval`
+/// one the human has to turn on in System Settings, and the other two are no
+/// registration at all — which `openAtLogin` already says.
+export type LoginStatus = "not-registered" | "enabled" | "requires-approval" | "not-found";
 
 /// Verkstead's startup registration on this machine: read, written, and
 /// rewritten at every launch.
@@ -281,10 +331,28 @@ export function startup(registering: Registering, login: LoginItem): Startup {
     return written !== undefined && saysOn(written);
   };
 
-  const standing = (): Registration =>
-    "nowhere" in put
-      ? { possible: false, on: false, why: put.nowhere }
-      : { possible: true, on: on() };
+  /// Whether the platform is holding a registration that is there off, which is
+  /// a Mac's alone — see [`LoginItem.status`]. Asked of nothing else: Windows
+  /// answers nothing, and a machine with no registration to hold has none held.
+  const held = (): boolean =>
+    "login" in put &&
+    registering.platform === "darwin" &&
+    login.status() === "requires-approval";
+
+  const standing = (): Registration => {
+    if ("nowhere" in put) {
+      return { possible: false, on: false, why: put.nowhere };
+    }
+
+    // Before the reading, because it is a stronger statement than the reading
+    // is: the registration is there, `openAtLogin` says off about it, and what
+    // would put that right is in System Settings rather than here.
+    if (held()) {
+      return { possible: false, on: false, why: HELD };
+    }
+
+    return { possible: true, on: on() };
+  };
 
   const set = (asked: boolean): Registration => {
     if ("nowhere" in put) {

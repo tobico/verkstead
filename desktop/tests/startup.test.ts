@@ -18,9 +18,10 @@
 //! Startup Applications has to read as unticked here.
 //!
 //! The Mac and Windows arms are Electron's login-item API, which is a call
-//! rather than a file — so they are exercised through a stub of the two calls
-//! this needs of it, which is what makes the arm this Linux runner will never
-//! run an ordinary test all the same.
+//! rather than a file — so they are exercised through a stub of the calls this
+//! needs of it, which is what makes the arm this Linux runner will never run an
+//! ordinary test all the same. The plist the tray app left on a Mac is the one
+//! thing there that *is* a file, and it is `launchd.test.ts`'s.
 
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,6 +40,7 @@ import {
   quoted,
   type LoginAsked,
   type LoginItem,
+  type LoginStatus,
   type Registering,
   saysOn,
   startup,
@@ -77,6 +79,7 @@ function loginItem(
   on = false,
   args: string[] = [...ARGS],
   opened = false,
+  status: LoginStatus | undefined = undefined,
 ): LoginItem & { asked: LoginAsked[]; read: string[][] } {
   const asked: LoginAsked[] = [];
   const read: string[][] = [];
@@ -90,6 +93,7 @@ function loginItem(
       return registered !== undefined && same(registered, wanted);
     },
     openedAtLogin: () => opened,
+    status: () => status,
     register: (wanted) => {
       asked.push(wanted);
       registered = wanted.openAtLogin ? wanted.args : undefined;
@@ -103,6 +107,9 @@ const noLogin: LoginItem = {
     throw new Error("the Linux arm is a file, and asked the login-item API");
   },
   openedAtLogin: (): boolean => {
+    throw new Error("the Linux arm is a file, and asked the login-item API");
+  },
+  status: (): LoginStatus => {
     throw new Error("the Linux arm is a file, and asked the login-item API");
   },
   register: () => {
@@ -478,6 +485,7 @@ describe("the login-item arm", () => {
     const login: LoginItem = {
       registered: () => false,
       openedAtLogin: () => false,
+      status: () => undefined,
       register: () => {
         throw new Error("the login item could not be written");
       },
@@ -489,6 +497,65 @@ describe("the login-item arm", () => {
       possible: true,
       on: false,
       refused: expect.stringContaining("could not"),
+    });
+  });
+});
+
+describe("a registration macOS is holding", () => {
+  /// What `SMAppService` leaves behind when a human switches Verkstead off
+  /// under Login Items in System Settings: the registration is still there and
+  /// `openAtLogin` alone does not say that starting it needs their approval.
+  /// So the box is greyed with the one place that can be put right named under
+  /// it, rather than one that ticks and writes a registration the system is
+  /// already ignoring.
+  it("is a box that cannot be ticked, and says where to turn it on", () => {
+    const standing = startup(
+      packed(dir, { platform: "darwin" }),
+      loginItem(false, [...ARGS], false, "requires-approval"),
+    ).standing();
+
+    expect(standing.possible).toBe(false);
+    expect(standing.on).toBe(false);
+    expect(standing.why).toMatch(/System Settings/);
+  });
+
+  /// And every other thing that status says is the ordinary reading: a
+  /// registration that is there and enabled is a ticked box, and the two that
+  /// say there is none are what `openAtLogin` already says.
+  it("is nothing the other three states do", () => {
+    for (const status of ["enabled", "not-registered", "not-found"] as const) {
+      expect(
+        startup(
+          packed(dir, { platform: "darwin" }),
+          loginItem(true, [...ARGS], false, status),
+        ).standing(),
+        status,
+      ).toEqual({ possible: true, on: true });
+    }
+  });
+
+  /// Nor anything a Mac before 13 says, which is nothing at all: that platform
+  /// has no `SMAppService` to be held by.
+  it("is nothing where the platform says nothing", () => {
+    expect(startup(packed(dir, { platform: "darwin" }), loginItem(true)).standing()).toEqual({
+      possible: true,
+      on: true,
+    });
+  });
+
+  /// And it is not asked of Windows at all — a status is a Mac's word, and the
+  /// stub that throws when it is asked is what says so.
+  it("is not asked of Windows", () => {
+    const login: LoginItem = {
+      ...loginItem(true),
+      status: (): LoginStatus => {
+        throw new Error("Windows has no SMAppService, and was asked for a status");
+      },
+    };
+
+    expect(startup(packed(dir, { platform: "win32" }), login).standing()).toEqual({
+      possible: true,
+      on: true,
     });
   });
 });
