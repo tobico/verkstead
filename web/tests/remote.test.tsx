@@ -42,7 +42,7 @@ import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import jsQR from "jsqr";
 import type { JSX } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   faApple,
@@ -51,9 +51,17 @@ import {
 } from "@fortawesome/free-brands-svg-icons";
 import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 
-import type { DevicesView, RemoteView, ServePress } from "../src/api/types";
+import type {
+  DevicesView,
+  DiscoveredDevice,
+  Nudge,
+  RemoteView,
+  ServePress,
+} from "../src/api/types";
+import { listenForNudges } from "../src/nudge";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
 import devices from "./fixtures/devices.json" with { type: "json" };
+import devicesDiscovered from "./fixtures/devices-discovered.json" with { type: "json" };
 import devicesLinked from "./fixtures/devices-linked.json" with { type: "json" };
 import devicesWaiting from "./fixtures/devices-waiting.json" with { type: "json" };
 import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
@@ -65,6 +73,7 @@ import serving from "./fixtures/remote-serving.json" with { type: "json" };
 import done from "./fixtures/serve-done.json" with { type: "json" };
 import ungranted from "./fixtures/serve-ungranted.json" with { type: "json" };
 import { askedFor, json, whenever, serving as stubbing } from "./serving";
+import { stream, streaming } from "./streaming";
 
 /// The five machines: no Tailscale at all, one whose daemon is not answering,
 /// one that is up and serving the workbench, one that is up and serving
@@ -103,6 +112,17 @@ const LINKED = devicesLinked as DevicesView;
 /// been agreed until somebody at the far end presses.
 const WAITING = devicesWaiting as DevicesView;
 
+
+/// And three devices this one has *found* and is not linked to at all, which is
+/// what the Discovered list draws: a Mac on the LAN with two addresses, a WSL
+/// found on the LAN and over the tailnet both — the mark being the only thing
+/// that would tell it from the Windows it shares a hostname with — and a Mac
+/// found only over the tailnet.
+///
+/// One each way and one found both, because those are the three things the word
+/// beside a name can say.
+const HEARD = devicesDiscovered as DiscoveredDevice[];
+
 /// The login link the serving machine hands out, which is the address with the
 /// key on the end of it.
 const LINK =
@@ -124,16 +144,52 @@ function mounting(what: () => JSX.Element) {
 
 /// What this Verkstead is, held for its own path.
 ///
-/// A second read beside the machine's, because the pane makes two: the serve
-/// and the key are read off Tailscale and the Devices section is read off the
-/// device, and neither of them waits on the other.
+/// A second read beside the machine's, because the pane makes three: the serve
+/// and the key are read off Tailscale, the Devices section is read off the
+/// device, and the Discovered list under it off what a browse heard — and none
+/// of them waits on another.
 function theDevice(listed: DevicesView = DEVICES) {
   return whenever("/api/ui/devices", json(listed));
 }
 
-/// A server answering the two reads this section makes.
-function theMachine(told: RemoteView, listed: DevicesView = DEVICES) {
-  return stubbing(whenever("/api/ui/remote", json(told)), theDevice(listed));
+/// And what it has heard of the devices it is not linked to, held for its own
+/// path too: the Discovered list is a third read rather than a field of the
+/// second, so that a browse hearing something leaves the cluster's own rows
+/// alone.
+///
+/// Nothing heard unless a test says otherwise, which is what a browse that has
+/// just started answers however many machines are on the LAN.
+function theHeard(heard: Heard = []) {
+  return whenever(
+    "/api/ui/devices/discovered",
+    typeof heard === "function" ? heard : json(heard),
+  );
+}
+
+/// What a test says the browse heard: a list, or an answer that changes under
+/// the page — see [`thenHeard`].
+type Heard = DiscoveredDevice[] | ((init?: RequestInit) => Promise<Response>);
+
+/// A browse that heard nothing and then heard something, which is every browse:
+/// the first read starts it and the rows arrive after it, so the answer a Nudge
+/// asks for is not the answer the pane was drawn from.
+function thenHeard(...answers: DiscoveredDevice[][]) {
+  let taken = 0;
+
+  return () => json(answers[Math.min(taken++, answers.length - 1)]!)();
+}
+
+/// A server answering the three reads this pane makes.
+function theMachine(
+  told: RemoteView,
+  listed: DevicesView = DEVICES,
+  heard: Heard = [],
+) {
+  return stubbing(
+    whenever("/api/ui/remote", json(told)),
+    theDevice(listed),
+    theHeard(heard),
+  );
 }
 
 function mountCard(told: RemoteView, listed: DevicesView = DEVICES) {
@@ -141,8 +197,12 @@ function mountCard(told: RemoteView, listed: DevicesView = DEVICES) {
   return mounting(() => <RemoteCard open={false} press={vi.fn()} />);
 }
 
-function mountPane(told: RemoteView, listed: DevicesView = DEVICES) {
-  theMachine(told, listed);
+function mountPane(
+  told: RemoteView,
+  listed: DevicesView = DEVICES,
+  heard: Heard = [],
+) {
+  theMachine(told, listed, heard);
   return mounting(() => <RemotePane back={vi.fn()} />);
 }
 
@@ -296,6 +356,7 @@ describe("the serve checkbox", () => {
     return stubbing(
       whenever("/api/ui/remote", json(told)),
       theDevice(),
+      theHeard(),
       ...answers.map((answer) => json(answer)),
     );
   }
@@ -581,6 +642,7 @@ describe("the login link", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
+      theHeard(),
       whenever("/api/ui/remote/key", json(fresh), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -622,6 +684,7 @@ describe("the login link", () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
+      theHeard(),
       whenever(
         "/api/ui/remote/key",
         () =>
@@ -851,6 +914,340 @@ one on the LAN",
   });
 });
 
+describe("the discovered list", () => {
+  /// The row of the device named, which is the `li` its name is drawn in: what a
+  /// test about one row asks is what that row says, and the list beside it is
+  /// somebody else's row.
+  function theRow(name: string): Element {
+    const row = screen.getAllByText(name).at(0)?.closest("li");
+
+    if (!row) {
+      throw new Error(`no row for ${name}`);
+    }
+
+    return row;
+  }
+
+  /// A device heard of is a row: the mark for its OS, the name it advertised,
+  /// where it was found and that the LAN is where — and a press that needs
+  /// nothing typed.
+  it("draws a row for every device it has heard of", async () => {
+    mountPane(SERVING, DEVICES, HEARD);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const heard = theRow("laptop");
+
+    expect(
+      heard.textContent,
+      "where it was found, with the port that device's listener landed on — which \
+is the only thing that tells two Verksteads on one machine apart",
+    ).toContain("192.168.1.31:8423, 10.0.0.31:8423");
+    expect(heard.textContent, "and that the LAN is where").toContain("LAN");
+    expect(
+      heard.querySelector("button")?.textContent,
+      "with one press to link it, and nothing to type",
+    ).toBe("Add");
+
+    // And the second, which is the case the whole of cluster mode was written
+    // for: it answers to the same hostname this device does, and the mark beside
+    // the name is what tells the two apart.
+    expect(screen.getByRole("img", { name: "Linux (WSL)" })).toBeTruthy();
+  });
+
+  /// And the word beside the name says every way this device was found: *LAN*,
+  /// *Tailscale*, and both where both halves found the one machine.
+  ///
+  /// **One row rather than two**, because it is one machine: two rows offering to
+  /// link it would be two presses about one device, and the row carries both
+  /// addresses in the order an Add should try them — the LAN first, that being the
+  /// shorter road.
+  it("says every way a device was found, and draws one found twice once", async () => {
+    mountPane(SERVING, DEVICES, HEARD);
+
+    await waitFor(() => expect(screen.getByText("kitchen-mini")).toBeTruthy());
+
+    expect(
+      theRow("kitchen-mini").textContent,
+      "a device found on the tailnet alone reads Tailscale",
+    ).toContain("Tailscale");
+    expect(theRow("kitchen-mini").textContent).toContain("100.64.0.9:8423");
+
+    // Named by its addresses rather than by its name, which this device shares:
+    // the WSL answers to the same hostname, which is the case the whole of
+    // cluster mode was written for.
+    const both = theRow("172.29.0.14:9423, 100.64.0.14:8423");
+
+    expect(
+      both.textContent,
+      "and one found both ways says both rather than whichever way was found first",
+    ).toContain("LAN and Tailscale");
+    expect(
+      both.textContent,
+      "with every place either half found it, the LAN's address first, that being \
+the shorter road",
+    ).toContain("172.29.0.14:9423, 100.64.0.14:8423");
+
+    expect(
+      screen.getAllByText("Add").filter((press) => press.closest("li")).length,
+      "and one machine is one row: three devices found, three rows to press",
+    ).toBe(3);
+  });
+
+  /// And a press apiece, on every discovered row and on none of the cluster's
+  /// own: a member is linked already, and this device is not linked to itself.
+  ///
+  /// Counted among the rows rather than on the page, because the box below the
+  /// list says Add as well — one press per row and one for the address somebody
+  /// types, which is two ways of asking the same question.
+  it("offers Add on every discovered row and on no other", async () => {
+    mountPane(SERVING, LINKED, HEARD);
+
+    await waitFor(() =>
+      expect(screen.getByText("192.168.1.31:8423, 10.0.0.31:8423")).toBeTruthy(),
+    );
+
+    expect(
+      screen.getAllByText("Add").filter((press) => press.closest("li")).length,
+      "one apiece for the three devices found; the members carry Unlink instead",
+    ).toBe(3);
+    expect(
+      screen.getAllByText("Unlink").length,
+      "and the two members' rows are untouched by any of it",
+    ).toBe(2);
+  });
+
+  /// Nothing heard yet reads as a browse that has just started rather than as a
+  /// network with nothing on it.
+  ///
+  /// **Which is what every first read of this list is.** The browse starts when
+  /// the list is first asked for, so the answer the pane is drawn from is empty
+  /// however many machines are out there — a line saying none was found would be
+  /// wrong for the first second of every visit to this pane.
+  it("says devices appear as they are found rather than that none was found", async () => {
+    mountPane(SERVING);
+
+    await waitFor(() => expect(screen.getByText("Discovered")).toBeTruthy());
+
+    expect(
+      screen.getByText(/appear here as they are found/),
+      "and the typed box below is what is left for the ones neither half reaches",
+    ).toBeTruthy();
+  });
+
+  /// The whole of how a device arrives: a browse that has heard one machine, a
+  /// Nudge down the stream, and the second row appearing with nothing reloaded.
+  ///
+  /// **Which is what a browse is rather than a way of testing one.** It finds
+  /// things after the fact, so the answer the pane was drawn from is never the
+  /// last word — and the row already on the page stays exactly where it was while
+  /// the new one arrives beside it.
+  ///
+  /// **And the cluster's own rows are not re-read for it**, which is why the two
+  /// lists are two readings: a browse hears something every few seconds, and a
+  /// membership re-read each time would be the rows the human is looking at
+  /// replaced by whatever the LAN happened to say.
+  it("draws a device the browse found without re-reading the cluster", async () => {
+    const fetching = theMachine(SERVING, DEVICES, thenHeard([HEARD[1]!], HEARD));
+    streaming();
+
+    const queries = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    render(() => (
+      <QueryClientProvider client={queries}>
+        <RemotePane back={vi.fn()} />
+      </QueryClientProvider>
+    ));
+
+    const listening = listenForNudges(queries);
+    stream().opens();
+
+    // The one device this browse had heard when the pane was drawn, and the read
+    // of the membership beside it.
+    await waitFor(() =>
+      expect(screen.getByText("100.64.0.9:8423")).toBeTruthy(),
+    );
+
+    const read = askedFor(fetching, "/api/ui/devices");
+
+    stream().nudges({ kind: "discovered" } satisfies Nudge);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(
+      screen.getByText("100.64.0.9:8423"),
+      "and the row that was already drawn is still the same row",
+    ).toBeTruthy();
+    expect(
+      askedFor(fetching, "/api/ui/devices"),
+      "while the membership is not read again: nothing about the cluster changed, \
+and the rows drawn of it are not the browse's to move",
+    ).toBe(read);
+
+    listening();
+  });
+
+  /// The open pane keeps asking for the list, which is what keeps the server
+  /// browsing at all.
+  ///
+  /// **Not a poll for the rows** — those arrive on a `discovered` Nudge, and the
+  /// test above is that. What this asking is for is the server's own browse: it is
+  /// held open by the list being read and dropped once nothing has read it for
+  /// five minutes, and a browse that has heard nothing new announces nothing. So a
+  /// pane sitting open on a quiet LAN would go a whole spell without a read and the
+  /// server would stop browsing underneath it — and the second machine, started
+  /// after that, would never be heard at all.
+  ///
+  /// **And it asks for that list alone.** The membership is not re-read for it:
+  /// nothing about the cluster is in question, and the whole reason the two are
+  /// two readings is that one of them moves while somebody watches the other.
+  describe("while the pane sits open", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps saying it is still looking, and asks for nothing else", async () => {
+      const fetching = theMachine(SERVING, DEVICES, HEARD);
+      mounting(() => <RemotePane back={vi.fn()} />);
+
+      await waitFor(() =>
+        expect(askedFor(fetching, "/api/ui/devices/discovered")).toBe(1),
+      );
+
+      const cluster = askedFor(fetching, "/api/ui/devices");
+
+      // Well inside the five minutes the server holds a browse for, so that a
+      // pane nobody has touched is one the server is still browsing for.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+
+      expect(
+        askedFor(fetching, "/api/ui/devices/discovered"),
+        "the list is asked for again while nothing at all has happened, which is \
+what holds the browse open",
+      ).toBeGreaterThan(1);
+
+      expect(
+        askedFor(fetching, "/api/ui/devices"),
+        "and the cluster's own rows are left exactly as they were: this says \
+somebody is looking and asks nothing about the membership",
+      ).toBe(cluster);
+    });
+  });
+
+  /// Where a press on a row goes: the device the row is about, and no address.
+  const ADDING = `/api/ui/devices/discovered/${HEARD[0]!.device}/add`;
+
+  /// The press on a row names the device and redraws the section out of the
+  /// answer, so the pending row it left arrives with it.
+  ///
+  /// **The device rather than an address**, because the row holds a list of them
+  /// and the server works down it in the order it found them: a page that sent
+  /// one of them would be choosing which address is the live one.
+  it("presses Add on the row by naming the device, and redraws on the answer", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(HEARD),
+      whenever(ADDING, json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Waiting for confirmation on laptop."),
+      ).toBeTruthy(),
+    );
+
+    const pressed = fetching.mock.calls.find(
+      ([path, init]) => String(path) === ADDING && init?.method === "POST",
+    );
+
+    expect(pressed, `a press on the row posts to ${ADDING}`).toBeTruthy();
+    expect(
+      JSON.parse(String(pressed?.[1]?.body)),
+      "with nothing said in the body: the device is in the path, and which of its \
+addresses is dialled is the server's own",
+    ).toEqual({});
+  });
+
+  /// And the list is read again for it, so the row the press was made on is gone:
+  /// a device a join is pending for is one the server leaves out.
+  ///
+  /// **Which is what makes one press one row.** The pending row above is the
+  /// answer to it, and a discovered row beside that would be a second thing to
+  /// press about one device.
+  it("re-reads the list after a press, so the row it was made on goes", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(thenHeard(HEARD, [HEARD[1]!, HEARD[2]!])),
+      whenever(ADDING, json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+
+    expect(
+      screen.getByText("kitchen-mini"),
+      "while the rows beside it are exactly where they were",
+    ).toBeTruthy();
+  });
+
+  /// A press that did not get through says so in the words it came back in, which
+  /// name the device: a row can be stale by the time somebody presses it.
+  ///
+  /// **And the list is read again for that too**, the row having been forgotten on
+  /// the server: what the refusal is drawn beside is a list without it.
+  it("says why a stale row could not be asked, and drops the row", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(thenHeard(HEARD, [HEARD[1]!, HEARD[2]!])),
+      whenever(
+        ADDING,
+        json(
+          { error: "laptop answered at none of the addresses it was found at" },
+          502,
+        ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/laptop answered at none of the addresses/),
+      ).toBeTruthy(),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("Add").filter((press) => press.closest("li")).length,
+        "and the row it was pressed on is gone from the list, the server having \
+forgotten it",
+      ).toBe(2),
+    );
+  });
+});
+
 describe("adding a device", () => {
   /// The box and the press, which are the one thing on this pane that is
   /// configured rather than read.
@@ -901,6 +1298,7 @@ describe("adding a device", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
+      theHeard(),
       whenever("/api/ui/devices/joins", json(WAITING), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -934,6 +1332,7 @@ describe("adding a device", () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
+      theHeard(),
       whenever("/api/ui/devices/joins", json(WAITING), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -954,6 +1353,7 @@ describe("adding a device", () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
+      theHeard(),
       whenever(
         "/api/ui/devices/joins",
         json({ error: "192.168.1.31 answered nothing" }, 502),
@@ -1055,6 +1455,7 @@ describe("a join waiting to be confirmed", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(WAITING),
+      theHeard(),
       whenever(
         "/api/ui/devices/joins/1122334455667788/cancel",
         json(DEVICES),
@@ -1112,6 +1513,7 @@ describe("unlinking a device", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(LINKED),
+      theHeard(),
       whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -1153,6 +1555,7 @@ describe("unlinking a device", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(LINKED),
+      theHeard(),
       whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -1182,6 +1585,7 @@ describe("unlinking a device", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(LINKED),
+      theHeard(),
       whenever(`/api/ui/devices/members/${LAPTOP}/unlink`, json(AFTER), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -1214,6 +1618,7 @@ describe("unlinking a device", () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice({ ...LINKED, members: LINKED.members.slice(1) }),
+      theHeard(),
       whenever(`/api/ui/devices/members/${last}/unlink`, json(DEVICES), "POST"),
     );
     mounting(() => <RemotePane back={vi.fn()} />);
@@ -1246,6 +1651,7 @@ describe("unlinking a device", () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(LINKED),
+      theHeard(),
       whenever(
         `/api/ui/devices/members/${LAPTOP}/unlink`,
         json(

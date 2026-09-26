@@ -421,6 +421,61 @@
   }
 }
 
+
+/* And the devices out there that this one is not in a cluster with, under a word
+   of their own: the rows above are the cluster, and these are what could join it.
+   Set off by the same air the box below it stands in rather than by a rule — one
+   section, two lists — see `Remote.tsx`. */
+.found {
+  margin-top: 1.25rem;
+}
+
+/* The word over them, set as the label over the box below is: this list is read
+   and that one is typed into, and the two read as one pair of things to do. */
+.foundTitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* Where a device was heard — *LAN*, and both words where both found it — which
+   stands where *this device* stands on the row above and is the same kind of
+   thing said: a fact about the row rather than something to press. */
+.source {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* And the press that links it, drawn as the Unlink across from it is — an outline
+   at the end of the row, set to the first line so that a device with two
+   addresses keeps its press beside the name. In the accent rather than the
+   removed colour, this one being the press that *does*: what it leaves is a
+   pending row and somebody at the other machine being asked. */
+.add {
+  flex: none;
+  margin-top: 0.1rem;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.add:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .add:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+
 /* And the box the whole section is here for, set off from the rows above it by
    the same rule the section itself stands under: it is the one control on this
    pane that configures rather than reads, and it reads as a form rather than as

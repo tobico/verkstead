@@ -78,14 +78,16 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    AskingDevice, DeviceIdentity, DevicesView, JoinSettled, RenewedCertificate,
+    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinHeld, JoinSettled,
+    RenewedCertificate,
 };
 use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
+use crate::discovery::{self, Browse, Probe};
 use crate::peer::Members;
-use crate::peer::dialling::Peers;
+use crate::peer::dialling::{Peers, Reached};
 use crate::peer::joining::Joins;
 use crate::settings::write_atomically;
 
@@ -644,6 +646,31 @@ pub struct Devices {
     /// which is a row apiece under those — see [`crate::peer::joining::Joins`].
     joins: Joins,
 
+    /// And what it has heard of the devices it is *not* linked to, which is the
+    /// Discovered list under those rows — see [`crate::discovery::Browse`].
+    ///
+    /// Here rather than beside this handle, because the three things a discovered
+    /// row is left out for are all in this one: the id of this device, the
+    /// membership, and the joins it is waiting on. A browse hears a LAN and knows
+    /// none of them.
+    ///
+    /// Heard nothing unless a server said otherwise — see [`Devices::browsing`],
+    /// which is where a start hands over the real one.
+    browse: Browse,
+
+    /// And the other half of that list, which is the tailnet: the peers
+    /// `tailscale status` names, asked what they are as the list is read — see
+    /// [`crate::discovery::Probe`].
+    ///
+    /// Beside the browse rather than inside it, the two being different kinds of
+    /// finding: one is a multicast held open while somebody is looking, and this
+    /// is a handful of dials made at the moment of asking. What they share is
+    /// where they are merged and where the three exclusions are made, which is
+    /// this handle.
+    ///
+    /// Asked nothing unless a server said otherwise — see [`Devices::probing`].
+    probe: Probe,
+
     /// And how it reaches another device, which is what the one press in this
     /// section goes out over: Add dials the address somebody typed and posts a
     /// join, and Cancel dials the same address and takes it back.
@@ -674,8 +701,35 @@ impl Devices {
             reading,
             members,
             joins,
+            browse: Browse::heard_nothing(),
+            probe: Probe::asked_nothing(),
             peers,
         }
+    }
+
+    /// The same, browsing the LAN for the devices this one is not linked to — see
+    /// [`crate::discovery::Browse`], which is where the Discovered list comes
+    /// from.
+    ///
+    /// **Handed over rather than made here**, because a browse is a thread of its
+    /// own and a multicast group: a router stood up to answer a question about a
+    /// membership has no business joining one, so what [`Devices::of`] leaves is a
+    /// device that has heard nothing and the one start that serves a workbench is
+    /// what says otherwise.
+    pub fn browsing(self, browse: Browse) -> Devices {
+        Devices { browse, ..self }
+    }
+
+    /// The same, asking the nodes of this machine's tailnet what they are as that
+    /// list is read — see [`crate::discovery::Probe`], which is the other half of
+    /// where the Discovered list comes from.
+    ///
+    /// **Handed over rather than made here** for the reason the browse is, and
+    /// one more besides: a probe is a handful of outbound handshakes at machines
+    /// on somebody's tailnet, and a router stood up to answer a question about a
+    /// membership has no business making them.
+    pub fn probing(self, probe: Probe) -> Devices {
+        Devices { probe, ..self }
     }
 
     /// The same, giving every dial this section makes `patience` rather than the
@@ -712,6 +766,63 @@ impl Devices {
         })
     }
 
+    /// The **Discovered** list as the pane draws it: every device this one has
+    /// heard of and is not already in a cluster with (ADR-0020, *Discovery*).
+    ///
+    /// **A reading of its own rather than a field of [`Devices::listing`]**, and
+    /// that is the point of it: a browse hears something every few seconds, and a
+    /// list that arrived on the same answer as the membership would be the rows
+    /// the pane had already drawn replaced each time the LAN said anything. Two
+    /// readings are two queries, and what a found device re-reads is this one.
+    ///
+    /// **Three kinds of device are left out, and this is where.** A **Member** is
+    /// in the cluster already, so a row offering to link it would be a press with
+    /// nothing behind it. This device hears its own advertisement, and a Verkstead
+    /// is not linked to itself. And a device this one holds a **Join** for is one
+    /// somebody has already pressed Add on — the pending row under the list is
+    /// the answer to that press, and a discovered row beside it would be a second
+    /// thing to press about one device. A refused or run-out row counts: it is
+    /// still drawn up there, and what ends it is the Dismiss on it.
+    ///
+    /// **The exclusions are made here rather than by the browse or the probe**,
+    /// because this is where a membership is known: a browse hears a LAN and a
+    /// probe asks a tailnet, and neither has any idea which of what it found is
+    /// already linked. So what they hold is everything they heard — which is also
+    /// why hearing a member costs an announcement the next read draws nothing new
+    /// from.
+    ///
+    /// **Two halves, merged by Device Id before any of that** — see
+    /// [`crate::discovery::merged`]. A machine on the same network as this one and
+    /// on the same tailnet is found twice and is one row saying both, and it is
+    /// excluded or drawn as one thing.
+    pub(crate) async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
+        let members: Vec<String> = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .map(|member| member.device)
+            .collect();
+
+        let awaiting = self.joins.awaiting().await?;
+
+        // The LAN's rows are what a browse already holds and the tailnet's are a
+        // handful of dials made now — see [`crate::discovery::Probe`], which is
+        // read at the moment of asking because a tailnet has nothing to announce
+        // itself with.
+        let heard = self.browse.found();
+        let asked = self.probe.found(&self.peers).await;
+
+        Ok(discovery::merged(heard, asked)
+            .into_iter()
+            .filter(|row| {
+                row.device != self.device.id()
+                    && !members.contains(&row.device)
+                    && !awaiting.contains(&row.device)
+            })
+            .collect())
+    }
+
     /// **Add**: ask the device at `address` to let this one into its cluster.
     ///
     /// The one place on the Remote access pane where something is configured
@@ -726,13 +837,9 @@ impl Devices {
     /// none is recorded there, and what settles it is a press on the other
     /// machine.
     ///
-    /// **A device cannot ask itself.** The pane shows this machine's own
-    /// addresses a few lines above the box, so typing one in is an easy mistake
-    /// and a confusing state to be left in — a modal on this workbench asking
-    /// whether to link to this workbench. It cannot be told before the dial,
-    /// there being nothing to compare until the far end has answered, so what is
-    /// done is to take the question straight back off the machine that turned
-    /// out to be this one.
+    /// **A device cannot ask itself**, which is settled in [`Devices::asked`]:
+    /// the pane shows this machine's own addresses a few lines above the box, so
+    /// typing one in is an easy mistake and a confusing state to be left in.
     pub(crate) async fn add(&self, address: &str) -> Result<()> {
         let address = address.trim();
 
@@ -743,6 +850,102 @@ impl Devices {
         let saying = self.reading.identity(&self.device).await;
         let held = self.peers.join(address, &saying).await?;
 
+        self.asked(address, held).await
+    }
+
+    /// **Add** on a **Discovered** row: ask the device that row is about, with
+    /// nothing typed (ADR-0020, *Discovery*).
+    ///
+    /// **Named by its Device Id rather than by an address**, because a discovery
+    /// found a *list* of them: mDNS resolves every address a device advertised,
+    /// and the identity a probe read carries the tailnet's. So what is dialled is
+    /// the list the row holds, in the order it was found — the LAN's first, that
+    /// being the shorter road — exactly as a dial to a **Member** works down that
+    /// member's addresses. The typed box keeps the single address it has always
+    /// had: what somebody types is only the first address ever known.
+    ///
+    /// **What it leaves is what the typed press leaves**: a join posted, the
+    /// question held for its ten minutes over there, and a pending row here with
+    /// this device's own fingerprint under it and a Cancel. The discovered row
+    /// goes with the press, a device a join is pending for being one the list
+    /// leaves out — so a press moves a row from one list to the other rather than
+    /// leaving two rows about one device.
+    ///
+    /// **And a row can be stale by the time it is pressed.** The device may have
+    /// gone off the LAN or left the tailnet between the browse hearing it and
+    /// somebody pressing Add, so the press is refused in the words a dial that
+    /// reached nobody uses, naming the device — and the row is forgotten, which is
+    /// what makes the next read of the list one without it.
+    ///
+    /// **A device that answered and said no keeps its row**, which is the one
+    /// thing the forget above must not reach. A far end already holding as many
+    /// join requests as it will, or one that could not write the question down,
+    /// is a machine that is exactly where the row said it was — and forgetting it
+    /// would take away the row somebody would press again in a minute. Only a
+    /// walk that reached *nobody* says the row was wrong, which is what
+    /// [`Reached`] is for.
+    pub(crate) async fn add_found(&self, device: &str) -> Result<()> {
+        let device = device.trim();
+
+        // Off the list this device draws rather than off the browse, because the
+        // three exclusions are the list's: a press naming a member, this device or
+        // a device already being waited on is a press on a row nobody was offered.
+        // Which costs the tailnet half a second asking again, and is what it
+        // costs: a device found over the tailnet holds no address the browse has,
+        // and a press is a dial either way.
+        let Some(found) = self
+            .discovered()
+            .await?
+            .into_iter()
+            .find(|row| row.device == device)
+        else {
+            bail!(
+                "device {device} is not one this device has heard of, so there is no address \
+                 to dial it at",
+            );
+        };
+
+        let saying = self.reading.identity(&self.device).await;
+
+        let (address, held) = match self.peers.join_found(&found, &saying).await {
+            // A device that spoke is a device that is there, whether what it said
+            // was a question held or a refusal: the row stays exactly as it was,
+            // and the press is refused in the far end's own terms.
+            Reached::Answered(answered) => answered?,
+
+            Reached::Nobody(why) => {
+                // Nothing answered anywhere, so the row was wrong and this press
+                // is where that was learned: forgotten here rather than left for a
+                // TTL, so that the answer this refusal is drawn beside is a list
+                // without it.
+                self.browse.forgotten(&found.device);
+
+                return Err(why);
+            }
+        };
+
+        self.asked(&address, held).await
+    }
+
+    /// The pending row both presses leave behind: the request named, the address
+    /// it was asked at, and the certificate this device met at the far end.
+    ///
+    /// **Shared because the two presses are one act at two starting points** —
+    /// an address somebody typed, and a row a discovery drew. What differs is
+    /// which address was dialled, and by here that is settled: it is the one that
+    /// answered.
+    ///
+    /// **And a device cannot ask itself.** The pane shows this machine's own
+    /// addresses a few lines above the box, so typing one in is an easy mistake
+    /// and a confusing state to be left in — a modal on this workbench asking
+    /// whether to link to this workbench. It cannot be told before the dial,
+    /// there being nothing to compare until the far end has answered, so what is
+    /// done is to take the question straight back off the machine that turned out
+    /// to be this one. Nothing a *discovered* row leads to can be this device —
+    /// the list leaves its own id out — so this is the typed box's case, kept
+    /// here because it is a fact about what answered rather than about which
+    /// press asked.
+    async fn asked(&self, address: &str, held: JoinHeld) -> Result<()> {
         if held.identity.device == self.device.id() {
             // Taken back rather than left to run out, because the question is
             // this device's own and it is standing in front of its own human.

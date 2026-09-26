@@ -14,12 +14,15 @@
 //! takes: a dial presenting a certificate the far end has never acknowledged
 //! would be refused at that end's own gate.
 //!
-//! **With one exception, which is the join.** A device pressing Add has never
-//! met the machine it is asking, so there is no fingerprint to pin it on: that
-//! dial takes whatever certificate turns up, for the one call, and hands back
-//! what it turned out to be — which is the string the two humans then compare by
-//! eye and the string every dial after it is pinned on. See [`Peers::join`] and
-//! [`WhateverIsThere`].
+//! **With two exceptions, and both of them are dials to a stranger.** A device
+//! pressing Add has never met the machine it is asking, so there is no
+//! fingerprint to pin it on: that dial takes whatever certificate turns up, for
+//! the one call, and hands back what it turned out to be — which is the string
+//! the two humans then compare by eye and the string every dial after it is
+//! pinned on. The tailnet half of a discovery is the other, and for the same
+//! reason: it asks a node nothing has heard of what it is, and a probe that
+//! insisted on a fingerprint could only ever find devices already linked. See
+//! [`Peers::join`], [`Peers::stranger`] and [`WhateverIsThere`].
 //!
 //! **And the far end is proved by the fingerprint the member row holds.** There
 //! is no certificate authority anywhere in a cluster, so the pinned fingerprint
@@ -56,13 +59,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::{DeviceIdentity, JoinHeld, JoinSettled};
+use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinSettled};
 use verkstead_store::{HeldJoin, Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
@@ -101,6 +104,61 @@ const REACHING: Duration = Duration::from_secs(2);
 /// Ten seconds, which is that reading and the request around it with room to
 /// spare. It is spent at most once per dial, on the one address that answered.
 const ANSWERING: Duration = Duration::from_secs(10);
+
+/// The most of an answer this device will read off a **stranger**: **64 KiB**.
+///
+/// **Because the tailnet half of a discovery dials machines nobody typed an
+/// address for** — see [`Peers::stranger`]. Every other bound on a probe is on
+/// how many nodes are asked and how long one has to answer; without this one, a
+/// node that answers slowly and endlessly is a read with no end but a deadline,
+/// and there are [`crate::discovery::AT_ONCE`] of them in flight at a time. It is
+/// the outbound half of the bound a join already has coming the other way, where
+/// what a stranger may post into this machine is capped by the listener itself.
+///
+/// Sixty-four kibibytes because an identity is nowhere near it: the longest one a
+/// device may say — see [`crate::peer::joining::too_much`] — is a name, an OS
+/// word, an id, a fingerprint and sixteen addresses, which is some four thousand
+/// characters. So this is roomy enough that no Verkstead ever meets it, and small
+/// enough that sixteen at once is nothing. Anything over it is a node that is not
+/// a Verkstead, which is what most of a tailnet is.
+pub const MOST_SAID: usize = 64 * 1024;
+
+/// What a press on a **Discovered** row came to — see [`Peers::join_found`],
+/// whose whole answer this is.
+///
+/// **The two are worth telling apart at the end of the walk as well as at each
+/// address of it**, which is why this stands beside [`Knocked`] rather than
+/// being that enum said twice: a device that answered *anything* is a device
+/// that is where the row said it was, and a row nothing answered at is a row
+/// that was wrong. The caller does different things with the two — see
+/// [`crate::device::Devices::add_found`], which stops drawing the row for the
+/// second and leaves it alone for the first.
+pub enum Reached {
+    /// A device answered at one of the row's addresses, and this is what came of
+    /// it: the address that answered with the question now held over there, or
+    /// this device's account of why it is not held. Either way that device is
+    /// there.
+    Answered(Result<(String, JoinHeld)>),
+
+    /// And nothing answered at any of them, which is a row that went stale
+    /// between being drawn and being pressed.
+    Nobody(anyhow::Error),
+}
+
+/// What one knock at one address came to — see [`Peers::knocked`], and
+/// [`Peers::join_found`], which is the one caller that cares which of the two it
+/// is.
+enum Knocked {
+    /// The address answered, and this is what came of the answer: the question
+    /// held over there, or this device's account of why it was not. Either way
+    /// the device has spoken, and a walk down its other addresses is over.
+    Answered(Result<JoinHeld>),
+
+    /// And nothing at that address at all, which is the one finding worth trying
+    /// another address for: a machine that has moved, or a row drawn of a device
+    /// that has since gone.
+    Nobody(anyhow::Error),
+}
 
 /// The devices this one is linked to, as something to *call*: this device's
 /// certificate to present, and the membership a dial's findings are written
@@ -548,19 +606,124 @@ impl Peers {
     /// The one address rather than a list, because there is no list: what the
     /// human typed is the only place this device has been told to look, and
     /// every address the far end has is in the answer — which is what a link
-    /// carries from here on.
+    /// carries from here on. A device a discovery *found* holds a list of them,
+    /// and that is [`Peers::join_found`].
     pub async fn join(&self, address: &str, saying: &DeviceIdentity) -> Result<JoinHeld> {
-        let met = Arc::new(Mutex::new(None));
-        let asking = self.asking(&met)?;
-        let at = reaching(address, JOIN);
+        match self.knocked(address, saying).await {
+            Knocked::Answered(held) => held,
+            Knocked::Nobody(why) => Err(why),
+        }
+    }
 
-        let answered = asking
-            .post(&at)
+    /// The same question put to a device a discovery found, which is a **list**
+    /// of addresses rather than one (ADR-0020, *Discovery*) — and the address it
+    /// turned out to answer at, which is what the pending row is left naming.
+    ///
+    /// **Every address in the order the row holds them, until one answers**,
+    /// exactly as a dial to a member works down that member's — see
+    /// [`Peers::identity`], which is this walk made against a device this end
+    /// already knows. The row holds the LAN's addresses before the tailnet's, so
+    /// the shorter road is the one tried first.
+    ///
+    /// **An address that answered ends the walk, whatever it answered.** A second
+    /// address of the same machine would answer the same way, and a refusal asked
+    /// twice would be two questions held over there for one press — which is the
+    /// one thing this walk must not leave behind.
+    ///
+    /// **And a row can be stale by the time it is pressed.** A device may have
+    /// gone off the LAN or left the tailnet between the browse finding it and
+    /// somebody pressing Add, so a walk that reached nobody is refused in the
+    /// words a dial that reached nobody uses, naming the device the row drew.
+    ///
+    /// **Which is why the answer is a [`Reached`] rather than a bare result.** A
+    /// walk that reached nobody and a device that answered and said no are two
+    /// findings rather than one failure — the first is about the row and the
+    /// second is about the far end — and only the first is a reason to stop
+    /// drawing the row.
+    pub async fn join_found(&self, found: &DiscoveredDevice, saying: &DeviceIdentity) -> Reached {
+        let mut nothing_at = Vec::new();
+
+        for address in &found.addresses {
+            match self.knocked(address, saying).await {
+                Knocked::Answered(held) => {
+                    return Reached::Answered(held.map(|held| (address.clone(), held)));
+                }
+
+                Knocked::Nobody(why) => {
+                    tracing::debug!(
+                        device = %found.device,
+                        %address,
+                        why = format!("{why:#}"),
+                        "a device this one found did not answer at one of the addresses it was \
+                         found at, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        // A row with no address at all is the same finding by a shorter road, and
+        // it is the one [`Peers::identity`] makes of a member that advertised
+        // nothing: there is nowhere to knock.
+        if nothing_at.is_empty() {
+            return Reached::Nobody(anyhow!(
+                "{} was found at no address to dial it at",
+                found.name,
+            ));
+        }
+
+        Reached::Nobody(anyhow!(
+            "{} answered at none of the addresses it was found at ({})",
+            found.name,
+            nothing_at.join(", "),
+        ))
+    }
+
+    /// One knock at one address: what came of it, or nobody there at all.
+    ///
+    /// The two are worth telling apart, which is the whole reason this is not
+    /// simply [`Peers::join`]'s body: a transport failure is that address being
+    /// gone and says nothing about the device, where anything the far end *said*
+    /// is about the device and ends a walk down its addresses.
+    async fn knocked(&self, address: &str, saying: &DeviceIdentity) -> Knocked {
+        let met = Arc::new(Mutex::new(None));
+
+        let asking = match self.asking(&met) {
+            Ok(asking) => asking,
+
+            // Not an address that answered nothing: a client this device cannot
+            // build is this device's own failure, and trying the next address
+            // would fail it again.
+            Err(why) => return Knocked::Answered(Err(why)),
+        };
+
+        let answered = match asking
+            .post(reaching(address, JOIN))
             .json(saying)
             .send()
             .await
-            .with_context(|| format!("asking the device at {address} to link with this one"))?;
+        {
+            Ok(answered) => answered,
 
+            Err(why) => {
+                return Knocked::Nobody(anyhow::Error::new(why).context(format!(
+                    "asking the device at {address} to link with this one"
+                )));
+            }
+        };
+
+        Knocked::Answered(self.taken(address, answered, &met).await)
+    }
+
+    /// And what an answer to a join post was worth: the question held over there,
+    /// or this device's account of why it was not.
+    async fn taken(
+        &self,
+        address: &str,
+        answered: reqwest::Response,
+        met: &Arc<Mutex<Option<String>>>,
+    ) -> Result<JoinHeld> {
         let status = answered.status();
 
         if !status.is_success() {
@@ -592,6 +755,97 @@ impl Peers {
         }
 
         Ok(held)
+    }
+
+    /// What the device at `address` says it is, when this one has never heard of
+    /// it — which is the tailnet half of a discovery asking a peer what it is
+    /// (ADR-0020, *Discovery*).
+    ///
+    /// **Whatever certificate that address presents is taken, for this one
+    /// call**, exactly as [`Peers::join`] takes one and for the same reason:
+    /// there is nothing yet by which to know what the far end's certificate
+    /// ought to be, and a probe that insisted on a fingerprint could only ever
+    /// find devices already linked. What is on the row this fills is a name, a
+    /// mark and an address — nothing anybody is asked to trust — and the
+    /// fingerprint two people compare by eye arrives on the pending row that the
+    /// press on **Add** leaves.
+    ///
+    /// **And what turned up is checked against what the far end says it is**, the
+    /// one judgement that can be made of a stranger: a device names the
+    /// fingerprint of the certificate it presented so that a caller can hold the
+    /// two up beside each other, and one that names another is not the device it
+    /// says it is. So is one that answers something which is not an identity at
+    /// all, which is most of what is on a tailnet — a phone, a server, anything
+    /// with something else on that port.
+    ///
+    /// **Nothing is recorded and nothing is dimmed.** The far end is not a
+    /// member: there is no row to write a finding on to, and a device that
+    /// answered nothing is a row that is simply not drawn.
+    ///
+    /// **And what it will read of the answer is bounded** — see [`MOST_SAID`].
+    /// Every other bound on a probe is on how many of these are made and how long
+    /// one may take; this is the bound on what one of them may *cost*, and it is
+    /// the half that has to be here rather than at the caller, a body being read
+    /// where it is read.
+    ///
+    /// The one address rather than a list, because the caller is working down a
+    /// list of its own — see [`crate::discovery::Probe`], which spends a deadline
+    /// per peer rather than per address.
+    pub async fn stranger(&self, address: &str) -> Result<DeviceIdentity> {
+        let met = Arc::new(Mutex::new(None));
+        let asking = self.asking(&met)?;
+        let at = reaching(address, IDENTITY);
+
+        let mut answered = asking
+            .get(&at)
+            .send()
+            .await
+            .with_context(|| format!("asking the device at {address} what it is"))?;
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            bail!("the device at {address} answered {status} for its identity");
+        }
+
+        // Read in the chunks it arrives in rather than whole, which is the only
+        // way the bound is one on what is held: a `Content-Length` is the far
+        // end's own word for how much it is about to send.
+        let mut said = Vec::new();
+
+        while let Some(chunk) = answered
+            .chunk()
+            .await
+            .with_context(|| format!("reading what the device at {address} says it is"))?
+        {
+            if said.len() + chunk.len() > MOST_SAID {
+                bail!(
+                    "the device at {address} said more about itself than an identity is, so it \
+                     is not one",
+                );
+            }
+
+            said.extend_from_slice(&chunk);
+        }
+
+        let identity: DeviceIdentity = serde_json::from_slice(&said)
+            .with_context(|| format!("reading what the device at {address} says it is"))?;
+
+        let met = met
+            .lock()
+            .expect("nothing panics holding this")
+            .take()
+            .with_context(|| format!("the device at {address} presented no certificate"))?;
+
+        if identity.fingerprint != met {
+            bail!(
+                "the device at {address} presented {met} and named {} as its certificate, \
+                 which is a device that is not the one it says it is",
+                identity.fingerprint,
+            );
+        }
+
+        Ok(identity)
     }
 
     /// And take that question back, which is Cancel on the pending row.

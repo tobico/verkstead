@@ -90,6 +90,74 @@ behind them. Ask it again from another machine on the same tailnet and it says
 the same thing; ask it off a laptop that has moved and the addresses have
 moved with it.
 
+**And the same device says so on the LAN, so that nobody has to type any of
+that.** A start advertises `_verkstead._tcp.local` over mDNS — in this process,
+with no avahi or Bonjour to install — carrying the device id, the hostname, the
+OS word and the port the peer listener really landed on. Anything that browses
+mDNS reads it back:
+
+```console
+$ avahi-browse -rt _verkstead._tcp
+= enp10s0 IPv4 86f1933fecb070cbee865fbb84819d14  _verkstead._tcp  local
+  hostname = [86f1933fecb070cbee865fbb84819d14.local]
+  address = [192.168.1.24]
+  port = [8423]
+  txt = ["port=8423" "os=Linux" "name=workbench" "id=86f1933fecb070cbee865fbb84819d14"]
+```
+
+The instance is named by the device id rather than by the hostname, because two
+Verksteads on one machine are two devices and a hostname cannot tell them apart —
+start the second one below and this lists two, each naming its own peer port.
+`--no-advertising` or `VERKSTEAD_NO_ADVERTISING=1` turns it off, and on NixOS
+`services.verkstead.advertising = false;` does: what goes out is a hostname, an
+operating system and a device id, on a LAN that may not be yours. A server
+*asked* to stop — a `SIGTERM`, or a `^C` — withdraws the advertisement on its way
+out, which is the one ordered stop this server has; a killed one leaves the row
+on the other machine to run out on its own TTL, the way a shut lid does.
+
+**And the other half of it is what the pane draws under those rows.** The same
+service browsed rather than advertised, which is the **Discovered** list: every
+device this one has found and is not already in a cluster with, each with every
+address it was found at and an **Add** on the row.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/devices/discovered
+[{"device":"0011223344556677889900aabbccddee","name":"kitchen-mini","os":"macOS",
+  "addresses":["192.168.1.31:8423","100.64.0.9:8423"],"found":["Lan","Tailscale"]}]
+```
+
+**The browse runs while that list is being read and not otherwise.** It starts on
+the first read of it and stops once nothing has read it for five minutes — a phone
+that closes a tab says nothing, so the reading being read is the whole of what
+governs it. Which means the first read is empty or short however many machines are
+out there: a browse is cold when it starts, and the rows arrive over the seconds
+after it, each as a `discovered` nudge that an open pane redraws on.
+
+The rows are the Nudge's and nothing polls for them. The one interval in the
+viewer is on this read alone, once a minute while the pane is open, and what it is
+for is the spell above rather than the rows: a browse that has heard nothing new
+announces nothing, so without it the server would stop browsing five minutes into
+a pane somebody was still watching, and a second Verkstead started after that
+would never be heard. A test reads the list again itself, which renews the spell
+the same way.
+
+**And `found` is a list because there are two ways of being found.** A tailnet
+carries no multicast, so there is nothing to hear on one: the tailnet half asks
+instead, reading the online peers out of `tailscale status --json` and putting the
+identity endpoint's question to each of them on port 8423 as the list is read. So
+the tailnet rows are in the first answer where the LAN rows arrive after it, and a
+machine on this network *and* this tailnet is one row that says `Lan` and
+`Tailscale` both, its LAN address first. Bounded, because how many nodes a tailnet
+has is nobody here's decision: sixty-four peers at most, sixteen at a time, three
+seconds apiece. `RUST_LOG=verkstead_server::discovery=debug` says which peers were
+asked and what each of them answered — a phone or a server with nothing on that
+port is a debug line and no row.
+
+Three kinds of device are left out of the merged list — a member, this device, and
+one a join is already pending for — so what the list holds is only what there is
+anything to press. Start the second Verkstead below with a data directory of its
+own and this lists it; link the two and it is a member above instead.
+
 **Three routes stand outside the member gate and they are the whole of the
 un-gated surface**: that identity endpoint, the join post, and the cancel and
 the dial-back a join is settled through. Every other path on that port answers
@@ -111,14 +179,27 @@ $ cargo run -p verkstead-cli -- serve --data-dir /tmp/other \
 ```
 
 Two installs, two device ids, two certificates. Open the **Remote access** pane
-on the first one's workbench and its **Devices** section holds one row, marked
-*this device*, with **Add** under it. Type `127.0.0.1:8523` — the port is only
-needed because both are on this machine; a device answering on 8423 is reached
-by its name or address alone — and press Add.
+on the first one's workbench: its **Devices** section holds one row, marked *this
+device*, and under **Discovered** the second install appears within a second or
+two of the pane being opened — heard over the multicast, drawn with the port its
+listener bound, and with an **Add** on the row. It reads *LAN* and not *Tailscale*
+however much Tailscale is on this machine: the tailnet half asks this machine's
+*peers*, and the second install is on this machine. Two machines on one tailnet are
+the case that reads *Tailscale*, and *LAN and Tailscale* where they share a network
+too.
 
-What happens then is the whole of the stage. The first device dials that
-address, takes whatever certificate it presents for the one call, and posts what
-it is; the second writes the question down, holds it ten minutes, and raises a
+**Press that Add and nothing is typed anywhere.** The press names the device
+rather than one of its addresses, a discovery having found a list of them: the
+server dials every address on the row in the order it found them — the LAN's
+first, that being the shorter road — and posts the join at the first that answers.
+The box under the list is what is left for the devices neither half reaches, and
+it takes the one address it always did: `127.0.0.1:8523` for the second install,
+the port being needed only because both are on this machine.
+
+What happens then is the whole of the stage, and the two presses are one act from
+here on. The first device dials that address, takes whatever certificate it
+presents for the one call, and posts what it is; the second writes the question
+down, holds it ten minutes, and raises a
 modal in every workbench it has open with a push to any phone subscribed to it.
 The first draws a pending row, *Waiting for confirmation on …*, with **its own**
 fingerprint under it — the same string the modal over there is drawing, for two
@@ -131,9 +212,20 @@ checks that certificate against the one it met when it asked. Both lists now
 read the same, and a third Verkstead joining through either of them lands on all
 three.
 
-Through the API rather than the pane, which is what a test does:
+The pending row and the discovered row are never both drawn: a device a join is
+pending for is one the Discovered list leaves out, so the press moves a row from
+under the list to above it. And a row that went stale between being drawn and
+being pressed — the machine switched off in between, so nothing answers at any of
+the addresses it was found at — is refused naming the device and dropped from the
+list, rather than sitting there refusing again. A far end that *answered* and said
+no keeps its row, being exactly where the row said it was: only a press that
+reached nobody says the row was wrong.
+
+Through the API rather than the pane, which is what a test does — the discovered
+press first, then the typed one:
 
 ```console
+$ curl -X POST http://127.0.0.1:8422/api/ui/devices/discovered/0011…ee/add
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"address":"127.0.0.1:8523"}' http://127.0.0.1:8422/api/ui/devices/joins
 $ curl http://127.0.0.1:8522/api/ui/devices/asking

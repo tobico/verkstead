@@ -38,6 +38,7 @@ import type {
   Dependency,
   DevicesView,
   DirectoryListing,
+  DiscoveredDevice,
   FileDeleted,
   FileDeleting,
   FileListsView,
@@ -1351,6 +1352,26 @@ export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
 }
 
+/// And the devices nobody has typed an address for: the Discovered list under
+/// those rows.
+///
+/// A read of its own beside the one above rather than a field of it, and that is
+/// what it is for: a browse hears something every few seconds, and a list
+/// arriving on the same answer as the membership would be the cluster's own rows
+/// replaced each time the LAN said anything. A `discovered` Nudge re-reads this
+/// and nothing else.
+///
+/// **And asking is what holds the browse open.** The server starts browsing on
+/// the first of these and stops once nothing has asked for a spell — a phone that
+/// closes a tab says nothing, so the reading being read is the whole of what
+/// governs it, and an open pane asks again on an interval to say it is still
+/// looking. Which is why the first answer is empty or short: a cold browse has
+/// heard nothing yet, and the rows arrive over the seconds after it, each with a
+/// Nudge to say so.
+export function loadDiscovered(): Promise<DiscoveredDevice[]> {
+  return get<DiscoveredDevice[]>("/api/ui/devices/discovered");
+}
+
 /// Ask the device at an address to let this one into its cluster.
 ///
 /// The one thing in that section that is pressed rather than read, which is the
@@ -1365,6 +1386,28 @@ export function loadDevices(): Promise<DevicesView> {
 /// Verkstead that refused are two different things.
 export function addDevice(address: string): Promise<DevicesView> {
   return post<DevicesView>("/api/ui/devices/joins", { address });
+}
+
+/// And the same question asked of a device on the Discovered list, which is the
+/// press on that row: nothing typed anywhere.
+///
+/// **The device rather than an address**, because a discovery found a list of
+/// them — every address that device advertised, and the tailnet's where a probe
+/// answered too — and the server dials them in the order it found them. A page
+/// that picked one would be choosing between addresses it knows nothing about.
+///
+/// What comes back is the Devices section read again, the way the typed press
+/// answers, so the pending row arrives out of it. The Discovered list is re-read
+/// rather than answered here: the row the press was made on has left it, and one
+/// list is not the other's to redraw.
+///
+/// A refusal is the words the dial put it in, naming the device: a row can be
+/// stale by the time somebody presses it, the device having gone off the LAN or
+/// left the tailnet since it was drawn.
+export function addFound(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/discovered/${encodeURIComponent(device)}/add`,
+  );
 }
 
 /// And take that request back: Cancel on a row still waiting, Dismiss on one

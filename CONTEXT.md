@@ -741,12 +741,141 @@ its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Advertising**:
+What a **Device** says about itself on the LAN, so that a Verkstead on the next
+desk finds it without anybody typing an address: the service
+`_verkstead._tcp.local`, with a TXT record of the **Device Id**, the name and
+the OS word out of the **Device Reading**, and the port the **Peer Listener**
+answers on.
+**In the server's own process**, advertised and browsed with `mdns-sd`: there is
+no avahi to install on Linux and no Bonjour to find on Windows, which is one
+behaviour on three platforms rather than three ways of shelling out to somebody
+else's daemon.
+**The instance is named by the Device Id** rather than by the hostname, because
+two Verksteads on one machine are two devices and a hostname cannot tell them
+apart — which is the same reason the id was invented rather than read off the
+machine. It is what the address records are hung off as well, that being the one
+string on a machine that is certainly a legal label and certainly not somebody
+else's.
+**Against the port the listener landed on** rather than the one the
+configuration asked for: a `:0` is a port the operating system chose, and an
+advertisement naming any other number is one nothing can be dialled at.
+**And it can be turned off** — `--no-advertising`, `VERKSTEAD_NO_ADVERTISING`,
+and `advertising` beside `peerListen` in the NixOS module. What goes out is a
+hostname, an operating system and a **Device Id**, on a LAN that may not be the
+human's alone, and anything saying that much about a machine to whoever is on
+the wire has to be able to be told not to. On by default for the reason
+`openFirewall` is: a discovery nothing can hear is a feature that silently does
+not work, with nothing on either machine saying why — and the rule that opens
+the peer port opens UDP 5353 beside it, whether or not this host advertises,
+because the answers to its own browsing arrive there too.
+**And it is withdrawn on the way out**, which is the one ordered stop this
+server has: a signal it is asked to stop on sends the goodbye that takes the row
+off every other machine's list at once, and then the process ends as it always
+did — nothing else is drained and nothing else waits. A *killed* server
+withdraws nothing and its row runs out on its own TTL instead, the same thing
+that covers a machine whose lid shut, so the withdrawal is what makes a restart
+tidy rather than what makes a stale row impossible.
+_Avoid_: broadcasting, publishing, mDNS registration (it is **Advertising**),
+Bonjour, zeroconf
+
+**Discovered**:
+The list of every **Device** this one has found and is not in a cluster with,
+under the rows of the **Devices** section. One row each: the OS icon, the name it
+gave, the addresses it was found at, where it was found — *LAN*, *Tailscale*, or
+both words — and an **Add** that runs a **Join** with nothing typed.
+**Two halves, merged by Device Id.** The LAN half is the reading half of
+**Advertising**, browsing the same `_verkstead._tcp.local` in the same process;
+the tailnet half is the **Peer Probe**. Keyed by the **Device Id** because two
+Verksteads on one machine answer to one hostname at one address, and the id is
+the only thing about either that is nobody else's — so a machine on one network
+and one tailnet is one row saying both, its LAN address first, that being the
+shorter road.
+**A reading of its own rather than a field of the Devices one**, and that is what
+it is for: a browse hears something every few seconds and a probe costs a handful
+of dials, and a list arriving on the same answer as the membership would be the
+rows the pane had already drawn replaced each time the LAN said anything. What
+moves it is a **Nudge** of its own kind, so the membership is not re-read for a
+device turning up.
+**Three kinds of device are left out**: a **Member**, which is in the cluster
+already and would be a press with nothing behind it; this device, which hears its
+own advertisement; and one this device holds a **Join** for, whose **pending
+row** is already the answer to the press somebody made — a row that was refused
+or ran out included, until it is dismissed. All three are left out of the merged
+list, so a device found both ways is left out once.
+**The browse is held while somebody is looking.** It starts when this list is
+first read and is dropped once nothing has read it for five minutes: a phone that
+closes a tab says nothing, so the reading being read is the whole of what governs
+it — and an open pane reads it again every minute, which is the one thing in this
+viewer on an interval and is there to say *somebody is still looking* rather than
+to fetch anything. Without it a browse that heard nothing new would announce
+nothing, prompt no read, and be dropped under a pane somebody was sitting in
+front of. Which is why the first read of it is empty or short — a browse is cold
+when it starts — and why the LAN rows arrive over the seconds after a pane is
+drawn, each announced. The tailnet rows are in the first answer instead, a probe
+being made as the list is read.
+**A device that stopped advertising leaves it**, at once on the goodbye an ordered
+stop sends and at the end of its TTL where there was none, which is a machine
+whose lid shut; both arrive as one event. One that stopped answering a probe
+leaves it on the next read.
+**And the Add on a row is a Join with nothing typed.** The press names the device
+by its **Device Id** rather than by an address, a discovery having found a list of
+them: the server dials every address the row holds, in the order it found them —
+the LAN's first, that being the shorter road — and posts the join at the first
+that answers, exactly as a dial to a **Member** works down that member's
+addresses. What it leaves is what the typed box leaves, and the row goes with the
+press: a device a Join is pending for is one this list leaves out, so a press
+moves a row from this list to the rows above rather than leaving two rows about
+one device.
+**A row can be stale by the time it is pressed**, the device having gone off the
+LAN or left the tailnet since it was drawn. That press is refused in the words a
+dial that reached nobody uses, naming the device rather than failing bare — and
+the row is forgotten, so the list the refusal is drawn beside is one without it.
+**Only a press that reached nobody forgets one.** A far end that answered and
+said no — one already holding as many join requests as it will, say — is a
+machine exactly where the row said it was, so its row stands: forgetting it is not
+cheaply undone, a browse announcing a resolution only when a record *changes*, so
+a row taken away comes back when that device says something new or when the browse
+itself is dropped at the end of its spell and a later read starts a fresh one.
+_Avoid_: found devices, nearby devices, the browse (which is how half of it is
+read), available devices
+
+**Peer Probe**:
+The tailnet half of **Discovered**: the nodes of this machine's tailnet asked,
+one by one, what they are. A tailnet carries no multicast for an **Advertising**
+to go out over, so there is nothing to hear on one — what finds a device there is
+the peer list out of `tailscale status --json`, every node it says is online
+asked over the **Peer Listener**'s own un-gated identity endpoint, and whatever
+certificate that node presents taken for the one call the way a **Join** takes
+one.
+**Made as the list is read rather than on a schedule**, which is why the tailnet
+rows are in the first answer where the LAN rows arrive after it.
+**Bounded, because how many nodes a tailnet has is not this machine's to
+choose**: at most sixty-four peers asked, at most sixteen in flight, and three
+seconds apiece. A tailnet with more machines than that in it is one where the
+typed address is the answer.
+**A node that is not a Verkstead is no row.** It refuses, it answers something
+that is not a **Device Reading**, or it answers nothing, and all three come to
+the same absent row — which is most of a tailnet.
+**And the peer port is assumed**, a peer list naming none: a device told to
+listen somewhere else is found on the LAN and not on the tailnet, which is a
+known limit of the same kind as a Windows machine and the WSL on it.
+**Having no Tailscale is an answer rather than a failure.** No `tailscale`, a
+daemon that is down and one that does not answer each leave the LAN half of the
+list standing, which is the stance every other reading of this daemon takes.
+_Avoid_: tailnet browsing, tailnet discovery (there is no browse on a tailnet),
+scanning
+
 **Join**:
 One **Device** asking another to let it into its cluster, and the whole of what
 follows the press on **Add**. The asking device dials the address somebody
-typed, takes whatever certificate that address presents for the one call, and
-posts what it is — its **Device Id**, that certificate's fingerprint, and its
-**Device Reading**. The device asked writes the question down, pinning the
+typed — or, from a **Discovered** row, each address that row holds until one
+answers, an address that answered *anything* ending the walk — takes whatever
+certificate that address presents for the one call, and posts what it is — its
+**Device Id**, that certificate's fingerprint, and its **Device Reading**. The
+pending row names the address that answered, which for a typed press is the one
+typed and for a discovered one is wherever that walk landed: it is what a Cancel
+dials. The device asked writes the question down, pinning the
 certificate the handshake took from the caller, and asks its human: a modal in
 every open workbench, and a push to every phone. The asking device is left a
 **pending row** reading *waiting for confirmation on* that device, with **its

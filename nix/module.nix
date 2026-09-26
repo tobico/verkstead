@@ -43,6 +43,16 @@ let
   # Split from the right, so that an IPv6 address written `[::]:8423` gives up
   # its port rather than its first colon.
   peerPort = lib.toInt (lib.last (lib.splitString ":" cfg.peerListen));
+
+  # And the port mDNS is spoken on, which is nobody's to choose: RFC 6762 says
+  # 5353, so this is a constant rather than an option — a discovery on the port
+  # next door would be heard by nothing.
+  #
+  # The other half of the rule below. Verkstead advertises itself there so that
+  # a Verkstead on the same LAN can find it without anybody typing an address,
+  # and a host that firewalled the multicast would be one that advertised into a
+  # wall.
+  mdnsPort = 5353;
 in
 
 {
@@ -126,12 +136,43 @@ in
       '';
     };
 
+    advertising = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Whether this host says what it is on the LAN, so that another Verkstead
+        on the same one finds it without anybody typing an address.
+
+        What it puts on the wire is an mDNS advertisement of
+        `_verkstead._tcp.local`, carrying this device's id, the machine's
+        hostname, the word for its operating system and the port
+        {option}`peerListen` named — which is the whole of what the other
+        machine needs to reach this one. Turning it off passes
+        `--no-advertising`, and then no other Verkstead can find this host and
+        it is linked only by an address somebody types.
+
+        On, for the reason {option}`openFirewall` below is on: a discovery
+        nothing can hear is a feature that silently does not work, with nothing
+        on either machine saying why. Off is for a LAN that is not the human's
+        alone — a hostname, an operating system and a device id is more than
+        some networks are worth telling.
+
+        It is the advertising half: what it turns off is what other machines
+        hear of this one, and not this one's own listening. Opening the Remote
+        access pane on a host with it off still puts a query for
+        `_verkstead._tcp.local` on the LAN, which says that something here is
+        looking for Verksteads and nothing about what it is.
+      '';
+    };
+
     openFirewall = lib.mkOption {
       type = lib.types.bool;
       default = true;
       example = false;
       description = ''
-        Whether to open {option}`peerListen`'s port on this host's firewall.
+        Whether to open {option}`peerListen`'s port on this host's firewall,
+        and UDP 5353 beside it.
 
         On, because a peer listener nothing can reach is a linking that cannot
         happen. A NixOS host firewalls by default, so a module that left this
@@ -139,7 +180,12 @@ in
         dialling in would time out, and nothing on either machine would say
         why.
 
-        That port and nothing else. The workbench's own stays shut — what
+        5353 is mDNS, which is how the two machines find each other in the
+        first place — see {option}`advertising`. It is opened whether or not
+        this host advertises, because the answers to this host's *own* browsing
+        arrive there too: a host that only listens still has to be able to hear.
+
+        Those two and nothing else. The workbench's own port stays shut — what
         reaches it from another device is `tailscale serve` on the tailnet
         rather than anything arriving on this machine's LAN.
 
@@ -361,6 +407,13 @@ in
     # speaks plain HTTP to whoever opens it.
     networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ peerPort ];
 
+    # And the multicast the two machines find each other over, which is UDP and
+    # is a port of nobody's choosing — see `mdnsPort` above. Opened with the peer
+    # port rather than with `advertising`: what arrives here is an answer to this
+    # host's own browsing as much as a query about its advertisement, so a host
+    # that says nothing about itself and only looks for others still needs it.
+    networking.firewall.allowedUDPPorts = lib.optionals cfg.openFirewall [ mdnsPort ];
+
     users.users.verkstead = {
       isSystemUser = true;
       group = "verkstead";
@@ -444,6 +497,7 @@ in
             bind
           ]) cfg.sandboxBinds
           ++ lib.optional (!cfg.updateCheck) "--no-update-check"
+          ++ lib.optional (!cfg.advertising) "--no-advertising"
         );
 
         User = "verkstead";

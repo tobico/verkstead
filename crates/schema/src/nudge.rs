@@ -96,6 +96,23 @@ pub enum Nudge {
     /// appears with nothing beside it to explain itself.
     Devices,
 
+    /// The **Discovered** list moved: a device nobody has typed an address for
+    /// was heard advertising itself, or one that had been heard stopped.
+    ///
+    /// **A kind of its own rather than [`Nudge::Devices`]**, because the two
+    /// name two readings: nothing about this cluster has changed, and the rows
+    /// the pane already drew of it are not to be re-read for it. What has
+    /// changed is what is *out there* — which is the whole reason a browse can
+    /// be held while somebody looks without the membership being read again
+    /// every time the LAN says something.
+    ///
+    /// **And it is what makes the list arrive at all.** A browse is cold when it
+    /// starts, so the first read of that list is empty or short and every row
+    /// after it lands here: an open pane draws a device appearing without a
+    /// reload and without a poll, which is what ADR-0009 put every other list in
+    /// this viewer on.
+    Discovered,
+
     /// The Agent Profiles moved.
     ///
     /// Nothing announces this yet: a Profile is only ever saved or deleted by a

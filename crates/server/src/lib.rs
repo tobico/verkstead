@@ -64,6 +64,13 @@ mod deferrals;
 pub mod device;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+/// How a device is found by one nobody has typed an address into: what this one
+/// says about itself on the LAN, over mDNS (ADR-0020, *Discovery*).
+///
+/// Public for the reason [`device`] above is: what a machine says about itself
+/// to whoever is on the wire is the product's own boundary, and a suite that
+/// browses for it is standing where another Verkstead stands.
+pub mod discovery;
 mod done;
 mod drivers;
 mod exchanges;
@@ -593,6 +600,31 @@ pub struct Config {
         value_parser = clap::builder::FalseyValueParser::new(),
     )]
     pub no_update_check: bool,
+
+    /// Don't say what this device is on the LAN, and so be found only by a
+    /// machine somebody has typed this one's address into (ADR-0020).
+    ///
+    /// What advertising puts on the wire is this machine's hostname, the word
+    /// for its operating system and its device id, and the LAN it goes out on
+    /// may not be the human's alone — so it is a switch for the reason the
+    /// update check above is one. On by default all the same, for the reason
+    /// `openFirewall` is on by default in the NixOS module: a discovery nothing
+    /// can hear is a feature that silently does not work, with nothing on
+    /// either machine saying why.
+    ///
+    /// It is the advertising half: what this turns off is what other devices
+    /// hear of this one.
+    #[arg(
+        long,
+        env = "VERKSTEAD_NO_ADVERTISING",
+        action = clap::ArgAction::SetTrue,
+        // Anything that is not a falsey word counts as set, for the reason the
+        // update check's own parser is this one: `=1` is how a switch is thrown
+        // in a service unit, and clap's own parser for a flag would refuse it
+        // for not being the word `true`.
+        value_parser = clap::builder::FalseyValueParser::new(),
+    )]
+    pub no_advertising: bool,
 }
 
 impl Config {
@@ -601,6 +633,14 @@ impl Config {
     /// that what it decided can be asked about rather than inferred.
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
+    }
+
+    /// Whether this device says what it is on the LAN — the one thing
+    /// [`Config::no_advertising`] decides, named so that what it decided can be
+    /// asked about rather than inferred, which is what [`Config::releases`]
+    /// above is for.
+    pub fn advertises(&self) -> bool {
+        !self.no_advertising
     }
 
     /// The Data Directory this configuration comes to, made where it is not
@@ -1694,6 +1734,7 @@ pub async fn run_on_keyed(
         device = %device.id(),
         fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
+        advertising = config.advertises(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -1749,20 +1790,52 @@ pub async fn run_on_keyed(
     #[cfg(windows)]
     let reachable = reachable.piped(pipe.asked_through());
 
+    // Whatever `tailscale` this machine has, which two of the readings below run
+    // and one of them presses: where this device is on the tailnet, which nodes
+    // of that tailnet are up, and the pane's own four things. The port it is
+    // built with is the one the workbench bound — a serve is this workbench's when
+    // it proxies there — which is nothing the two readings ask about.
+    //
+    // One handle rather than three, because it is one daemon on one machine asked
+    // three questions; the pane's own is built again below, that one holding the
+    // Workbench Key and a way to escalate and being the only one of them that
+    // does anything to the machine.
+    let tailscale = remote::Tailscale::on_path(config.listen.port());
+
     // And the machine this device is on, read at each answer rather than held
     // from here: the hostname it is shown under, the word for its OS, and every
-    // address a peer could reach it on — see [`device::reading`]. Its own
-    // `tailscale` handle, because the tailnet half of those addresses is the
-    // same `status --json` the Remote access pane stands on; the port it is
-    // built with is the one the workbench bound, which is nothing this reading
-    // asks about.
+    // address a peer could reach it on — see [`device::reading`]. Through the
+    // handle above, because the tailnet half of those addresses is the same
+    // `status --json` the Remote access pane stands on.
     //
     // One handle rather than one per listener, because the two listeners
     // describe one machine: what a peer reads off the identity endpoint and
     // what the Devices section of the Remote access pane draws are the same
     // answer told to two different askers.
-    let reading =
-        device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
+    let reading = device::reading::Reading::of_this_machine(tailscale.clone());
+
+    // And what this device says about itself on the LAN, so that a Verkstead on
+    // the next desk can draw a row for it with nobody typing an address
+    // (ADR-0020) — see [`discovery`]. Four things: the device id, the name and
+    // the OS word out of the reading above, and the port the peer listener
+    // *landed* on rather than the one the configuration asked for — a `:0` is a
+    // port the operating system chose, and an advertisement naming any other
+    // number is one nothing can be dialled at.
+    //
+    // Registered here rather than beside the bind, because this is where the
+    // reading is: the machine a discovered row draws and the machine the
+    // identity endpoint answers for are one answer told to two askers.
+    let advertisement = discovery::Advertisement::of_this_device(
+        config.advertises(),
+        &discovery::Announcement::of(&device, &reading, peer.address().port()),
+    );
+
+    // And the signal an ordered stop arrives as, listened for from here rather
+    // than from the moment it is awaited: one that arrives before the handler is
+    // in place is one that kills the process, and what would be lost with it is
+    // the goodbye that takes the row above off every other machine's list at
+    // once — see [`discovery::ToldToStop`].
+    let mut stopping = discovery::ToldToStop::listening();
 
     // And this device's cluster as something to *do* things to rather than to
     // read: the Devices section's presses go through it, and so does the one thing
@@ -1773,7 +1846,36 @@ pub async fn run_on_keyed(
         reading.clone(),
         members.clone(),
         joins.clone(),
-    );
+    )
+    // And the other half of the discovery above: a browse of the same service,
+    // which is what the Discovered list under those rows is drawn from. Started
+    // by the first read of that list rather than here — a server nobody is
+    // looking at browses nothing — and dropped again once nothing has read it
+    // for a spell, which is what the reading being read is the only signal for
+    // (ADR-0020) — see [`discovery::Browse`]. An open pane re-reads on an interval
+    // of its own to keep it, a browse that hears nothing new having nothing to
+    // announce and so nothing to prompt the next read with.
+    //
+    // The nudges, because a browse is the one reading here that answers before
+    // it knows: a cold one has heard nothing, so the rows arrive over the seconds
+    // after the pane was drawn and each of them is a word to the open pages.
+    //
+    // Not behind the advertising switch. What that turns off is what this machine
+    // *says* about itself on a LAN that may not be the human's; hearing the
+    // devices whose operator chose to say something is the other half, and a
+    // machine that has been told to keep quiet has not been told to go deaf.
+    .browsing(discovery::Browse::of_this_device(nudges.clone()))
+    // And the tailnet half of the same list, which is asked rather than heard:
+    // there is no multicast on a tailnet for an advertisement to go out over, so
+    // what finds a device there is the peers `tailscale status` names, each asked
+    // on the peer port what it is as the list is read (ADR-0020) — see
+    // [`discovery::Probe`]. Bounded, because how many nodes a tailnet has is
+    // somebody else's decision.
+    //
+    // Not behind the advertising switch either, and for the same reason the browse
+    // is not: what that turns off is what this machine *says* about itself, and a
+    // machine told to keep quiet has not been told to stop looking.
+    .probing(discovery::Probe::of_this_tailnet(tailscale));
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it
@@ -1862,6 +1964,7 @@ pub async fn run_on_keyed(
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
 
@@ -1872,6 +1975,24 @@ pub async fn run_on_keyed(
         tokio::select! {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
+}
+
+/// The ordered stop: the advertisement withdrawn, and then this server ending
+/// the way it always did.
+///
+/// **The one thing this process does on its way out, and the only reason it has
+/// a way out at all.** A row on another machine's **Discovered** list runs out
+/// on its own TTL, which is what covers a killed server and a lid that shut —
+/// this is what makes a restart tidy rather than what makes a stale row
+/// impossible. Nothing else is drained, stopped or closed in order: no request
+/// waits, no session is asked to finish, and the listeners go with the process.
+async fn stopped(signal: &str, advertisement: &discovery::Advertisement) -> Result<()> {
+    tracing::info!(signal, "verkstead has been asked to stop");
+
+    advertisement.withdrawn().await;
+
+    Ok(())
 }

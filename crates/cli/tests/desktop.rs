@@ -403,7 +403,15 @@ fn command(opener: Option<&Opener>, home: &Path, env: &[(&str, &str)]) -> Comman
         // here, because a port found and released is a port something else can
         // take in between. Before the caller's own, so that a test about the
         // variable still wins.
-        .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0");
+        .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0")
+        // And nothing advertised on the LAN, which is on by default and is
+        // one thing a test has no business doing: what a real Verkstead
+        // three desks away would hear is a device with a fresh id and a
+        // hostname, gone again when the test ends. The switch rather than a
+        // port of its own, because mDNS is spoken on 5353 wherever it is
+        // spoken at all — see `crates/server/tests/advertising.rs`, which is
+        // where the advertisement is read back off a port nobody else is on.
+        .env("VERKSTEAD_NO_ADVERTISING", "1");
     if let Some(opener) = opener {
         command.env("PATH", &opener.bin);
     }
