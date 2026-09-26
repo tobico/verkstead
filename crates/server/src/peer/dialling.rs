@@ -65,7 +65,7 @@ use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_t
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::{DeviceIdentity, JoinHeld, JoinSettled};
+use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinSettled};
 use verkstead_store::{HeldJoin, Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
@@ -104,6 +104,21 @@ const REACHING: Duration = Duration::from_secs(2);
 /// Ten seconds, which is that reading and the request around it with room to
 /// spare. It is spent at most once per dial, on the one address that answered.
 const ANSWERING: Duration = Duration::from_secs(10);
+
+/// What one knock at one address came to — see [`Peers::knocked`], and
+/// [`Peers::join_found`], which is the one caller that cares which of the two it
+/// is.
+enum Knocked {
+    /// The address answered, and this is what came of the answer: the question
+    /// held over there, or this device's account of why it was not. Either way
+    /// the device has spoken, and a walk down its other addresses is over.
+    Answered(Result<JoinHeld>),
+
+    /// And nothing at that address at all, which is the one finding worth trying
+    /// another address for: a machine that has moved, or a row drawn of a device
+    /// that has since gone.
+    Nobody(anyhow::Error),
+}
 
 /// The devices this one is linked to, as something to *call*: this device's
 /// certificate to present, and the membership a dial's findings are written
@@ -551,19 +566,117 @@ impl Peers {
     /// The one address rather than a list, because there is no list: what the
     /// human typed is the only place this device has been told to look, and
     /// every address the far end has is in the answer — which is what a link
-    /// carries from here on.
+    /// carries from here on. A device a discovery *found* holds a list of them,
+    /// and that is [`Peers::join_found`].
     pub async fn join(&self, address: &str, saying: &DeviceIdentity) -> Result<JoinHeld> {
-        let met = Arc::new(Mutex::new(None));
-        let asking = self.asking(&met)?;
-        let at = reaching(address, JOIN);
+        match self.knocked(address, saying).await {
+            Knocked::Answered(held) => held,
+            Knocked::Nobody(why) => Err(why),
+        }
+    }
 
-        let answered = asking
-            .post(&at)
+    /// The same question put to a device a discovery found, which is a **list**
+    /// of addresses rather than one (ADR-0020, *Discovery*) — and the address it
+    /// turned out to answer at, which is what the pending row is left naming.
+    ///
+    /// **Every address in the order the row holds them, until one answers**,
+    /// exactly as a dial to a member works down that member's — see
+    /// [`Peers::identity`], which is this walk made against a device this end
+    /// already knows. The row holds the LAN's addresses before the tailnet's, so
+    /// the shorter road is the one tried first.
+    ///
+    /// **An address that answered ends the walk, whatever it answered.** A second
+    /// address of the same machine would answer the same way, and a refusal asked
+    /// twice would be two questions held over there for one press — which is the
+    /// one thing this walk must not leave behind.
+    ///
+    /// **And a row can be stale by the time it is pressed.** A device may have
+    /// gone off the LAN or left the tailnet between the browse finding it and
+    /// somebody pressing Add, so a walk that reached nobody is refused in the
+    /// words a dial that reached nobody uses, naming the device the row drew.
+    pub async fn join_found(
+        &self,
+        found: &DiscoveredDevice,
+        saying: &DeviceIdentity,
+    ) -> Result<(String, JoinHeld)> {
+        let mut nothing_at = Vec::new();
+
+        for address in &found.addresses {
+            match self.knocked(address, saying).await {
+                Knocked::Answered(held) => return held.map(|held| (address.clone(), held)),
+
+                Knocked::Nobody(why) => {
+                    tracing::debug!(
+                        device = %found.device,
+                        %address,
+                        why = format!("{why:#}"),
+                        "a device this one found did not answer at one of the addresses it was \
+                         found at, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        // A row with no address at all is the same finding by a shorter road, and
+        // it is the one [`Peers::identity`] makes of a member that advertised
+        // nothing: there is nowhere to knock.
+        if nothing_at.is_empty() {
+            bail!("{} was found at no address to dial it at", found.name);
+        }
+
+        bail!(
+            "{} answered at none of the addresses it was found at ({})",
+            found.name,
+            nothing_at.join(", "),
+        );
+    }
+
+    /// One knock at one address: what came of it, or nobody there at all.
+    ///
+    /// The two are worth telling apart, which is the whole reason this is not
+    /// simply [`Peers::join`]'s body: a transport failure is that address being
+    /// gone and says nothing about the device, where anything the far end *said*
+    /// is about the device and ends a walk down its addresses.
+    async fn knocked(&self, address: &str, saying: &DeviceIdentity) -> Knocked {
+        let met = Arc::new(Mutex::new(None));
+
+        let asking = match self.asking(&met) {
+            Ok(asking) => asking,
+
+            // Not an address that answered nothing: a client this device cannot
+            // build is this device's own failure, and trying the next address
+            // would fail it again.
+            Err(why) => return Knocked::Answered(Err(why)),
+        };
+
+        let answered = match asking
+            .post(reaching(address, JOIN))
             .json(saying)
             .send()
             .await
-            .with_context(|| format!("asking the device at {address} to link with this one"))?;
+        {
+            Ok(answered) => answered,
 
+            Err(why) => {
+                return Knocked::Nobody(anyhow::Error::new(why).context(format!(
+                    "asking the device at {address} to link with this one"
+                )));
+            }
+        };
+
+        Knocked::Answered(self.taken(address, answered, &met).await)
+    }
+
+    /// And what an answer to a join post was worth: the question held over there,
+    /// or this device's account of why it was not.
+    async fn taken(
+        &self,
+        address: &str,
+        answered: reqwest::Response,
+        met: &Arc<Mutex<Option<String>>>,
+    ) -> Result<JoinHeld> {
         let status = answered.status();
 
         if !status.is_success() {

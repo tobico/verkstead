@@ -78,7 +78,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinSettled, RenewedCertificate,
+    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinHeld, JoinSettled,
+    RenewedCertificate,
 };
 use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
@@ -836,13 +837,9 @@ impl Devices {
     /// none is recorded there, and what settles it is a press on the other
     /// machine.
     ///
-    /// **A device cannot ask itself.** The pane shows this machine's own
-    /// addresses a few lines above the box, so typing one in is an easy mistake
-    /// and a confusing state to be left in — a modal on this workbench asking
-    /// whether to link to this workbench. It cannot be told before the dial,
-    /// there being nothing to compare until the far end has answered, so what is
-    /// done is to take the question straight back off the machine that turned
-    /// out to be this one.
+    /// **A device cannot ask itself**, which is settled in [`Devices::asked`]:
+    /// the pane shows this machine's own addresses a few lines above the box, so
+    /// typing one in is an easy mistake and a confusing state to be left in.
     pub(crate) async fn add(&self, address: &str) -> Result<()> {
         let address = address.trim();
 
@@ -853,6 +850,91 @@ impl Devices {
         let saying = self.reading.identity(&self.device).await;
         let held = self.peers.join(address, &saying).await?;
 
+        self.asked(address, held).await
+    }
+
+    /// **Add** on a **Discovered** row: ask the device that row is about, with
+    /// nothing typed (ADR-0020, *Discovery*).
+    ///
+    /// **Named by its Device Id rather than by an address**, because a discovery
+    /// found a *list* of them: mDNS resolves every address a device advertised,
+    /// and the identity a probe read carries the tailnet's. So what is dialled is
+    /// the list the row holds, in the order it was found — the LAN's first, that
+    /// being the shorter road — exactly as a dial to a **Member** works down that
+    /// member's addresses. The typed box keeps the single address it has always
+    /// had: what somebody types is only the first address ever known.
+    ///
+    /// **What it leaves is what the typed press leaves**: a join posted, the
+    /// question held for its ten minutes over there, and a pending row here with
+    /// this device's own fingerprint under it and a Cancel. The discovered row
+    /// goes with the press, a device a join is pending for being one the list
+    /// leaves out — so a press moves a row from one list to the other rather than
+    /// leaving two rows about one device.
+    ///
+    /// **And a row can be stale by the time it is pressed.** The device may have
+    /// gone off the LAN or left the tailnet between the browse hearing it and
+    /// somebody pressing Add, so the press is refused in the words a dial that
+    /// reached nobody uses, naming the device — and the row is forgotten, which is
+    /// what makes the next read of the list one without it. A device that is
+    /// really there advertises again within the minute and is a row again.
+    pub(crate) async fn add_found(&self, device: &str) -> Result<()> {
+        let device = device.trim();
+
+        // Off the list this device draws rather than off the browse, because the
+        // three exclusions are the list's: a press naming a member, this device or
+        // a device already being waited on is a press on a row nobody was offered.
+        // Which costs the tailnet half a second asking again, and is what it
+        // costs: a device found over the tailnet holds no address the browse has,
+        // and a press is a dial either way.
+        let Some(found) = self
+            .discovered()
+            .await?
+            .into_iter()
+            .find(|row| row.device == device)
+        else {
+            bail!(
+                "device {device} is not one this device has heard of, so there is no address \
+                 to dial it at",
+            );
+        };
+
+        let saying = self.reading.identity(&self.device).await;
+
+        let (address, held) = match self.peers.join_found(&found, &saying).await {
+            Ok(answered) => answered,
+
+            Err(why) => {
+                // The row was wrong, and this press is where that was learned:
+                // forgotten here rather than left for a TTL, so that the answer
+                // this refusal is drawn beside is a list without it.
+                self.browse.forgotten(&found.device);
+
+                return Err(why);
+            }
+        };
+
+        self.asked(&address, held).await
+    }
+
+    /// The pending row both presses leave behind: the request named, the address
+    /// it was asked at, and the certificate this device met at the far end.
+    ///
+    /// **Shared because the two presses are one act at two starting points** —
+    /// an address somebody typed, and a row a discovery drew. What differs is
+    /// which address was dialled, and by here that is settled: it is the one that
+    /// answered.
+    ///
+    /// **And a device cannot ask itself.** The pane shows this machine's own
+    /// addresses a few lines above the box, so typing one in is an easy mistake
+    /// and a confusing state to be left in — a modal on this workbench asking
+    /// whether to link to this workbench. It cannot be told before the dial,
+    /// there being nothing to compare until the far end has answered, so what is
+    /// done is to take the question straight back off the machine that turned out
+    /// to be this one. Nothing a *discovered* row leads to can be this device —
+    /// the list leaves its own id out — so this is the typed box's case, kept
+    /// here because it is a fact about what answered rather than about which
+    /// press asked.
+    async fn asked(&self, address: &str, held: JoinHeld) -> Result<()> {
         if held.identity.device == self.device.id() {
             // Taken back rather than left to run out, because the question is
             // this device's own and it is standing in front of its own human.

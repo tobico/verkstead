@@ -138,6 +138,15 @@
 //! been made on — the server leaves all three out, so a device moves from that
 //! list to these rows rather than being drawn in both.
 //!
+//! **And a press on one of those rows is a Join with nothing typed.** It names
+//! the device rather than one of its addresses: the row holds every place this
+//! machine found that device, and the server works down them in the order it
+//! found them. What it leaves is what the box below leaves — a pending row with a
+//! fingerprint on it for two people to compare — and the row it was pressed on
+//! has gone with it. A row that had gone stale is refused in the words the dial
+//! put it in, naming the device, and dropped from the list for good measure: the
+//! browse hears a device that is really there again within the minute.
+//!
 //! **And under both lists, the other control on this pane that configures rather
 //! than reads**: Add, against an address somebody types — which is what covers
 //! the devices a browse cannot reach, a Windows machine and the WSL on it among
@@ -179,6 +188,7 @@ import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import {
   addDevice,
+  addFound,
   cancelJoin,
   loadDevices,
   loadDiscovered,
@@ -1015,8 +1025,38 @@ function Row(props: {
 /// **Members are not here**, nor is this device, nor is one a press has already
 /// been made on — the server leaves all three out, so a device that has just been
 /// pressed moves from this list to the rows above rather than being drawn twice.
+///
+/// **The press is this component's rather than each row's**, for the reason the
+/// asking above the cluster's list is that component's: one thing on the page at
+/// a time. A press names the device it was made on, the answer redraws the
+/// section, and a refusal is drawn once under the list in the words it came back
+/// in — which name the device themselves, a row being stale by the time somebody
+/// presses it being exactly what they are about.
 function Discovered(): JSX.Element {
   const found = useDiscovered();
+  const queries = useQueryClient();
+
+  // Which row is being asked about, so that the press on it reads *Asking…*
+  // while the others are only held. `null` while nothing is in flight.
+  const [pressed, setPressed] = createSignal<string | null>(null);
+
+  const ask = useMutation(() => ({
+    mutationFn: (device: string) => addFound(device),
+
+    // The membership comes out of the answer, the way the typed press's does —
+    // and the list this row was on is re-read rather than reasoned about here:
+    // the server leaves out the device a join is now pending for, and leaves out
+    // a row it has forgotten for want of an answer, which is the same re-read
+    // either way.
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+    onSettled: () => void queries.invalidateQueries({ queryKey: ["discovered"] }),
+  }));
+
+  const press = (device: string) => {
+    setPressed(device);
+    ask.mutate(device);
+  };
 
   return (
     <div class={styles.found}>
@@ -1032,7 +1072,13 @@ function Discovered(): JSX.Element {
         <Match when={found.data?.length}>
           <ul class={styles.list}>
             <For each={found.data}>
-              {(device: DiscoveredDevice) => <Heard of={device} />}
+              {(device: DiscoveredDevice) => (
+                <Heard
+                  of={device}
+                  add={press}
+                  asking={ask.isPending ? pressed() : null}
+                />
+              )}
             </For>
           </ul>
         </Match>
@@ -1045,6 +1091,12 @@ function Discovered(): JSX.Element {
           </Note>
         </Match>
       </Choose>
+
+      <Show when={ask.isError}>
+        <ErrorLine class={styles.failure}>
+          The device could not be asked: {ask.error?.message}
+        </ErrorLine>
+      </Show>
     </div>
   );
 }
@@ -1062,8 +1114,18 @@ function Discovered(): JSX.Element {
 /// agreed with a device that has only advertised itself, or only answered that it
 /// is there: what the press does is the same Join the typed box makes, and what it
 /// leaves is the same pending row with a fingerprint on it for two people to
-/// compare.
-function Heard(props: { of: DiscoveredDevice }): JSX.Element {
+/// compare — after which this row is gone, a device a join is pending for being
+/// one the list leaves out.
+///
+/// **What it names is the device rather than an address.** The row holds every
+/// place this device found it, and the server works down them in that order: a
+/// row that sent one of its addresses would be the page choosing which of them is
+/// the live one.
+function Heard(props: {
+  of: DiscoveredDevice;
+  add: (device: string) => void;
+  asking: string | null;
+}): JSX.Element {
   return (
     <li class={styles.device}>
       <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
@@ -1076,11 +1138,16 @@ function Heard(props: { of: DiscoveredDevice }): JSX.Element {
         <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
       </div>
 
-      {/* Drawn here and given its press by the task after this one, which is
-          what makes it a Join: the row names a device, and what is dialled is
-          every address the browse found for it. */}
-      <button type="button" class={styles.add}>
-        Add
+      {/* The row names a device, and what is dialled is every address the
+          discovery found for it. Every press is held while one is in flight, and
+          the one that was made says so. */}
+      <button
+        type="button"
+        class={styles.add}
+        disabled={props.asking !== null}
+        onClick={() => props.add(props.of.device)}
+      >
+        {props.asking === props.of.device ? "Asking…" : "Add"}
       </button>
     </li>
   );

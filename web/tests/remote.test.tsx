@@ -1088,6 +1088,113 @@ and the rows drawn of it are not the browse's to move",
 
     listening();
   });
+
+  /// Where a press on a row goes: the device the row is about, and no address.
+  const ADDING = `/api/ui/devices/discovered/${HEARD[0]!.device}/add`;
+
+  /// The press on a row names the device and redraws the section out of the
+  /// answer, so the pending row it left arrives with it.
+  ///
+  /// **The device rather than an address**, because the row holds a list of them
+  /// and the server works down it in the order it found them: a page that sent
+  /// one of them would be choosing which address is the live one.
+  it("presses Add on the row by naming the device, and redraws on the answer", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(HEARD),
+      whenever(ADDING, json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Waiting for confirmation on laptop."),
+      ).toBeTruthy(),
+    );
+
+    const pressed = fetching.mock.calls.find(
+      ([path, init]) => String(path) === ADDING && init?.method === "POST",
+    );
+
+    expect(pressed, `a press on the row posts to ${ADDING}`).toBeTruthy();
+    expect(
+      JSON.parse(String(pressed?.[1]?.body)),
+      "with nothing said in the body: the device is in the path, and which of its \
+addresses is dialled is the server's own",
+    ).toEqual({});
+  });
+
+  /// And the list is read again for it, so the row the press was made on is gone:
+  /// a device a join is pending for is one the server leaves out.
+  ///
+  /// **Which is what makes one press one row.** The pending row above is the
+  /// answer to it, and a discovered row beside that would be a second thing to
+  /// press about one device.
+  it("re-reads the list after a press, so the row it was made on goes", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(thenHeard(HEARD, [HEARD[1]!, HEARD[2]!])),
+      whenever(ADDING, json(WAITING), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+
+    expect(
+      screen.getByText("kitchen-mini"),
+      "while the rows beside it are exactly where they were",
+    ).toBeTruthy();
+  });
+
+  /// A press that did not get through says so in the words it came back in, which
+  /// name the device: a row can be stale by the time somebody presses it.
+  ///
+  /// **And the list is read again for that too**, the row having been forgotten on
+  /// the server: what the refusal is drawn beside is a list without it.
+  it("says why a stale row could not be asked, and drops the row", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(),
+      theHeard(thenHeard(HEARD, [HEARD[1]!, HEARD[2]!])),
+      whenever(
+        ADDING,
+        json(
+          { error: "laptop answered at none of the addresses it was found at" },
+          502,
+        ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    fireEvent.click(theRow("laptop").querySelector("button")!);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/laptop answered at none of the addresses/),
+      ).toBeTruthy(),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("Add").filter((press) => press.closest("li")).length,
+        "and the row it was pressed on is gone from the list, the server having \
+forgotten it",
+      ).toBe(2),
+    );
+  });
 });
 
 describe("adding a device", () => {
