@@ -46,7 +46,6 @@ mod migrations;
 mod pairings;
 mod pauses;
 mod pending_steers;
-mod placements;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -122,7 +121,6 @@ pub use pending_steers::{
     Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
-pub use placements::place_conversations;
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
     create_profile, delete_profile, load_profile, profiles, update_profile,
@@ -804,14 +802,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // none of it is an Event.
     wrap_up::apply_schema(pool).await?;
 
-    // And where the human put each Conversation in the sidebar, which hangs off
-    // the Conversations alone for that reason too — an order is a fact about the
-    // list rather than a thing that happened to the work.
-    placements::apply_schema(pool).await?;
-
     // And which of them the human has put away, which the sidebar reads the
-    // same way and for the same reason: what a list draws is not a fact about
-    // the work either.
+    // same way it reads the order it draws them in: what a list shows is not a
+    // fact about the work, any more than the order is. There is no table here
+    // for that order — it is a column on the Conversation itself, its **Rank**,
+    // see [`ranks`].
     archives::apply_schema(pool).await?;
 
     // And what a Cleanup has since taken back out of the ones that were put away

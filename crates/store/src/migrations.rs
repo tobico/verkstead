@@ -34,6 +34,12 @@
 //! and [`rank_the_conversations`] is what fills it, taking the id and called by
 //! the serve once the identity is issued and before any route is answered.
 //!
+//! **And it is the one rewrite that takes a table away.** The places the sidebar
+//! used to be ordered by are what those ranks are computed from, so `placements`
+//! is dropped in the same transaction that reads it — which is why that drop
+//! lives over there rather than here: this module runs at the open and that one
+//! runs at the serve, so a drop here would be a drop before the read.
+//!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
 //! rewrites rather than a version number kept somewhere. So a database opened
@@ -428,7 +434,8 @@ async fn conversations_that_had_no_rank(pool: &SqlitePool) -> Result<()> {
 }
 
 /// Rank every Conversation that has no rank, in the order the sidebar has been
-/// showing them in, each one suffixed with `device` (ADR-0020, *Ranks*).
+/// showing them in, each one suffixed with `device` (ADR-0020, *Ranks*) — and
+/// then take away the table that order was kept in.
 ///
 /// **The other half of the arrival above**, and the one that needs something an
 /// open cannot have: this device's id. So it is not in [`apply`] at all — the
@@ -451,17 +458,41 @@ async fn conversations_that_had_no_rank(pool: &SqlitePool) -> Result<()> {
 /// everything a moment ago and the rows from before belong under it, which is
 /// what walking on from the foot of the list produces.
 ///
+/// **Then the places themselves go**, in the same transaction: they have become
+/// ranks, and a table nothing reads any more is one to be rid of rather than one
+/// to leave standing. Which is why the drop is here rather than in [`apply`]
+/// with the rest of the schema — [`apply`] runs at the open and this runs at the
+/// serve, so a drop over there would be a drop before this read.
+///
+/// **And a database with no such table is nothing to rewrite.** One made fresh
+/// after that drop never had one: every row was ranked as it was started, so
+/// there is no unranked row to find and nothing left that could have ordered it.
+/// So the table being there is what says there is anything to do here at all,
+/// and a missing one leaves before any query rather than failing over a join to
+/// a table that has done its job.
+///
 /// All of it in one transaction: a sidebar read halfway through a ranking would
 /// be a list half in one order and half in the other.
 ///
-/// Safe to run twice, and it runs at every start: what says whether there is
-/// anything to do is a row with no rank, and after the first run there are none.
+/// Safe to run twice, and it runs at every start: the first run is the one that
+/// finds the table, and after it there is none to find.
 pub async fn rank_the_conversations(pool: &SqlitePool, device: &str) -> Result<()> {
+    let places: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .bind("placements")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the places the sidebar used to be ordered by")?;
+
+    if places.is_none() {
+        return Ok(());
+    }
+
     let mut tx = super::writing(pool, "ranking the Conversations").await?;
 
-    // The order the sidebar has been drawn in all along — see
-    // [`super::conversations::conversations`], whose `ORDER BY` this is, minus
-    // the archive filter: every row is ranked, drawn or not.
+    // The order the sidebar was drawn in before there were ranks: what the human
+    // placed, in their place order, with what nobody had placed above it newest
+    // first. Minus the archive filter — every row is ranked, drawn or not.
     let unranked: Vec<(i64,)> = sqlx::query_as(
         "SELECT c.id
          FROM conversations c
@@ -472,10 +503,6 @@ pub async fn rank_the_conversations(pool: &SqlitePool, device: &str) -> Result<(
     .fetch_all(&mut *tx)
     .await
     .context("listing the Conversations that have no rank")?;
-
-    if unranked.is_empty() {
-        return Ok(());
-    }
 
     // Where the walk starts: the foot of what is already ranked, so the rows
     // from before go under it. On every database this really finds there is
@@ -499,6 +526,13 @@ pub async fn rank_the_conversations(pool: &SqlitePool, device: &str) -> Result<(
 
         last = Some(rank);
     }
+
+    // And the table those places were kept in, every row of which is now a rank
+    // on the Conversation itself.
+    sqlx::query("DROP TABLE placements")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the places the sidebar used to be ordered by")?;
 
     tx.commit().await.context("ranking the Conversations")
 }

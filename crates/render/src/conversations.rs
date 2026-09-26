@@ -3125,17 +3125,6 @@ pub struct NewPullRequestAdoption {
     pub base: String,
 }
 
-/// The order the human has just dragged the sidebar into: every Conversation
-/// they can see, by id, top first.
-///
-/// Nothing sends one any more — see [`NewRank`], which is what letting go of a
-/// card says now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewOrder {
-    pub order: Vec<i64>,
-}
-
 /// Where the human has just put one Conversation: the row it now sits directly
 /// under, or nothing at all for the top of the list.
 ///

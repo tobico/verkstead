@@ -2,10 +2,9 @@
 //! becomes when there is nothing left to read on it.
 //!
 //! Archiving is a fact about the sidebar rather than about the work, so it is
-//! beside the Conversations rather than a column on them — the reason a
-//! placement is, said again: there is no migration machinery here, and
-//! `conversations` is STRICT and left alone. The row being there is the whole
-//! of the flag, and taking it away is what unarchiving is.
+//! beside the Conversations rather than a column on them — and the row being
+//! there is the whole of the flag, which is a thing a column could only say
+//! twice. Taking that row away is what unarchiving is.
 //!
 //! Nothing leaves a Timeline. An archived Conversation is one the list stops
 //! drawing and nothing else: its record is where it was, its branch is where it

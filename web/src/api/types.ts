@@ -2863,15 +2863,6 @@ export type NewConversation = { repo_id: number, };
 export type NewJoin = { address: string, };
 
 /**
- * The order the human has just dragged the sidebar into: every Conversation
- * they can see, by id, top first.
- *
- * Nothing sends one any more — see [`NewRank`], which is what letting go of a
- * card says now.
- */
-export type NewOrder = { order: Array<number>, };
-
-/**
  * And starting one to wrap a pull request up with: which Repo, and the row off
  * the *Wrap up a pull request* level that was pressed.
  *
