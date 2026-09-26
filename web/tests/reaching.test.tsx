@@ -34,6 +34,11 @@ import type {
   RepoEntry,
   Submitted,
 } from "../src/api/types";
+import {
+  RefusedError,
+  loadConversation,
+  retrying,
+} from "../src/api/client";
 import { Reaching } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -512,5 +517,71 @@ describe("a set on another device", () => {
         ),
       ).toHaveLength(1),
     );
+  });
+});
+
+describe("a member that is not answering", () => {
+  /// The hop's own refusal is a verdict rather than a bad moment, and the app
+  /// must not go back for three more of them.
+  ///
+  /// What a second attempt costs is the whole of the reason: a call put to a
+  /// member walks every address that device advertised, at two seconds apiece,
+  /// and writes its row unreachable when none of them answers — so the ordinary
+  /// three retries are half a minute of blank page and four passes down the
+  /// same dead list, to arrive at the sentence the first refusal already
+  /// carried. A local refusal is still worth the ordinary attempts: it costs a
+  /// round trip on the loopback.
+  it("is not asked again three more times", async () => {
+    serving(
+      json(
+        {
+          error: `device ${MEMBER} answered at none of the addresses it advertised`,
+        },
+        502,
+      ),
+    );
+
+    const refused = await loadConversation(MEMBER, String(THERE.id)).catch(
+      (error: unknown) => error,
+    );
+
+    expect(refused).toBeInstanceOf(RefusedError);
+    expect((refused as RefusedError).status).toBe(502);
+    expect((refused as RefusedError).message).toContain("none of the addresses");
+    expect(retrying(0, refused)).toBe(false);
+  });
+
+  /// And the two a Device Id earns before anything is dialled, which are the
+  /// far end's own refusals besides — a Conversation it has no record of among
+  /// them. None of the three is a machine that might answer next time.
+  it("is not asked again for an id that was never going to be dialled", async () => {
+    for (const [status, said] of [
+      [400, "is this device"],
+      [404, "knows no device"],
+    ] as const) {
+      serving(json({ error: said }, status));
+
+      const refused = await loadConversation(MEMBER, String(THERE.id)).catch(
+        (error: unknown) => error,
+      );
+
+      expect((refused as RefusedError).status).toBe(status);
+      expect(retrying(0, refused)).toBe(false);
+    }
+  });
+
+  /// While this device refusing the same way is still worth the ordinary three
+  /// attempts: what the rule is about is the walk down a member's addresses,
+  /// and a local refusal has none to walk.
+  it("leaves a refusal of this device's own retried as it always was", async () => {
+    serving(json({ error: "there isn't one" }, 404));
+
+    const refused = await loadConversation(null, String(HERE.id)).catch(
+      (error: unknown) => error,
+    );
+
+    expect((refused as RefusedError).status).toBe(404);
+    expect(retrying(0, refused)).toBe(true);
+    expect(retrying(3, refused)).toBe(false);
   });
 });

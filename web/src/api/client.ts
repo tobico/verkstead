@@ -135,6 +135,13 @@ function on(device: Device, path: string): string {
     : `${MEMBERS}${encodeURIComponent(device)}${path.slice(NAMESPACE.length)}`;
 }
 
+/// Whether a path is one this device puts to a member rather than answers
+/// itself — which is the one thing [`retrying`] needs of it, and is a fact
+/// about the path [`on`] wrote.
+function relayed(path: string): boolean {
+  return path.startsWith(MEMBERS);
+}
+
 /// A refusal from the server, in the shape both halves refuse in.
 ///
 /// Carries the server's own wording rather than a status code, because that
@@ -144,11 +151,17 @@ export class RefusedError extends Error {
   readonly status: number;
   readonly violations: NonNullable<ApiError["violations"]>;
 
-  constructor(status: number, refusal: ApiError) {
+  /// And whether it came back from a call put to a member, which is what
+  /// [`retrying`] reads: a refusal made on the way to another machine costs
+  /// something to make again that a local one does not.
+  readonly relayed: boolean;
+
+  constructor(status: number, refusal: ApiError, relayed = false) {
     super(refusal.error);
     this.name = "RefusedError";
     this.status = status;
     this.violations = refusal.violations ?? [];
+    this.relayed = relayed;
   }
 }
 
@@ -164,16 +177,52 @@ export function timedOut(error: unknown): boolean {
 /// the app is retried by, said here because the rule beside it is.
 const RETRIES = 3;
 
+/// The statuses a relayed call is refused with that are a verdict rather than
+/// a bad moment — see [`retrying`], which is where they are read.
+///
+/// `502` is the hop's own and nothing else's: it is what this device answers
+/// when a member answered at none of the addresses it advertised, and no route
+/// in the namespace at the far end ever mints one. `400` and `404` are the two
+/// a Device Id earns before anything is dialled — this device's own id, and an
+/// id that is no member's — and are the far end's own refusals besides, a
+/// Conversation it has no record of among them. None of the three is worth a
+/// second go: the first is a machine that is not there, and the other two are
+/// answers.
+const FINAL_FROM_A_MEMBER = [400, 404, 502];
+
 /// Whether a read that failed is worth making again. The app's retry rule, set
 /// as the query client's default in `App.tsx`.
 ///
-/// The ordinary three attempts, minus the one case where trying again is worse
-/// than not: a read that gave up on its own deadline. Retrying that is thirty
-/// seconds of nothing, three more times, before the page is allowed to say
-/// anything — and what it would say is what it already knew. The error is the
-/// answer, and on the Conversation pane the error is what draws the way out.
+/// The ordinary three attempts, minus the two cases where trying again is worse
+/// than not.
+///
+/// **A read that gave up on its own deadline.** Retrying that is thirty seconds
+/// of nothing, three more times, before the page is allowed to say anything —
+/// and what it would say is what it already knew. The error is the answer, and
+/// on the Conversation pane the error is what draws the way out.
+///
+/// **And a member refusing by name** (ADR-0020, *The opened device relays*). A
+/// call put to a member walks every address that device advertised, at two
+/// seconds apiece, and marks its row unreachable when none of them answers — so
+/// three more goes at a machine that is switched off is half a minute of blank
+/// page and four passes down the same dead list, to arrive at the sentence the
+/// first refusal already carried. A local refusal is still retried: it costs a
+/// round trip on the loopback, and the rule here is about what a second attempt
+/// costs rather than about how likely it is to help.
 export function retrying(attempts: number, error: unknown): boolean {
-  return !timedOut(error) && attempts < RETRIES;
+  if (timedOut(error)) {
+    return false;
+  }
+
+  if (
+    error instanceof RefusedError &&
+    error.relayed &&
+    FINAL_FROM_A_MEMBER.includes(error.status)
+  ) {
+    return false;
+  }
+
+  return attempts < RETRIES;
 }
 
 /// One Set, rendered, with where it stands — or the stored body where this
@@ -410,7 +459,9 @@ export function listConversations(): Promise<ConversationEntry[]> {
 /// Conversation that has gone is passed over on the other side, which is what a
 /// list drawn a moment ago is allowed to carry.
 export async function placeConversations(order: number[]): Promise<void> {
-  await refused(await sent("/api/ui/conversations/order", { order }));
+  const at = "/api/ui/conversations/order";
+
+  await refused(at, await sent(at, { order }));
 }
 
 /// Whether the sidebar is drawing what has been archived, and whether there is
@@ -433,7 +484,9 @@ export function showingArchived(): Promise<ShowingArchived> {
 /// The position rather than a flip, so what is sent is what the human is
 /// looking at. Answered with nothing at all, as the order is.
 export async function showArchived(showing: boolean): Promise<void> {
-  await refused(await sent("/api/ui/conversations/archived", { showing }));
+  const at = "/api/ui/conversations/archived";
+
+  await refused(at, await sent(at, { showing }));
 }
 
 /// How long this read is given before the browser gives up on it.
@@ -662,17 +715,17 @@ export async function closeTerminal(
   number: number,
   asked = false,
 ): Promise<TerminalClosed> {
+  const at = on(
+    device,
+    `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
+  );
+
   return taken<TerminalClosed>(
-    await fetch(
-      on(
-        device,
-        `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
-      ),
-      {
-        method: "DELETE",
-        headers: { accept: "application/json" },
-      },
-    ),
+    at,
+    await fetch(at, {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    }),
   );
 }
 
@@ -1038,26 +1091,25 @@ export async function attachFile(
   id: number,
   file: File,
 ): Promise<Attached> {
-  const response = await fetch(
-    on(
-      device,
-      `/api/ui/conversations/${id}/attachments/${encodeURIComponent(file.name)}`,
-    ),
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/octet-stream",
-      },
-      body: file,
-    },
+  const at = on(
+    device,
+    `/api/ui/conversations/${id}/attachments/${encodeURIComponent(file.name)}`,
   );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
 
   if (response.status === 413) {
     return "TooLarge";
   }
 
-  return taken<Attached>(response);
+  return taken<Attached>(at, response);
 }
 
 /// And take one off again, by the row's own id: two files on one Conversation
@@ -1090,25 +1142,27 @@ export async function attachToAnswer(
   label: string,
   file: File,
 ): Promise<AnswerAttached> {
-  const response = await fetch(
-    on(device, `/api/ui/sets/${set}/answers/${encodeURIComponent(
+  const at = on(
+    device,
+    `/api/ui/sets/${set}/answers/${encodeURIComponent(
       label,
-    )}/attachments/${encodeURIComponent(file.name)}`),
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/octet-stream",
-      },
-      body: file,
-    },
+    )}/attachments/${encodeURIComponent(file.name)}`,
   );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
 
   if (response.status === 413) {
     return "TooLarge";
   }
 
-  return taken<AnswerAttached>(response);
+  return taken<AnswerAttached>(at, response);
 }
 
 /// And take one off an Answer again, by the row's own id — which is what the
@@ -1365,12 +1419,12 @@ export async function seeConversation(
   device: Device,
   id: string,
 ): Promise<void> {
-  await refused(
-    await sent(
-      on(device, `/api/ui/conversations/${encodeURIComponent(id)}/seen`),
-      {},
-    ),
+  const at = on(
+    device,
+    `/api/ui/conversations/${encodeURIComponent(id)}/seen`,
   );
+
+  await refused(at, await sent(at, {}));
 }
 
 /// Start driving a conversation again, from wherever the work now stands.
@@ -1893,11 +1947,14 @@ export function subscribePush(subscription: Subscription): Promise<Subscribed> {
 /// endpoint the server never stored leaves what was asked for holding either
 /// way.
 export async function unsubscribePush(endpoint: string): Promise<void> {
-  await refused(await sent("/api/ui/push/unsubscribe", { endpoint }));
+  const at = "/api/ui/push/unsubscribe";
+
+  await refused(at, await sent(at, { endpoint }));
 }
 
 async function get<T>(path: string, within?: number): Promise<T> {
   return taken(
+    path,
     await fetch(path, {
       headers: { accept: "application/json" },
       // Only where the caller named one. A deadline is a decision about what a
@@ -1910,7 +1967,7 @@ async function get<T>(path: string, within?: number): Promise<T> {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  return taken(await sent(path, body));
+  return taken(path, await sent(path, body));
 }
 
 function sent(path: string, body?: unknown): Promise<Response> {
@@ -1926,17 +1983,26 @@ function sent(path: string, body?: unknown): Promise<Response> {
   });
 }
 
-async function taken<T>(response: Response): Promise<T> {
-  await refused(response);
+async function taken<T>(path: string, response: Response): Promise<T> {
+  await refused(path, response);
 
   return (await response.json()) as T;
 }
 
 /// Throw if the server refused, in its own words. Split out from [`taken`] for
 /// the endpoints that answer with no body to read.
-async function refused(response: Response): Promise<void> {
+///
+/// The path is carried in beside the answer so that the refusal knows whether
+/// it crossed a hop, which is what [`retrying`] reads — see [`relayed`]. Off
+/// the path this module wrote rather than off `response.url`, because that is
+/// the one account of it that is there whatever answered.
+async function refused(path: string, response: Response): Promise<void> {
   if (!response.ok) {
-    throw new RefusedError(response.status, await refusal(response));
+    throw new RefusedError(
+      response.status,
+      await refusal(response),
+      relayed(path),
+    );
   }
 }
 
