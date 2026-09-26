@@ -56,7 +56,7 @@
 //! between them is the registration behind it rather than anything here.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch as Choose, type JSX } from "solid-js";
+import { For, Match, Show, Switch as Choose, onMount, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
@@ -117,11 +117,17 @@ function useDesktop(reach: Bridge) {
 
 /// And how **Launch on Startup** stands, out of the platform's own registration.
 ///
-/// Static for [`useDesktop`]'s reason and one of its own: nothing the server has
-/// to say could change a registration with the desktop session, and what moves
-/// this is a tick answering. A desktop's own settings can change it under the
-/// page — which is what a pane opened afresh reads, the registration being asked
-/// of the platform every time rather than remembered anywhere.
+/// Static for [`useDesktop`]'s reason: nothing the server has to say could change
+/// a registration with the desktop session, so a Nudge has no business re-reading
+/// it, and what moves the box is a tick answering.
+///
+/// **But this is the one reading on the page that something outside the app can
+/// change.** A desktop's own Startup Applications can untick Verkstead under an
+/// open window, and closing that window now keeps the app running — so the page
+/// may be the same page for days. Static alone would be a box saying what was
+/// true when the workbench was loaded, so the pane asks again every time it is
+/// opened. That is [`Pane`]'s rather than this function's: it is a fact about
+/// opening the pane rather than about the reading.
 function useStartup(reach: Bridge) {
   return useReading(() => ({
     queryKey: STARTUP,
@@ -238,6 +244,19 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
   const desktop = useDesktop(props.reach);
   const starts = useStartup(props.reach);
   const mac = () => props.reach.platform === MAC;
+
+  /// The registration asked of the platform again, every time this pane is
+  /// opened.
+  ///
+  /// Both readings here are static, so nothing re-reads either on its own — and
+  /// the settings are right to be: that file is only ever written by this pane.
+  /// The registration is not, a desktop's own settings being able to change it
+  /// under a window that may have been open for days, and the moment worth asking
+  /// in is the moment somebody opened the pane to look at it. A `refetch` rather
+  /// than an invalidation, which a static reading is deaf to by design; and one
+  /// that does not cancel, so a first open's own read is the read rather than
+  /// being thrown away and made again.
+  onMount(() => void starts.refetch({ cancelRefetch: false }));
 
   /// A control moved, which saves itself.
   ///
