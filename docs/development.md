@@ -49,19 +49,26 @@ untouched by that: it is the certificate that is renewed.
 
 While the new certificate is waiting on members to acknowledge it, a line of
 its own says so and names both fingerprints — the one still going out and the
-one coming in. Nothing is linked yet, so what that line says here is that there
-was nobody to announce to and the changeover is already over:
+one coming in. On a checkout nothing has been linked to, what that line says is
+that there was nobody to announce to and the changeover is already over:
 
 ```console
   INFO verkstead_server: this device's certificate was near its expiry and has been made again, and there was no member to announce the new fingerprint to fingerprint=9C:4B:…
 ```
 
+Once something *is* linked — which is further down this step — that start
+announces the new fingerprint to every member instead, over the link it already
+holds and still presenting the outgoing certificate, that being the only one any
+of them holds. The changeover ends at the last acknowledgement; a member that
+was switched off is told by the next call that gets through to it, and one that
+never answers is a member the human unlinks.
+
 **`peer_listen=` is where another Verkstead reaches this one.** A second
 listener, TLS on every interface at port 8423, presenting the certificate
 above and asking a caller for one without insisting on it — `--peer-listen` or
 `VERKSTEAD_PEER_LISTEN` moves it, and a second Verkstead on this machine needs
-its own the way it needs its own `--listen`. Nothing links anything yet: the one
-route on it is the identity endpoint, which anybody may read —
+its own the way it needs its own `--listen`. The one route on it anybody at all
+may read is the identity endpoint —
 
 ```console
 $ curl -k https://127.0.0.1:8423/api/peer/v1/identity
@@ -83,9 +90,70 @@ behind them. Ask it again from another machine on the same tailnet and it says
 the same thing; ask it off a laptop that has moved and the addresses have
 moved with it.
 
-Every other path on that port answers `403` and says so, whatever you present
-and whether or not a route answers it: everything but the identity endpoint is
-behind the member gate, and nothing has made a member yet.
+**Three routes stand outside the member gate and they are the whole of the
+un-gated surface**: that identity endpoint, the join post, and the cancel and
+the dial-back a join is settled through. Every other path on that port answers
+`403` and says so — *you are not a member of this verkstead's cluster* —
+whatever you present and whether or not a route answers it, so a stranger is
+told it is a membership they are missing rather than a path that is not there.
+Behind the gate is one membership said three ways: a device put on this one's
+list, a device taken off it, and the certificate one of them stands under
+changed.
+
+**Seeing a link made takes a second Verkstead**, which on one machine means a
+second of everything: its own Data Directory, its own workbench port and its own
+peer port. In a terminal of its own —
+
+```console
+$ mkdir -p /tmp/other
+$ cargo run -p verkstead-cli -- serve --data-dir /tmp/other \
+    --listen 127.0.0.1:8522 --peer-listen 0.0.0.0:8523
+```
+
+Two installs, two device ids, two certificates. Open the **Remote access** pane
+on the first one's workbench and its **Devices** section holds one row, marked
+*this device*, with **Add** under it. Type `127.0.0.1:8523` — the port is only
+needed because both are on this machine; a device answering on 8423 is reached
+by its name or address alone — and press Add.
+
+What happens then is the whole of the stage. The first device dials that
+address, takes whatever certificate it presents for the one call, and posts what
+it is; the second writes the question down, holds it ten minutes, and raises a
+modal in every workbench it has open with a push to any phone subscribed to it.
+The first draws a pending row, *Waiting for confirmation on …*, with **its own**
+fingerprint under it — the same string the modal over there is drawing, for two
+people at two screens to compare by eye — and a **Cancel**.
+
+Press **Allow** on the second one's modal and nothing else is pressed anywhere.
+The second dials the first back, checks the certificate it meets is the one the
+request pinned, and hands over itself and every member it holds; the first
+checks that certificate against the one it met when it asked. Both lists now
+read the same, and a third Verkstead joining through either of them lands on all
+three.
+
+Through the API rather than the pane, which is what a test does:
+
+```console
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"address":"127.0.0.1:8523"}' http://127.0.0.1:8422/api/ui/devices/joins
+$ curl http://127.0.0.1:8522/api/ui/devices/asking
+[{"request":"5b1f…","identity":{"device":"86f1933f…","fingerprint":"3F:0A:…",
+  "name":"workbench","os":"Linux","addresses":["192.168.1.24"]}}]
+$ curl -X POST http://127.0.0.1:8522/api/ui/devices/asking/5b1f…/allow
+$ curl http://127.0.0.1:8422/api/ui/devices
+```
+
+**Unlink** is the row's other press, and it takes that device out of the cluster
+for everybody rather than cutting this device's own half of a link: every member
+drops it and the device itself is told to forget the rest. It is asked once,
+over the page, as Remove on a Repo is — and it works on a member that is not
+answering, which is most of what it is for. A member the last dial found nothing
+at stays on the list, dimmed, reading *unreachable*.
+
+A device asking to link is the one thing a stranger writes into this machine, so
+it is bounded at both ends: a post saying more about itself than is kept is
+refused, and so is one that would take this device past sixteen questions held
+at once.
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
