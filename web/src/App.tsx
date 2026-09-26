@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
+import { DragBar } from "./DragBar";
 import { Toasts } from "./Toasts";
 import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
@@ -88,6 +89,11 @@ export function App(): JSX.Element {
 /// because a server that cannot say whether it is set up is one that has been
 /// answering everything else for months.
 ///
+/// **Which leaves a moment with no bar to move the window by**, and inside the
+/// app that is the same hole the wizard and the no-such-page have: nothing is
+/// drawn, so there is no pane head to be dragged. So the moment before the
+/// verdict is the bare drag bar and nothing else — see [`DragBar`](./DragBar.tsx).
+///
 /// Exported for the reason [`Shell`] is: what a test about the route tables has
 /// to mount is the gate the app really has, and [`App`] carries a query client
 /// of its own that outlives every render — a verdict cached by one test would
@@ -104,7 +110,7 @@ export function Gate(): JSX.Element {
   }));
 
   return (
-    <Show when={!onboarding.isPending}>
+    <Show when={!onboarding.isPending} fallback={<DragBar />}>
       <Show when={onboarding.data?.mode} fallback={<Verkstead />}>
         <Onboarding />
       </Show>
@@ -243,6 +249,13 @@ export function Moved(): JSX.Element {
   return <Navigate href={pathTo(params.id!, "code")} />;
 }
 
+/// One line of notice, and — inside the app — the bar that moves the window: a
+/// page holding nothing but a sentence has no pane head to be dragged by.
 function NoSuchPage(): JSX.Element {
-  return <Empty>No such page.</Empty>;
+  return (
+    <>
+      <DragBar />
+      <Empty>No such page.</Empty>
+    </>
+  );
 }
