@@ -833,7 +833,7 @@ describe("the process a compose page is composing under", () => {
     expect(showing("Process")).toBe("Develop");
   });
 
-  /// Two rows for now. A Process is offered only once its stage has landed, as
+  /// Three rows for now. A Process is offered only once its stage has landed, as
   /// an agent type is offered only once it can launch the real thing.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -843,7 +843,7 @@ describe("the process a compose page is composing under", () => {
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
     expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate"]);
   });
 
   /// The server applies its own reading to the Conversation it creates — no row
@@ -913,10 +913,8 @@ describe("the process a compose page is composing under", () => {
 /// Which of the role pickers stand in the row, and what the press waits on:
 /// the Process's to say, and `processes.ts`'s table to answer.
 ///
-/// The one-role shape is exercised over a Process nothing offers yet. Only
-/// Develop has landed, so it is reached the one way it can be — a body this
-/// device is holding, which is a word the wire carries and this build has a row
-/// for.
+/// The one-role shape is exercised over an Investigate, which the picker offers
+/// and this page can be moved to like any other landed Process.
 describe("the pickers a compose page's process draws", () => {
   beforeEach(() => localStorage.clear());
 
@@ -974,6 +972,7 @@ describe("the pickers a compose page's process draws", () => {
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
     expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+    expect(OFFERED).toContain("Investigate");
   });
 
   /// And the press waits on exactly those roles. Asked over a repo remembering
@@ -1239,8 +1238,8 @@ describe("the agent control on a compose page", () => {
 /// do, and that a pick through it is replayed onto the Implementation role of
 /// the Conversation a press creates.
 ///
-/// Asked over a Process nothing offers yet, which is the only way to ask it
-/// until Investigate lands: the device is holding one, the picker draws a chosen
+/// Asked over an Investigate, which is the one landed Process run under a single
+/// role: the device is holding one, the picker draws a chosen
 /// Process it cannot offer, and the shape is read off the table rather than off
 /// what has landed.
 describe("the agent dropdown on a compose page", () => {

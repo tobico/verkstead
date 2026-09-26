@@ -196,6 +196,20 @@ pub(crate) fn ready_to_wrap(implementation: Option<&PairingView>, review: &Picke
     runnable(implementation) && settled(review)
 }
 
+/// And the same with the review left out of it as well, which is what a Process
+/// run under the Implementation role alone waits on: an **Investigate**, whose
+/// composer draws the one **Agent** dropdown and no other picker.
+///
+/// The one role every Process uses and no Process can pick away — there is no
+/// work without something doing it — so this is [`runnable`] under the name of
+/// the question it answers. Said here beside the other two rather than called
+/// directly, because what a press asks and what the pane asks have to be the one
+/// reading: `unready_to_investigate` in [`crate::conversations`] is the other
+/// half of it.
+pub(crate) fn ready_to_investigate(implementation: Option<&PairingView>) -> bool {
+    runnable(implementation)
+}
+
 /// Whether the one role that can be picked away is settled: a Pairing something
 /// could be launched under, or the row that launches nothing.
 fn settled(picked: &PickedView) -> bool {

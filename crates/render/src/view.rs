@@ -125,8 +125,8 @@ pub struct SetView {
     /// chooser that has not turned up yet.
     pub proposal: Option<ProposalView>,
 
-    /// Whether this Set was asked while its Conversation is in Follow-up, which
-    /// is what puts the Nothing-else option in its closing section.
+    /// Which ending the Nothing-else option in this Set's closing section would
+    /// bring about, or `null` where there is no option to draw.
     ///
     /// The other control the viewer injects, and it arrives the same way the
     /// proposal does: with the Set, so the page never draws a closing section
@@ -134,9 +134,10 @@ pub struct SetView {
     ///
     /// A fact about the Conversation rather than about the Set, which is why it
     /// is decided here rather than read off the stored body. Nothing about what
-    /// was asked changes — an ordinary Set is what a follow-up's rounds are made
-    /// of — and a Set stored before any of this stays exactly as it was.
-    pub follow_up: bool,
+    /// was asked changes — an ordinary Set is what a follow-up's and an
+    /// investigation's rounds are both made of — and a Set stored before any of
+    /// this stays exactly as it was.
+    pub ending: Option<Ending>,
 
     /// The files the human put on this Set's Answers, oldest first — which is
     /// the order they were attached in, and the order the pills are drawn in.
@@ -295,6 +296,31 @@ pub enum Standing {
     LockedUnanswered(String),
 }
 
+/// What the human's Nothing-else mark on this Set would end, which is the whole
+/// of what the two states whose rounds carry the box differ over.
+///
+/// The box itself is the same box and the mark the same mark — see
+/// `store::nothing_else` — so what this is drawn on is the line *under* the box
+/// rather than a second control: a follow-up wraps the Conversation up and an
+/// investigation ends with nothing committed, and a page that said one where it
+/// meant the other would be promising a review nobody is going to read.
+///
+/// Not `store::Ending`, which is what became of writing one of them down. This
+/// is what the box on a Set nobody has answered yet would set in motion, and
+/// nothing reads it but the words beside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Ending {
+    /// A follow-up's round: the agent finishes it, the follow-up ends and the
+    /// Conversation wraps up.
+    FollowUp,
+
+    /// An investigation's: the agent finishes it, and the investigation ends
+    /// where it came from. Nothing is committed and no pull request is opened,
+    /// which is what makes it worth saying differently.
+    Investigation,
+}
+
 /// A Set's Response as the page needs it: the Answers, and when they were sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -309,7 +335,7 @@ pub struct Answered {
 ///
 /// `standing` is the caller's to decide — it comes from the store's settlement
 /// and the registry of held waits, neither of which is any of this crate's
-/// business. `follow_up` is the caller's for the same reason: it is where the
+/// business. `ending` is the caller's for the same reason: it is where the
 /// Conversation stands, which this crate never asks about, and `attachments` is
 /// the record of what was put on the Set's Answers, which is the same. Everything
 /// else on the way out is rendering, which is all of it.
@@ -318,7 +344,7 @@ pub fn set_view(
     conversation: i64,
     set: verkstead_schema::QuestionSet,
     standing: Standing,
-    follow_up: bool,
+    ending: Option<Ending>,
     attachments: Vec<crate::conversations::AttachmentView>,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
@@ -357,7 +383,7 @@ pub fn set_view(
         questions,
         standing,
         proposal,
-        follow_up,
+        ending,
         attachments,
     }
 }

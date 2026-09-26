@@ -1952,6 +1952,22 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
 export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
+ * What the human's Nothing-else mark on this Set would end, which is the whole
+ * of what the two states whose rounds carry the box differ over.
+ *
+ * The box itself is the same box and the mark the same mark — see
+ * `store::nothing_else` — so what this is drawn on is the line *under* the box
+ * rather than a second control: a follow-up wraps the Conversation up and an
+ * investigation ends with nothing committed, and a page that said one where it
+ * meant the other would be promising a review nobody is going to read.
+ *
+ * Not `store::Ending`, which is what became of writing one of them down. This
+ * is what the box on a Set nobody has answered yet would set in motion, and
+ * nothing reads it but the words beside it.
+ */
+export type Ending = "FollowUp" | "Investigation";
+
+/**
  * What one entry is, which decides what the field drawing it does with the row.
  *
  * Three rather than two, because a repository is the thing one of these fields
@@ -4194,8 +4210,8 @@ standing: Standing,
  */
 proposal: ProposalView | null, 
 /**
- * Whether this Set was asked while its Conversation is in Follow-up, which
- * is what puts the Nothing-else option in its closing section.
+ * Which ending the Nothing-else option in this Set's closing section would
+ * bring about, or `null` where there is no option to draw.
  *
  * The other control the viewer injects, and it arrives the same way the
  * proposal does: with the Set, so the page never draws a closing section
@@ -4203,10 +4219,11 @@ proposal: ProposalView | null,
  *
  * A fact about the Conversation rather than about the Set, which is why it
  * is decided here rather than read off the stored body. Nothing about what
- * was asked changes — an ordinary Set is what a follow-up's rounds are made
- * of — and a Set stored before any of this stays exactly as it was.
+ * was asked changes — an ordinary Set is what a follow-up's and an
+ * investigation's rounds are both made of — and a Set stored before any of
+ * this stays exactly as it was.
  */
-follow_up: boolean, 
+ending: Ending | null, 
 /**
  * The files the human put on this Set's Answers, oldest first — which is
  * the order they were attached in, and the order the pills are drawn in.

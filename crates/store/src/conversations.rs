@@ -916,10 +916,12 @@ pub enum Chosen {
 }
 
 /// What became of starting a Conversation's work — grilling it, or, on a
-/// **Tinker**, landing it in Follow-up.
+/// **Tinker**, landing it in Follow-up, or, on an **Investigate**, landing it in
+/// Investigating.
 ///
-/// One answer for both landings, because the two are the same record written
-/// with one word different: see [`start_grilling`] and [`start_tinkering`].
+/// One answer for all three landings, because they are the same record written
+/// with one word different: see [`start_grilling`], [`start_tinkering`] and
+/// [`start_investigating`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -3745,10 +3747,11 @@ impl<'a> From<&'a String> for Base<'a> {
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
 ///
-/// **Two landings, and which of them is the Conversation's Process's** — see
-/// [`start_tinkering`] below, which writes this same transaction and leaves the
-/// Conversation in Follow-up. Everything the server did against git before
-/// calling either is the same work, so the record of it is the same record.
+/// **Three landings, and which of them is the Conversation's Process's** — see
+/// [`start_tinkering`] and [`start_investigating`] below, which write this same
+/// transaction and leave the Conversation in Follow-up and in Investigating.
+/// Everything the server did against git before calling any of them is the same
+/// work, so the record of it is the same record.
 pub async fn start_grilling<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -3793,8 +3796,35 @@ pub async fn start_tinkering<'a>(
     .await
 }
 
-/// What the two of them do, which is the same thing but for where it leaves the
-/// Conversation.
+/// And the same start on an **Investigate** Conversation, which lands in
+/// Investigating.
+///
+/// The third landing of the one press, and written for [`start_tinkering`]'s
+/// reason: everything the server did against git before calling it is the same
+/// work, so the record of it is the same record. What differs is the state it
+/// comes out in — an investigation answers a question about the code rather
+/// than building anything, so there is neither a grilling nor a follow-up for it
+/// to land in — and the session the server starts once this has been written.
+pub async fn start_investigating<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::Investigating,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// What the three of them do, which is the same thing but for where it leaves
+/// the Conversation.
 ///
 /// `landing` is the whole of what the Process decides here. Everything else is
 /// written the same way whichever press asked, because it is the same work being

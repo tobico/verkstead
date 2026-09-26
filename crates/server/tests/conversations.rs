@@ -728,7 +728,21 @@ async fn a_draft_can_be_set_to_tinker() {
     assert_eq!(opened(&app, id).await.process, Process::Tinker);
 }
 
-/// The three whose stage has not landed are refused by a name of their own,
+/// And a draft can be set to Investigate, the third Process whose stage has
+/// landed.
+#[tokio::test]
+async fn a_draft_can_be_set_to_investigate() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(opened(&app, id).await.process, Process::Investigate);
+}
+
+/// The two whose stage has not landed are refused by a name of their own,
 /// rather than under the refusal about this Conversation: nothing the human does
 /// here makes one of them pickable, and what they are waiting on is Verkstead.
 ///
@@ -740,11 +754,7 @@ async fn a_process_whose_stage_has_not_landed_is_refused_by_name() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    for process in [
-        Process::Investigate,
-        Process::Review,
-        Process::FixMergeIssues,
-    ] {
+    for process in [Process::Review, Process::FixMergeIssues] {
         assert_eq!(
             pick_process(&app, id, process).await,
             ProcessPicked::NotLanded,
@@ -1884,6 +1894,180 @@ async fn starting_a_tinker_checks_its_companions_out_too() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.companions.len(), 1);
+
+    let worktree = view.companions[0]
+        .worktree
+        .as_ref()
+        .expect("a companion is checked out when the Conversation's own is");
+    assert!(!worktree.missing);
+    assert!(PathBuf::from(&worktree.path).join("README.md").is_file());
+}
+
+/// A drafting Conversation ready to be investigated: the Process picked, the one
+/// role it is run under answered, and a Brief to find out about.
+///
+/// No Grilling Pairing and no Review Pairing: an Investigate draws neither
+/// picker, so neither is ever chosen on one.
+async fn investigate(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
+    let id = started(app, repo_id).await;
+
+    assert_eq!(
+        pick_process(app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+
+    let implementation = profile(app, elsewhere, "opus").await;
+    choose(app, id, "implementation", implementation).await;
+
+    assert_eq!(
+        write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    id
+}
+
+/// An Investigate waits on a brief and on the one role it is run under, and on
+/// nothing else — the same reading on the button and under the press.
+///
+/// Neither the Grilling picker nor the Review one is drawn for one, so an
+/// Investigate that waited on either would be a Start nothing on the page could
+/// ever satisfy.
+#[tokio::test]
+async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoImplementationProfile,
+        "the role the session runs under is the only one asked about",
+    );
+    assert!(!opened(&app, id).await.ready_to_grill);
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, elsewhere.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::EmptyBrief,
+        "and with it answered what is left is the Brief: no grilling and no \
+         review is ever waited on",
+    );
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "which the button waits on too",
+    );
+
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    assert!(
+        opened(&app, id).await.ready_to_grill,
+        "one role and a brief is the whole of what an Investigate waits on, \
+         with the two pickers nobody drew never among them",
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And the press does the grill start's own sequence, landing Investigating: the
+/// branch, the worktree, the frozen Brief and the move on the Timeline, with
+/// neither a grilling nor a follow-up anywhere in it.
+#[tokio::test]
+async fn starting_an_investigate_lands_it_in_investigating() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = investigate(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Investigating],
+        "one move, straight past the state a Develop would have been grilled in",
+    );
+
+    assert_eq!(
+        git(
+            &repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", view.branch)
+            ]
+        )
+        .trim()
+        .len(),
+        40,
+        "the branch is cut exactly as a grill start cuts one",
+    );
+
+    let worktree = view
+        .worktree
+        .expect("an investigation is worked in a Worktree: it writes probes and runs them");
+    let path = PathBuf::from(&worktree.path);
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert!(
+        worktrees(&repo).contains(&path.canonicalize().unwrap()),
+        "and git has it registered: {:?}",
+        worktrees(&repo),
+    );
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+        "checked out on the branch the work is on",
+    );
+
+    assert!(
+        view.base_commit.is_some(),
+        "with what it branched from settled, which is the rule resolving",
+    );
+
+    // And everything the press freezes is frozen: the Brief, the Pairing and the
+    // Process, exactly as they are for a grilling that has started.
+    assert_eq!(
+        write_brief(&app, id, "# Something else\n").await,
+        BriefSaved::NotDrafting
+    );
+    assert_eq!(
+        pick_process(&app, id, Process::Develop).await,
+        ProcessPicked::NotDrafting
+    );
+}
+
+/// An Investigate checks its companions out as a grill start does, every one of
+/// them on a branch of its own — an investigation may have to run something in
+/// one to answer the question.
+#[tokio::test]
+async fn starting_an_investigate_checks_its_companions_out_too() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+
+    let id = investigate(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Investigating);
     assert_eq!(view.companions.len(), 1);
 
     let worktree = view.companions[0]

@@ -17,7 +17,7 @@ import type { Process } from "../api/types";
 
 /// What each Process is called on the page.
 ///
-/// All five, including the four nothing offers yet: the wire carries every one
+/// All five, including the two nothing offers yet: the wire carries every one
 /// of them, so a record naming one this viewer refused to word would be a pane
 /// with a hole in it.
 export const PROCESS: Record<Process, string> = {
@@ -37,9 +37,9 @@ export const PROCESS: Record<Process, string> = {
 /// is offered in the first place. A stage that brings a Process to life adds to
 /// both, and each of them is written knowing the other is there.
 ///
-/// Two rows for now. A Process is offered only once its stage has landed, as an
+/// Three rows for now. A Process is offered only once its stage has landed, as an
 /// agent type is offered only once it can launch the real thing.
-export const OFFERED: Process[] = ["Develop", "Tinker"];
+export const OFFERED: Process[] = ["Develop", "Tinker", "Investigate"];
 
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside

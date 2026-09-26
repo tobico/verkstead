@@ -4812,7 +4812,7 @@ describe("a conversation's process", () => {
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// Two rows for now, and that list is the one place a later stage adds to: a
+  /// Three rows for now, and that list is the one place a later stage adds to: a
   /// Process is offered only once its stage has landed.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -4820,7 +4820,7 @@ describe("a conversation's process", () => {
     await theProcess();
 
     expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate"]);
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there
@@ -5995,11 +5995,10 @@ describe("the pickers a conversation's process draws", () => {
     expect(OFFERED).toContain("Tinker");
   });
 
-  /// A Process nothing offers yet, which the wire carries all the same: one
-  /// role, so one picker — and one picker is the control drawn as the picker
-  /// itself, which the describe below is about. Nothing here has landed to pick
-  /// it: the record is read as one, which is what the two lists in
-  /// `processes.ts` are for.
+  /// And one under an Investigate: one role, so one picker — and one picker is
+  /// the control drawn as the picker itself, which the describe below is about.
+  /// Neither a Grilling picker nor a Review one is drawn, so there is nothing
+  /// here to pick a review away on and nothing for the press to wait for.
   it("draws one picker under a process that uses one role", async () => {
     theWorkbenchWith({ process: "Investigate" });
     mount(`/conversations/${OPEN.id}`);
@@ -6010,6 +6009,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(screen.queryByLabelText("Review")).toBeNull();
 
     expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+    expect(OFFERED).toContain("Investigate");
   });
 });
 
@@ -6018,10 +6018,9 @@ describe("the pickers a conversation's process draws", () => {
 /// standing in the row where the trigger would have stood, with no trigger over
 /// it and no panel behind it.
 ///
-/// Asked over a Process nothing offers yet, which is the only way to ask it
-/// until Investigate lands: the wire carries all five, the picker draws a chosen
-/// Process it cannot offer, and the shape is read off the table rather than off
-/// what has landed.
+/// Asked over an Investigate, which is the one landed Process run under a single
+/// role — and the shape is read off the table rather than off the count of
+/// pickers a page happened to draw.
 describe("the agent dropdown on a conversation", () => {
   /// The record under a one-role Process, on the account the fixture implements
   /// under.
@@ -7008,9 +7007,8 @@ describe("starting the work", () => {
     );
   });
 
-  /// And a Process with one role says one, which is asked over a Process
-  /// nothing offers yet: the wire carries all five, and the words are counted
-  /// off the table rather than off what has landed.
+  /// And a Process with one role says one, which is an Investigate: the words
+  /// are counted off the table rather than written into the sentence.
   it("names one role where the process has one", async () => {
     theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);

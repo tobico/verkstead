@@ -5,7 +5,7 @@
     "conversation": 1,
     "diagrams": false,
     "diff": [],
-    "ending": "FollowUp",
+    "ending": "Investigation",
     "id": 1,
     "postscript_html": "<p>Both are pushed as separate commits, so the second can go on its own.</p>\n",
     "preface_html": "<p>The header is in and pushed. Two things I could not settle from the code.</p>\n",

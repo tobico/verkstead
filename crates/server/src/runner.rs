@@ -2293,11 +2293,22 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 /// Worktree is writable all the same, because finding things out means writing
 /// probes and running them.
 ///
+/// **A session that is gone is a stop**, which is the follow-up's rule and the
+/// responding rule under it: no other session is ever sent to finish somebody
+/// else's, so what this one had got to and what it made of the last answer are
+/// beyond asking. The Notice says what happened and any question it left the
+/// human holding goes off with it.
+///
+/// **And so is one that will not ask.** A session that goes idle without a Set
+/// open leaves the human holding a Conversation they can neither answer nor end,
+/// so it is spoken to, and the human told where it will not answer. The session
+/// is left running for them to move.
+///
 /// **What ends it is the human saying there is nothing else**, which lands the
 /// Conversation where this Investigating came from — the ending is not written
-/// yet. Until it is, a session that goes is a Conversation nothing is driving,
-/// which the stall sweep raises in the words [`crate::stalls::driving`] keeps
-/// for this state.
+/// yet. Until it is, a signal the human's mark bears out ends the session and
+/// leaves the Conversation in Investigating for the stall sweep to raise, in the
+/// words [`crate::stalls::driving`] keeps for this state.
 pub(crate) async fn investigating(
     state: AppState,
     conversation_id: i64,
@@ -2325,21 +2336,106 @@ pub(crate) async fn investigating(
     };
 
     let event_id = session.event_id;
+    let idle = session.idle.clone();
+    let pace = state.sessions.pace();
 
-    // Held until the session is over, which is the whole of what this driver
-    // is: an investigation is one session having a conversation, and the
-    // Conversation is being driven for exactly as long as it is there.
-    let _driving = driving;
-
-    let ended = session.ended().await;
-
-    tracing::info!(
+    // The signal is checked against the human's mark and nothing on the branch,
+    // an investigation committing nothing by instruction — see
+    // [`crate::done::Evidence::NothingElse`], whose reading this shares until the
+    // ending gives an investigation one of its own.
+    let expecting = state.signals.expecting(
         conversation_id,
         event_id,
-        on_purpose = ended.on_purpose(),
-        "the investigating session is over",
+        crate::done::Evidence::NothingElse,
+        crate::done::Ends::WithItsWork,
     );
+    let signal = expecting.signal();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // The session is still there and saying nothing, with nothing put to
+        // the human. Spoken to, and the human told where it will not answer —
+        // see [`crate::rescues`].
+        never = crate::rescues::watched(
+            &state,
+            conversation_id,
+            event_id,
+            &idle,
+            pace,
+            signal,
+            "finding out what was asked",
+        ) => match never {},
+    };
+
+    drop(expecting);
+
+    // Held until whatever this writes is written, which is what every driver
+    // here holds it for: dropping first would leave a moment where a sweep could
+    // find the Conversation undriven and stop it with a worse sentence.
+    let _driving = driving;
+
+    let Some(ended) = ended else {
+        // The human has said there is nothing else and the session has finished
+        // its round. Where the Conversation goes from here is the ending, which
+        // is not written yet: the session is ended, and what is left is a
+        // Conversation in Investigating with nothing driving it for the sweep to
+        // raise.
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the investigating session signalled and its round is over",
+        );
+
+        state.sessions.end(conversation_id).await;
+        return;
+    };
+
+    // Verkstead ended it — the human closed the Conversation or force-stopped
+    // it, or the account it was spending ran out of window. Each has already
+    // written the stop this would otherwise write. See
+    // [`crate::sessions::Ended::on_purpose`].
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the investigating session was stopped from outside, so nothing is said about it",
+        );
+        return;
+    }
+
+    // And anything it left the human holding goes off as the stop is raised. The
+    // session that asked is gone and no other is ever handed somebody else's
+    // ask, so a Set left standing would keep the card blocked on you over a
+    // question nobody is behind. See [`crate::responding`], whose rule this is.
+    left_open(&state, conversation_id).await;
+
+    // How it ended, where the ending itself was the problem; otherwise the
+    // ending is the whole of it, a session that has finished with the
+    // investigation still standing being exactly as gone as one that fell over.
+    let how = match ended.badly() {
+        Some(how) => format!("{how}, so {NOBODY_INVESTIGATING}"),
+        None => format!("the investigating session finished, so {NOBODY_INVESTIGATING}"),
+    };
+
+    stop(
+        &state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        "finding out what was asked",
+        &how,
+        Some(event_id),
+    )
+    .await;
 }
+
+/// What a stop over a gone investigating session says beyond how it went.
+///
+/// [`NOBODY_FOLLOWING_UP`]'s sentence with the one word that differs: what is
+/// left unfinished is the question rather than the follow-up, and there is
+/// nothing on the branch either way.
+const NOBODY_INVESTIGATING: &str = "nobody is left to find anything out or to ask you about it, and any question it had put to \
+     you has been closed unanswered";
 
 /// Whether the Conversation's own work is on a pull request, or `None` where the
 /// record would not say.

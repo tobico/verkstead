@@ -2282,6 +2282,87 @@ fn a_tinker_round(prompts: &Path) -> String {
     )
 }
 
+/// The same workbench with the same press, on a draft whose Process is
+/// **Investigate**: it lands in Investigating rather than Grilling, and the one
+/// session it starts is the investigating one.
+///
+/// One role rather than three — an investigation builds nothing, so neither a
+/// Grilling picker nor a Review one is drawn for it — and the Process picked
+/// before the Brief is written, which is the order the composer sends its fields
+/// in.
+async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_one_an_investigation_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Investigate }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// An investigating session: it writes down what it was primed with, then waits
+/// on the human, which is what an investigation spends its time doing.
+///
+/// Written to a file rather than printed, for [`a_tinker_round`]'s reason: what
+/// is being read is a whole prompt, and a terminal is eighty columns wide.
+fn an_investigating_round(prompts: &Path) -> String {
+    format!(
+        "SAYING='finding it out'\n\
+         printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
+/// And the same session leaving once the round it asked has been answered, which
+/// is the investigation a press of Resume picks up again.
+fn an_investigating_round_then_gone(prompts: &Path) -> String {
+    format!(
+        "SAYING='finding it out'\n\
+         printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         printf 'that is that, then\n'\n",
+        prompts = quoted(prompts),
+    )
+}
+
 /// The same over a repository `seed` has committed into before the Conversation
 /// is started — see [`Seeded`], which is where the moment is explained.
 ///
@@ -2681,8 +2762,16 @@ impl Bench {
         self.paired(id, &["implementation", "review"]).await;
     }
 
-    /// What both of those are: a Profile per role, paired with the first of the
-    /// models it lists.
+    /// And the one an **Investigate** settles, which is the whole of what its
+    /// card offers: an investigation builds nothing, so there is nothing to
+    /// review and no interview to run, and the Agent control is the one
+    /// Implementation picker.
+    async fn the_one_an_investigation_runs_under(&self, id: i64) {
+        self.paired(id, &["implementation"]).await;
+    }
+
+    /// What all three of those are: a Profile per role, paired with the first of
+    /// the models it lists.
     async fn paired(&self, id: i64, roles: &[&str]) {
         for role in roles {
             let role = *role;
@@ -23435,8 +23524,9 @@ async fn a_tinkers_round_commits_and_asks_on_a_branch_with_no_pull_request() {
 
     let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
 
-    assert!(
-        fixture.set(set).await.follow_up,
+    assert_eq!(
+        fixture.set(set).await.ending,
+        Some(verkstead_render::Ending::FollowUp),
         "and the round reaches the human as an ordinary Set carrying the \
          Nothing-else box, which is how they say the follow-up is over",
     );
@@ -23489,6 +23579,163 @@ async fn resume_tinkers_again_on_the_brief_and_the_rounds_answered() {
         relaunched.contains("# What I want to follow up on")
             && relaunched.contains("The API has none."),
         "on the Brief, which is what a Tinker's follow-up is about: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("What you have already asked, and what I said"),
+        "with what has already been said under it: {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
+        "which is the round it asked before it went: {relaunched:?}",
+    );
+}
+
+/// An **Investigate** starts where a Tinker does: the press cuts the branch and
+/// the Worktree and lands the Conversation in Investigating, with the
+/// investigating session running on the Brief.
+///
+/// One session and no interview, under the Implementation Pairing, inside the
+/// skill a steer into Investigating puts one in. What it is primed with is the
+/// Brief under *What I want found out* and nowhere else — nothing has been built,
+/// so there are no documents over it — with the naming instruction that rides
+/// every first session, the branch still carrying the name Verkstead invented.
+///
+/// And its round carries the **Nothing else** box, which is how the human says
+/// the investigation is over: the box is drawn off the state the Conversation is
+/// in rather than off anything in the Set — see the server's `ui` module.
+#[tokio::test]
+async fn an_investigate_starts_the_investigating_session_on_the_brief() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round(&written_to)).await;
+
+    // The session, once it is printing — and then the round it puts, which is
+    // what an investigation waits on the human with and what keeps the rescue and
+    // the sweep off it while this reads the record.
+    fixture.running().await;
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Investigating,
+        "the press landed it there rather than in a grilling or a follow-up",
+    );
+    assert!(
+        view.worktree.is_some_and(|worktree| !worktree.missing),
+        "with somewhere to work, cut as a grill start cuts one: an \
+         investigation writes probes and runs them",
+    );
+
+    assert_eq!(
+        fixture.set(set).await.ending,
+        Some(verkstead_render::Ending::Investigation),
+        "and the round reaches the human as an ordinary Set carrying the \
+         Nothing-else box, which is how they say the investigation is over",
+    );
+
+    let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one session, the investigating one: {started:?}",
+    );
+
+    let prompt = started[0];
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "run under the Implementation Pairing, an Investigate having no other: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("/verkstead/skills/investigating/SKILL.md"),
+        "inside the investigating skill, which is the one that keeps asking and \
+         commits nothing: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        "and in no other: an investigation is not a follow-up: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# What I want found out"),
+        "primed with the Brief as the question to act on: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("# The Brief this started from")
+            && !prompt.contains("# What the grilling settled"),
+        "and with no documents over it: nothing has been built, and nothing \
+         was grilled: {prompt:?}",
+    );
+    assert_eq!(
+        prompt.matches("The API has none.").count(),
+        1,
+        "so the Brief is read once, under the heading that says act on it: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# This branch has no name yet"),
+        "with the instruction every first session carries, the branch still \
+         being on the name Verkstead invented: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("pull request"),
+        "and with nothing promising one: an investigation never ends on one: \
+         {prompt:?}",
+    );
+}
+
+/// And an Investigate that loses its session is picked up again, on the Brief it
+/// is finding out about and the rounds it has already been through.
+///
+/// The relaunch a steered investigation gets, on a Conversation that was never
+/// steered: there is no Steer Event to read the question off, so the Brief is
+/// what the investigation is about and the move the start wrote is where its
+/// rounds begin. Without that reading an Investigate whose session died could be
+/// neither resumed nor swept up — a Conversation in Investigating that nothing
+/// could start anything for.
+#[tokio::test]
+async fn resume_investigates_again_on_the_brief_and_the_rounds_answered() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round_then_gone(&written_to)).await;
+
+    fixture.running().await;
+
+    // One round, answered without the mark: the human has more they want found
+    // out, and the session goes away before they get to ask for it.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture.stopped().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|_| {
+            let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+            let started = prompts(&written);
+
+            (started.len() > 1).then(|| started[1].to_owned())
+        })
+        .await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/investigating/SKILL.md"),
+        "the press starts the investigation again rather than anything else: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("# What I want found out") && relaunched.contains("The API has none."),
+        "on the Brief, which is what an Investigate's investigation is about: \
          {relaunched:?}",
     );
     assert!(

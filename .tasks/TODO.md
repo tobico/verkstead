@@ -22,7 +22,7 @@ Roadmap stage: [04: Investigate](docs/roadmaps/processes/04-investigate.md)
 ## Tasks
 
 - [x] 01: Investigating, the state and its skill — [details](01-the-state-and-the-skill.md)
-- [ ] 02: The Investigate start — [details](02-the-start.md)
+- [x] 02: The Investigate start — [details](02-the-start.md)
 - [ ] 03: The ending, over scratch and at Done — [details](03-the-ending.md)
 - [ ] 04: Steer into Investigating — [details](04-steer.md)
 - [ ] 05: Back where it came from — [details](05-back-where-it-came-from.md)

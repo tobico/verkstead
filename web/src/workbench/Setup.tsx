@@ -762,9 +762,9 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 /// about. What a pick *does* is the caller's, and so is everything said under
 /// it.
 ///
-/// One row for now. Which Processes it offers is [`OFFERED`]'s, and the server
-/// keeps the other list — a Process is offered only once its stage has landed,
-/// as an agent type is offered only once it can launch the real thing.
+/// Which Processes it offers is [`OFFERED`]'s, and the server keeps the other
+/// list — a Process is offered only once its stage has landed, as an agent type
+/// is offered only once it can launch the real thing.
 export function ProcessPicker(props: {
   chosen: Process;
   pick: (picked: Process) => void;

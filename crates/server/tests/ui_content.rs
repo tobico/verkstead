@@ -995,10 +995,10 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
 
 /// The Nothing-else option is drawn from where the Conversation stands rather
 /// than from anything in the Set, so what the payload has to carry is that
-/// standing — and it has to carry it on the Sets of a follow-up and on no
-/// others.
+/// standing — and which ending the mark would bring about with it, the two
+/// states whose rounds carry the box ending differently.
 #[tokio::test]
-async fn only_a_follow_ups_sets_say_the_closing_section_carries_the_option() {
+async fn only_a_follow_ups_and_an_investigations_sets_carry_the_option() {
     for state in [
         store::Lifecycle::Draft,
         store::Lifecycle::Grilling,
@@ -1011,22 +1011,32 @@ async fn only_a_follow_ups_sets_say_the_closing_section_carries_the_option() {
         store::set_state(&pool, ASKING_FROM, state).await.unwrap();
 
         let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
-        assert!(
-            !view.follow_up,
+        assert_eq!(
+            view.ending, None,
             "a Set asked from a Conversation in {state:?} carries no option"
         );
     }
 
-    let (_dir, pool, app) = fresh_app().await;
-    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
-        .await
-        .unwrap();
+    for (state, ending) in [
+        (
+            store::Lifecycle::FollowUp,
+            verkstead_render::Ending::FollowUp,
+        ),
+        (
+            store::Lifecycle::Investigating,
+            verkstead_render::Ending::Investigation,
+        ),
+    ] {
+        let (_dir, pool, app) = fresh_app().await;
+        store::set_state(&pool, ASKING_FROM, state).await.unwrap();
 
-    let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
-    assert!(
-        view.follow_up,
-        "and a follow-up's own round is the one that does"
-    );
+        let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
+        assert_eq!(
+            view.ending,
+            Some(ending),
+            "a round of {state:?} carries the option, worded for what it ends"
+        );
+    }
 }
 
 /// What the option is drawn from is the Conversation, so a Set stored before any
@@ -1043,7 +1053,7 @@ async fn nothing_about_the_option_reaches_the_stored_set() {
     let asked = full_grammar_set();
     let stored = put(&pool, &asked).await.unwrap();
     let (view, _) = fetch_set(&app, stored.id).await;
-    assert!(view.follow_up);
+    assert_eq!(view.ending, Some(verkstead_render::Ending::FollowUp));
 
     let body: (String,) = sqlx::query_as("SELECT body FROM question_sets WHERE id = ?")
         .bind(stored.id)
@@ -1745,17 +1755,27 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
     write("set-proposed.json", &pinned(&json));
 
-    // A round of a follow-up, which is the one kind whose closing section
-    // carries the Nothing-else option. An ordinary Set in every other respect:
-    // what puts the option there is the Conversation being in Follow-up while it
-    // is answered, which is why this one is asked from a steered Conversation
-    // rather than built differently.
+    // A round of a follow-up, which is one of the two kinds whose closing
+    // section carries the Nothing-else option. An ordinary Set in every other
+    // respect: what puts the option there is the Conversation being in Follow-up
+    // while it is answered, which is why this one is asked from a steered
+    // Conversation rather than built differently.
     let (_dir, pool, app) = fresh_app().await;
     store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
         .await
         .unwrap();
     let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
     write("set-following-up.json", &json);
+
+    // And a round of an investigation, which is the other: the same box over the
+    // other ending, so the page has both wordings to draw from the payload rather
+    // than one of them and a guess.
+    let (_dir, pool, app) = fresh_app().await;
+    store::set_state(&pool, ASKING_FROM, store::Lifecycle::Investigating)
+        .await
+        .unwrap();
+    let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
+    write("set-investigating.json", &json);
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
