@@ -153,13 +153,18 @@ function standingIn(
   return asked;
 }
 
-/// Whichever half of the section a test is about, over one query client: both
-/// halves draw the one reading, exactly as the page has them.
-function mounting(what: () => JSX.Element) {
-  const queries = new QueryClient({
+/// A query client of its own, which is what each mount gets unless a test hands
+/// one in — the pane opened twice over one cache being the case that wants it to
+/// survive between them.
+function client() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
 
+/// Whichever half of the section a test is about, over one query client: both
+/// halves draw the one reading, exactly as the page has them.
+function mounting(what: () => JSX.Element, queries = client()) {
   return render(() => (
     <QueryClientProvider client={queries}>{what()}</QueryClientProvider>
   ));
@@ -175,9 +180,9 @@ function mountCard(open = false) {
 }
 
 /// The controls in the details pane, and what its way back asked for.
-function mountPane() {
+function mountPane(queries?: QueryClient) {
   const back = vi.fn();
-  return { ...mounting(() => <DesktopPane back={back} />), back };
+  return { ...mounting(() => <DesktopPane back={back} />, queries), back };
 }
 
 /// The three positions of the radio, in the order they are drawn.
@@ -467,6 +472,42 @@ describe("Launch on Startup", () => {
 
     await screen.findByText("the entry could not be written");
     expect(box.checked).toBe(false);
+  });
+
+  /// And asked of the platform again every time the pane is opened, which is the
+  /// one reading here that something outside the app can change: a desktop's own
+  /// Startup Applications can untick Verkstead under a window that, now closing
+  /// it keeps the app running, may have been open for days. The reading is static
+  /// — read once and never again — so this is the one thing that asks twice.
+  it("asks the platform again when the pane is opened afresh", async () => {
+    const asked = standingIn();
+    const queries = client();
+
+    const first = mountPane(queries);
+    await screen.findByLabelText("Launch on Startup");
+    expect(asked.startup).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mountPane(queries);
+
+    await waitFor(() => expect(asked.startup).toHaveBeenCalledTimes(2));
+  });
+
+  /// And the settings are not, which is the other half of it: that file is only
+  /// ever written by this pane, so there is nothing to re-read.
+  it("does not re-read the settings when the pane is opened afresh", async () => {
+    const asked = standingIn();
+    const queries = client();
+
+    const first = mountPane(queries);
+    await screen.findByLabelText("Show tray icon");
+    expect(asked.settings).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mountPane(queries);
+
+    await screen.findByLabelText("Show tray icon");
+    expect(asked.settings).toHaveBeenCalledTimes(1);
   });
 
   /// Drawn on every platform, what differs between them being the registration
