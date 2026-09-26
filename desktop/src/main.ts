@@ -520,6 +520,7 @@ async function run(): Promise<void> {
       }
     },
     quit: () => app.quit(),
+    platform: machine.platform,
   };
 
   // **Launch on Startup**, which is the one setting on the Desktop page that is

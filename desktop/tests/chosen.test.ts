@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { type Chosen, label, MENU, viewing } from "../src/chosen.js";
+import { type Chosen, clicked, label, MENU, viewing } from "../src/chosen.js";
 import { keep, type Kept } from "../src/log.js";
 
 /// Everything a spy on the stream was handed, which is where a run with no log
@@ -42,6 +42,24 @@ describe("the menu", () => {
   /// the three things a page cannot do.
   it("leaves Launch on Startup to the page", () => {
     expect(MENU.map(label)).not.toContain("Launch on Startup");
+  });
+});
+
+describe("the icon's own click", () => {
+  /// The panels this was wired for: Electron emits the click on the
+  /// StatusNotifierItem activation and no two panels agree on what causes one,
+  /// so an icon answering nothing would look broken on the ones that send it.
+  it("is wired on the panels that have one", () => {
+    expect(clicked("linux")).toBe(true);
+    expect(clicked("win32")).toBe(true);
+  });
+
+  /// And on a Mac it is not: a menu bar item carrying a menu opens that menu on
+  /// every press *and* emits the click, so a wired one is the window coming
+  /// back because somebody looked at the menu. Open is on the menu, one row
+  /// down, and that row is the one that means it.
+  it("is the menu alone on a Mac", () => {
+    expect(clicked("darwin")).toBe(false);
   });
 });
 
