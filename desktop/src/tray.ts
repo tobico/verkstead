@@ -39,6 +39,7 @@ import { dialog, Menu, shell, Tray } from "electron";
 
 import { type Chosen, label, MENU, viewing } from "./chosen.js";
 import { type Kept, say } from "./log.js";
+import { hand, type Opening } from "./opening.js";
 
 /// What the tray needs, none of which it works out for itself.
 export interface Trayed {
@@ -49,6 +50,11 @@ export interface Trayed {
   /// is about. Held from the moment the log file was opened, because by the
   /// time somebody picks the item there is nothing left to ask.
   kept: Kept;
+
+  /// How this machine opens a file — [`opening`](./opening.js)'s answer, held
+  /// for the same reason `kept` is: **View Logs** is picked long after the
+  /// environment it was read out of was read.
+  by: Opening | undefined;
 
   /// Put the window back in front of the human.
   open: () => void;
@@ -91,7 +97,7 @@ export function raise(trayed: Trayed): void {
   // do — the menu being a value is what buys that.
   const acts: Record<Chosen, () => void> = {
     open: trayed.open,
-    logs: () => logs(trayed.kept),
+    logs: () => logs(trayed.kept, trayed.by),
     quit: trayed.quit,
   };
 
@@ -126,10 +132,14 @@ export function lower(): void {
 /// most likely to have the tray off is the one the tray misbehaved on. So the
 /// Desktop page's **View Logs** is this same call reached over the bridge —
 /// one action reached two ways rather than two actions that agree. It lives
-/// here rather than beside the bridge because opening a file and putting a
-/// dialog up are things only the edge can do, and this is the file that already
-/// does them.
-export function logs(kept: Kept): void {
+/// here rather than beside the bridge because putting a dialog up is a thing
+/// only the edge can do, and this is the file that already does it.
+///
+/// **`by` is how this machine opens a file** — [`opening`](./opening.js)'s
+/// answer, and `undefined` on the two platforms where that is `shell`'s own
+/// job. Handed in rather than asked for here, because it is a fact about the
+/// machine and this is a function of one.
+export function logs(kept: Kept, by: Opening | undefined): void {
   const act = viewing(kept);
 
   if (!("open" in act)) {
@@ -149,6 +159,15 @@ export function logs(kept: Kept): void {
   }
 
   say(`View Logs opens ${act.open}`);
+
+  // Ours to open where this machine has said so — on Linux, where `shell` is an
+  // `xdg-open` that would not follow this file's type and would hand the
+  // bundle's libraries to whatever it started. See [`opening`](./opening.js),
+  // which is the whole of that.
+  if (by !== undefined) {
+    hand(by, act.open, say);
+    return;
+  }
 
   // Handed over rather than waited on, the same reading the Rust app made of
   // it in `opener.rs`: what starts is somebody else's program, and a text editor
