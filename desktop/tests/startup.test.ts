@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../src/settings.js";
 import {
   APP_ID,
+  ARGS,
   autostartDir,
   HIDDEN,
   hidden,
@@ -59,25 +60,44 @@ const packed = (dir: string, over: Partial<Registering> = {}): Registering => ({
 /// every test about the file reads.
 const entryIn = (dir: string): string => join(dir, "autostart", `${APP_ID}.desktop`);
 
-/// Electron's login-item API, stood in for: what it was asked, and whatever it
-/// is to answer next.
-function loginItem(on = false): LoginItem & { asked: LoginAsked[] } {
+/// Whether two argument lists are the one list.
+const same = (one: string[], two: string[]): boolean =>
+  one.length === two.length && one.every((word, at) => word === two[at]);
+
+/// Electron's login-item API, stood in for: what it was asked, what it was read
+/// with, and whatever it is to answer next.
+///
+/// **It answers the way Windows does**, which is the whole of what it is for
+/// beyond recording: a registration there is a command line under the Run key,
+/// and `openAtLogin` is Electron comparing that line against the arguments it
+/// was *asked* about. So a read that named different ones from the write gets a
+/// `false` about a registration this app itself made — and that is a stub that
+/// can see it rather than one that answers its own writes whatever they said.
+function loginItem(
+  on = false,
+  args: string[] = [...ARGS],
+): LoginItem & { asked: LoginAsked[]; read: string[][] } {
   const asked: LoginAsked[] = [];
-  let registered = on;
+  const read: string[][] = [];
+  let registered: string[] | undefined = on ? args : undefined;
 
   return {
     asked,
-    registered: () => registered,
+    read,
+    registered: (wanted) => {
+      read.push(wanted);
+      return registered !== undefined && same(registered, wanted);
+    },
     register: (wanted) => {
       asked.push(wanted);
-      registered = wanted.openAtLogin;
+      registered = wanted.openAtLogin ? wanted.args : undefined;
     },
   };
 }
 
 /// One that is never called, for the arms that are a file rather than a call.
 const noLogin: LoginItem = {
-  registered: () => {
+  registered: (): boolean => {
     throw new Error("the Linux arm is a file, and asked the login-item API");
   },
   register: () => {
@@ -409,7 +429,7 @@ describe("the login-item arm", () => {
     const starts = startup(packed(dir, { platform: "darwin" }), login);
 
     expect(starts.set(true)).toEqual({ possible: true, on: true });
-    expect(login.asked).toEqual([{ openAtLogin: true, openAsHidden: true, args: [HIDDEN] }]);
+    expect(login.asked).toEqual([{ openAtLogin: true, args: [HIDDEN] }]);
 
     expect(starts.set(false).on).toBe(false);
     expect(login.asked[1]?.openAtLogin).toBe(false);
@@ -425,6 +445,23 @@ describe("the login-item arm", () => {
     const off = loginItem();
     startup(packed(dir, { platform: "win32" }), off).refresh();
     expect(off.asked).toHaveLength(0);
+  });
+
+  /// **The read carries the arguments the write sent**, which Electron needs of
+  /// it: `openAtLogin` there is a comparison against the arguments it is asked
+  /// about, defaulting to none, so a bare read answers `false` about a
+  /// registration this app has just made — a box that springs back the moment it
+  /// is ticked, on a machine that really will start Verkstead at the next login.
+  it("reads the box back with the arguments it was registered with", () => {
+    const login = loginItem();
+    const starts = startup(packed(dir, { platform: "win32" }), login);
+
+    expect(starts.set(true)).toEqual({ possible: true, on: true });
+
+    expect(login.read.length).toBeGreaterThan(0);
+    for (const wanted of login.read) {
+      expect(wanted).toEqual(login.asked[0]?.args);
+    }
   });
 
   /// And what the API refused is carried up to the page rather than thrown at
