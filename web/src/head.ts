@@ -149,15 +149,34 @@ function drawn(): { paper: string; ink: string } | undefined {
   return paper === undefined || ink === undefined ? undefined : { paper, ink };
 }
 
+/// The notations three channels can be read out of: `rgb()` and the `rgba()` a
+/// colour with an alpha is answered in, in either the comma'd spelling Chromium
+/// serializes today or the space-separated one. A computed `background-color` is
+/// one of these or it is a colour this cannot turn into `#rrggbb`.
+const RGB = /^rgba?\(/i;
+
 /// A resolved colour as the `#rrggbb` Electron parses, or nothing where it is not
 /// one.
 ///
-/// Three channels out of whatever notation the browser answered in — `rgb(250,
-/// 248, 245)` today, `rgb(250 248 245)` wherever it has been modernised — and
+/// Three channels out of the notation the browser answered in — `rgb(250, 248,
+/// 245)` today, `rgb(250 248 245)` wherever it has been modernised — and
 /// **nothing at all where the colour is transparent**: a page with no stylesheet
 /// behind it reports `rgba(0, 0, 0, 0)` for a background nobody set, and an
 /// overlay painted from that would be a black strip rather than a head.
+///
+/// **And nothing at all where the notation is not one of those two**, which is
+/// [`RGB`]'s whole job: three numbers pulled out of a string are only three
+/// channels if the string was saying channels. `oklch(0.97 0.01 80)` names the
+/// same near-white paper and its first three numbers make `#010000`, so a page
+/// served by a browser that had modernised its serialization further would push
+/// a near-black strip rather than push nothing — which is the one failure this
+/// cannot answer for, an overlay being paint on the window rather than a value
+/// somebody reads.
 function hex(colour: string): string | undefined {
+  if (!RGB.test(colour)) {
+    return undefined;
+  }
+
   const channels = colour.match(/[\d.]+/g)?.map(Number);
 
   if (channels === undefined || channels.length < 3) {
