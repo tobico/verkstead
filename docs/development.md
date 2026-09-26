@@ -117,6 +117,36 @@ still the app quitting. The sidecar's stdout and the app's own lines both go to
 `verkstead.log` under the **Log Directory**, which the app names on the terminal
 as it opens it and which both **View Logs** open.
 
+**And the window has no title bar of its own.** What stands at its top-right
+corner on Linux and Windows is the platform's own controls overlay, drawn on the
+paper the page's heads are drawn on with its symbols in their ink and as tall as
+the head beneath it: the page pushes those three values over the same preload
+bridge at load and at every flip of the machine's colour scheme, so going dark
+recolours the controls with no restart and the log says each push. A Mac has the
+traffic lights inset at its top-left instead and ignores the three values. What moves
+the window is any pane head — the sidebar's wordmark, a pane's own title row,
+the settings, the composer — with every button standing in one still pressing,
+and a double-click on one maximising. The frame pads whichever head is at an
+edge of the window clear of the controls, so nothing in a head ends up
+underneath them; and a page with no head at all — the setup wizard, the
+no-such-page, the moment before the onboarding verdict lands — draws a bare bar
+of the same height to be moved by. In a browser on this machine there is none of
+it: the drag regions are inert, the insets are nought, and there is no bridge
+for the colours to cross. CONTEXT.md's **Window Decorations** is the account of
+the whole of it.
+
+**On a Wayland session the overlay can be a close button alone, and that is
+Chromium rather than your desktop.** The pinned Electron picks Wayland by itself
+where the session says it is Wayland, and on a nested COSMIC 1.2.0 the overlay
+came out 32 px wide with nothing in it but close; the same app on the same
+session over Xwayland is 96 px and the usual three. COSMIC is refusing nothing —
+its toplevel carries all four window capabilities, and neither its own toolkit
+settings nor a GTK decoration layout moves it. So maximise is a double-click on
+any head, and minimise is the app's own to ask for: nothing COSMIC ships binds a
+key to one. The whole measurement is in
+[stage 05's brief](roadmaps/electron-desktop/05-linux-appimage.md), and what a
+packaged Linux app does about it is that stage's to settle.
+
 **The Desktop section at the top of the settings page is where those choices
 are made**, and it is drawn only inside the app: the page reaches the app over
 a preload bridge on the app's own window, so the same settings page in a
