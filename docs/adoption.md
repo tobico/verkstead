@@ -50,12 +50,12 @@ There are four ways in, and they are four different things rather than four
 spellings of one. **The flake and the NixOS module run the headless daemon**, on
 a machine that is always on and answering from wherever you are. **The AppImage
 is the same server started from an icon**, on the Linux desktop in front of you,
-with the viewer in your browser and a tray icon over it. **The dmg is that same
-app for a Mac**, with the icon in the menu bar instead. **The msi installs that
-same app on Windows**, into your own profile and without asking for
-administrator. Which one you want is which of those machines you were
-describing; two at once is two Verksteads, and the second to reach port 8422
-says so in a dialog and exits.
+with the workbench in the app's own window and a tray icon beside it. **The dmg
+is that same server for a Mac**, the viewer in your browser and the icon in the
+menu bar instead. **The msi installs that same app on Windows**, into your own
+profile and without asking for administrator. Which one you want is which of
+those machines you were describing; two at once is two Verksteads, and the
+second to reach port 8422 says so in a dialog and exits.
 
 ### The daemon, on NixOS
 
@@ -179,33 +179,35 @@ business: `services.tailscale.enable`, and a `tailscale up` in a terminal.
 
 ### The desktop app, on a Linux machine
 
-`Verkstead-x86_64.AppImage` is one file holding the server, the viewer and every
-library the tray is drawn over, so a machine with none of them installed needs
-nothing else to draw a tray icon. x86_64 only: an arm64 Linux desktop has the
-bare CLI and `verkstead serve`. Downloaded, made executable — a Release asset
-carries no mode — and run, it serves on `127.0.0.1:8422`, opens the viewer in the default
-browser, and puts an icon in the tray with the four things a browser tab cannot
-do for itself: **Open** brings the viewer back, **View Logs** opens the file the
-server's logging goes to when there is no terminal to print it in, **Launch on
-Startup** is a checkbox over the desktop's own startup registration, and
-**Exit** stops the server. `--no-open` starts it without the browser, and
-`--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
+`Verkstead-x86_64.AppImage` is one file holding the app, the server it starts
+and the viewer the two of them draw between them, with Electron's own browser
+runtime beside them — so a machine with none of that installed needs nothing
+else to put the workbench on the screen. x86_64 only: an arm64 Linux desktop has
+the bare CLI and `verkstead serve`. Downloaded, made executable — a Release
+asset carries no mode — and run, it starts the server on `127.0.0.1:8422`, opens
+the workbench in a window of its own, and puts an icon in the tray with the
+three things the window cannot do for itself: **Open** brings the window back,
+**View Logs** opens the file this run's logging goes to when there is no
+terminal to print it in, and **Quit** stops the app and the server with it.
 
-**The browser it opens is logged in.** Every page of the workbench answers 401
+**There is nothing to learn about starting it.** The app takes one flag,
+`--hidden`, and its own startup registration is what writes that rather than
+anybody typing it; what it reads instead is the server's own environment, so
+`VERKSTEAD_DATA_DIR` moves the Data Directory off `~/.local/share/verkstead`
+exactly as it does for a `verkstead serve` run by hand. Everything else about
+this machine is set rather than typed, on the **Desktop** section of the
+settings page: **Launch on Startup**, **When the window is closed** — keep
+running in the tray, ask first, or quit — and **Show tray icon**.
+
+**The window it opens is logged in.** Every page of the workbench answers 401
 without the **Workbench Key**, the secret Verkstead keeps in its Data Directory
-where no session can reach it — so what the app opens is the login link, the
-address with the key on the end of it. **Open** composes it afresh at every
-press, which is what to reach for when a browser has forgotten the cookie:
-there is no link to keep anywhere, and nothing to type. Started with
-`--no-open`, **Open** is the whole of it — the app's own startup line names the
-address and no key, because **View Logs** opens a file on your desk and a
-workbench key written into it would be a login for anybody reading over your
-shoulder. The journal a `verkstead serve` writes is the other case, and still
-carries the link: a host with no tray has nowhere else to be handed one. **And
-so does an app that finds no tray to raise** — over SSH, in a container, or
-where the desktop will not give it an icon: there is no **Open** to press
-there, so the link goes in the log rather than leaving you with a workbench and
-no way into it.
+where no session can reach it — and the app reads that file itself, before there
+is a server to ask one of, so the window comes up on the address with the key on
+the end of it. There is nothing to keep anywhere and nothing to type: **Open**
+is that same window brought forward rather than a login handed over again. The
+app's own startup line names the address and no key, because **View Logs** opens
+a file on your desk and a workbench key written into it would be a login for
+anybody reading over your shoulder.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
 access**: it reads what this machine's Tailscale is doing, a checkbox puts the
@@ -218,26 +220,48 @@ served by a process that is neither root nor the tailnet's operator, and an app
 has somebody at the machine to ask, so that press goes through `pkexec` rather
 than handing back a `sudo` line to type.
 
-**What is inside is the whole `verkstead`**, and the icon is one verb of it:
-the entry point in the file runs `verkstead desktop`, because a desktop
-launcher names a file and has nowhere to say a verb — which is also why the
-flags above are the app's rather than the CLI's. The same binary is what a
-session started here is handed to ask with, so the two halves of an ask are
-one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as amended) — and the
-libraries it was packed with go in beside it, so a session can run it on the
-machine this file was made for as surely as you can.
+**What is inside is the app and the released `verkstead` beside it**, rather
+than one binary whose entry point supplies a verb. The CLI sits in a directory
+of its own under the app's resources, and it is the very build a Release
+publishes — the statically linked binary the same run's CLI leg made, downloaded
+into the package rather than compiled a second time
+([ADR-0020](adr/0020-electron-desktop.md)). It is what a session started here is
+handed to ask with, so the two halves of an ask are one build; and because that
+binary is static, a session is handed the binary itself — no launcher in front
+of it, and none of the bundle's own libraries anywhere on its way.
 
-**A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
-GNOME is the case people meet — it draws no tray, and an AppIndicator extension
-is what gives it one. Verkstead cannot tell that from a tray that is drawing the
-icon, because the item registers on the bus either way, so there is no
-message it could honestly give you. What it does instead is what it does
-everywhere: serve, and open the viewer. The viewer is the whole interface — the
-tray holds those four items and nothing else — so what is lost is the icon
-rather than the app: the viewer is a URL you already have, the log file is in
-the platform's log directory, and stopping it is stopping the process. The
-extension is what gets the four back, and there is nothing to reinstall or
-reconfigure here once it is on.
+**The window has no title bar.** The workbench's own heads are the top of it,
+and what stands where a title bar would have been is your platform's window
+controls, inset at the top-right corner. Which of them are drawn is the
+platform's answer rather than ours, and on a Wayland desktop Chromium draws the
+close button alone — which is what a COSMIC session gets. So the gestures for
+the rest are the app's own: a double-click on any pane head maximises the window
+and a second one restores it, `Ctrl+M` puts it away, and closing it keeps
+Verkstead running in the tray, which is what **When the window is closed** says
+until you say otherwise. The menu bar is hidden and Alt is what brings it down,
+with that same **Minimize** under **Window** where a keystroke was not what you
+wanted.
+
+**A desktop with no tray host loses the icon and nothing else.** Vanilla GNOME
+is the case people meet — it draws no tray, and an AppIndicator extension is
+what gives it one. Verkstead cannot tell that from a tray that is drawing the
+icon, because the item registers on the bus either way, so there is no message
+it could honestly give you. What is lost is the icon rather than anything the
+icon was the only way to: the workbench is in the app's own window rather than
+in a browser tab to be found again, **View Logs** is on the **Desktop** section
+of the settings page as well as on the menu, and running the file again brings
+the window forward rather than starting a second Verkstead — which is the way
+back to a window that was closed. The extension is what gets the icon, and there
+is nothing to reinstall or reconfigure here once it is on.
+
+**And an app that started before the panel never gets one either.** A tray icon
+is registered with a watcher on the session bus, and Chromium registers once: a
+panel arriving afterwards — a desktop still coming up, a panel restarted — finds
+nothing to draw, and that run stays iconless however long it lasts. **Show tray
+icon**, turned off and then on again, is the way back: it takes that tray down
+and raises another, which registers with the watcher that is there now and puts
+the icon on the panel. Nothing else about the run is touched by the trip, which
+is what makes the switch a way back as well as a way out.
 
 **Three things stay the machine's**, and a bundle is the wrong place for any of
 them.
@@ -249,16 +273,22 @@ NixOS module puts it on the service's path; a desktop elsewhere wants the
 distribution's `bubblewrap` package installed.
 
 **The C library is the host's**, because a process holding two of them has two
-of everything a C library keeps. The bundle is built against glibc 2.35, which
-is the floor it runs on: Ubuntu 22.04, Debian 12 and anything newer will load
-it, and a distribution older than those — RHEL 9 and its family among them —
-will not, saying `GLIBC_2.35 not found` and nothing friendlier.
+of everything a C library keeps. Nothing in this file was compiled against your
+distribution and the CLI inside it is linked statically, so the floor is
+Electron's own rather than anything a build of ours chose: glibc 2.25, which the
+release leg reads back off the artifact instead of taking on trust. Ubuntu
+18.04, Debian 10 and RHEL 8 are all above it, so a distribution still taking
+updates will load it; one older than those says `GLIBC_2.25 not found` and
+nothing friendlier.
 
-**And FUSE, because an AppImage mounts itself.** It wants a `fusermount` on the
-`PATH` and a `/dev/fuse` to open; every desktop install has both, and a minimal
-or hardened one may not. Without them the file says so — "Cannot mount AppImage,
-please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
-it for a machine you cannot change.
+**And FUSE, because an AppImage mounts itself.** It wants a `/dev/fuse` to open
+and the `fusermount3` helper to open it with, and nothing else: the runtime
+packed into this file carries its own squashfuse, so there is no libfuse for
+anybody to install — the library current distributions stopped shipping is not
+one it asks for. Every desktop install has both; a minimal or hardened one may
+not, and without them the file says so — "Cannot mount AppImage, please check
+your FUSE setup" — with `--appimage-extract-and-run` the way past it for a
+machine you cannot change.
 
 **A session's account is a Built Root, not your account.** It is made fresh
 under `homes/<id>` in the Data Directory as each session starts, and bound at
@@ -297,11 +327,11 @@ Mac and on Windows.
 ### The desktop app, on a Mac
 
 `Verkstead-universal.dmg` holds `Verkstead.app`: the same server and the same
-viewer the AppImage carries, drawn over AppKit instead of GTK, and universal —
-the Apple silicon build and the Intel one are in the one executable, so there is
-one download and no architecture to choose between. macOS 11 is the oldest it
-will start on. Open the image and drag Verkstead into the Applications folder
-beside it in the window, which is the whole of the install.
+viewer, drawn over AppKit, and universal — the Apple silicon build and the Intel
+one are in the one executable, so there is one download and no architecture to
+choose between. macOS 11 is the oldest it will start on. Open the image and drag
+Verkstead into the Applications folder beside it in the window, which is the
+whole of the install.
 
 Inside the bundle is the whole `verkstead`, with a small launcher script beside
 it that supplies the `desktop` verb — a bundle names an executable and has
@@ -333,15 +363,15 @@ Replacing it with a newer download is a different copy and wants the same three
 steps again.
 
 What is on the screen after that is an icon in the menu bar, and the menu on it
-is the Linux tray's four: **Open** brings the viewer back, and heads the menu a
-click on the icon opens; **View Logs** opens the file under
-`~/Library/Logs/Verkstead` that the server's logging goes to when there is no
-terminal to print it in; **Launch on Startup** is a checkbox over a launch
-agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist`; and **Exit**
-stops the server. `--no-open` starts it without the browser and `--data-dir`
-moves the Data Directory off `~/Library/Application Support/Verkstead`, both of
-them for a run from a terminal — an app launched from Finder is launched with no
-arguments at all.
+is four items: **Open** brings the viewer back, and heads the menu a click on
+the icon opens; **View Logs** opens the file under `~/Library/Logs/Verkstead`
+that the server's logging goes to when there is no terminal to print it in;
+**Launch on Startup** is a checkbox over a launch agent at
+`~/Library/LaunchAgents/net.tobico.Verkstead.plist`; and **Exit** stops the
+server. `--no-open` starts it without the browser and `--data-dir` moves the
+Data Directory off `~/Library/Application Support/Verkstead`, both of them for a
+run from a terminal — an app launched from Finder is launched with no arguments
+at all.
 
 macOS keeps a **Login Items** list of its own beside that plist, in a database
 the file is not in, and the checkbox cannot see it: switching Verkstead off
@@ -552,8 +582,8 @@ a failure for not having been found, so it is also how a half-finished install
 is tidied up.
 
 What is on the screen once **Verkstead** is opened from the Start menu is an
-icon in the notification area, and the menu on it is the Linux tray's four:
-**Open** brings the viewer back, and is what a double-click on the icon does;
+icon in the notification area, and the menu on it is four items: **Open** brings
+the viewer back, and is what a double-click on the icon does;
 **View Logs** opens the file under `%LOCALAPPDATA%\Verkstead` that the server's
 logging goes to when there is no console to print it in; **Launch on Startup**
 is a checkbox over a `net.tobico.Verkstead` value under
