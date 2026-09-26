@@ -1393,6 +1393,23 @@ impl Devices {
         tokio::spawn(async move { devices.announce_renewal().await });
     }
 
+    /// Hold a Nudge stream to every member, announcing what comes down each on
+    /// `nudges` under the Device Id it came from (ADR-0020, *The opened device
+    /// relays*) — see [`crate::relaying::freshness`], which is the whole of it.
+    ///
+    /// **Here because the two things it is made of are here**: the membership it
+    /// works down, and the dial it makes at each member's addresses. `nudges` is
+    /// the one thing that is neither — it is what this device's own pages listen
+    /// on, and holding a member's stream is the only part of a cluster that has
+    /// anything to say to them.
+    ///
+    /// Never returns, and is spawned rather than waited on for the reason
+    /// [`Devices::announce_renewal`] is: the first thing it does is dial members
+    /// that may be switched off.
+    pub async fn stay_fresh(&self, nudges: crate::nudge::Nudges) {
+        crate::relaying::freshness::held(self.members.clone(), self.peers.clone(), nudges).await
+    }
+
     /// What an announcement of the renewal carries: this device as it answers
     /// anybody, and the fingerprint of the certificate it is changing to.
     ///

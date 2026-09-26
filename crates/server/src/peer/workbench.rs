@@ -31,6 +31,13 @@
 //! to have it* — the same distinction the Member Gate's own refusal is a
 //! `Forbidden` rather than a `Not Found` for.
 //!
+//! **And one endpoint in it answers a member differently from a browser**: the
+//! Nudge stream, which carries this device's own news over the link and that plus
+//! every member's to a browser — see [`crate::nudge::nudges`], and
+//! [`OverTheLink`], which is how it knows. The one exception to *one router of
+//! routes*, and a filter over what goes down a stream rather than a second route
+//! to keep.
+//!
 //! **And the agents' half is not here.** A session's Conversation-scoped API
 //! answers the loopback and the named pipe, which is all a session ever dials,
 //! and the health check is nobody's Conversation; the viewer's fallback is a
@@ -61,13 +68,33 @@ use crate::AppState;
 /// under it, and a path that merely begins with those letters is not.
 pub(crate) const KEPT_TO_ITSELF: [&str; 3] = ["/api/ui/remote", "/api/ui/devices", "/api/ui/push"];
 
+/// What says a request arrived over the Peer Listener rather than from this
+/// device's own browser, put beside every request this router answers.
+///
+/// **One endpoint reads it, and reads it to answer less**: the Nudge stream,
+/// which carries this device's own news over the link and that plus every
+/// member's to a browser — see [`crate::nudge::nudges`], which is where the
+/// reasoning is. Everything else in the namespace answers the same whoever
+/// asked, which is the whole point of mounting one router twice.
+///
+/// **An extension rather than the [`super::Caller`] already beside the
+/// request**, which would say the same thing wherever a real socket is
+/// involved: what is being asked is which *router* answered rather than what the
+/// handshake took, and a suite that stands this namespace up in process has no
+/// connection for a caller to be read off. A listener is a fact about the
+/// arrangement, and this is the arrangement saying so.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OverTheLink;
+
 /// The viewer's own namespace over this device's state: what a member reaches,
 /// once [`super::router`] has put the gate in front of it.
 ///
 /// The state is [`crate::standing`]'s, made once and shared with the workbench's
 /// own router — see this module's own documentation, and [`crate::Routers`].
 pub(crate) fn served(state: AppState) -> Router {
-    crate::ui::routes().with_state(state)
+    crate::ui::routes()
+        .with_state(state)
+        .layer(axum::Extension(OverTheLink))
 }
 
 /// And the three prefixes held back, over everything the gate admits.

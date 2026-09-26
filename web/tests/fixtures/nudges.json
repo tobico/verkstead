@@ -44,5 +44,8 @@
   },
   {
     "kind": "profiles"
+  },
+  {
+    "kind": "everything"
   }
 ]

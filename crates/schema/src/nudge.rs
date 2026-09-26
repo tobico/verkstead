@@ -8,6 +8,10 @@
 //! The kinds are the server's vocabulary for what moved, not the viewer's cache
 //! layout. Which queries a kind stands for is decided on the other side of the
 //! wire, in `nudge.ts`, so renaming a query key here is not a server change.
+//!
+//! And whose news it is rides beside the kind rather than in it — see [`Nudged`],
+//! which is what goes down a stream: the device the browser opened says a
+//! member's news is that member's, and its own is the frame it always was.
 
 use serde::{Deserialize, Serialize};
 
@@ -120,4 +124,73 @@ pub enum Nudge {
     /// vocabulary is the taxonomy of ADR-0009 rather than a list of today's
     /// callers, and a second device watching is what it is waiting for.
     Profiles,
+
+    /// Everything of one device's, which is the widest thing there is to say:
+    /// read back whatever of it is on screen.
+    ///
+    /// **What a Nudge stream that has just been taken up says.** The hub holds
+    /// one to each of its members, and a stream that has come back knows nothing
+    /// about what it missed — so what it announces under that device is *look at
+    /// all of it*, which is the reaction the browser's own stream makes of a
+    /// reconnect, aimed at one device's queries (ADR-0020, *The opened device
+    /// relays*). See [`Nudged`], which is what carries the device.
+    ///
+    /// **A kind of its own rather than one of every other kind said at once**,
+    /// because the kinds say what moved rather than what to read: a member whose
+    /// news was missed did not move its Discovered list, and a stream that said
+    /// so would be inventing news to buy an invalidation with.
+    ///
+    /// **And rather than nothing at all**, which is what an unrecognised kind
+    /// comes to: a page that read *everything* because one member came back
+    /// would throw away what it holds of this device and of every other member
+    /// with it, having missed nothing of either.
+    Everything,
+}
+
+/// One Nudge as it goes down a stream: what moved, and **whose news it is**.
+///
+/// A page reaches a member's Conversation through the device it opened
+/// (ADR-0020, *The opened device relays*), so the news of one has to arrive on
+/// that device's stream too: the hub holds a Nudge stream to each of its members
+/// and re-announces what comes down one under the Device Id it came from — see
+/// `relaying::freshness`. Which device a Nudge is about is what the viewer's
+/// table keys its invalidation by, ids being each device's own and colliding by
+/// construction.
+///
+/// **A local Nudge is the JSON it always was.** The device is flattened over
+/// [`Nudge`] and left out when there is none, so what an open page has been
+/// reading since ADR-0009 goes down the wire byte for byte — a kind, and a
+/// Conversation where the change belongs to one — and a member's carries one
+/// field more.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Nudged {
+    /// Which device the news is about: a member of this one's cluster, by its
+    /// Device Id — absent for this device's own, which is every Nudge a
+    /// workbench has ever sent about its own work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+
+    /// And what moved, which is the whole of what a Nudge says.
+    #[serde(flatten)]
+    pub moved: Nudge,
+}
+
+impl Nudged {
+    /// This device's own news, which is what every caller inside a workbench
+    /// announces.
+    pub fn here(moved: Nudge) -> Nudged {
+        Nudged {
+            device: None,
+            moved,
+        }
+    }
+
+    /// And a member's, re-announced under the device it was heard from.
+    pub fn of(device: &str, moved: Nudge) -> Nudged {
+        Nudged {
+            device: Some(device.to_owned()),
+            moved,
+        }
+    }
 }

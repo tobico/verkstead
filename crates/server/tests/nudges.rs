@@ -472,7 +472,7 @@ const SCOPED_TO: i64 = 7;
 ///
 /// One of each rather than one per file: this is a vocabulary rather than a set
 /// of payloads, and what a reader of it wants to see is the whole of it at once.
-const KINDS: [Nudge; 13] = [
+const KINDS: [Nudge; 14] = [
     Nudge::Transcript {
         conversation: SCOPED_TO,
     },
@@ -500,6 +500,7 @@ const KINDS: [Nudge; 13] = [
     Nudge::Devices,
     Nudge::Discovered,
     Nudge::Profiles,
+    Nudge::Everything,
 ];
 
 /// Where the golden fixtures are written, relative to this crate — the same
