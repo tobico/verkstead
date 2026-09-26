@@ -42,6 +42,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { utcStamp } from "../set/when";
 import { CheckMark, SAID } from "./Checks";
 import { IN_WORDS } from "./Merging";
@@ -80,6 +81,7 @@ export function PullRequest(props: {
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   /// What the press was refused with, and `null` while nothing has been.
   const [refused, setRefused] = createSignal<Resolved | null>(null);
@@ -90,11 +92,13 @@ export function PullRequest(props: {
   /// correction either way. The button goes with the state, so a press that
   /// landed takes its own row off the page.
   const resolving = useMutation(() => ({
-    mutationFn: (id: number) => resolveConflicts(id),
+    mutationFn: (id: number) => resolveConflicts(device(), id),
     onSuccess: (outcome: Resolved) => {
       setRefused(outcome === "Resolving" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
   }));
@@ -103,8 +107,14 @@ export function PullRequest(props: {
     // The event is in the key, as a commit's diff is: opening another
     // conversation's pull request is another query rather than this one showing
     // the wrong commits for a moment.
-    queryKey: ["pull-request", props.conversation.id, props.opened.id],
-    queryFn: () => loadPullRequest(props.conversation.id, props.opened.id),
+    queryKey: keyOf(
+      device(),
+      "pull-request",
+      props.conversation.id,
+      props.opened.id,
+    ),
+    queryFn: () =>
+      loadPullRequest(device(), props.conversation.id, props.opened.id),
 
     // Merged rather than frozen: a pull request is the one payload here that
     // somebody else is still writing, so an open pane has to follow commits

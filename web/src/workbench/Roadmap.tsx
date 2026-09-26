@@ -21,6 +21,7 @@ import { loadRoadmapPane } from "../api/client";
 import type { ConversationView, StageDocument } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Contents, navigation } from "../set/Contents";
 import type { Section } from "../set/outline";
 import { spied } from "../set/outline";
@@ -44,9 +45,11 @@ export function Roadmap(props: {
 
   back: () => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const opened = useReading(() => ({
-    queryKey: ["roadmap", props.conversation.id, props.name],
-    queryFn: () => loadRoadmapPane(props.conversation.id, props.name),
+    queryKey: keyOf(device(), "roadmap", props.conversation.id, props.name),
+    queryFn: () => loadRoadmapPane(device(), props.conversation.id, props.name),
 
     // Merged rather than frozen, for the backlog pane's reason: this is the
     // worktree as it stands, and a stage ticking itself off moves it while this

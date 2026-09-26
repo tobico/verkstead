@@ -46,6 +46,11 @@
 
 import { createSignal } from "solid-js";
 
+// Every call here names no device, and that is not an omission: the compose
+// page composes this device's own work. A Conversation of a member's is made
+// on the member, and what this replay is replaying is a page that had no
+// Conversation at all until a moment ago — see `reaching.ts`.
+
 import {
   addCompanion,
   adoptRoadmap,
@@ -362,7 +367,7 @@ export async function create(
   // stage is worked on its own slug, and the base went out with the start.
   if (held === null) {
     if (state.brief.trim() !== "") {
-      const outcome = await saveBrief(id, state.brief);
+      const outcome = await saveBrief(null, id, state.brief);
       said(
         outcome === "Saved",
         `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
@@ -377,7 +382,7 @@ export async function create(
   // card over it, so what is in the box is the human's and goes up above.
   if (held === null && pull === null) {
     if (state.branch !== "") {
-      const outcome = await renameBranch(id, state.branch);
+      const outcome = await renameBranch(null, id, state.branch);
       said(
         outcome === "Renamed",
         `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
@@ -385,7 +390,7 @@ export async function create(
     }
 
     if (state.base !== null) {
-      const outcome = await setBaseBranch(id, state.base);
+      const outcome = await setBaseBranch(null, id, state.base);
       said(
         outcome === "Recorded",
         `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
@@ -399,6 +404,7 @@ export async function create(
 
   if (state.grilling !== null) {
     const outcome = await chooseGrillingPairing(
+      null,
       id,
       pairing.role(state.grilling),
     );
@@ -410,6 +416,7 @@ export async function create(
 
   if (state.implementation !== null) {
     const outcome = await chooseImplementationPairing(
+      null,
       id,
       pairing.choice(state.implementation),
     );
@@ -420,7 +427,11 @@ export async function create(
   }
 
   if (state.review !== null) {
-    const outcome = await chooseReviewPairing(id, pairing.role(state.review));
+    const outcome = await chooseReviewPairing(
+      null,
+      id,
+      pairing.role(state.review),
+    );
     said(
       outcome === "Chosen",
       `The review profile could not be chosen: ${CHOICE_REFUSAL[outcome]}`,
@@ -447,7 +458,7 @@ export async function create(
 
   if (work && refused.length === 0) {
     if (held !== null) {
-      const outcome = await adoptRoadmap(id);
+      const outcome = await adoptRoadmap(null, id);
       said(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
@@ -456,13 +467,13 @@ export async function create(
       // The third kickoff, and the one that starts no session: the take-up puts
       // the Conversation on the pull request's head branch and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
-      const outcome = await takeUpPullRequest(id);
+      const outcome = await takeUpPullRequest(null, id);
       said(
         outcome === "TakenUp",
         `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
       );
     } else {
-      const outcome = await startGrilling(id);
+      const outcome = await startGrilling(null, id);
       said(
         outcome === "Started",
         `The work could not be started: ${grillRefusal(outcome)}`,
@@ -504,7 +515,7 @@ async function put(
   alongside: Alongside,
   said: (ok: boolean, sentence: string) => boolean,
 ): Promise<void> {
-  const added = await addCompanion(id, alongside.repo_id);
+  const added = await addCompanion(null, id, alongside.repo_id);
   if (
     !said(
       added === "Added",
@@ -518,6 +529,7 @@ async function put(
   // leaves, so only what the human moved is sent.
   if (alongside.mode !== "ReadOnly") {
     const outcome = await setCompanionMode(
+      null,
       id,
       alongside.repo_id,
       alongside.mode,
@@ -530,6 +542,7 @@ async function put(
 
   if (alongside.base !== RULE) {
     const outcome = await setCompanionBase(
+      null,
       id,
       alongside.repo_id,
       alongside.base,
@@ -544,6 +557,7 @@ async function put(
   // is checked out detached, so there is no branch of its own to name.
   if (alongside.mode === "ReadWrite" && alongside.branch !== "") {
     const outcome = await renameCompanionBranch(
+      null,
       id,
       alongside.repo_id,
       alongside.branch,

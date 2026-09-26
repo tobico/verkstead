@@ -52,6 +52,7 @@ import {
   DIRECTIONS,
 } from "../directions";
 import { ErrorLine, Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
@@ -176,9 +177,11 @@ export function Answering(props: {
     );
 
   const queries = useQueryClient();
+  const device = useDevice();
 
   const submit = useMutation(() => ({
-    mutationFn: (sending: Decided) => submitResponse(props.id, sending),
+    mutationFn: (sending: Decided) =>
+      submitResponse(device(), props.id, sending),
     onSuccess: (outcome: Submitted) => {
       if (typeof outcome !== "string") {
         // Rejected by the grammar. The page builds Responses that resolve the
@@ -900,6 +903,7 @@ function putting(what: {
   attached: () => AttachmentView[];
 }): Putting {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [landing, setLanding] = createSignal<Array<Landing>>([]);
   const [refusals, setRefusals] = createSignal<Array<Said>>([]);
@@ -924,7 +928,7 @@ function putting(what: {
       const key = (keys += 1);
       setLanding((held) => [...held, { key, label, name: file.name }]);
 
-      void attachToAnswer(what.set(), label, file)
+      void attachToAnswer(device(), what.set(), label, file)
         .then(async (outcome: AnswerAttached) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
@@ -942,7 +946,9 @@ function putting(what: {
           // `finally` below and the pill that replaces it is the one this read
           // brings back: firing the read and carrying straight on would be the
           // file blinking out of the row and back into it.
-          await queries.invalidateQueries({ queryKey: ["set"] });
+          await queries.invalidateQueries({
+            queryKey: keyOf(device(), "set"),
+          });
         })
         .catch((error: unknown) => {
           setRefusals((said) => [
@@ -966,7 +972,7 @@ function putting(what: {
     const label = attachment.label ?? "";
     setRemoving((was) => [...was, attachment.id]);
 
-    void removeAnswerAttachment(what.set(), attachment.id)
+    void removeAnswerAttachment(device(), what.set(), attachment.id)
       .then((outcome: AnswerAttachmentRemoved) => {
         setRefusedRemoval((said) => [
           ...said.filter((one) => one.label !== label),
@@ -978,7 +984,7 @@ function putting(what: {
         // Either way: what came back is about a Set this page read a moment
         // ago, so reading it again is both the correction and — where the pill
         // is simply gone — the whole of what there was to do.
-        void queries.invalidateQueries({ queryKey: ["set"] });
+        void queries.invalidateQueries({ queryKey: keyOf(device(), "set") });
       })
       .catch((error: unknown) =>
         setRefusedRemoval((said) => [

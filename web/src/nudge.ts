@@ -30,6 +30,15 @@
 //! `EventSource` and no worker, and the server being restarted — and they cover
 //! it at the moment the human looks, rather than ten seconds at a time.
 //!
+//! **And it is this device's stream.** A Conversation of a member's is read
+//! through this device (ADR-0020) and its news is the member's own, on a stream
+//! nobody here is holding yet — so a page opened on one reads fresh when it is
+//! opened and on coming back, and not yet on a Set answered over there. Holding
+//! one stream per member and re-announcing what comes down it locally is the
+//! stage after this. What follows that through is already here: every key below
+//! is built for a device, so a Nudge said to be a member's invalidates that
+//! member's queries and nothing of this device's.
+//!
 //! The one gap left is a stream that died silently on a page nobody touches: no
 //! reconnect, no return to visibility, and nothing to notice it. The keep-alive
 //! is what makes `EventSource` see most such deaths, and any focus change heals
@@ -38,6 +47,7 @@
 import type { QueryClient, QueryKey } from "@tanstack/solid-query";
 
 import type { Nudge } from "./api/types";
+import { keyOf, type Device } from "./reaching";
 
 /// The server's stream — see the `nudge` module on the other side of it.
 const STREAM = "/api/ui/nudges";
@@ -49,7 +59,11 @@ const RELAYED = "nudge";
 
 /// Every pane following the disk for itself, and which Conversation each of
 /// them is drawn on — see [`whenFilesMove`].
-const following = new Set<{ conversation: number; look: () => void }>();
+const following = new Set<{
+  device: Device;
+  conversation: number;
+  look: () => void;
+}>();
 
 /// Hear every `files` Nudge for one Conversation, for as long as the returned
 /// closer is not called.
@@ -76,10 +90,11 @@ const following = new Set<{ conversation: number; look: () => void }>();
 /// becoming visible again tell every subscriber, whichever Conversation it is
 /// on.
 export function whenFilesMove(
+  device: Device,
   conversation: number,
   look: () => void,
 ): () => void {
-  const listener = { conversation, look };
+  const listener = { device, conversation, look };
 
   following.add(listener);
 
@@ -91,11 +106,19 @@ export function whenFilesMove(
 /// Tell them: one Conversation's, or — where the page cannot say what moved —
 /// all of them.
 ///
+/// One Conversation is a device and an id together, ids being each device's own
+/// and colliding by construction (see `reaching.ts`): a member's Conversation 4
+/// moving is no news at all for this device's Conversation 4.
+///
 /// Over a copy, because what a subscriber does about the news is its own and
 /// may be to stop listening.
-function tell(conversation: number | null): void {
+function tell(moved: { device: Device; conversation: number } | null): void {
   for (const listener of [...following]) {
-    if (conversation === null || listener.conversation === conversation) {
+    if (
+      moved === null ||
+      (listener.device === moved.device &&
+        listener.conversation === moved.conversation)
+    ) {
       listener.look();
     }
   }
@@ -168,8 +191,14 @@ function overTheStream(queries: QueryClient): () => void {
 
     // Named, so that whatever else may one day come down this stream is not
     // mistaken for a Nudge by a page too old to know about it.
+    // This device's own, which is what `null` says: the stream is the one
+    // served here, and nothing on it is a member's news yet.
     opened.addEventListener("nudge", (event) =>
-      lookAgainAt(queries, whatMoved((event as MessageEvent<unknown>).data)),
+      lookAgainAt(
+        queries,
+        null,
+        whatMoved((event as MessageEvent<unknown>).data),
+      ),
     );
   };
 
@@ -221,8 +250,12 @@ function whatMoved(data: unknown): Nudge | null {
 }
 
 /// Read back what the Nudge was about, and nothing else.
-function lookAgainAt(queries: QueryClient, moved: Nudge | null): void {
-  const reading = moved && standsFor(moved);
+function lookAgainAt(
+  queries: QueryClient,
+  device: Device,
+  moved: Nudge | null,
+): void {
+  const reading = moved && standsFor(device, moved);
 
   if (!reading) {
     lookAgain(queries);
@@ -239,12 +272,17 @@ function lookAgainAt(queries: QueryClient, moved: Nudge | null): void {
   // following: the queries above are its tree's roots, and what it holds beside
   // them is a walk no key names — see [`whenFilesMove`].
   if (moved.kind === "files") {
-    tell(moved.conversation);
+    tell({ device, conversation: moved.conversation });
   }
 }
 
 /// Which queries a kind of Nudge is about, or `null` for a kind this page does
 /// not know — which is every kind a newer server has and this one does not.
+///
+/// Every key is built for the device the news is about — see `keyOf`, and the
+/// reasoning there: ids collide by construction, so a table naming bare ids
+/// would read a member's Set over this device's Conversation of the same
+/// number. A key of this device's own is the key it has always been.
 ///
 /// Prefixes, because that is how a query key matches: `["transcript", 4]` names
 /// every Transcript of Conversation 4 whichever session Event it belongs to,
@@ -255,7 +293,7 @@ function lookAgainAt(queries: QueryClient, moved: Nudge | null): void {
 /// A key named here that is frozen (`freshness: "static"`) is a no-op and is
 /// still named: this table says what a kind is *about*, and what a re-read costs
 /// is the query's own business (see `freshness.ts`).
-function standsFor(moved: Nudge): readonly QueryKey[] | null {
+function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
   switch (moved.kind) {
     // Lines on a Transcript, and nothing else — this is the kind that arrives
     // twice a second while a session talks, so it is the one whose narrowness
@@ -263,16 +301,16 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // under `conversation`, announced separately by the half of the write that
     // moves it.
     case "transcript":
-      return [["transcript", moved.conversation]];
+      return [keyOf(device, "transcript", moved.conversation)];
 
     // A session printed: the Capture is what it printed, the Screen is the
     // terminal at the other end of it, and the same write moves the line the
     // Timeline row reads.
     case "screen":
       return [
-        ["capture", moved.conversation],
-        ["screen", moved.conversation],
-        ["conversation", String(moved.conversation)],
+        keyOf(device, "capture", moved.conversation),
+        keyOf(device, "screen", moved.conversation),
+        keyOf(device, "conversation", String(moved.conversation)),
       ];
 
     // A commit landed: a new Event on the Timeline, its diff, and the pull
@@ -286,10 +324,10 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // mark has changed (ADR 0019, *The tree*).
     case "commit":
       return [
-        ["commit", moved.conversation],
-        ["pull-request", moved.conversation],
-        ["conversation", String(moved.conversation)],
-        ["file-status", moved.conversation],
+        keyOf(device, "commit", moved.conversation),
+        keyOf(device, "pull-request", moved.conversation),
+        keyOf(device, "conversation", String(moved.conversation)),
+        keyOf(device, "file-status", moved.conversation),
       ];
 
     // The Worktrees moved: something wrote, made, or took a file away, and the
@@ -311,8 +349,8 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // that happens to be open.
     case "files":
       return [
-        ["file-roots", moved.conversation],
-        ["file-status", moved.conversation],
+        keyOf(device, "file-roots", moved.conversation),
+        keyOf(device, "file-status", moved.conversation),
       ];
 
     // A Set arrived, was answered, or was closed: the Set itself, the Timeline
@@ -324,8 +362,8 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // drawn are one open document, so this is one read at most.
     case "set":
       return [
-        ["set"],
-        ["conversation", String(moved.conversation)],
+        keyOf(device, "set"),
+        keyOf(device, "conversation", String(moved.conversation)),
         ["conversations"],
       ];
 
@@ -333,20 +371,32 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // is a badge on a Set, and nobody is newly waiting on the human because of
     // it. This is the kind that used to be carried by the poll.
     case "liveness":
-      return [["set"], ["conversation", String(moved.conversation)]];
+      return [
+        keyOf(device, "set"),
+        keyOf(device, "conversation", String(moved.conversation)),
+      ];
 
     // The Conversation everywhere it is drawn, its sidebar row included: a
     // lifecycle that moved is a row that reads differently.
     case "conversation":
-      return [["conversation", String(moved.conversation)], ["conversations"]];
+      return [
+        keyOf(device, "conversation", String(moved.conversation)),
+        ["conversations"],
+      ];
 
+    // The sidebar's own list, which is this device's work whichever member's
+    // news arrived — the merged list is a later stage. Unkeyed for that reason,
+    // as it is in the three kinds above.
     case "conversations":
       return [["conversations"]];
 
     // The roadmaps nothing is driving are read off the Repos every time they
     // are drawn, so they move when the Repos do.
     case "repos":
-      return [["repos"], ["abandoned-roadmaps"]];
+      return [
+        keyOf(device, "repos"),
+        keyOf(device, "abandoned-roadmaps"),
+      ];
 
     // The joins in flight: one was asked of this device, or one it was holding
     // was settled or ran out.
@@ -377,7 +427,7 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
       return [["discovered"]];
 
     case "profiles":
-      return [["profiles"]];
+      return [keyOf(device, "profiles")];
 
     default:
       return null;

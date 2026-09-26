@@ -126,35 +126,20 @@ function Verkstead(): JSX.Element {
           record of which one is open rather than a document of its own — the
           same page draws both. */}
       <Route path="/" component={Workbench} />
-      {/* And each of that Conversation's details panes under it, so what is
-          open survives a reload and can be linked to. Nested rather than
-          written out as six routes of their own, because the workbench is
-          one page across all of them: a route the router swaps for another
-          takes its component down with it, and everything the middle pane was
-          holding — a Brief half typed into above all — would go every time a
-          card was pressed. A parent route stays up while the leaf under it
-          changes, and these leaves draw nothing: what they are is what the
-          path says, and the page reads that off the URL.
+      {conversationRoutes()}
+      {/* And the same Conversation on a member of this device's cluster, which
+          is that whole list again under one segment more (ADR-0020, *The opened
+          device relays*). A parent above a parent rather than a second list of
+          them: the device says which Verkstead the page is reading and the
+          leaves say which pane is open, and neither has anything to say about
+          the other — so the routes under it are the very routes above it, and a
+          pane added to one is added to both.
 
-          The `events/` segment keeps the ids apart from the panes named by a
-          word beside them — see `openings.ts`. */}
-      <Route path="/conversations/:id" component={Workbench}>
-        <Route path="/" />
-        <Route path="/events/:event" />
-        <Route path="/backlog" />
-        <Route path="/share" />
-        <Route path="/code" />
-        <Route path="/steer" />
-        <Route path="/roadmaps/:name" />
-      </Route>
-      {/* And where Code's pane stood while it was the Terminal pane, which is
-          a redirect rather than a page: a link somebody kept and a browser
-          that remembered the old path still land on the pane, under the same
-          Conversation. Outside the route above rather than another leaf of
-          it, because those leaves draw nothing — the page reads what is open
-          off the URL — so a redirect written as one of them would never be
-          rendered to do its redirecting. */}
-      <Route path="/conversations/:id/terminal" component={Moved} />
+          Local URLs keep their shape, which is why there are two branches here
+          rather than an optional segment on one: this device is where most of
+          the work is, and `/devices/…` in front of every path would say
+          nothing. */}
+      <Route path="/devices/:device">{conversationRoutes()}</Route>
       {/* And the composer before there is anything for it to be about: the
           same page, working what the device is holding rather than a record.
           A page of its own rather than a pane of the workbench, because there
@@ -183,6 +168,51 @@ function Verkstead(): JSX.Element {
       </Route>
       <Route path="*" component={NoSuchPage} />
     </Router>
+  );
+}
+
+/// The Conversation and each of its details panes, which is one page across all
+/// of them.
+///
+/// Nested rather than written out as six routes of their own, because a route
+/// the router swaps for another takes its component down with it, and everything
+/// the middle pane was holding — a Brief half typed into above all — would go
+/// every time a card was pressed. A parent route stays up while the leaf under
+/// it changes, and these leaves draw nothing: what they are is what the path
+/// says, and the page reads that off the URL.
+///
+/// The `events/` segment keeps the ids apart from the panes named by a word
+/// beside them — see `openings.ts`.
+///
+/// A function rather than a constant, and used twice: once at the root and once
+/// under a device. Written out a second time it would be a second opinion about
+/// which panes a Conversation has, and the pane added without a line added there
+/// would be the one a member's Conversation had not got.
+///
+/// Exported for that same reason: a test that mounts the workbench mounts these
+/// routes rather than a copy of them, so what it is asking about is the table
+/// the app really builds.
+export function conversationRoutes(): JSX.Element {
+  return (
+    <>
+      <Route path="/conversations/:id" component={Workbench}>
+        <Route path="/" />
+        <Route path="/events/:event" />
+        <Route path="/backlog" />
+        <Route path="/share" />
+        <Route path="/code" />
+        <Route path="/steer" />
+        <Route path="/roadmaps/:name" />
+      </Route>
+      {/* And where Code's pane stood while it was the Terminal pane, which is
+          a redirect rather than a page: a link somebody kept and a browser
+          that remembered the old path still land on the pane, under the same
+          Conversation. Outside the route above rather than another leaf of
+          it, because those leaves draw nothing — the page reads what is open
+          off the URL — so a redirect written as one of them would never be
+          rendered to do its redirecting. */}
+      <Route path="/conversations/:id/terminal" component={Moved} />
+    </>
   );
 }
 
@@ -240,7 +270,9 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
 export function Moved(): JSX.Element {
   const params = useParams();
 
-  return <Navigate href={pathTo(params.id!, "code")} />;
+  return (
+    <Navigate href={pathTo(params.id!, "code", params.device ?? null)} />
+  );
 }
 
 function NoSuchPage(): JSX.Element {

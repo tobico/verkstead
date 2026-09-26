@@ -55,6 +55,7 @@ import { toast } from "../Toasts";
 import { utcStamp } from "../set/when";
 import { PaneSticky } from "../Panes";
 import { Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { PaneHead } from "./PaneHead";
 import styles from "./Share.module.css";
 import { onAPullRequest } from "./Steer";
@@ -159,17 +160,20 @@ export function Share(props: {
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   /// What every press here leaves behind: a pane drawn against a conversation
   /// that has moved. A publish replaces where the share went, which is the half
   /// of this pane that is a drawing of the record.
   const reread = () => {
-    void queries.invalidateQueries({ queryKey: ["conversation"] });
+    void queries.invalidateQueries({
+      queryKey: keyOf(device(), "conversation"),
+    });
     void queries.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const publish = useMutation(() => ({
-    mutationFn: (id: number) => publishShare(id),
+    mutationFn: (id: number) => publishShare(device(), id),
     onSuccess: (outcome: SharePublished) => {
       toast(() => published(outcome));
       reread();
@@ -182,7 +186,7 @@ export function Share(props: {
   }));
 
   const comment = useMutation(() => ({
-    mutationFn: (id: number) => shareToPullRequests(id),
+    mutationFn: (id: number) => shareToPullRequests(device(), id),
     onSuccess: (outcome: ShareCommented) => {
       toast(() => commented(outcome));
       reread();
@@ -258,7 +262,7 @@ export function Share(props: {
             download the human has ever made. */}
         <a
           class={styles.download}
-          href={sharePath(props.conversation.id)}
+          href={sharePath(device(), props.conversation.id)}
           download=""
         >
           Download

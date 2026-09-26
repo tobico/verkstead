@@ -143,6 +143,7 @@ import { Truncated } from "../Truncated";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { Empty } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
@@ -420,9 +421,11 @@ export function Timeline(props: {
   // Agent run never boards one anyway — so this is a read for a card that
   // cannot be there. A list that has not been read says the account's name,
   // which is the answer that can never misattribute a run.
+  const device = useDevice();
+
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
     enabled: !props.readOnly,
     freshness: { reconcile: "id" },
   }));

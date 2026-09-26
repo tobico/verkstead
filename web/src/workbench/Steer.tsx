@@ -133,6 +133,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneSticky } from "../Panes";
 import * as pairing from "../pairing";
 import { Listbox } from "../picking";
+import { keyOf, useDevice } from "../reaching";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
@@ -460,9 +461,11 @@ function Companions(props: {
   keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat: a rebuilt row is a new element,
     // and a nudge landing while the human is filling one in would take what
@@ -754,6 +757,7 @@ export function Steer(props: {
   done: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   /// The targets this conversation can actually be sent to. Wrapping up is
   /// drawn out where the work is on no pull request: a target that would be
@@ -849,8 +853,8 @@ export function Steer(props: {
   // The profile list is read here rather than passed in, so the picker is whole
   // wherever the form is opened from — the setup pane does the same.
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
 
     // Merged by the id each row carries flat: a rebuilt `<option>` is a new
     // element in a `<select>` the human may have open, and a list re-read while
@@ -1089,7 +1093,8 @@ export function Steer(props: {
   );
 
   const saving = useMutation(() => ({
-    mutationFn: (form: SteerForm) => saveSteer(props.conversation.id, form),
+    mutationFn: (form: SteerForm) =>
+      saveSteer(device(), props.conversation.id, form),
     onSuccess: (outcome: SteerSaved, sent: SteerForm) => {
       if (outcome !== "Saved") {
         // What is on the screen stands: it is the only copy of it there is, and
@@ -1109,7 +1114,9 @@ export function Steer(props: {
       // would be the pane asking for the timeline over and over to redraw one
       // line that has not changed.
       if (moved) {
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
       }
     },
     // Whatever became of it, the form may have been typed into while it was in
@@ -1132,7 +1139,7 @@ export function Steer(props: {
     // has not been saved yet, and a press that asked the server to freeze what
     // it had would lose it. What the pane shows is what goes.
     mutationFn: () =>
-      steer(props.conversation.id, {
+      steer(device(), props.conversation.id, {
         target: going(),
         interrupt: ending(),
         // Sent only where the target runs something. A target nothing runs in
@@ -1158,7 +1165,9 @@ export function Steer(props: {
       // The page it was submitted from is out of date either way: the work has
       // moved, or the world had moved under the form. Reading it again is both
       // the correction and, where it was refused, the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
 
       // The pending steer went with the record it became, so there is nothing
@@ -1171,7 +1180,7 @@ export function Steer(props: {
       // A refused submit leaves the pending steer exactly where it was, so the
       // form stays open and says why. A pairing refused is a profile list this
       // pane read a moment ago, so that is re-read too.
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
       setRefused(outcome);
     },
   }));
@@ -1184,9 +1193,11 @@ export function Steer(props: {
   /// conversation it was written about is exactly where the press that opened
   /// it left the work.
   const cancelling = useMutation(() => ({
-    mutationFn: () => cancelSteer(props.conversation.id),
+    mutationFn: () => cancelSteer(device(), props.conversation.id),
     onSuccess: () => {
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
 
       // Either way there is no pending steer at this address: a conversation

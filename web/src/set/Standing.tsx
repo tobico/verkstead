@@ -19,6 +19,7 @@ import { Modal } from "../Modal";
 import { lockSet } from "../api/client";
 import type { Locked, Liveness } from "../api/types";
 import { ErrorLine, Note } from "../notices";
+import { useDevice } from "../reaching";
 import page from "./Sheet.module.css";
 import styles from "./Standing.module.css";
 import { clearDraft } from "./filling";
@@ -68,9 +69,10 @@ export function Standing(props: {
   let shut = (): void => {};
 
   const queries = useQueryClient();
+  const device = useDevice();
 
   const lock = useMutation(() => ({
-    mutationFn: () => lockSet(props.id),
+    mutationFn: () => lockSet(device(), props.id),
     onSuccess: (outcome: Locked) => {
       if (outcome !== "Closed") {
         return;

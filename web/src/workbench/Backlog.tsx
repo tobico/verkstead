@@ -35,6 +35,7 @@ import { loadBacklogPane } from "../api/client";
 import type { ConversationView, TaskDocument } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Contents, navigation } from "../set/Contents";
 import type { Section } from "../set/outline";
 import { spied } from "../set/outline";
@@ -51,9 +52,11 @@ export function Backlog(props: {
   conversation: ConversationView;
   back: () => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const opened = useReading(() => ({
-    queryKey: ["backlog", props.conversation.id],
-    queryFn: () => loadBacklogPane(props.conversation.id),
+    queryKey: keyOf(device(), "backlog", props.conversation.id),
+    queryFn: () => loadBacklogPane(device(), props.conversation.id),
 
     // Merged rather than frozen, unlike a commit's pane: a commit cannot change
     // and `.tasks/` is the worktree as it stands, so a session finishing a task

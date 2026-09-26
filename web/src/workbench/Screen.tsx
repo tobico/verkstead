@@ -27,6 +27,7 @@ import { loadScreen, screenSocket } from "../api/client";
 import type { AgentOutputEvent, ConversationView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Attached, Standing } from "./Attached";
 
 export function Screen(props: {
@@ -37,12 +38,15 @@ export function Screen(props: {
   /// Screen comes from — the socket or the fetch.
   const live = () => props.output.running;
 
+  const device = useDevice();
+
   const screen = useReading(() => ({
     // The Event is in the key for the reason it is in the Transcript's: opening
     // another session's Screen is another query rather than this one showing
     // the wrong session's grid for a moment.
-    queryKey: ["screen", props.conversation.id, props.output.id],
-    queryFn: () => loadScreen(props.conversation.id, props.output.id),
+    queryKey: keyOf(device(), "screen", props.conversation.id, props.output.id),
+    queryFn: () =>
+      loadScreen(device(), props.conversation.id, props.output.id),
     // A running session is watched instead. One request for the grid as the
     // store last had it would be a request for something a repaint is about to
     // replace.
@@ -65,7 +69,7 @@ export function Screen(props: {
       </Match>
       <Match when={live()}>
         <Attached
-          at={screenSocket(props.conversation.id, props.output.id)}
+          at={screenSocket(device(), props.conversation.id, props.output.id)}
           say={{
             waiting: "Waiting for this session's screen…",
             watching:
