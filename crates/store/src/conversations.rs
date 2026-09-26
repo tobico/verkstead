@@ -61,6 +61,9 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
 /// too, being somewhere the human puts a Conversation whose work is already
 /// pushed — and it leads back into the wrap-up it came off.
+/// [`Lifecycle::Investigating`] is beside it the same way: a question about the
+/// code being answered rather than a rung the work climbs, and it leads back to
+/// wherever it was entered from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The Brief is being written, and with it everything else about the
@@ -86,6 +89,21 @@ pub enum Lifecycle {
     /// where it leads back to is Wrapping.
     FollowUp,
 
+    /// A question about the code is being answered: one session reading,
+    /// writing and running whatever it needs to find things out, in rounds of
+    /// Question Sets, and committing none of it.
+    ///
+    /// Off the ladder the way [`Self::FollowUp`] is, and for the same reason —
+    /// nothing is being built here, so there is no rung below it and none
+    /// above. Two ways in, a Start on an **Investigate** draft and a steer from
+    /// anywhere, and where it leads back to is where it came from: Done for an
+    /// Investigate Conversation of its own, and the state it was steered from
+    /// for one steered into it — Done again where that state is one nothing
+    /// returns to.
+    ///
+    /// See ADR-0020.
+    Investigating,
+
     /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
     /// opens a second round with a Brief of its own — see
     /// [`steer_conversation`].
@@ -106,6 +124,7 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::FollowUp => "follow-up",
+            Self::Investigating => "investigating",
             Self::Done => "done",
             Self::Closed => "closed",
         }
@@ -127,6 +146,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "follow-up" => Self::FollowUp,
+            "investigating" => Self::Investigating,
             "done" => Self::Done,
             "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
@@ -897,10 +917,12 @@ pub enum Chosen {
 }
 
 /// What became of starting a Conversation's work — grilling it, or, on a
-/// **Tinker**, landing it in Follow-up.
+/// **Tinker**, landing it in Follow-up, or, on an **Investigate**, landing it in
+/// Investigating.
 ///
-/// One answer for both landings, because the two are the same record written
-/// with one word different: see [`start_grilling`] and [`start_tinkering`].
+/// One answer for all three landings, because they are the same record written
+/// with one word different: see [`start_grilling`], [`start_tinkering`] and
+/// [`start_investigating`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -1038,6 +1060,31 @@ pub enum Ending {
     /// closed out from under the session, or steered somewhere else while this
     /// was deciding.
     NotFollowingUp,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of ending an investigation, which is one move to wherever the
+/// investigation came from.
+///
+/// One variant for the landing rather than one apiece, which is where this parts
+/// from [`Ending`] beside it: a follow-up is reached two ways and so lands in one
+/// of two places, and an investigation goes back to the state it was steered out
+/// of — any state there is, and Done for one that was steered out of nowhere. So
+/// the landing is the caller's word rather than something read back off the
+/// outcome. See [`investigation_over`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Investigated {
+    /// Landed: the Conversation is in the state it was sent to and the move is
+    /// on its Timeline, with its Worktree left exactly as the investigation
+    /// left it.
+    Landed,
+
+    /// It is not investigating anything, so there is no investigation here to
+    /// end — closed out from under the session, or steered somewhere else while
+    /// this was deciding.
+    NotInvestigating,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -3726,10 +3773,11 @@ impl<'a> From<&'a String> for Base<'a> {
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
 ///
-/// **Two landings, and which of them is the Conversation's Process's** — see
-/// [`start_tinkering`] below, which writes this same transaction and leaves the
-/// Conversation in Follow-up. Everything the server did against git before
-/// calling either is the same work, so the record of it is the same record.
+/// **Three landings, and which of them is the Conversation's Process's** — see
+/// [`start_tinkering`] and [`start_investigating`] below, which write this same
+/// transaction and leave the Conversation in Follow-up and in Investigating.
+/// Everything the server did against git before calling any of them is the same
+/// work, so the record of it is the same record.
 pub async fn start_grilling<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -3774,8 +3822,35 @@ pub async fn start_tinkering<'a>(
     .await
 }
 
-/// What the two of them do, which is the same thing but for where it leaves the
-/// Conversation.
+/// And the same start on an **Investigate** Conversation, which lands in
+/// Investigating.
+///
+/// The third landing of the one press, and written for [`start_tinkering`]'s
+/// reason: everything the server did against git before calling it is the same
+/// work, so the record of it is the same record. What differs is the state it
+/// comes out in — an investigation answers a question about the code rather
+/// than building anything, so there is neither a grilling nor a follow-up for it
+/// to land in — and the session the server starts once this has been written.
+pub async fn start_investigating<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::Investigating,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// What the three of them do, which is the same thing but for where it leaves
+/// the Conversation.
 ///
 /// `landing` is the whole of what the Process decides here. Everything else is
 /// written the same way whichever press asked, because it is the same work being
@@ -4237,6 +4312,70 @@ async fn out_of_follow_up(
     })
 }
 
+/// End an investigation, because the human has said there is nothing else they
+/// want found out.
+///
+/// The move and the line on the Timeline are the whole of it. An investigation
+/// answers a question about the code and writes nothing down on the branch, so
+/// there is no pull request to carry anything to and nothing for a wrap-up to be
+/// about — and its Worktree stays as it is, whatever scratch the session left in
+/// it being the scratch every Set's Diff has already shown.
+///
+/// **`landing` is the whole of what the caller decides here**, the way it is for
+/// a start and for the two ways out of a follow-up — see [`follow_up_over`] and
+/// [`follow_up_done`], which share one move with the state as the word that
+/// differs.
+/// Where an investigation goes is where it came from: the state the steer that
+/// opened it found the Conversation in, or Done for one that no steer opened.
+/// Nothing here works that out, and nothing here is in a position to: it is a
+/// fact recorded beside the Steer Event — see [`super::SteerRecord::source`].
+///
+/// Refused for anything but Investigating, as every move here is refused outside
+/// the state it leaves: a Conversation closed or steered out from under the
+/// session is not one to finish.
+///
+/// No `pushed`, and **no settles put back to waiting on the way to Wrapping**,
+/// which is where this parts from a follow-up landing in one: an investigation
+/// commits nothing and pushes nothing, so it has given GitHub no new run to make
+/// up its mind about and the settle standing over the checks is still earned.
+///
+/// One transaction, as every move is: a Conversation that says it has moved
+/// always has the move on its Timeline to say when it got there.
+pub async fn investigation_over(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+) -> Result<Investigated> {
+    let mut tx = super::writing(pool, "ending an investigation").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Investigated::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Investigating {
+        return Ok(Investigated::NotInvestigating);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(landing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} out of investigating"))?;
+
+    moved(&mut tx, id, landing).await?;
+
+    tx.commit().await.context("ending an investigation")?;
+
+    Ok(Investigated::Landed)
+}
+
 /// Send a Done Conversation back to wrapping up, because the human pressed
 /// **Resolve conflicts** on a pull request that will not merge.
 ///
@@ -4376,6 +4515,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 /// the move on its Timeline to say when it got there, and one steered always has
 /// the human's own line above it.
 ///
+/// **And the state it was steered out of**, beside the Steer Event, in a table
+/// of its own: where the work went is the Event's, and where it came from would
+/// be nowhere the moment the state column is written over. Which is what an
+/// Investigating steered into reads at its ending to know where to go back to —
+/// see [`super::steers::came_from`], which is called before the move for that
+/// reason, and [`super::SteerRecord::source`], which is where it reads back.
+///
 /// **And the Pairing the human picked, where they picked one.** In the same
 /// transaction as the move, because it is the same act: steering re-settles what
 /// runs the work rather than picking for one session, and a Conversation that
@@ -4435,6 +4581,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         checkouts,
         said,
         recorded,
+        scratch,
     } = steer;
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
@@ -4469,6 +4616,14 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // just written it rather than looked up afterwards: two steers landing in
     // the same millisecond are told apart by their ids and by nothing else.
     let steered = landed.last_insert_rowid();
+
+    // And where the work came from, beside that Event. Before the move rather
+    // than after it, because what it writes down is the state column as the
+    // steer found it — see [`super::steers::came_from`], which selects it in the
+    // statement that records it. Where the work *went* is the Steer's own target;
+    // where it came from is nowhere else at all once the update below has run,
+    // and an Investigating steered into ends by going back to it.
+    super::steers::came_from(&mut tx, steered, id).await?;
 
     // And what came into the sandbox with it, directly under the human's own
     // line. The Steer says a person moved this; this says which repositories
@@ -4571,7 +4726,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // for the reason the Worktree above is — a Steer Event that said where the
     // work went without saying what was picked to run it would be half an
     // account of one press, and nothing could tell which half.
-    super::steers::record(&mut tx, steered, id, recorded, companions, opened).await?;
+    super::steers::record(&mut tx, steered, id, recorded, companions, opened, scratch).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -4778,6 +4933,16 @@ pub struct Steer<'a> {
     /// the same list — and a second copy on the submit would be two shapes to
     /// keep true about one press. See [`super::SteerRecord`].
     pub recorded: super::steers::Recorded<'a>,
+
+    /// And what each checkout already held uncommitted, read off the checkouts
+    /// as the submit lands rather than written by anybody.
+    ///
+    /// Empty on every steer but one into Investigating, which is the one target
+    /// whose ending has to put a Worktree back to what it found: an investigation
+    /// leaves its probes behind by instruction, and the only way to take those
+    /// away without taking away work that was already uncommitted is to have
+    /// written down which was which. See [`super::Scratch`].
+    pub scratch: &'a [super::Scratch<'a>],
 }
 
 /// A Pairing a steer settles: which of the roles, and both halves of the

@@ -341,6 +341,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             checkouts: &[],
             said: None,
             recorded: verkstead_store::Recorded::default(),
+            scratch: &[],
         },
     )
     .await
@@ -1691,6 +1692,7 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
                     model: "claude-opus-5",
                 }),
             },
+            scratch: &[],
         },
     )
     .await

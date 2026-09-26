@@ -20,6 +20,12 @@
 //! forgotten, and the Worktree and base commit the steer had to make written
 //! beside the move.
 //!
+//! And the state the steer found it in, beside the Steer Event: where the work
+//! went is the Event's own, and where it came from is nowhere at all the moment
+//! the state column is written over. An Investigating steered into goes back to
+//! it when the human says there is nothing else, so it is a fact somebody
+//! recorded rather than one read back off the Timeline afterwards.
+//!
 //! And the review a steer into Wrapping puts back to waiting, from whatever
 //! state it was steered: a steer is the human saying look at this again, so the
 //! wrap-up it lands in reads the branch rather than inheriting what the last one
@@ -36,11 +42,11 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, Adding, Base, CompanionMode, Deleting, Directing, Edited, Event, Joining, Lifecycle,
-    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Settling, Steer,
-    SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile, fix_attempts,
-    load_conversation, open_database, pick_direction, record_fix_attempt, register_repo,
-    save_brief, settle_naming, settle_wrap_up, start_conversation, start_grilling,
-    start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
+    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Scratch, Settling,
+    Steer, SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile,
+    fix_attempts, load_conversation, open_database, pick_direction, record_fix_attempt,
+    register_repo, save_brief, scratch, settle_naming, settle_wrap_up, start_conversation,
+    start_grilling, start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
 };
 
 /// The plainest steer there is: the move and nothing beside it.
@@ -63,6 +69,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         checkouts: &[],
         said: None,
         recorded: Recorded::default(),
+        scratch: &[],
     }
 }
 
@@ -1069,6 +1076,12 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
         record.upgraded[0].branch, "",
         "empty is mirroring, which is what the row was left on",
     );
+
+    assert_eq!(
+        record.source,
+        Some(Lifecycle::Grilling),
+        "and the state the press found it in, which the Event's target cannot say",
+    );
 }
 
 /// The ordinary steer settles nothing and asks for nothing, and its record says
@@ -1141,6 +1154,255 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
             .pairing,
         RecordedPairing::Removed,
     );
+}
+
+/// The state each steer found the Conversation in, written down beside its own
+/// Event.
+///
+/// One press has one source, and a Conversation steered a few times has one per
+/// press: what the record holds is where each of them came *from*, which the
+/// Event's own target says nothing about. Read back with the rest of the form,
+/// and read again out of a second pool over the same file — the ending that
+/// wants it may be hours and a restart away.
+#[tokio::test]
+async fn a_steer_records_the_state_it_came_out_of() {
+    let (dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    // Out of Grilling and into Investigating: the question asked about work that
+    // is still being interviewed, which is the source nothing else would say.
+    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+        .await
+        .unwrap();
+
+    // And out of Investigating again, which is what makes this a fact per press
+    // rather than one per Conversation.
+    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&pool, id).await,
+        [
+            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
+            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+        ],
+        "each steer says where it went and where it came from",
+    );
+
+    pool.close().await;
+
+    let reopened = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&reopened, id).await,
+        [
+            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
+            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+        ],
+        "and a restart reads back what the press wrote down",
+    );
+}
+
+/// And a steer from before the source was written down has none, which is a
+/// steer recorded by an older Verkstead rather than a steer out of nowhere.
+///
+/// ADR-0006's rule again, said of the one thing this task adds. The row is taken
+/// away by hand, which is the only way to have a Timeline that old in a database
+/// this build made.
+#[tokio::test]
+async fn a_steer_from_before_the_source_was_written_down_reads_back_without_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+        .await
+        .unwrap();
+
+    sqlx::query("DELETE FROM steer_sources")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&pool, id).await,
+        [(Lifecycle::Investigating, None)],
+        "the rest of the record is exactly where it was",
+    );
+}
+
+/// What each checkout already held uncommitted when the steer went in, read back
+/// by the Repo it is of.
+///
+/// **Read and clean is not the same answer as never read**, which is the whole
+/// reason a checkout that held nothing is written down at all: the ending puts
+/// back the checkouts it has a reading of and leaves the rest exactly as it finds
+/// them, so a clean one left out of the record would be one nothing ever tidied.
+///
+/// Read again out of a second pool over the same file, because the ending that
+/// wants it may be hours and a restart away.
+#[tokio::test]
+async fn a_steer_records_what_each_checkout_already_held() {
+    let (dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+    let docs = alongside(&pool, "askance").await;
+
+    let half_done = ["probes/window.rs".to_owned(), "README.md".to_owned()];
+
+    steer_conversation(
+        &pool,
+        id,
+        Steer {
+            scratch: &[
+                Scratch {
+                    repo_id: own(&pool, id).await,
+                    paths: &half_done,
+                },
+                // Read and clean, which is a row of its own.
+                Scratch {
+                    repo_id: docs,
+                    paths: &[],
+                },
+            ],
+            ..into(Lifecycle::Investigating)
+        },
+    )
+    .await
+    .unwrap();
+
+    let event = steered(&pool, id).await;
+
+    pool.close().await;
+
+    let reopened = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let held = scratch(&reopened, event).await.unwrap();
+
+    assert_eq!(
+        held.get(&own(&reopened, id).await).map(|paths| {
+            let mut paths = paths.clone();
+            paths.sort();
+            paths
+        }),
+        Some(vec!["README.md".to_owned(), "probes/window.rs".to_owned()]),
+        "what the Worktree was part way through is what reads back: {held:?}",
+    );
+    assert_eq!(
+        held.get(&docs),
+        Some(&Vec::new()),
+        "and a checkout that held nothing reads back as one that was read: \
+         {held:?}",
+    );
+
+    reopened.close().await;
+}
+
+/// And a steer from before any of this was written down has no reading at all,
+/// which is not the same as a reading that found nothing.
+///
+/// ADR-0006's rule on the one thing the ending would be most wrong about: a
+/// checkout missing from the map is one nobody read, so the ending leaves it as it
+/// finds it and an investigation steered by an older Verkstead ends exactly as it
+/// used to. The rows are taken away by hand, which is the only way to have a
+/// record that old in a database this build made.
+#[tokio::test]
+async fn a_steer_from_before_the_scratch_was_read_has_no_reading_of_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let half_done = ["README.md".to_owned()];
+
+    steer_conversation(
+        &pool,
+        id,
+        Steer {
+            scratch: &[Scratch {
+                repo_id: own(&pool, id).await,
+                paths: &half_done,
+            }],
+            ..into(Lifecycle::Investigating)
+        },
+    )
+    .await
+    .unwrap();
+
+    let event = steered(&pool, id).await;
+
+    sqlx::query("DELETE FROM steer_scratch")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        scratch(&pool, event).await.unwrap().is_empty(),
+        "nothing there says nobody wrote one rather than saying the checkout was \
+         clean",
+    );
+}
+
+/// And the ordinary steer records no reading either, there being no ending that
+/// would want one: it is read for a steer into Investigating and for nothing else.
+#[tokio::test]
+async fn a_steer_into_anywhere_else_records_no_reading_of_the_checkouts() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert!(
+        scratch(&pool, steered(&pool, id).await)
+            .await
+            .unwrap()
+            .is_empty(),
+    );
+}
+
+/// The Repo a Conversation's own checkout is of.
+async fn own(pool: &SqlitePool, id: i64) -> i64 {
+    load_conversation(pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there")
+        .repo
+        .id
+}
+
+/// The newest Steer Event on this Conversation's Timeline, by id.
+async fn steered(pool: &SqlitePool, id: i64) -> i64 {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| matches!(event.event, Event::Steer(..)))
+        .next_back()
+        .expect("there is a steer on the Timeline")
+        .id
+}
+
+/// Where each steer on this Timeline went, and where the record says it came
+/// from.
+///
+/// The pair rather than the source alone, because the source is a fact about one
+/// press: a Conversation steered three times has three of them, and a reading
+/// that dropped the target could not say which press each belonged to.
+async fn sources(pool: &SqlitePool, id: i64) -> Vec<(Lifecycle, Option<Lifecycle>)> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Steer(target, _, recorded) => {
+                Some((target, recorded.and_then(|record| record.source)))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// And a steer written before any of this was kept reads back as the steer it

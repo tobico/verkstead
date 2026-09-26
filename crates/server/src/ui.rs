@@ -685,20 +685,25 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         OffsetDateTime::now_utc(),
     );
 
-    // Whether the closing section carries the Nothing-else option, which is a
-    // fact about the Conversation rather than about the Set: a follow-up's
-    // rounds are ordinary Sets, and what makes one a follow-up's is where the
-    // work stands while it is being answered. A Conversation that cannot be read
-    // draws no option, which is what every state but Follow-up gets anyway.
-    let follow_up = match store::state(&state.pool, conversation).await {
-        Ok(state) => state == Some(store::Lifecycle::FollowUp),
+    // Whether the closing section carries the Nothing-else option, and which
+    // ending it would bring about — a fact about the Conversation rather than
+    // about the Set: a follow-up's rounds and an investigation's are both
+    // ordinary Sets, and what makes one either is where the work stands while it
+    // is being answered. A Conversation that cannot be read draws no option,
+    // which is what every state but those two gets anyway.
+    let ending = match store::state(&state.pool, conversation).await {
+        Ok(state) => match state {
+            Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
+            Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
+            _ => None,
+        },
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation,
                 "reading where a Set's Conversation stands failed"
             );
-            false
+            None
         }
     };
 
@@ -723,7 +728,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, follow_up, attachments)
+        verkstead_render::set_view(set_id, conversation, set, standing, ending, attachments)
     })
     .await;
 
@@ -4826,6 +4831,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::FollowUp => Lifecycle::FollowUp,
+        store::Lifecycle::Investigating => Lifecycle::Investigating,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
     }

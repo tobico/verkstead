@@ -4812,7 +4812,7 @@ describe("a conversation's process", () => {
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// Two rows for now, and that list is the one place a later stage adds to: a
+  /// Three rows for now, and that list is the one place a later stage adds to: a
   /// Process is offered only once its stage has landed.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -4820,7 +4820,7 @@ describe("a conversation's process", () => {
     await theProcess();
 
     expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate"]);
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there
@@ -5995,11 +5995,10 @@ describe("the pickers a conversation's process draws", () => {
     expect(OFFERED).toContain("Tinker");
   });
 
-  /// A Process nothing offers yet, which the wire carries all the same: one
-  /// role, so one picker — and one picker is the control drawn as the picker
-  /// itself, which the describe below is about. Nothing here has landed to pick
-  /// it: the record is read as one, which is what the two lists in
-  /// `processes.ts` are for.
+  /// And one under an Investigate: one role, so one picker — and one picker is
+  /// the control drawn as the picker itself, which the describe below is about.
+  /// Neither a Grilling picker nor a Review one is drawn, so there is nothing
+  /// here to pick a review away on and nothing for the press to wait for.
   it("draws one picker under a process that uses one role", async () => {
     theWorkbenchWith({ process: "Investigate" });
     mount(`/conversations/${OPEN.id}`);
@@ -6010,6 +6009,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(screen.queryByLabelText("Review")).toBeNull();
 
     expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+    expect(OFFERED).toContain("Investigate");
   });
 });
 
@@ -6018,10 +6018,9 @@ describe("the pickers a conversation's process draws", () => {
 /// standing in the row where the trigger would have stood, with no trigger over
 /// it and no panel behind it.
 ///
-/// Asked over a Process nothing offers yet, which is the only way to ask it
-/// until Investigate lands: the wire carries all five, the picker draws a chosen
-/// Process it cannot offer, and the shape is read off the table rather than off
-/// what has landed.
+/// Asked over an Investigate, which is the one landed Process run under a single
+/// role — and the shape is read off the table rather than off the count of
+/// pickers a page happened to draw.
 describe("the agent dropdown on a conversation", () => {
   /// The record under a one-role Process, on the account the fixture implements
   /// under.
@@ -7008,9 +7007,8 @@ describe("starting the work", () => {
     );
   });
 
-  /// And a Process with one role says one, which is asked over a Process
-  /// nothing offers yet: the wire carries all five, and the words are counted
-  /// off the table rather than off what has landed.
+  /// And a Process with one role says one, which is an Investigate: the words
+  /// are counted off the table rather than written into the sentence.
   it("names one role where the process has one", async () => {
     theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -11028,6 +11026,7 @@ describe("steering a conversation", () => {
     expect(targets(await openSteer(container))).toEqual([
       "Grilling",
       "Implementing",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
@@ -11045,6 +11044,7 @@ describe("steering a conversation", () => {
       "Grilling",
       "Implementing",
       "Wrapping",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
@@ -11066,6 +11066,7 @@ describe("steering a conversation", () => {
       "Grilling",
       "Implementing",
       "Wrapping",
+      "Investigating",
       "Done",
     ]);
     unmount();
@@ -11086,6 +11087,7 @@ describe("steering a conversation", () => {
       "Implementing",
       "Wrapping",
       "FollowUp",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/The pull request followed up on/)).toBeTruthy();
@@ -11154,6 +11156,93 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: "Does it count the 429s it sends?",
+        // Nor is the question beside it: each payload goes under its own target.
+        investigation: null,
+      }),
+    );
+  });
+
+  /// And investigating is offered wherever the form opens, including on work
+  /// that is on no pull request: a question about the work is not a step of it,
+  /// so there is nowhere the work can have got to that makes asking one wrong.
+  ///
+  /// Which is the whole difference between it and the two beside it, and it is
+  /// what the target is for: the answer comes back and the conversation goes
+  /// back to the state it was steered from.
+  it("offers investigating from every state, and requires the question", async () => {
+    const fetching = theGrillingSteering(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    // Grilling, which is on no pull request at all: neither wrapping up nor
+    // following up is offered here, and investigating is.
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toContain("Investigating");
+    expect(pane.querySelector("#steer-investigation")).toBeNull();
+
+    // And it says where the answer leaves the conversation, both halves of it:
+    // a Draft and a closed conversation are steered from like any other, and
+    // neither is a state anything goes back to.
+    expect(
+      screen.getByText(
+        /goes back to the state you steered it from, or to Done where there is nowhere to go back to/,
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(
+        pane,
+        `.${steerForm.steerTarget} input[value="Investigating"]`,
+      ),
+    );
+
+    // The implementation pairing is what it runs under, so the picker is drawn.
+    await drawn(pane, "#steer-pairing");
+
+    const press = (await drawn(
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
+    )) as HTMLButtonElement;
+
+    // Nothing written is nothing to find out, so the press is held shut rather
+    // than offered and then refused by name.
+    await waitFor(() => expect(press.disabled).toBe(true));
+
+    fireEvent.input(await drawn(pane, "#steer-investigation"), {
+      target: { value: "   " },
+    });
+
+    await waitFor(() => expect(press.disabled).toBe(true));
+
+    fireEvent.input(await drawn(pane, "#steer-investigation"), {
+      target: { value: "Where does the 429 count come from?" },
+    });
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    fireEvent.click(press);
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Investigating",
+        interrupt: false,
+        pairing: { profile_id: building.profile.id, model: building.model },
+        brief: null,
+        digest: false,
+        added: [],
+        upgraded: [],
+        instruction: null,
+        follow_up: null,
+        investigation: "Where does the 429 count come from?",
       }),
     );
   });
@@ -11330,6 +11419,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: "Note the window the count is against.",
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11399,6 +11489,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11460,6 +11551,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11617,6 +11709,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
 
@@ -11930,6 +12023,11 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(pane, `.${steerForm.steerDigest} input`));
     await under("Implementing", "#steer-instruction", "Rebase this onto main.");
     await under("FollowUp", "#steer-follow-up", "Does it count the 429s?");
+    await under(
+      "Investigating",
+      "#steer-investigation",
+      "Where does the count come from?",
+    );
 
     fireEvent.click(await drawn(pane, `.${steerForm.steerInterrupt} input`));
 
@@ -11969,11 +12067,12 @@ describe("steering a conversation", () => {
       expect(
         sent(fetching, STEER_SAVE, writes(fetching, STEER_SAVE) - 1),
       ).toEqual({
-        target: "FollowUp",
+        target: "Investigating",
         brief: "# Retries\n",
         digest: true,
         instruction: "Rebase this onto main.",
         follow_up: "Does it count the 429s?",
+        investigation: "Where does the count come from?",
         pairing: {
           profile_id: PROFILES[0]!.id,
           model: PROFILES[0]!.models[0],

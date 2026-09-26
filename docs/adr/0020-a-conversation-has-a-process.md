@@ -54,7 +54,13 @@ Pairing, shaped like a follow-up — rounds of Question Sets, the human's
 Worktree so it can write and run code to find things out, and told to commit
 none of it. The Done signal is accepted over uncommitted changes here and
 nowhere else: the scratch is the point, the Diff on every Set already shows it,
-and the Worktree goes with the close. No pull request is ever asked for. The
+and the Worktree goes with the close. Which holds for an investigation that ends
+Done and not for one that hands its checkout back to a state something runs in:
+the sessions a wrap-up or a follow-up dispatches stage everything they find, so
+the ending takes the investigation's scratch back out and leaves the checkout as
+the steer found it. What the steer found is written down beside it, because a
+path the human had already left uncommitted is theirs and only what the
+investigation added may go. No pull request is ever asked for. The
 session is still asked to rename the branch, because the branch is the
 Conversation's title and a title is worth a cheap rename.
 
@@ -65,10 +71,14 @@ a follow-up lands back in the wrap-up it came off. Done is the ending of an
 Investigate Conversation, which came from a Draft; making it the ending of every
 Investigating was considered and rejected, because a Wrapping Conversation
 steered into one to ask a question would come out of it Done, its pull request
-unmerged and its watchers off it. Draft and Closed are the two states nothing
-returns to, so an Investigating steered from either ends Done as well. Which
-state to go back to is written down when the steer is made rather than read off
-the Timeline: it is a fact of the steer, not something to infer from history.
+unmerged and its watchers off it. Draft, Closed and Investigating are the three
+states nothing returns to, so an Investigating steered out of any of them ends
+Done as well: the first two have a way in of their own that nothing else may
+use, and an investigation sent back to Investigating is one the Nothing-else
+mark could never end, the move that lands it there opening a fresh window the
+tick falls outside of. Which state to go back to is written down when the steer
+is made rather than read off the Timeline: it is a fact of the steer, not
+something to infer from history.
 
 **Review** is *Wrap up a pull request* made a Process. Draft to Wrapping, the
 ordinary wrap-up with its review, on the pull request or branch it is pointed

@@ -985,17 +985,17 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
 /// accept, and that is what the human is offered. A stage that brings a Process
 /// to life adds to both, and each of them is written knowing the other is there.
 ///
-/// Two for now. The record reads and writes all five — see [`store::Process`] —
-/// so this list is the whole of what holds the other three back, and nothing
+/// Three for now. The record reads and writes all five — see [`store::Process`]
+/// — so this list is the whole of what holds the other two back, and nothing
 /// about them has to be added when one of them arrives.
-const LANDED: &[Process] = &[Process::Develop, Process::Tinker];
+const LANDED: &[Process] = &[Process::Develop, Process::Tinker, Process::Investigate];
 
 /// Say what kind of work a drafting Conversation is for.
 ///
 /// Thin over the store with one question of its own in front of it, which is
 /// the one the store deliberately does not ask: whether that Process has a stage
 /// behind it yet. The record holds all five and only the landed ones can be
-/// picked on, so the other four are refused here by a name that says why —
+/// picked on, so the rest are refused here by a name that says why —
 /// rather than under [`ProcessPicked::NotDrafting`], which is about this
 /// Conversation and is something the human could have done differently.
 ///
@@ -1175,18 +1175,21 @@ pub(crate) async fn rename_companion_branch(
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
-/// **Two landings, and the Conversation's Process is what says which.** A
+/// **Three landings, and the Conversation's Process is what says which.** A
 /// **Develop** one is grilled, and the session that starts is the interview
 /// through which what the work becomes is settled. A **Tinker** lands in
 /// Follow-up instead, and the session that starts is the follow-up's own, primed
-/// with the Brief as the thing to follow up on. Everything between the press and
-/// those two lines is the same work — the fetch, the base, the branch, the
+/// with the Brief as the thing to follow up on. An **Investigate** lands in
+/// Investigating, and the session that starts is the investigating one, primed
+/// with the Brief as the question to find out about. Everything between the press
+/// and those three lines is the same work — the fetch, the base, the branch, the
 /// checkouts, the freeze and the memory — which is why it is one function rather
-/// than two beside each other.
+/// than three beside each other.
 ///
-/// Which roles it waits on is the Process's too: Develop wants all three, and a
+/// Which roles it waits on is the Process's too: Develop wants all three; a
 /// Tinker is never interviewed, so it wants the two a wrap-up wants and the
-/// Grilling picker is drawn for it nowhere.
+/// Grilling picker is drawn for it nowhere; and an Investigate builds nothing to
+/// review, so it wants the Implementation role alone.
 ///
 /// Everything that has to be true is checked here, each refused by its own name,
 /// because each is something different for the human to go and do. They are
@@ -1288,6 +1291,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // so it is the same answer.
     let unready = match process {
         store::Process::Tinker => unready_to_wrap(implementation.as_ref(), &review),
+        store::Process::Investigate => unready_to_investigate(implementation.as_ref()),
         _ => unready(grilling.as_ref(), implementation.as_ref(), &review),
     };
 
@@ -1523,6 +1527,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // it comes out in as the word that differs.
     let moved = match process {
         store::Process::Tinker => store::start_tinkering(pool, id, base, &path, &checkouts).await?,
+        store::Process::Investigate => {
+            store::start_investigating(pool, id, base, &path, &checkouts).await?
+        }
         _ => store::start_grilling(pool, id, base, &path, &checkouts).await?,
     };
 
@@ -1564,9 +1571,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
     //
-    // A Tinker hands it on instead, to the run that is about to drive its
-    // follow-up: that one is a loop rather than a launch, and it holds the
-    // registration for as long as it is driving.
+    // A Tinker and an Investigate hand it on instead, to the run that is about
+    // to drive their rounds: each of those is a loop rather than a launch, and
+    // it holds the registration for as long as it is driving.
     let driving = state.drivers.driving(id);
 
     // A Tinker's own session, which is the follow-up's: the same skill, the same
@@ -1580,6 +1587,22 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             state.clone(),
             id,
             crate::follow_ups::FollowUp::priming(brief),
+            driving,
+        ));
+
+        return Ok(GrillingStarted::Started);
+    }
+
+    // And an Investigate's own session, which is the one session an
+    // investigation has: the investigating skill, opened on the Brief as the
+    // question to find out about, in rounds of Question Sets that commit
+    // nothing. Spawned rather than awaited for the Tinker's reason, and handed
+    // the registration for the same one — see [`crate::runner::investigating`].
+    if process == store::Process::Investigate {
+        tokio::spawn(crate::runner::investigating(
+            state.clone(),
+            id,
+            crate::investigations::Investigation::opening(brief),
             driving,
         ));
 
@@ -3118,6 +3141,26 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
         .then_some(Unready::ProfileBroken)
 }
 
+/// And what is wrong with the one Profile an investigation runs under, or
+/// nothing at all.
+///
+/// [`unready_to_wrap`]'s reading with the review taken out of it as well, which
+/// is the whole of an **Investigate**: nothing is built, so there is nothing to
+/// review, and the composer draws the one **Agent** dropdown over the
+/// Implementation picker and nothing else. What is left is the Profile the
+/// session runs under, judged exactly as it is beside a grilling.
+fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unready> {
+    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoImplementationProfile);
+    };
+
+    implementation
+        .profile
+        .broken
+        .is_some()
+        .then_some(Unready::ProfileBroken)
+}
+
 /// The Brief the round a Conversation is in started from.
 ///
 /// The *last* Brief rather than the first, and searched for rather than taken
@@ -3206,9 +3249,10 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 ///
 /// **The same reading the press takes**, one Process at a time: a **Tinker** is
 /// never interviewed, so the Grilling picker is drawn for it nowhere and the
-/// button waits on the two roles a wrap-up waits on. The press asks exactly this
-/// again when it is pressed — see [`start_grilling`], where the pair of readings
-/// stand side by side.
+/// button waits on the two roles a wrap-up waits on, and an **Investigate** is
+/// run under the Implementation role alone, so it waits on that one. The press
+/// asks exactly this again when it is pressed — see [`start_grilling`], where the
+/// pair of readings stand side by side.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
     process: store::Process,
@@ -3219,6 +3263,7 @@ pub(crate) fn ready_to_grill(
 ) -> bool {
     let roles = match process {
         store::Process::Tinker => crate::profiles::ready_to_wrap(implementation, review),
+        store::Process::Investigate => crate::profiles::ready_to_investigate(implementation),
         _ => crate::profiles::ready_to_grill(grilling, implementation, review),
     };
 

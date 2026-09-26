@@ -246,6 +246,7 @@ fn held(form: &SteerForm) -> store::PendingForm {
         digest: form.digest,
         instruction: form.instruction.clone(),
         follow_up: form.follow_up.clone(),
+        investigation: form.investigation.clone(),
         pairing: form.pairing.as_ref().map(|picked| store::PendingPairing {
             profile_id: picked.profile_id,
             model: picked.model.clone(),
@@ -285,6 +286,7 @@ pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
         digest: form.digest,
         instruction: form.instruction,
         follow_up: form.follow_up,
+        investigation: form.investigation,
         pairing: form.pairing.map(|picked| ProfileChoice {
             profile_id: picked.profile_id,
             model: picked.model,
@@ -461,6 +463,7 @@ pub(crate) async fn submit(
 
     let instruction = instruction(submission);
     let follow_up = follow_up(submission);
+    let investigation = investigation(submission);
 
     // The rows the added companions become, borrowed off what was read back
     // above rather than off the submit: an empty branch name is *mirroring* and
@@ -502,13 +505,33 @@ pub(crate) async fn submit(
 
     let settling = settling(&conversation, submission);
 
+    // And what every checkout the session may write in already holds, for the one
+    // target whose ending has to put them back to it. Read here — after `make`,
+    // so a checkout this steer cut or rebuilt reads clean, and before anything is
+    // started in any of them — and written down beside the Event, because by the
+    // time the ending wants it the investigation has been writing in there for
+    // hours. See [`crate::investigations::tidied`].
+    let scratch = match submission.target {
+        SteerTarget::Investigating => already_held(&conversation, &added, &opened).await,
+        _ => Vec::new(),
+    };
+
+    let scratch: Vec<store::Scratch<'_>> = scratch
+        .iter()
+        .map(|(repo_id, paths)| store::Scratch {
+            repo_id: *repo_id,
+            paths,
+        })
+        .collect();
+
     let steer = store::Steer {
         target,
         pairings: &settling,
         brief: brief(submission),
-        // Whichever of the two the target takes, both landing in the one place:
-        // the Steer Event's own body is what the human wrote to steer it with.
-        instruction: instruction.or(follow_up),
+        // Whichever of the three the target takes, all of them landing in the
+        // one place: the Steer Event's own body is what the human wrote to steer
+        // it with, whatever field the form drew it in.
+        instruction: instruction.or(follow_up).or(investigation),
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base: made.base_commit.as_deref().map(|commit| store::Base {
@@ -537,6 +560,7 @@ pub(crate) async fn submit(
                     model: &choice.model,
                 }),
         },
+        scratch: &scratch,
     };
 
     match store::steer_conversation(&state.pool, conversation_id, steer).await? {
@@ -657,6 +681,34 @@ pub(crate) async fn submit(
             }
         },
 
+        // And a session on the investigating skill, started on the question the
+        // human wants found out — which is required, so [`refusal`] has already
+        // made sure there is one and this cannot come to nothing. See
+        // [`crate::runner::investigating`], which drives the Conversation while
+        // it runs.
+        SteerTarget::Investigating => match investigation {
+            Some(brief) => {
+                tokio::spawn(crate::runner::investigating(
+                    state.clone(),
+                    conversation_id,
+                    crate::investigations::Investigation::opening(brief.to_owned()),
+                    driving,
+                ));
+            }
+
+            // Refused above, so nothing reaches here — said rather than
+            // unwrapped, exactly as the follow-up's own impossible case is.
+            None => {
+                tracing::error!(
+                    conversation_id,
+                    "a steer into Investigating got past the refusals with no brief, so \
+                     nothing was started",
+                );
+
+                drop(driving);
+            }
+        },
+
         // And nothing at all: a steer into Done is the move alone.
         SteerTarget::Done => drop(driving),
     }
@@ -707,10 +759,19 @@ async fn refusal(
 
     // And a follow-up is whatever the human wrote it about. Nothing on the branch
     // could stand in for it — a follow-up is not a step of the run to be picked
-    // up — so it is the one written payload with no quiet meaning, and the form
-    // holds the submit shut without one rather than offering it.
+    // up — so it is one of the two written payloads with no quiet meaning, and
+    // the form holds the submit shut without one rather than offering it.
     if submission.target == SteerTarget::FollowUp && follow_up(submission).is_none() {
         return Ok(Some(ConversationSteered::NoFollowUpBrief));
+    }
+
+    // And an investigation is whatever the human asked about, which is the same
+    // rule on the payload beside it: a question is a thing they wanted asked
+    // rather than a step of the run, so nothing on the branch could stand in for
+    // one. Refused under its own name because the follow-up's words name a pull
+    // request, and an investigation is steerable from states that have none.
+    if submission.target == SteerTarget::Investigating && investigation(submission).is_none() {
+        return Ok(Some(ConversationSteered::NoInvestigationBrief));
     }
 
     // And a steer into Implementing either carries on what the branch already
@@ -853,6 +914,115 @@ fn follow_up(submission: &SteerSubmission) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|follow_up| !follow_up.is_empty())
+}
+
+/// What every checkout this Conversation's sessions can write in already holds
+/// uncommitted, by the Repo it is of.
+///
+/// One entry per writable checkout, **including the ones that hold nothing**: a
+/// checkout that was read and was clean and a checkout that was never read are
+/// different answers to the ending that reads this back, and only one of them
+/// means *take away everything you find* — see [`store::scratch`].
+///
+/// Which is why the checkouts this steer is itself making are in the list with
+/// nothing against them rather than left out of it. They were cut a moment ago and
+/// hold nothing, so there is nothing to read; what says so has to be written down
+/// all the same, or a probe the investigation writes in a companion it was given
+/// would be one nothing takes back out.
+///
+/// The rest is read off the record's own checkouts, after `make` has run: one it
+/// had to rebuild is clean by then, so the reading of it is empty and right. Both
+/// ends of a rename, because either end of one is a path the investigation did not
+/// put there.
+///
+/// A checkout git will not answer about is left out rather than recorded empty,
+/// which is the safe way round: nothing is tidied in a directory nothing could
+/// read.
+///
+/// Blocking, so it is done on a worker of its own — a `git status` of a large
+/// repository is not a quick call, and a steer is served on the request's thread.
+async fn already_held(
+    conversation: &store::Conversation,
+    added: &[store::Companion],
+    opened: &[store::Companion],
+) -> Vec<(i64, Vec<String>)> {
+    let mut checkouts = Vec::new();
+
+    if let Some(worktree) = conversation.worktree.clone() {
+        checkouts.push((conversation.repo.id, worktree));
+    }
+
+    for companion in &conversation.companions {
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        if let Some(worktree) = companion.worktree.clone() {
+            checkouts.push((companion.repo.id, worktree));
+        }
+    }
+
+    let mut held: Vec<(i64, Vec<String>)> = tokio::task::spawn_blocking(move || {
+        checkouts
+            .into_iter()
+            .filter_map(|(repo_id, worktree)| {
+                let changed = crate::diffs::changed(&worktree)?;
+
+                let mut paths = Vec::with_capacity(changed.len());
+
+                for change in changed {
+                    paths.extend(change.from);
+                    paths.push(change.path);
+                }
+
+                Some((repo_id, paths))
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default();
+
+    // And the ones the steer is cutting, which hold nothing and are recorded as
+    // holding nothing. A read-only companion is not among them: it is bound
+    // read-only, so there is nothing for an investigation to leave in it.
+    let cut = added
+        .iter()
+        .filter(|companion| companion.mode == store::CompanionMode::ReadWrite)
+        .map(|companion| companion.repo.id)
+        .chain(opened.iter().map(|companion| companion.repo.id));
+
+    for repo_id in cut {
+        if held.iter().any(|(already, _)| *already == repo_id) {
+            continue;
+        }
+
+        held.push((repo_id, Vec::new()));
+    }
+
+    held
+}
+
+/// And what the human wants found out, or `None` where they wrote nothing.
+///
+/// The follow-up's reading word for word, on the field beside it: whitespace
+/// alone is nothing written, what is written is trimmed at the ends the way every
+/// document reaching a prompt is, and `None` is a refusal rather than an ordinary
+/// case — there is nothing on the branch an investigation could carry on instead.
+/// See [`refusal`].
+///
+/// A reading of its own rather than the follow-up's read twice, because the form
+/// keeps the two payloads apart: a question that arrived beside another target is
+/// a page sending a field it should not have drawn.
+fn investigation(submission: &SteerSubmission) -> Option<&str> {
+    if submission.target != SteerTarget::Investigating {
+        return None;
+    }
+
+    submission
+        .investigation
+        .as_deref()
+        .map(str::trim)
+        .filter(|investigation| !investigation.is_empty())
 }
 
 /// How the work is built from here, or `None` where the Conversation has already
@@ -1099,8 +1269,11 @@ pub(crate) async fn standing(
 /// work, the wrap-up's watchers dispatch the fix and comment sessions that see
 /// it through, and a follow-up session does whatever the human wants doing
 /// about it afterwards. Every one of those is the work itself, so all of them
-/// run under what builds. A grilling is its own, which is what an interview runs
-/// under whatever else has happened since.
+/// run under what builds. Investigating is under the same one for the same
+/// reason read the other way: what an investigation does is read, write and run
+/// the code, which is building in everything but what it leaves behind. A
+/// grilling is its own, which is what an interview runs under whatever else has
+/// happened since.
 ///
 /// Wrapping is the one target that names two, because a wrap-up both builds and
 /// reviews. What the human's one pick does to each of them is not the same
@@ -1111,7 +1284,9 @@ pub(crate) async fn standing(
 fn roles(target: SteerTarget) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
-        SteerTarget::Implementing | SteerTarget::FollowUp => &[Role::Implementation],
+        SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
+            &[Role::Implementation]
+        }
         SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
         SteerTarget::Done => &[],
     }
@@ -2125,6 +2300,7 @@ fn target(target: SteerTarget) -> Lifecycle {
         SteerTarget::Implementing => Lifecycle::Implementing,
         SteerTarget::Wrapping => Lifecycle::Wrapping,
         SteerTarget::FollowUp => Lifecycle::FollowUp,
+        SteerTarget::Investigating => Lifecycle::Investigating,
         SteerTarget::Done => Lifecycle::Done,
     }
 }
@@ -2142,6 +2318,7 @@ pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
         Lifecycle::Implementing => SteerTarget::Implementing,
         Lifecycle::Wrapping => SteerTarget::Wrapping,
         Lifecycle::FollowUp => SteerTarget::FollowUp,
+        Lifecycle::Investigating => SteerTarget::Investigating,
         Lifecycle::Done => SteerTarget::Done,
         Lifecycle::Draft | Lifecycle::Closed => return None,
     })

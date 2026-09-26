@@ -133,9 +133,10 @@ impl Drivers {
             Lifecycle::Grilling => {
                 working.contains(&conversation_id) || self.registered(conversation_id)
             }
-            Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp => {
-                self.registered(conversation_id)
-            }
+            Lifecycle::Implementing
+            | Lifecycle::Wrapping
+            | Lifecycle::FollowUp
+            | Lifecycle::Investigating => self.registered(conversation_id),
             Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => true,
         }
     }
@@ -381,6 +382,7 @@ mod tests {
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
             Lifecycle::FollowUp,
+            Lifecycle::Investigating,
         ] {
             assert!(
                 !drivers.driven(&working(&[CONVERSATION]), CONVERSATION, state),
@@ -394,6 +396,7 @@ mod tests {
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
             Lifecycle::FollowUp,
+            Lifecycle::Investigating,
         ] {
             assert!(
                 drivers.driven(&working(&[]), CONVERSATION, state),
@@ -407,6 +410,7 @@ mod tests {
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
             Lifecycle::FollowUp,
+            Lifecycle::Investigating,
         ] {
             assert!(
                 !drivers.driven(&working(&[]), CONVERSATION, state),

@@ -56,6 +56,11 @@
 //! sessions share the account's memory. Every Profile from before arrives on,
 //! because the shared store is what they have always been given.
 //!
+//! And one more column added holding nothing: a half-written steer keeps one slot
+//! per target's payload, and Investigating's arrives with the target. Nobody
+//! could have written into it, so it comes in empty — which is what an empty slot
+//! means on every other one of the form's fields too.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -69,10 +74,11 @@ use verkstead_store::{
     Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Pairing, ProfileFacts,
     PullRequest, RanUnder, Saving, WaitingOn, asked_to_stop, clear_stop, commit_repo,
     conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
-    open_database, profiles, pull_request, pull_request_repo, record_another_pull_request,
-    record_commit, record_fix_attempt, recorded_commits, register_repo, settle_wrap_up,
-    start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop, stopped,
-    timeline, update_profile, wrap_up_settled,
+    open_database, open_pending_steer, pending_steer, profiles, pull_request, pull_request_repo,
+    record_another_pull_request, record_commit, record_fix_attempt, recorded_commits,
+    register_repo, save_pending_steer, settle_wrap_up, start_capture, start_conversation,
+    start_grilling, start_unnamed_conversation, stop, stopped, timeline, update_profile,
+    wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -2224,4 +2230,78 @@ async fn the_sessions_of_before_keep_their_names_and_a_new_one_may_have_none() {
          which reads as the harness and the model alone, exactly as a record \
          from before Verkstead wrote a name down does",
     );
+}
+
+/// And a half-written steer from before Investigating was a target has no
+/// question written on it, which is what every slot of that form means empty.
+///
+/// The target arrives with the column, so there was never a form whose human
+/// could have picked it: the column's own emptiness is the whole of the rewrite,
+/// and the rest of what somebody had typed is exactly where they left it.
+#[tokio::test]
+async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    open_pending_steer(&pool, id).await.unwrap();
+
+    // An afternoon's typing on the targets that were there, which is what has to
+    // come back unchanged.
+    save_pending_steer(
+        &pool,
+        id,
+        &verkstead_store::PendingForm {
+            target: Some(Lifecycle::FollowUp),
+            follow_up: Some("Does it count the 429s it sends?".to_owned()),
+            ..verkstead_store::PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: there was no Investigating to steer into.
+    sqlx::query("ALTER TABLE pending_steers DROP COLUMN investigation")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let form = pending_steer(&pool, id).await.unwrap().expect(opening).form;
+
+        assert_eq!(
+            form.investigation, None,
+            "nobody could have asked for an investigation before there was one to ask for",
+        );
+        assert_eq!(
+            form.follow_up.as_deref(),
+            Some("Does it count the 429s it sends?"),
+            "and what they had written is where they left it",
+        );
+        assert_eq!(form.target, Some(Lifecycle::FollowUp));
+
+        pool.close().await;
+    }
 }

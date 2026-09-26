@@ -39,6 +39,7 @@ import type {
   AskView,
   AttachmentView,
   Direction,
+  Ending,
   OptionView,
   ProposalView,
   QuestionView,
@@ -98,10 +99,10 @@ export function Answering(props: {
   /// What puts the direction chooser on the sheet; `null` leaves it off.
   proposal: ProposalView | null;
 
-  /// Whether this Set was asked from a Conversation in Follow-up, which is what
-  /// puts the Nothing-else option in the closing section. `false` on every
-  /// other Set, which leaves the option off it.
-  followUp: boolean;
+  /// Which ending the Nothing-else option in the closing section would bring
+  /// about, which is also what puts the option there at all. `null` on every Set
+  /// asked from a state that has no such ending, which leaves the option off it.
+  ending: Ending | null;
 
   /// The files already put on this Set's Answers, oldest first, each naming the
   /// Question it was put under.
@@ -334,14 +335,18 @@ export function Answering(props: {
             />
           </div>
         </section>
-        {/* And, on a follow-up's Sets alone, the way to say there is nothing
-            else — under the box rather than beside it, because it is what the
-            human reaches for once they have finished writing. */}
-        <Show when={props.followUp}>
-          <Ending
-            ticked={() => sheet.nothing_else}
-            tick={(ticked) => setSheet("nothing_else", ticked)}
-          />
+        {/* And, on the Sets of a state that has an ending to mark, the way to
+            say there is nothing else — under the box rather than beside it,
+            because it is what the human reaches for once they have finished
+            writing. */}
+        <Show when={props.ending}>
+          {(ending) => (
+            <NothingElse
+              ending={ending()}
+              ticked={() => sheet.nothing_else}
+              tick={(ticked) => setSheet("nothing_else", ticked)}
+            />
+          )}
         </Show>
       </Postscript>
       <section class={styles.submit}>
@@ -507,7 +512,8 @@ function Choosing(props: {
 /// And it says what ticking does, for the reason the direction chooser does:
 /// what a control means has to be on the control, rather than left to whatever
 /// the agent happened to write above it.
-function Ending(props: {
+function NothingElse(props: {
+  ending: Ending;
   ticked: () => boolean;
   tick: (ticked: boolean) => void;
 }): JSX.Element {
@@ -523,14 +529,28 @@ function Ending(props: {
         />
         <span class={page.endingName}>Nothing else</span>
       </label>
-      <p class={page.semantics}>
-        Tick this when there is nothing more you want from this follow-up.
-        Everything you have written here still goes back, and the agent finishes
-        the round; the follow-up then ends and the Conversation wraps up.
-      </p>
+      <p class={page.semantics}>{ENDING[props.ending]}</p>
     </section>
   );
 }
+
+/// What ticking it will do, said by which ending it would bring about.
+///
+/// The box and the mark are the same either way — see `store::nothing_else` —
+/// and what differs is where the Conversation goes afterwards: a follow-up ends
+/// in the wrap-up, and an investigation ends where it was asked from with nothing
+/// committed. A line promising a wrap-up under an investigation's round would be
+/// offering a review of work nobody did.
+const ENDING: Record<Ending, string> = {
+  FollowUp:
+    "Tick this when there is nothing more you want from this follow-up. " +
+    "Everything you have written here still goes back, and the agent finishes " +
+    "the round; the follow-up then ends and the Conversation wraps up.",
+  Investigation:
+    "Tick this when there is nothing more you want found out. Everything you " +
+    "have written here still goes back, and the agent finishes the round; the " +
+    "investigation then ends, and nothing it wrote is committed.",
+};
 
 /// A Question or a Sub-question — both are asked the same way: the name it
 /// answers to, its text, its Options as a radio group, then a free-text field

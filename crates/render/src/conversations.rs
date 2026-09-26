@@ -40,6 +40,12 @@ pub enum Lifecycle {
     /// wrap-up.
     FollowUp,
 
+    /// Beside the ladder rather than on it, the way Follow-up is: a question
+    /// about the code being answered in rounds, with nothing built and nothing
+    /// committed. Reachable from a Start on an **Investigate** draft and from a
+    /// steer out of anywhere, and leading back to wherever it was entered from.
+    Investigating,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
@@ -965,6 +971,15 @@ pub struct SteerForm {
     /// And the brief, for a steer into Follow-up.
     #[serde(default)]
     pub follow_up: Option<String>,
+
+    /// And the question, for a steer into Investigating.
+    ///
+    /// A slot of its own rather than the follow-up's read twice, which is the
+    /// rule every payload here is kept under: the form holds what was written
+    /// under each target, so a human who moves the picker across and back reads
+    /// their own sentence back where they wrote it.
+    #[serde(default)]
+    pub investigation: Option<String>,
 
     /// What the work would run under from here, which is what the submit would
     /// send — the Conversation's own prefill included, rather than only a pick
@@ -3778,6 +3793,12 @@ pub enum Resumed {
     /// about: another record that cannot be true, a steer being the only way
     /// into Follow-up and one without a brief being refused.
     NoFollowUpBrief,
+
+    /// And it says it is investigating and nothing on its Timeline says what
+    /// about: the same record that cannot be true, read for the state beside
+    /// it. Both ways into Investigating carry the question in, and neither is
+    /// allowed in without one.
+    NoInvestigation,
 }
 
 /// What became of pressing **Resolve conflicts** on a finished Conversation's
@@ -3891,11 +3912,12 @@ pub enum SteerCancelled {
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
 /// its own, and a steer is for the states the work is *done in* — the four rungs
-/// of the ladder, and Follow-up beside them, which has no other way in at all. A
-/// target the form offers is a target something can be set going in, which is
-/// why the two that turn on a pull request are drawn out where there is none: an
-/// instruction is writable anywhere and Done needs nothing, but there is no
-/// wrapping up and no following up of work nobody can see.
+/// of the ladder, and Follow-up and Investigating beside them. A target the form
+/// offers is a target something can be set going in, which is why the two that
+/// turn on a pull request are drawn out where there is none: an instruction is
+/// writable anywhere, Done needs nothing and a question can be asked about work
+/// at any stage, but there is no wrapping up and no following up of work nobody
+/// can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -3957,6 +3979,23 @@ pub enum SteerTarget {
     /// next.
     FollowUp,
 
+    /// A question about this work answered without changing it: a session
+    /// started on the brief the human wrote, which finds out what they asked
+    /// and goes on asking until they are finished, committing nothing.
+    ///
+    /// **The brief is required**, as a follow-up's is and for the same reason:
+    /// there is nothing on the branch that could stand for the question. It
+    /// carries it in a field of its own, as every payload here does, and a
+    /// submit without one is refused under its own name — see
+    /// [`ConversationSteered::NoInvestigationBrief`].
+    ///
+    /// Reachable from every state, unlike either of the other two that run: an
+    /// investigation is a question about the work rather than a step of it, so
+    /// there is nowhere the work can have got to that makes asking one wrong.
+    /// Where it leads back to is the state it was steered from — or Done, for the
+    /// states nothing returns to.
+    Investigating,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
@@ -3972,7 +4011,11 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Implementing | Self::Wrapping | Self::FollowUp => true,
+            Self::Grilling
+            | Self::Implementing
+            | Self::Wrapping
+            | Self::FollowUp
+            | Self::Investigating => true,
             Self::Done => false,
         }
     }
@@ -4059,6 +4102,21 @@ pub struct SteerSubmission {
     /// Whitespace alone is nothing written, as everywhere else here.
     #[serde(default)]
     pub follow_up: Option<String>,
+
+    /// And the question, for a steer into Investigating.
+    ///
+    /// The follow-up's rule word for word: it lands as the Steer Event's own
+    /// body, the session started on it is primed with it as its Brief, it is
+    /// **required** because nothing on the branch could stand for a question
+    /// somebody wanted asked, and whitespace alone is nothing written. A submit
+    /// that names Investigating without one is refused by name — see
+    /// [`ConversationSteered::NoInvestigationBrief`].
+    ///
+    /// Its own field rather than [`Self::follow_up`] sent under another name,
+    /// because the form keeps the two apart: what a submit carries is what the
+    /// human wrote under the target they picked.
+    #[serde(default)]
+    pub investigation: Option<String>,
 
     /// Whether the session is primed with everything the human has already
     /// answered.
@@ -4196,12 +4254,20 @@ pub enum ConversationSteered {
 
     /// Follow-up was named with no brief written.
     ///
-    /// The one written payload that is always required. A steer into
+    /// One of the two written payloads that are always required. A steer into
     /// Implementing with nothing written carries on what the branch holds and a
     /// steer into Grilling with nothing written grills the Brief that is there;
     /// a follow-up is neither the run's next step nor a round of it, so an empty
     /// one is a session with nothing to follow up.
     NoFollowUpBrief,
+
+    /// And Investigating was named with no question written.
+    ///
+    /// The same rule on the other required payload, refused under its own name
+    /// because what the human is owed is a sentence about what they were doing:
+    /// an investigation is a question about the work, and the follow-up's words
+    /// name a pull request that a steer into Investigating need not have.
+    NoInvestigationBrief,
 
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.

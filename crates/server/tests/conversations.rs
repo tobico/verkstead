@@ -728,7 +728,21 @@ async fn a_draft_can_be_set_to_tinker() {
     assert_eq!(opened(&app, id).await.process, Process::Tinker);
 }
 
-/// The three whose stage has not landed are refused by a name of their own,
+/// And a draft can be set to Investigate, the third Process whose stage has
+/// landed.
+#[tokio::test]
+async fn a_draft_can_be_set_to_investigate() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(opened(&app, id).await.process, Process::Investigate);
+}
+
+/// The two whose stage has not landed are refused by a name of their own,
 /// rather than under the refusal about this Conversation: nothing the human does
 /// here makes one of them pickable, and what they are waiting on is Verkstead.
 ///
@@ -740,11 +754,7 @@ async fn a_process_whose_stage_has_not_landed_is_refused_by_name() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    for process in [
-        Process::Investigate,
-        Process::Review,
-        Process::FixMergeIssues,
-    ] {
+    for process in [Process::Review, Process::FixMergeIssues] {
         assert_eq!(
             pick_process(&app, id, process).await,
             ProcessPicked::NotLanded,
@@ -1580,6 +1590,21 @@ async fn steer_following_up(app: &Router, id: i64, brief: Option<&str>) -> Conve
     .await
 }
 
+/// And the submit into Investigating, which carries the payload beside the
+/// follow-up's: the question the session it starts is set going on.
+async fn steer_investigating(app: &Router, id: i64, brief: Option<&str>) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Investigating",
+            "interrupt": false,
+            "investigation": brief,
+        }),
+    )
+    .await
+}
+
 /// And the same submit into Grilling, which is the one target that carries a
 /// payload: the round's Brief where the human wrote one.
 ///
@@ -1884,6 +1909,180 @@ async fn starting_a_tinker_checks_its_companions_out_too() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.companions.len(), 1);
+
+    let worktree = view.companions[0]
+        .worktree
+        .as_ref()
+        .expect("a companion is checked out when the Conversation's own is");
+    assert!(!worktree.missing);
+    assert!(PathBuf::from(&worktree.path).join("README.md").is_file());
+}
+
+/// A drafting Conversation ready to be investigated: the Process picked, the one
+/// role it is run under answered, and a Brief to find out about.
+///
+/// No Grilling Pairing and no Review Pairing: an Investigate draws neither
+/// picker, so neither is ever chosen on one.
+async fn investigate(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
+    let id = started(app, repo_id).await;
+
+    assert_eq!(
+        pick_process(app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+
+    let implementation = profile(app, elsewhere, "opus").await;
+    choose(app, id, "implementation", implementation).await;
+
+    assert_eq!(
+        write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    id
+}
+
+/// An Investigate waits on a brief and on the one role it is run under, and on
+/// nothing else — the same reading on the button and under the press.
+///
+/// Neither the Grilling picker nor the Review one is drawn for one, so an
+/// Investigate that waited on either would be a Start nothing on the page could
+/// ever satisfy.
+#[tokio::test]
+async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Investigate).await,
+        ProcessPicked::Picked
+    );
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoImplementationProfile,
+        "the role the session runs under is the only one asked about",
+    );
+    assert!(!opened(&app, id).await.ready_to_grill);
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, elsewhere.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::EmptyBrief,
+        "and with it answered what is left is the Brief: no grilling and no \
+         review is ever waited on",
+    );
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "which the button waits on too",
+    );
+
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    assert!(
+        opened(&app, id).await.ready_to_grill,
+        "one role and a brief is the whole of what an Investigate waits on, \
+         with the two pickers nobody drew never among them",
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And the press does the grill start's own sequence, landing Investigating: the
+/// branch, the worktree, the frozen Brief and the move on the Timeline, with
+/// neither a grilling nor a follow-up anywhere in it.
+#[tokio::test]
+async fn starting_an_investigate_lands_it_in_investigating() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = investigate(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Investigating],
+        "one move, straight past the state a Develop would have been grilled in",
+    );
+
+    assert_eq!(
+        git(
+            &repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", view.branch)
+            ]
+        )
+        .trim()
+        .len(),
+        40,
+        "the branch is cut exactly as a grill start cuts one",
+    );
+
+    let worktree = view
+        .worktree
+        .expect("an investigation is worked in a Worktree: it writes probes and runs them");
+    let path = PathBuf::from(&worktree.path);
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert!(
+        worktrees(&repo).contains(&path.canonicalize().unwrap()),
+        "and git has it registered: {:?}",
+        worktrees(&repo),
+    );
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+        "checked out on the branch the work is on",
+    );
+
+    assert!(
+        view.base_commit.is_some(),
+        "with what it branched from settled, which is the rule resolving",
+    );
+
+    // And everything the press freezes is frozen: the Brief, the Pairing and the
+    // Process, exactly as they are for a grilling that has started.
+    assert_eq!(
+        write_brief(&app, id, "# Something else\n").await,
+        BriefSaved::NotDrafting
+    );
+    assert_eq!(
+        pick_process(&app, id, Process::Develop).await,
+        ProcessPicked::NotDrafting
+    );
+}
+
+/// An Investigate checks its companions out as a grill start does, every one of
+/// them on a branch of its own — an investigation may have to run something in
+/// one to answer the question.
+#[tokio::test]
+async fn starting_an_investigate_checks_its_companions_out_too() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+
+    let id = investigate(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Investigating);
     assert_eq!(view.companions.len(), 1);
 
     let worktree = view.companions[0]
@@ -3386,6 +3585,7 @@ async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
         "digest": true,
         "instruction": "Rebase this onto main.",
         "follow_up": "Does it count the 429s it sends?",
+        "investigation": "Where does the count come from?",
         "pairing": { "profile_id": running, "model": "claude-opus-5" },
         "interrupt": true,
         "added": [{
@@ -3419,6 +3619,7 @@ async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
         "digest": false,
         "instruction": serde_json::Value::Null,
         "follow_up": serde_json::Value::Null,
+        "investigation": serde_json::Value::Null,
         "pairing": serde_json::Value::Null,
         "interrupt": false,
         "added": [],
@@ -10345,5 +10546,153 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
         opened(&app, id).await.state,
         Lifecycle::Grilling,
         "and every Conversation this press starts is grilled",
+    );
+}
+
+/// A Conversation Verkstead has finished with is steered into Investigating, and
+/// the record says where the question came from as well as what was asked.
+///
+/// **Offered from everywhere, which is the target's whole shape.** A wrap-up and
+/// a follow-up both turn on a pull request; a question about the work turns on
+/// nothing, so there is nowhere the work can have got to that makes asking one
+/// wrong — and this Conversation has none, being a Develop one steered to Done off
+/// its grilling.
+///
+/// **The question is the Event**, rendered like every other document the human
+/// writes, exactly as a follow-up's brief is: reading the Timeline back is
+/// reading what was asked.
+///
+/// **And the state it was steered out of is on the record beside that Event**,
+/// which is the fact nothing else holds: the state column says Investigating from
+/// the moment the move lands, so where the work came from would be gone. Read
+/// back out of the database rather than off the page — the ending that wants it is
+/// the reader, and it may be hours and a restart away.
+#[tokio::test]
+async fn steering_a_finished_conversation_into_investigating_records_where_it_came_from() {
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_investigating(&app, id, Some("Where does the `429` count come from?\n")).await,
+        ConversationSteered::Steered,
+        "on no pull request at all, which is what this target is offered despite",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+            ("steer", Lifecycle::Investigating),
+            ("moved", Lifecycle::Investigating),
+        ],
+        "the human's own line, and the plain move under it",
+    );
+
+    let asked = view
+        .timeline
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.html.clone(),
+            _ => None,
+        })
+        .expect("the steer carries what was written on it");
+
+    assert!(
+        asked.contains("Where does the <code>429</code> count come from?"),
+        "rendered like every other document the human writes: {asked:?}",
+    );
+
+    assert!(
+        view.worktree.is_some(),
+        "and it has somewhere to write its probes: a steer into a state work goes \
+         on in checks one out where none stands",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone"
+    );
+
+    // The half of the record no page draws, read the way the ending will read it:
+    // out of the database, after the server that wrote it has gone.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // The store's own word for a state rather than the viewer's: what is being
+    // read here is the record, one side of the seam the view types are the other
+    // side of.
+    let sources: Vec<(store::Lifecycle, Option<store::Lifecycle>)> = store::timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            store::Event::Steer(target, _, recorded) => {
+                Some((target, recorded.and_then(|record| record.source)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    pool.close().await;
+
+    assert_eq!(
+        sources,
+        [
+            (store::Lifecycle::Done, Some(store::Lifecycle::Grilling)),
+            (
+                store::Lifecycle::Investigating,
+                Some(store::Lifecycle::Done)
+            ),
+        ],
+        "each press says where it went and where it found the work",
+    );
+}
+
+/// An investigation is whatever the human asked about, so a submit with nothing
+/// written is refused by name — in its own words rather than the follow-up's.
+///
+/// The second of the two written payloads with no quiet meaning: an empty
+/// instruction carries the branch on and an empty brief grills the one already
+/// written, and a question nobody asked is a session with nothing to find out.
+/// Its own refusal because the follow-up's names a pull request, and an
+/// investigation is steerable from work that is on none — which is this
+/// Conversation.
+#[tokio::test]
+async fn steering_into_investigating_with_nothing_to_find_out_is_refused_by_name() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_investigating(&app, id, None).await,
+        ConversationSteered::NoInvestigationBrief,
+        "there is nothing for the session to find out",
+    );
+    assert_eq!(
+        steer_investigating(&app, id, Some("   \n")).await,
+        ConversationSteered::NoInvestigationBrief,
+        "a textarea somebody tabbed through included",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling, "so nothing moved");
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and nothing on the record says it was steered",
     );
 }

@@ -96,6 +96,57 @@ pub(crate) enum Evidence {
     /// and a round that was a question and an answer commits nothing at all, so
     /// there is nothing on the branch to read instead.
     NothingElse,
+
+    /// An investigation, which is the same mark read in Investigating's own
+    /// window — and two differences the rules here carry.
+    ///
+    /// **Uncommitted changes do not refuse it.** Finding something out means
+    /// writing probes and running them, and the skill's instruction is to commit
+    /// none of it: the scratch left behind is the point rather than work stopped
+    /// short of, every Set's Diff has already shown it to the human, and the
+    /// Worktree goes with the close. This is the one kind that passes the check
+    /// by — see [`Evidence::over_scratch`], which is why it stays a step of its
+    /// own rather than a check that softens for everybody.
+    ///
+    /// **And the session ends with its work.** Nothing is ever committed, so
+    /// there is nothing to push and no pull request to open, here or in any
+    /// companion: every driver that writes this one writes
+    /// [`Ends::WithItsWork`] beside it.
+    Investigated,
+}
+
+impl Evidence {
+    /// Which state's Nothing-else mark bears a signal of this kind out, and what
+    /// one given without it is refused with — or `None` where what says the work
+    /// is done is on the branch rather than in the human's hands.
+    ///
+    /// Two kinds are the human's to end and each is refused in its own words: a
+    /// follow-up is not over, and an investigation has more to find out. The
+    /// mechanism is one and the sentences are two, because an agent acts on the
+    /// sentence.
+    fn mark(&self) -> Option<(Lifecycle, &'static str)> {
+        match self {
+            Evidence::NothingElse => Some((
+                Lifecycle::FollowUp,
+                "the human has not said there is nothing else, so this follow-up is not over: \
+                 put the next round to them as a Set with `verkstead ask`",
+            )),
+            Evidence::Investigated => Some((
+                Lifecycle::Investigating,
+                "the human has not said there is nothing else, so there is more they want found \
+                 out: put the next round to them as a Set with `verkstead ask`",
+            )),
+            Evidence::Landed { .. } | Evidence::Committed { .. } | Evidence::Nothing => None,
+        }
+    }
+
+    /// Whether what a session of this kind leaves uncommitted is what it was
+    /// sent to do rather than work it stopped short of committing.
+    ///
+    /// True for an investigation alone — see [`Evidence::Investigated`].
+    fn over_scratch(&self) -> bool {
+        matches!(self, Evidence::Investigated)
+    }
 }
 
 /// Whether a session is done with its work alone, or only once its branch is on
@@ -241,9 +292,9 @@ enum Verdict {
 /// 200 where the work has landed by its kind's own reading, and the session is
 /// ended once it is next idle. 409 otherwise, with the reason in words the agent
 /// can act on in the same turn: what is missing, no session here to end, no
-/// Direction picked yet, a follow-up the human has not said is over, or a
-/// session a run ends on whose branch — or whose companion's — has no pull
-/// request open. The session is left exactly as it was.
+/// Direction picked yet, a follow-up or an investigation the human has not said
+/// is over, or a session a run ends on whose branch — or whose companion's — has
+/// no pull request open. The session is left exactly as it was.
 pub(crate) async fn signal(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
@@ -284,15 +335,14 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     };
 
     // Not a gap the session can close by itself, so not said as one: whether
-    // there is anything else is the human's, and the move that asks them is a Set.
-    if matches!(evidence, Evidence::NothingElse)
-        && !crate::runner::marked(state, conversation_id).await
+    // there is anything else is the human's, and the move that asks them is a
+    // Set. Read inside the window of the state the kind is had in, because a
+    // Conversation can have been through more than one of them — see
+    // [`Evidence::mark`].
+    if let Some((within, unmarked)) = evidence.mark()
+        && !crate::runner::marked(state, conversation_id, within).await
     {
-        return Verdict::Refused(
-            "the human has not said there is nothing else, so this follow-up is not over: put \
-             the next round to them as a Set with `verkstead ask`"
-                .to_owned(),
-        );
+        return Verdict::Refused(unmarked.to_owned());
     }
 
     if let Some(missing) = missing(state, conversation_id, &evidence, ends).await {
@@ -302,7 +352,12 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         ));
     }
 
-    if let Some(uncommitted) = uncommitted(state, conversation_id).await {
+    // A step of its own that one kind passes by, rather than a check that
+    // softens: an investigation's scratch is what it was sent to write — see
+    // [`Evidence::over_scratch`].
+    if !evidence.over_scratch()
+        && let Some(uncommitted) = uncommitted(state, conversation_id).await
+    {
         return Verdict::Refused(uncommitted);
     }
 
@@ -428,8 +483,9 @@ async fn missing(
             (!carried_on && !crate::runner::committed_since(state, conversation_id, *already).await)
                 .then(|| "nothing has been committed since this session began".to_owned())
         }
-        // Read in [`verdict`], where its refusal is said in words of its own.
-        Evidence::Nothing | Evidence::NothingElse => None,
+        // Read in [`verdict`], where their refusals are said in words of their
+        // own.
+        Evidence::Nothing | Evidence::NothingElse | Evidence::Investigated => None,
     }
 }
 
@@ -506,30 +562,17 @@ async fn uncommitted(state: &AppState, conversation_id: i64) -> Option<String> {
 
 /// Every path git sees as changed in `worktree` — modified, staged, or untracked
 /// and not ignored — or `None` where git will not answer.
+///
+/// Where a change is now rather than both ends of it: a rename is one change, and
+/// the path it went to is the one the human has to go and look at. Read through
+/// [`crate::diffs::changed`], which is the one parse of `git status` here.
 fn changed(worktree: &std::path::Path) -> Option<Vec<String>> {
-    let status = crate::repos::git(
-        worktree,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-
-    let mut paths = Vec::new();
-    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
-
-    while let Some(entry) = entries.next() {
-        let Some((code, path)) = entry.split_at_checked(3) else {
-            continue;
-        };
-
-        // A rename or a copy is followed by the path it came from, which is
-        // the same change rather than another one.
-        if code.starts_with(['R', 'C']) {
-            entries.next();
-        }
-
-        paths.push(path.to_owned());
-    }
-
-    Some(paths)
+    Some(
+        crate::diffs::changed(worktree)?
+            .into_iter()
+            .map(|change| change.path)
+            .collect(),
+    )
 }
 
 /// `paths` as a refusal names them: in backticks, cut short after [`NAMED`].

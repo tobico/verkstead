@@ -580,7 +580,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap();
 
     assert!(
-        nothing_else(pool, id).await.unwrap(),
+        nothing_else(pool, id, Lifecycle::FollowUp).await.unwrap(),
         "the round is marked as over",
     );
 
@@ -809,6 +809,24 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .unwrap();
 
     sqlx::query("INSERT INTO steer_upgrades (event_id, repo_id, branch) VALUES (?, ?, '')")
+        .bind(event)
+        .bind(companion)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And where that steer came from, which is another row hung off the same
+    // Event.
+    sqlx::query("INSERT INTO steer_sources (event_id, state) VALUES (?, 'grilling')")
+        .bind(event)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And what its checkout was already holding uncommitted, which is the last
+    // of them: one row per path, and the NULL row a checkout that held nothing
+    // is recorded as.
+    sqlx::query("INSERT INTO steer_scratch (event_id, repo_id, path) VALUES (?, ?, 'README.md')")
         .bind(event)
         .bind(companion)
         .execute(pool)

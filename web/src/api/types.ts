@@ -1263,7 +1263,7 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1952,6 +1952,22 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
 export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
+ * What the human's Nothing-else mark on this Set would end, which is the whole
+ * of what the two states whose rounds carry the box differ over.
+ *
+ * The box itself is the same box and the mark the same mark — see
+ * `store::nothing_else` — so what this is drawn on is the line *under* the box
+ * rather than a second control: a follow-up wraps the Conversation up and an
+ * investigation ends with nothing committed, and a page that said one where it
+ * meant the other would be promising a review nobody is going to read.
+ *
+ * Not `store::Ending`, which is what became of writing one of them down. This
+ * is what the box on a Set nobody has answered yet would set in motion, and
+ * nothing reads it but the words beside it.
+ */
+export type Ending = "FollowUp" | "Investigation";
+
+/**
  * What one entry is, which decides what the field drawing it does with the row.
  *
  * Three rather than two, because a repository is the thing one of these fields
@@ -2485,7 +2501,7 @@ why: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -3853,7 +3869,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief" | "NoInvestigation";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -4194,8 +4210,8 @@ standing: Standing,
  */
 proposal: ProposalView | null, 
 /**
- * Whether this Set was asked while its Conversation is in Follow-up, which
- * is what puts the Nothing-else option in its closing section.
+ * Which ending the Nothing-else option in this Set's closing section would
+ * bring about, or `null` where there is no option to draw.
  *
  * The other control the viewer injects, and it arrives the same way the
  * proposal does: with the Set, so the page never draws a closing section
@@ -4203,10 +4219,11 @@ proposal: ProposalView | null,
  *
  * A fact about the Conversation rather than about the Set, which is why it
  * is decided here rather than read off the stored body. Nothing about what
- * was asked changes — an ordinary Set is what a follow-up's rounds are made
- * of — and a Set stored before any of this stays exactly as it was.
+ * was asked changes — an ordinary Set is what a follow-up's and an
+ * investigation's rounds are both made of — and a Set stored before any of
+ * this stays exactly as it was.
  */
-follow_up: boolean, 
+ending: Ending | null, 
 /**
  * The files the human put on this Set's Answers, oldest first — which is
  * the order they were attached in, and the order the pills are drawn in.
@@ -4854,6 +4871,15 @@ instruction: string | null,
  */
 follow_up: string | null, 
 /**
+ * And the question, for a steer into Investigating.
+ *
+ * A slot of its own rather than the follow-up's read twice, which is the
+ * rule every payload here is kept under: the form holds what was written
+ * under each target, so a human who moves the picker across and back reads
+ * their own sentence back where they wrote it.
+ */
+investigation: string | null, 
+/**
  * What the work would run under from here, which is what the submit would
  * send — the Conversation's own prefill included, rather than only a pick
  * made by hand.
@@ -5039,6 +5065,21 @@ instruction: string | null,
  */
 follow_up: string | null, 
 /**
+ * And the question, for a steer into Investigating.
+ *
+ * The follow-up's rule word for word: it lands as the Steer Event's own
+ * body, the session started on it is primed with it as its Brief, it is
+ * **required** because nothing on the branch could stand for a question
+ * somebody wanted asked, and whitespace alone is nothing written. A submit
+ * that names Investigating without one is refused by name — see
+ * [`ConversationSteered::NoInvestigationBrief`].
+ *
+ * Its own field rather than [`Self::follow_up`] sent under another name,
+ * because the form keeps the two apart: what a submit carries is what the
+ * human wrote under the target they picked.
+ */
+investigation: string | null, 
+/**
  * Whether the session is primed with everything the human has already
  * answered.
  *
@@ -5093,13 +5134,14 @@ upgraded: Array<CompanionUpgrade>, };
  *
  * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the states the work is *done in* — the four rungs
- * of the ladder, and Follow-up beside them, which has no other way in at all. A
- * target the form offers is a target something can be set going in, which is
- * why the two that turn on a pull request are drawn out where there is none: an
- * instruction is writable anywhere and Done needs nothing, but there is no
- * wrapping up and no following up of work nobody can see.
+ * of the ladder, and Follow-up and Investigating beside them. A target the form
+ * offers is a target something can be set going in, which is why the two that
+ * turn on a pull request are drawn out where there is none: an instruction is
+ * writable anywhere, Done needs nothing and a question can be asked about work
+ * at any stage, but there is no wrapping up and no following up of work nobody
+ * can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done";
 
 /**
  * And one companion the steer opened up, which carries the one field an

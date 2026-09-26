@@ -1408,8 +1408,9 @@ make, so its pull request is what it is asked for instead.
 non-zero saying what is missing, the session stays alive, and the agent puts it
 right in the same turn. Refused too over uncommitted changes, in the Worktree or
 in any companion repo the Conversation may write in, naming the files — except
-for an Investigate session, whose scratch is the point and goes with the
-Worktree — and, for
+for an Investigate session, whose scratch is the point and is Verkstead's to take
+back out where the ending hands the checkout back to work; see
+**Investigating** — and, for
 a session meant to end on a pull request, while the branch has none open, or any
 companion repo the work committed in has none, GitHub out of reach reading as
 accepted. The companions are asked about here rather than only by the wrap-up
@@ -2083,7 +2084,10 @@ state and it takes a brief the way Follow-up does; Draft and Closed are
 not among them, each having a way in of its own. **What state it was steered
 from is written down beside the Steer**, because one target reads it back:
 Investigating ends in the state it left rather than at Done — see
-**Investigating**. Sources are every state there
+**Investigating**. So is **what each checkout was already holding uncommitted**,
+for the same target and the same ending: what the investigation wrote comes out
+on the way back to work, and what the human had left half done stays.
+Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather
 than another move along it. So every refusal is about the target instead of the
@@ -2285,6 +2289,18 @@ working state that never ends on a pull request. The branch is still named — a
 Conversation's title is worth a cheap rename — and it outlives the checkout with
 nothing on it.
 
+**And the scratch is taken back out where the Conversation goes back to work.**
+One that ends **Done** keeps it: nothing is going to work in that checkout
+before the close takes it away. One that lands in a state something runs in
+hands the same checkout to sessions that commit and push — each of which stages
+everything it finds — so what the investigation wrote comes out on the way,
+leaving the checkout as the **Steer** found it. Which is why the steer writes
+down what each checkout was *already* holding uncommitted: a path that was half
+done before the question was asked stays half done, and only what the
+investigation added goes. A path on both lists stays, the record holding paths
+rather than contents — a probe left in a file somebody was working on costs a
+line in a diff, and reverting it would cost them the work.
+
 **What ends it is the human's mark and the session's Done signal together**,
 exactly as a follow-up: the newest answered round carries **Nothing else**, and
 a signal without the mark is refused. **Where it ends is where it came from.**
@@ -2292,11 +2308,14 @@ An Investigate Conversation came from its own Draft and ends **Done**, with no
 wrap-up, no watchers and nothing dispatched. One steered into Investigating
 returns to the state it was steered from, nothing else about it changed — so a
 question asked in the middle of a wrap-up leaves the wrap-up where it was rather
-than ending it, which is what a follow-up does too. Draft and Closed are the two
-states nothing returns to, so an Investigating steered from either ends Done as
-well. Which state to go back to is written down beside the **Steer** that made
-it, being a fact of the steer rather than something to read back off the
-Timeline.
+than ending it, which is what a follow-up does too. Draft, Closed and
+Investigating are the three states nothing returns to, so an Investigating
+steered out of any of them ends Done as well: the first two have a way in of
+their own, and an investigation sent back to Investigating is one the mark could
+never end — the move that lands it there opens a fresh window, and the tick that
+ended the last round falls outside it. Which state to go back to is written down
+beside the **Steer** that made it, being a fact of the steer rather than
+something to read back off the Timeline.
 _Avoid_: research, spike, exploration, read-only mode, question state
 
 **Nothing else**:
