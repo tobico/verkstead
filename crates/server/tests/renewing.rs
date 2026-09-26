@@ -159,6 +159,10 @@ impl Verkstead {
             standing.members.clone(),
             standing.joins.clone(),
             standing.nudges.clone(),
+            // And none of the workbench over the link: what these suites ask
+            // about is the link itself — see `tests/relayed.rs`, which is the
+            // suite about what a member reaches through one.
+            Router::new(),
         )));
 
         standing
@@ -213,6 +217,10 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
             self.nudges.clone(),
+            // And none of the workbench over the link: what these suites ask
+            // about is the link itself — see `tests/relayed.rs`, which is the
+            // suite about what a member reaches through one.
+            Router::new(),
         )));
     }
 

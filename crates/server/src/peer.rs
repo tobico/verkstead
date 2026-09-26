@@ -80,6 +80,7 @@ pub mod exchange;
 pub mod joining;
 pub mod renewing;
 pub mod unlinking;
+pub mod workbench;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -281,8 +282,17 @@ impl Listener {
 /// recorded anybody and is matched against the request it is answering — see
 /// [`exchange`]. Nothing grows that list afterwards: a member's relayed traffic
 /// goes the other way, inside [`members_only`] with the gate over it, and so
-/// does every call the stages after this one add — the first of which is the
-/// announcement in [`announcing`], where a member names a newcomer to this one.
+/// does every call the stages after this one add — the announcement in
+/// [`announcing`], where a member names a newcomer to this one, and the whole of
+/// the viewer's own namespace, which is what `workbench` is.
+///
+/// `workbench` is that namespace over this device's state, built outside for the
+/// reason `nudges` is made outside: it is the state the *other* listener answers
+/// out of, and a relayed call that landed on a second one would be a Set
+/// answered into a wait nobody was holding — see [`workbench`], and
+/// [`crate::Routers`], which is a start taking both. `Router::new()` is a
+/// listener with none of the workbench on it, which is what a suite standing one
+/// up for a question about something else wants.
 ///
 /// **What is not a route is refused rather than missed**, because the gate is
 /// the fallback: a path nothing here answers is one this caller has no
@@ -300,6 +310,7 @@ pub fn router(
     members: Members,
     joins: Joins,
     nudges: crate::nudge::Nudges,
+    workbench: Router,
 ) -> Router {
     // This device's cluster as something to *do* things to, which two of the
     // routes below need for one thing apiece: a device written into this
@@ -352,32 +363,43 @@ pub fn router(
                 }),
         )
         .fallback_service(members_only(
-            Router::new()
-                .route(announcing::MEMBERS, post(announcing::announced))
-                .with_state(announcing::Told {
-                    device: device.clone(),
-                    members: members.clone(),
-                    nudges: nudges.clone(),
-                    devices,
-                })
-                .merge(
-                    Router::new()
-                        .route(unlinking::MEMBER, delete(unlinking::dropped))
-                        .with_state(unlinking::Dropping {
-                            device: device.clone(),
-                            members: members.clone(),
-                            nudges: nudges.clone(),
-                        }),
-                )
-                .merge(
-                    Router::new()
-                        .route(renewing::CERTIFICATE, post(renewing::renewed))
-                        .with_state(renewing::Renewing {
-                            device,
-                            members: members.clone(),
-                            nudges,
-                        }),
-                ),
+            // And the three prefixes the workbench keeps to itself held back
+            // over the lot of it, which is a layer rather than a route apiece so
+            // that it is the namespace being refused rather than the endpoints
+            // that happen to be in it — see [`workbench::keeping_three_back`].
+            // Inside the gate, so that a stranger is refused for not being a
+            // member and learns nothing about which namespaces are relayed.
+            workbench::keeping_three_back(
+                Router::new()
+                    .route(announcing::MEMBERS, post(announcing::announced))
+                    .with_state(announcing::Told {
+                        device: device.clone(),
+                        members: members.clone(),
+                        nudges: nudges.clone(),
+                        devices,
+                    })
+                    .merge(
+                        Router::new()
+                            .route(unlinking::MEMBER, delete(unlinking::dropped))
+                            .with_state(unlinking::Dropping {
+                                device: device.clone(),
+                                members: members.clone(),
+                                nudges: nudges.clone(),
+                            }),
+                    )
+                    .merge(
+                        Router::new()
+                            .route(renewing::CERTIFICATE, post(renewing::renewed))
+                            .with_state(renewing::Renewing {
+                                device,
+                                members: members.clone(),
+                                nudges,
+                            }),
+                    )
+                    // And the viewer's own namespace, which is the whole of what
+                    // a member reaches of this device's workbench.
+                    .merge(workbench),
+            ),
             members,
         ))
 }
@@ -405,10 +427,12 @@ struct Answering {
 /// that reads as working code. So there is one call, and everything that goes
 /// through it is gated.
 ///
-/// Three routes on this listener, and they are one membership said three ways:
-/// the announcement in [`announcing`], which puts a device on this one's list,
-/// the unlink in [`unlinking`], which takes one off it, and the renewal in
-/// [`renewing`], which changes the certificate one of them stands under. It is
+/// Two things on this listener. One is a membership said three ways: the
+/// announcement in [`announcing`], which puts a device on this one's list, the
+/// unlink in [`unlinking`], which takes one off it, and the renewal in
+/// [`renewing`], which changes the certificate one of them stands under. The
+/// other is the viewer's own namespace, which is a member reaching this device's
+/// whole workbench over the link it already holds — see [`workbench`]. It is
 /// public all the same, because
 /// the suite stands its own one-line route behind the real gate: what is being
 /// asked of the gate is which callers get *through* it, and the path no route
