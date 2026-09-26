@@ -520,175 +520,205 @@ jobs:
           path: upload/${{ matrix.asset }}
           if-no-files-found: error
 
-  # The Linux desktop artifact: the tray app of ADR-0012 and everything it is
-  # drawn over, in one file. A leg of its own rather than a fifth row in the
-  # matrix above, because nothing about it is that matrix's shape — it is
-  # dynamic where those are static, it wants the toolkit's development packages
-  # where those want musl, and what it uploads is a bundle rather than a bare
-  # binary. `desktop-macos` is the next leg along and `desktop-windows` the
-  # third, one per desktop the app is drawn on.
+  # The Linux desktop artifact: the Electron app of ADR-0020 and the released
+  # CLI inside it, in one file. A leg of its own rather than a sixth row in the
+  # matrix above, because nothing about it is that matrix's shape — it compiles
+  # nothing, it wants a screen and a session bus, and what it uploads is a
+  # packed app rather than a bare binary. `desktop-macos` is the next leg along
+  # and `desktop-windows` the third, one per desktop the app is drawn on.
   #
-  # x86_64 only, per ADR-0012: an arm64 Linux user has the bare CLI.
+  # **It waits on the whole `build` job**, which is what makes the sidecar the
+  # released artifact rather than a second build of it (ADR-0020): what goes
+  # inside is `verkstead-linux-x64`, the static musl binary the matrix above
+  # built and ran, downloaded here rather than compiled again. A `needs` cannot
+  # name one row of a matrix, so it names the job. Nothing else of that job's is
+  # wanted and the viewer artifact is not either — the viewer is embedded in
+  # that binary at compile time, so fetching the CLI fetches the viewer with it.
+  #
+  # **And it compiles nothing at all**, which is what the previous shape of this
+  # leg was almost entirely about: there is no Rust toolchain here, no cache of
+  # its own, no toolkit development packages, and no `ubuntu:22.04` container —
+  # which existed only to hold a GTK binary to an older glibc, and which had to
+  # be handed `/dev/fuse`, `SYS_ADMIN` and a way past the host's apparmor
+  # profile to mount what it had built. A plain runner has FUSE and a
+  # `/dev/fuse`, and electron-builder brings its own `mksquashfs`.
+  #
+  # x86_64 only, per ADR-0020: an arm64 Linux user has the bare CLI.
   desktop-linux:
     name: Verkstead-x86_64.AppImage
-    needs: [prepare, viewer]
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
-    # **The floor this artifact runs on is decided here, and nowhere else.** A
-    # bundle carries every library it links but not the C runtime — a process
-    # holding two of those has two of everything the C library keeps — so what
-    # the loader on a downloader's machine has to satisfy is the glibc of the
-    # machine that compiled it. Built on the runner itself that would be 2.39,
-    # which is above Ubuntu 22.04 and Debian 12 and so above much of what is
-    # still in support; built here it is 22.04's own 2.35, and the step that
-    # reads the symbols back is what holds it there.
-    #
-    # The assertions below then run on the floor rather than above it, which is
-    # the better half of the bargain: an AppImage that comes up on the oldest
-    # machine this leg claims comes up on the newer ones.
-    #
-    # The options are what lets it: an AppImage mounts itself through FUSE, and
-    # a container is not allowed to mount anything unless it is handed the
-    # device, the capability and a way past the host's own profile for
-    # containers. Without them every assertion here would be about a file
-    # nothing had run.
-    container:
-      image: ubuntu:22.04
-      options: >-
-        --device /dev/fuse
-        --cap-add SYS_ADMIN
-        --security-opt apparmor:unconfined
     env:
-      # Where `tools/build-appimage.sh` leaves it, said once: every step below
-      # either runs this file or asks something of it.
-      APPIMAGE: target/appimage/Verkstead-x86_64.AppImage
+      # Where `pnpm run pack` leaves it, said once: every step below either runs
+      # this file, mounts it or uploads it.
+      APPIMAGE: target/electron/out/Verkstead-x86_64.AppImage
     steps:
-      # First, because a distribution image carries nothing and the steps below
-      # are what a runner image would have made unnecessary: `curl` is how the
-      # Rust action fetches rustup when a machine has none, `git` is how the
-      # checkout checks out, and a C compiler is what cc-rs builds the C in the
-      # dependency tree with — SQLite's own sources and `ring`'s, as on the CLI
-      # legs. No `sudo` anywhere in this job: a container step is already root,
-      # and the image has no such command.
+      # Four packages and a sysctl, and every one of them is about *running*
+      # the file rather than building it — the runner image already carries the
+      # shared libraries Chromium wants, because it ships browsers built on it.
       #
-      # Then three groups of the leg's own. `libgtk-3-dev` is what
-      # `crates/desktop` links and what `ci.yml` installs to build the workspace
-      # at all — the toolkit the dialogs are drawn with. The tray is no longer
-      # one of its, and no longer a package here.
-      # `squashfs-tools` and `fuse3` are the bundling's: `mksquashfs` makes the
-      # filesystem an AppImage is, and `fusermount3` is what the runtime mounts
-      # it back with, which is what lets the assertions run the artifact itself
-      # rather than something unpacked out of it.
+      # `xvfb` is the screen: the window is the point of this app, and a run
+      # with no display is a run that proves the sidecar and nothing else.
+      # `dbus-x11` is `dbus-run-session`, under the name `ci.yml` asks for it —
+      # the tray is published onto the session bus, and a runner has no session,
+      # so the run below brings a bus of its own. `fuse3` is `fusermount3`: the
+      # pinned AppImage runtime links its own squashfuse but still asks that
+      # helper for the mount, and the mount is what the two assertions after it
+      # stand on. And `binutils` is `objdump`, which the floor below is read
+      # with — every runner image carries one, and a check that silently had no
+      # tool to run would be the one failure this leg cannot afford to miss.
       #
-      # And `xvfb`, which nothing builds or bundles with: a runner has no screen,
-      # and without one the app takes its no-screen path and the bundled toolkit
-      # is never loaded at all — see the assertion for what that would leave
-      # unchecked. No session bus here, and none wanted: what a bus would get
-      # this leg is the tray, and the tray is no longer anything this bundle can
-      # be wrong about — see `crates/desktop/tests/tray.rs`, which is where it is
-      # asserted, on every pull request.
-      - name: Install what a distribution image has not got
+      # The sysctl is Chromium's sandbox, for the reason `ci.yml` lifts the same
+      # restriction for bubblewrap: the `chrome-sandbox` inside an AppImage is
+      # not setuid and the image is mounted `nosuid` besides, so the browser
+      # falls back to an unprivileged user namespace — which Ubuntu 24.04 denies
+      # through AppArmor, and Chromium answers by refusing to start at all. The
+      # runner is a throwaway VM, so the restriction goes off rather than a
+      # profile being written for a file that is about to be thrown away with
+      # it.
+      - name: Install what running this file here wants
         run: |
-          apt-get update
-          apt-get install -y ca-certificates curl git build-essential \
-            pkg-config libgtk-3-dev \
-            squashfs-tools fuse3 xvfb
+          sudo apt-get update
+          sudo apt-get install -y xvfb dbus-x11 fuse3 binutils
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - uses: actions/checkout@v7.0.1
         with:
           # The bump commit, as every leg does — see the `viewer` job.
           ref: ${{ needs.prepare.outputs.sha }}
 
-      # As the CLI legs do and for the same reason: the viewer is embedded at
-      # compile time out of `web/dist`, which the checkout leaves empty. The
-      # desktop app is the server in-process, so it carries the viewer too.
-      - name: Fetch the viewer
+      # The same pins the viewer's leg and `ci.yml` take — see the action. The
+      # Electron this packs is not the one installed here: that package's
+      # download is denied in `desktop/pnpm-workspace.yaml`, and
+      # electron-builder fetches the pinned build itself — see
+      # `desktop/electron-builder.yml`.
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # The sidecar, which is the whole reason this leg waits on the matrix.
+      - name: Fetch the CLI this app carries
         uses: actions/download-artifact@v8.0.1
         with:
-          name: viewer
-          path: web/dist
+          name: verkstead-linux-x64
+          path: sidecar
 
-      # The same pin as everywhere else, and no `targets`: this leg builds for
-      # the runner it is on. The toolkit is linked rather than compiled in, so
-      # there is nothing here to cross-compile towards — which is why this is a
-      # Linux runner and the artifact is the Linux one.
-      - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@1.95.0
-
-      # A cache key of its own, for the reason the matrix legs have theirs: this
-      # is a fifth dependency tree — the host target, with the GUI crates in it
-      # — and a key it shared with a musl leg would have the two evicting each
-      # other.
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          key: appimage
-
-      # The script the dev shell runs, unchanged and unexplained here: how the
-      # bundle is made, what is left to the machine it lands on and what rides
-      # inside is all `tools/build-appimage.sh`'s to say. Including the check it
-      # makes on itself — that every library the app or its bundle names is one
-      # of the files it copied in — which is what keeps this leg from shipping
-      # something that only runs on a machine with the development packages the
-      # first step of this job installed.
-      - name: Build the AppImage
-        run: tools/build-appimage.sh
-
-      # The claim the container above makes, checked rather than trusted. Every
-      # versioned reference to glibc in the app and in each library the bundle
-      # carries, and the highest of them is what a downloader's loader has to
-      # satisfy; anything over the floor is a file that builds, runs here, and
-      # refuses to start on the machines this leg was moved onto an older image
-      # to reach — with `GLIBC_2.xx not found` and nothing friendlier, long
-      # after a release.
+      # **The executable bit is put back before anything is packed.** An
+      # artifact is a zip and a zip carries no mode, so what arrived above is a
+      # binary nothing can spawn — and the app spawns it as its sidecar. It goes
+      # in with the mode it has here, which is what the `ask` assertion below
+      # finds out by running it out of the mounted image.
       #
-      # Said as a number here rather than read off the image, because it is the
-      # promise the documentation makes to a downloader and not a fact about a
-      # runner — see `docs/adoption.md`. Moving the image means moving both.
-      - name: The AppImage asks for no glibc newer than 2.35
+      # `pnpm run pack` rather than electron-builder: the configuration cannot
+      # name which `verkstead` this app is to carry, so the script is what
+      # stages it — see `desktop/scripts/pack.mjs`, and `VERKSTEAD_CLI` is the
+      # same variable a developer packing from a checkout says it in.
+      - name: Pack the app
+        working-directory: desktop
         env:
-          FLOOR: "2.35"
+          VERKSTEAD_CLI: ${{ github.workspace }}/sidecar/verkstead-linux-x64
         run: |
-          asked=$(objdump -T target/appimage/AppDir/usr/bin/verkstead \
-            target/appimage/AppDir/usr/lib/* 2> /dev/null |
+          chmod +x "$VERKSTEAD_CLI"
+          pnpm run pack
+
+      # **Mounted, because everything asserted below is asserted of the file
+      # that is uploaded.** An AppImage is its own mount command: the runtime
+      # prints where it put the image and stays running until it is killed, so
+      # the mount belongs to the job rather than to this step, and the steps
+      # after this one read the path out of the environment. The job ending is
+      # what takes it down.
+      #
+      # It is an assertion in its own right, and the one the adoption documents
+      # make to a downloader: this file mounts itself on a machine that has a
+      # `/dev/fuse` and a `fusermount3` and no libfuse2 at all, which is the
+      # pinned runtime's doing — and nothing but a real mount says so.
+      - name: The AppImage mounts
+        run: |
+          mkdir -p target/electron
+          where=target/electron/mounted
+          ./"$APPIMAGE" --appimage-mount > "$where" 2>&1 &
+          # The path appears when the filesystem is up, so this is the wait and
+          # the assertion both. An `if` rather than a `&&`, which under `set -e`
+          # would end the step on the first turn round the loop that found
+          # nothing.
+          for _ in $(seq 50); do
+            mounted=$(head -1 "$where" || true)
+            if [ -n "$mounted" ] && [ -d "$mounted" ]; then
+              break
+            fi
+            sleep 0.2
+          done
+          if [ ! -f "$mounted/AppRun" ]; then
+            echo "::error::The AppImage did not mount."
+            cat "$where"
+            exit 1
+          fi
+          echo "Mounted at $mounted:"
+          ls "$mounted"
+          echo "MOUNTED=$mounted" >> "$GITHUB_ENV"
+
+      # **The floor this artifact runs on, read off it rather than decided by
+      # the machine that packed it.** A bundle carries every library it links
+      # but not the C runtime — a process holding two of those has two of
+      # everything the C library keeps — so what the loader on a downloader's
+      # machine has to satisfy is the highest glibc anything inside names. The
+      # Rust AppImage was compiled by this leg, so that number was the image the
+      # leg ran in, and an older image was the whole of how it was held down.
+      # Nothing here is compiled at all now: the sidecar is statically linked
+      # musl and names no glibc at any version, so what is left is Electron's
+      # own floor, out of the sysroot Chromium is built against.
+      #
+      # So it is read, over every file in the mounted image — the app's own
+      # binaries, the handful of libraries electron-builder carries beside them,
+      # and the sidecar, which is the one of the three that could raise this
+      # number by having arrived from somewhere it should not have.
+      #
+      # Said as a number here rather than taken from whatever was measured,
+      # because it is the promise `docs/adoption.md` makes to a downloader and
+      # not a fact about a runner — the two are one number, and moving Electron
+      # moves both. Anything over it is a file that packs, runs here, and
+      # refuses to start on the machines that promise names, with
+      # `GLIBC_2.xx not found` and nothing friendlier, long after a release.
+      - name: The AppImage asks for no glibc newer than 2.25
+        env:
+          FLOOR: "2.25"
+        run: |
+          asked=$(find "$MOUNTED" -type f -print0 |
+            xargs -0 objdump -T 2> /dev/null |
             grep -o 'GLIBC_[0-9][0-9.]*' | sort -u -V | tail -1)
           asked=${asked#GLIBC_}
           echo "The highest glibc asked for is ${asked:-none}."
-          # Nothing found is a check that did not run rather than a bundle that
-          # asks for nothing: everything here is dynamically linked against the
-          # C library, so some version is always named.
+          # Nothing found is a check that did not run rather than an app that
+          # asks for nothing: Electron is dynamically linked against the C
+          # library, so some version is always named.
           if [ -z "$asked" ]; then
-            echo "::error::Nothing in the bundle names a glibc version at all."
+            echo "::error::Nothing in the AppImage names a glibc version at all."
             exit 1
           fi
           # `sort -V` and read the last: over the floor is the only failure, and
           # a version scheme is not a number to compare with `-gt`.
           if [ "$(printf '%s\n%s\n' "$FLOOR" "$asked" | sort -V | tail -1)" != "$FLOOR" ]; then
-            echo "::error::The AppImage asks for glibc $asked, above the $FLOOR this leg builds to."
+            echo "::error::The AppImage asks for glibc $asked, above the $FLOOR it promises."
             exit 1
           fi
 
-      # Which is the tray app's help, `AppRun` having supplied the verb: it is
-      # the only half of this binary that a run of the file itself can reach.
-      - name: The AppImage runs
-        run: ./"$APPIMAGE" --help
-
-      # And the other half, which nothing going through `AppRun` can ask for:
-      # what a session spawned by this app runs is the binary inside the mounted
-      # image, by path, saying `ask`. The two halves being one file is the
-      # invariant the sandbox stands on (ADR-0012, as amended) — an AppImage
-      # carrying the tray alone would come up, serve, draw its icon, pass every
-      # assertion above, and hand each session it spawned a binary with no `ask`
-      # in it.
+      # The half of this download a *session* gets, and the invariant the
+      # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
+      # the binary inside the mounted image, by path, saying `ask`. An AppImage
+      # carrying the window alone would come up, serve, draw its icon, pass
+      # every other assertion here, and hand each session it spawned a binary
+      # with no `ask` in it.
       #
-      # Asked of the file that was packed, which is what the glibc floor above
-      # reads too, and under the library path `AppRun` exports: a dynamically
-      # linked binary out of this bundle runs over the bundle's own libraries or
-      # it does not run at all. The help is read rather than the exit status
-      # alone, so that a binary answering with some other command's usage fails
-      # here rather than passing.
-      - name: The binary inside answers ask
+      # **Run as it is, with nothing exported in front of it**, which is the
+      # other thing this proves: the sidecar is static, so a session is handed
+      # the binary itself rather than a launcher pointing a loader at the
+      # bundle's libraries — see `crates/server/src/sandbox.rs`. The help is
+      # read rather than the exit status alone, so that a binary answering with
+      # some other command's usage fails here rather than passing.
+      - name: The binary inside the mounted image answers ask
         run: |
-          help=$(LD_LIBRARY_PATH=target/appimage/AppDir/usr/lib \
-            target/appimage/AppDir/usr/bin/verkstead ask --help)
+          help=$("$MOUNTED/resources/cli/verkstead" ask --help)
           printf '%s\n' "$help"
           case "$help" in
             *"Question Set"*) ;;
@@ -698,59 +728,50 @@ jobs:
               ;;
           esac
 
-      # The two halves of what a human downloads this file for, asserted on one
-      # run of it: the toolkit this bundle carries, and the viewer behind it.
+      # What a human downloads this file for, asserted on one run of the file
+      # itself: a window, an icon in the tray, and the viewer behind both.
       #
-      # **A screen, deliberately.** A runner has none, and a Verkstead started
-      # without one reads that as a session with nowhere to put an icon, serves
-      # anyway, and never starts the toolkit — see `crates/server/src/display.rs`.
-      # Which would leave the GTK this bundle carries unopened by this leg: the
-      # dialogs are drawn with it and the app's loop is its, and nothing but a
-      # run with a screen would ever find out whether what was copied in loads.
-      # So Xvfb is started and `$DISPLAY` points at it.
+      # **A screen, deliberately.** This app *is* a window — there is no
+      # headless path to fall back on — so a run without a display is a run
+      # that proves nothing this leg exists for. Xvfb is started and `$DISPLAY`
+      # points at it.
       #
-      # **The tray is asserted elsewhere, and deliberately not here.** It used to
-      # be this step's other half, back when it was drawn over an appindicator
-      # that `tools/build-appimage.sh` copied in by hand — a file the bundle
-      # could be wrong about, and only a run like this one would say so. It is
-      # Rust on the session bus now and its artwork is compiled in, so there is
-      # nothing of the bundle's left in it; what there is to assert is that the
-      # app registers with a panel, which is
-      # `crates/desktop/tests/tray.rs` on every pull request rather than this leg
-      # by hand at a release. The app's log here will carry a warning about
-      # there being no session bus to publish an icon on, and that is this
-      # container being a container rather than anything about the file being
-      # shipped.
+      # **And a session bus, deliberately.** The app says the icon is in the
+      # tray whether or not anything is listening, so this assertion would pass
+      # on a runner with no bus at all — and would mean less than it reads.
+      # `dbus-run-session` gives the run a bus of its own, so the line is said
+      # after a StatusNotifierItem was really exported onto one. What it still
+      # does not prove is a *panel*: nothing here owns the watcher name, which
+      # is the desktop-with-no-tray-host case the adoption documents describe
+      # and `desktop/tests` pins.
       #
-      # `--no-open` stays: a screen is not a browser, and there is still nothing
-      # here to hand a URL to.
+      # **The log is where the answers are.** Neither the window coming up nor
+      # the icon being raised is visible from outside the process, so the app
+      # says both itself — see `desktop/src/window.ts` and `desktop/src/tray.ts`
+      # — and `$XDG_STATE_HOME` is set so the file it says them in is somewhere
+      # this step knows. `$VERKSTEAD_DATA_DIR` is the server's own variable,
+      # passed on to the sidecar by the app, and it is where the key below goes.
       #
-      # **The log is where the answer is.** A toolkit that started is not visible
-      # from outside the process, so the app says so itself — one line once GTK
-      # is up, and a warning where it would not start — and `$XDG_STATE_HOME` is
-      # set so the file it says it in is somewhere this step knows. See
-      # `crates/desktop/src/lib.rs`.
+      # `--retry-connrefused` rather than a sleep, as in the CLI legs: the
+      # server is up when it answers.
       #
-      # `--retry-connrefused` rather than a sleep, as in the CLI legs: the app is
-      # up when it answers.
-      #
-      # **Bounded**, which the headless run had no need to be: the failures this
-      # app draws it has a screen for are drawn as dialogs, and a dialog waits
-      # for somebody to dismiss it. Nobody is here, so a run that got that far
-      # would hold the job until the runner's own six hours were up rather than
-      # failing in front of whoever tagged.
-      - name: The toolkit comes up, and the viewer is inside the AppImage
+      # **Bounded**, because the failures this app draws it has a screen for are
+      # drawn as dialogs, and a dialog waits for somebody to dismiss it. Nobody
+      # is here, so a run that got that far would hold the job until the
+      # runner's own six hours were up rather than failing in front of whoever
+      # tagged.
+      - name: The window comes up, the icon goes into the tray, and the viewer is inside
         timeout-minutes: 5
         env:
           XDG_STATE_HOME: ${{ runner.temp }}/state
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
         run: |
           Xvfb :99 -screen 0 1024x768x24 &
           screen=$!
           export DISPLAY=:99
-          # The socket is what says the display is up, and a toolkit started
-          # before it is there is a toolkit that will not start. Spelled as an
-          # `if` rather than a `&&`, which under `set -e` would end the step on
-          # the first turn round the loop that found nothing.
+          # The socket is what says the display is up, and a Chromium started
+          # before it is there is one that will not start. Spelled as an `if`
+          # for the reason the mount's loop is.
           for _ in $(seq 50); do
             if [ -e /tmp/.X11-unix/X99 ]; then
               break
@@ -760,27 +781,27 @@ jobs:
 
           log="$XDG_STATE_HOME/verkstead/verkstead.log"
           # The Workbench Key, as in the matrix's serving assertion and for the
-          # reason said there: the app answers 401 to a request that has shown
-          # nothing, and a key written into the Data Directory before the start
-          # is the key the app adopts.
+          # reason said there: the server answers 401 to a request that has
+          # shown nothing, and a key written into the Data Directory before the
+          # start is the key it adopts. The window reads the same file.
           key=the-key-this-leg-states
-          mkdir -p "$RUNNER_TEMP/desktop"
-          printf '%s\n' "$key" > "$RUNNER_TEMP/desktop/workbench.key"
+          mkdir -p "$VERKSTEAD_DATA_DIR"
+          printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
 
-          ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
-            --data-dir "$RUNNER_TEMP/desktop" &
+          dbus-run-session -- ./"$APPIMAGE" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
             --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
-          # The toolkit is started on the main thread while the server comes up
-          # on another, so the viewer answering is no promise that GTK has
-          # finished either way yet. Waited for here rather than read after the
-          # kill, where whichever won the race would be the answer.
-          for _ in $(seq 50); do
-            if grep -q "the desktop toolkit is up" "$log" 2> /dev/null; then
+          # The window is opened once the server answers and the icon is raised
+          # beside it, so the document above is no promise that either has
+          # happened yet. Waited for here rather than read after the kill, where
+          # whichever won the race would be the answer.
+          for _ in $(seq 100); do
+            if grep -q "the window is opening on" "$log" 2> /dev/null &&
+              grep -q "the icon is in the tray" "$log" 2> /dev/null; then
               break
             fi
             sleep 0.2
@@ -800,23 +821,24 @@ jobs:
               ;;
           esac
 
-          # And the toolkit, out of the app's own log — which on Linux is the
-          # bundled GTK having been found, loaded and initialised. Read for the
-          # line rather than against the warnings, so that a log which was never
-          # written — no log directory, and the events on a standard error
+          # And the two lines, out of the app's own log. Read for what is there
+          # rather than against what is not, so that a log which was never
+          # written — no log directory, and the app's events on a standard error
           # nobody kept — fails here rather than passing for want of anything to
           # find in it.
-          if ! grep -q "the desktop toolkit is up" "$log" 2> /dev/null; then
-            echo "::error::The AppImage did not start the toolkit it carries."
-            cat "$log" 2> /dev/null || echo "There is no log at $log."
-            exit 1
-          fi
+          for said in "the window is opening on" "the icon is in the tray"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              cat "$log" 2> /dev/null || echo "There is no log at $log."
+              exit 1
+            fi
+          done
           cat "$log"
 
       # Under an artifact name that says which desktop this is rather than what
       # the file is called. `publish` fetches the CLI binaries by a
       # `verkstead-*` pattern and counts what arrives, so a desktop asset named
-      # in that scheme — a Windows `.exe` would be — would be counted as a fifth
+      # in that scheme — a Windows `.exe` would be — would be counted as a sixth
       # binary; keeping every desktop leg's artifact under `desktop-*` is what
       # holds the two sets apart whatever the files inside them are called.
       # `publish` is where the file's own name is written down.

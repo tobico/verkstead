@@ -590,25 +590,37 @@ $ blender -b tools/hammer/verkstead-hammer.blend \
     --python tools/hammer/render.py   # the artwork, from the blend file it is modelled in
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
-$ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
 $ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 $ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
 ```
 
-The last three are the three desktop artifacts a release ships, one per desktop
-platform. Each takes everything from the working tree and leaves one file under
-`target/`, and each wants `web/dist` already built, because the viewer is
-compiled into the binary they wrap. Each also runs only where its artifact does:
-the dmg wants a Mac for `lipo` and `hdiutil`, and the msi wants Windows for the
-WiX toolset and the MSVC build under it, so the dev shell has the first of the
-three and nothing of the other two.
+The last two are the Mac and Windows desktop artifacts a release ships — the
+Linux one is the packed Electron app, which is `pnpm run pack` in `desktop/`
+rather than a script here. Each takes everything from the working tree and
+leaves one file under `target/`, and each wants `web/dist` already built,
+because the viewer is compiled into the binary they wrap. Each also runs only
+where its artifact does: the dmg wants a Mac for `lipo` and `hdiutil`, and the
+msi wants Windows for the WiX toolset and the MSVC build under it, so the dev
+shell has neither of the two.
 
-The AppImage is the unified binary, the packaging assets and every library the
-tray is drawn over, in one file, and it is the same command CI runs. It builds
-what `cargo build --release -p verkstead-cli` builds, feature and all, and its
-`AppRun` supplies the `desktop` verb — a desktop launcher names a file and has
-nowhere to say one — so it wants the dev shell for the same reason that build
-does.
+The AppImage is the Electron app with a `verkstead` packed inside it as its
+sidecar, and which binary that is is the one thing
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml) cannot say —
+so `pnpm run pack` is told, either as its first argument or in `VERKSTEAD_CLI`:
+
+```console
+$ cargo build --release -p verkstead-cli --no-default-features
+$ cd desktop && pnpm run pack ../target/release/verkstead
+```
+
+That build is the headless binary a Release ships, and the release leg hands the
+same variable the static musl one the CLI matrix published. What comes out is
+`target/electron/out/Verkstead-x86_64.AppImage`, packed against the Electron
+`desktop/package.json` pins — fetched by the pack rather than taken from the dev
+shell, whose Electron is a different patch version. The viewer is inside the CLI
+rather than beside it, so `web/dist` is that build's business rather than the
+pack's; one configuration serves all three platforms, with only the Linux target
+filled in.
 
 The dmg is `Verkstead.app` — the same binary built for both Apple targets and
 `lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` whose
@@ -880,8 +892,14 @@ why the virtual display the addon suggests is not an option in a Sandbox.
 at the web root and, because the viewer is embedded, carried inside every binary
 including the headless CLI — and a desktop entry and a launcher's icons are
 neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
-gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
-tree that `tools/build-appimage.sh` installs into the AppImage,
+gets a directory of its own: the hicolor icon tree that
+[`desktop/scripts/pack.mjs`](../desktop/scripts/pack.mjs) stages as the flat
+`<size>x<size>.png` set electron-builder reads an icon directory as — a rename
+rather than a second set of pixels, so a panel, a menu and the packed image's
+own `.DirIcon` are all drawn from the same hammer — and beside it
+`net.tobico.Verkstead.desktop`, which the packed app's entry takes its *fields*
+from rather than being installed itself, electron-builder writing that entry
+with an `Exec` of its own that no configuration replaces. Then
 `net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
 bundle, and `net.tobico.Verkstead.ico`, which Windows wants twice:
 `crates/desktop/build.rs` compiles it into the shim as a resource, nothing
@@ -890,9 +908,9 @@ installed beside an exe being what Alt-Tab and the taskbar draw it with, and
 Features. It is written by
 [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
 hammer, and committed for the same reason the viewer's icons are. That script
-rewrites the whole directory from nothing on every run — so a size
-that stops being generated stops being committed, and nothing under it is ever
-edited by hand.
+rewrites the whole directory from nothing on every run — so a size that stops
+being generated stops being committed, and nothing under it is ever edited by
+hand.
 
 The icns is written by the script itself rather than by `iconutil`, which is a
 Mac's: the format is a header and a PNG per icon slot, so it is generated in the

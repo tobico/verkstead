@@ -31,7 +31,7 @@ platform takes its release leg, and 08 retires it only once none is left.
 - [x] 02: The Electron shell — [brief](02-electron-shell.md)
 - [x] 03: Tray, close policy and the Desktop page — [brief](03-tray-and-desktop-page.md)
 - [x] 04: Client-side decorations — [brief](04-decorations.md)
-- [ ] 05: The Linux AppImage — [brief](05-linux-appimage.md)
+- [x] 05: The Linux AppImage — [brief](05-linux-appimage.md)
 - [ ] 06: The Mac — [brief](06-macos.md)
 - [ ] 07: Windows — [brief](07-windows.md)
 - [ ] 08: Retiring the Rust tray — [brief](08-retiring-the-rust-tray.md)

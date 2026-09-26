@@ -17,8 +17,10 @@ import { start } from "../../src/sidecar.ts";
 // Nothing is done with what the sidecar says: the log file is the app's and
 // this is not the app. What is under test is the child's lifetime — and the
 // address is handed over for the same reason, the stand-in being a script that
-// records its arguments and binds nothing.
-const sidecar = start(process.argv[2], process.argv[3], () => {});
+// records its arguments and binds nothing. The environment is this process's
+// own, unexamined: what the app hands a sidecar is `unmounted.ts`'s answer, and
+// this file can import nothing that imports anything.
+const sidecar = start(process.argv[2], process.argv[3], () => {}, process.env);
 process.stdout.write(`${sidecar.pid}\n`);
 
 // Not `stop()`: what is under test is the path where nobody stopped anything.

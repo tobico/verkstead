@@ -1,0 +1,141 @@
+# What a packed Verkstead is, on every platform it is packed for.
+#
+# One configuration for the three artifacts a Release ships (ADR-0020) — an
+# x86_64 AppImage, a universal dmg and an msi — with only the Linux target
+# filled in: stages 06 and 07 of the Electron roadmap add a `mac:` and a `win:`
+# section beside the `linux:` one below, and nothing here is a step they have to
+# undo first. Everything above those sections is every platform's.
+#
+# **What runs it is `pnpm run pack`** — see `scripts/pack.mjs`, which is where
+# the CLI this app carries comes from and what the two staged paths below are
+# written by. electron-builder on its own would pack an app with no sidecar in
+# it.
+#
+# Unsigned, as the Rust artifacts were: there is no Developer ID and no
+# authenticode certificate, and an unsigned package is what the adoption
+# documents already describe.
+
+appId: net.tobico.Verkstead
+productName: Verkstead
+
+# **The pack fetches its own Electron, by the version `package.json` pins.**
+# `node_modules` holds none: that package's install script — the one that
+# downloads a couple of hundred megabytes of runtime — is denied in
+# `pnpm-workspace.yaml`, because `pnpm start` runs the dev shell's Electron and
+# CI only lints, typechecks and tests. So electron-builder reads the version out
+# of `node_modules/electron/package.json` and downloads that build itself,
+# cached under `~/.cache/electron` between runs. Which is the one thing it must
+# not take from the dev shell: that Electron is a different patch version from
+# the one pinned here, and an artifact built against it would be an app nobody
+# had agreed to ship. There is no `electronVersion` here for the same reason —
+# said twice, the two drift.
+
+# **Nothing is published from here and nothing updates itself.** A Release is
+# assembled by `.github/workflows/release.yml`, which uploads the files its legs
+# built and their checksums beside them; electron-builder's own publishing would
+# be a second thing talking to GitHub about the same tag. Said as `null` rather
+# than left unsaid, because unsaid means *guess* — it reads the repository out of
+# `.git/config`, writes the update metadata an auto-updater we do not ship would
+# read, and fails the build outright where there is nothing to guess from.
+publish: null
+
+# Nothing to rebuild and nothing native: this app has no dependencies at all,
+# its devDependencies are not packed, and the pack is not the place to discover
+# that a package manager can be run from inside it.
+npmRebuild: false
+
+directories:
+  # Under the directory cargo already writes to, so that one `.gitignore` line
+  # covers both of them and `cargo clean` takes them away — which is where the
+  # Rust AppImage kept its AppDir too. `out/` is electron-builder's own output,
+  # `staged/` beside it is what `scripts/pack.mjs` writes for the two paths
+  # below to read.
+  output: ../target/electron/out
+  buildResources: build
+
+# The compiled main process, its preload and the manifest Electron reads its
+# name and its `main` out of — and nothing else. `src/`, `tests/` and this file
+# are the sources of that output rather than part of the app.
+files:
+  - dist/**/*
+  - package.json
+
+extraResources:
+  # **The CLI, in a directory of its own.** Not beside the launcher: the root of
+  # the install holds a launcher named for the product, Windows resolves `PATH`
+  # without regard to case, and a `verkstead` there would answer a lookup with
+  # the window instead of the guide (ADR-0020). Stage 07 puts this directory on
+  # Windows' `PATH` and could not put the launcher's there, so one layout serves
+  # all three platforms — and it is the layout `src/cli.ts` already looks in.
+  #
+  # Staged rather than named outright, because which binary it is is the
+  # developer's or the release leg's to say: `scripts/pack.mjs` is what puts it
+  # there.
+  - from: ../target/electron/staged/cli
+    to: cli
+
+  # And the tray's artwork, which `src/artwork.ts` reads from the root of the
+  # resources. The 192px one of the generated set, for the reason that file
+  # gives — a panel scales what it is given, and an icon scaled up is the one
+  # that looks wrong.
+  - from: ../assets/icons/icon-192.png
+    to: icon-192.png
+
+linux:
+  # **The launcher must not be called `verkstead`**, for the reason the CLI has a
+  # directory of its own: the two are one word apart on a platform that does not
+  # read case. Said rather than defaulted — electron-builder would name it after
+  # the package, which is a third spelling again.
+  executableName: Verkstead
+
+  # The committed launcher artwork, which `scripts/pack.mjs` stages as the flat
+  # `<size>x<size>.png` set electron-builder reads a directory as. Every size
+  # `tools/generate-packaging.sh` writes, so a panel, a menu and an AppImage's
+  # own `.DirIcon` are all drawn from the same pixels as the Rust app's were.
+  icon: ../target/electron/staged/icons
+
+  # The desktop entry is electron-builder's to write — it has an `Exec` of its
+  # own that no configuration replaces, naming the launcher inside the image —
+  # so what carries over from `packaging/net.tobico.Verkstead.desktop` is the
+  # entry's fields. `Name` is the product name above, and `Type`, `Terminal` and
+  # `Icon` electron-builder fills in itself.
+  category: Development
+  description: The workbench, in the system tray
+  desktop:
+    entry:
+      Keywords: agent;coding;sessions;workbench;
+
+  # And the entry is named for the app id, which is what `desktopName` in
+  # `package.json` says and what this makes the file name: one string for the
+  # tray, the startup registration and the entry, as
+  # `tools/generate-packaging.sh` has it, because a desktop told two would have
+  # two Verksteads. It is also the app id Electron itself reports as the
+  # window's, so a session associates the window with this entry rather than
+  # drawing it as some other application.
+  syncDesktopName: true
+
+  target:
+    - target: AppImage
+      # x86_64 only, as ADR-0012 had it and ADR-0020 keeps: an arm64 Linux user
+      # has the bare CLI.
+      arch:
+        - x64
+
+appImage:
+  # Written down rather than defaulted: `publish` names this file, the adoption
+  # documents spell it, and the install line a human copies matches it —
+  # electron-builder's own pattern would put the version in the middle of all
+  # three.
+  artifactName: Verkstead-x86_64.AppImage
+
+# **The static AppImage runtime.** With nothing said here, electron-builder
+# builds against `appimage-12.0.1`, whose runtime wants libfuse2 — which Ubuntu
+# 24.04, Debian 13 and current Fedora do not install, so the file would refuse to
+# mount on a current desktop with *"Cannot mount AppImage, please check your FUSE
+# setup"*. This runtime links its own squashfuse, so what it asks of a machine is
+# a `/dev/fuse` to open and a `fusermount3` to open it with — the helper any
+# FUSE mount goes through, and nothing a distribution has to be told to install
+# a library for. It compresses with zstd rather than xz, and it does not put
+# `--no-sandbox` on the desktop entry the way the legacy path does.
+toolsets:
+  appimage: "1.0.3"

@@ -18,24 +18,24 @@ workbench, the sandboxed sessions, the task-list and roadmap pipelines and the
 per-PR wrap-up are built; what has not happened yet is a real repository driven
 through them end to end, which is where [adoption](docs/adoption.md) stands.
 
-What a tag will produce is four ways in rather than one, and no two of them
-are the same thing. On a host that is always on, the flake builds the headless
+What a tag will produce is four ways in rather than one, and no two of them are
+the same thing. On a host that is always on, the flake builds the headless
 daemon and the NixOS module runs it. On a Linux desktop,
-`Verkstead-x86_64.AppImage` is that same server started from an icon: the viewer
-in your browser and a tray icon over it — or no icon at all where the desktop
-has no tray host, vanilla GNOME being the case people meet, and it serves just
-the same. On a Mac, `Verkstead-universal.dmg` carries `Verkstead.app` — one
-download for both Macs, the same server again, with its icon in the menu bar.
-That app is unsigned, so the first launch is refused and System Settings is
-where it is allowed through; the steps are written out beside the download in
+`Verkstead-x86_64.AppImage` is that same server started from an icon: the
+workbench in a window of its own, with a tray icon beside it — or no icon at all
+where the desktop has no tray host, vanilla GNOME being the case people meet,
+and the window is there just the same. On a Mac, `Verkstead-universal.dmg`
+carries `Verkstead.app` — one download for both Macs, the same server again,
+with its icon in the menu bar. That app is unsigned, so the first launch is
+refused and System Settings is where it is allowed through; the steps are
+written out beside the download in
 [adoption](docs/adoption.md#the-desktop-app-on-a-mac). On Windows,
 `Verkstead-x86_64.msi` installs that same app into your own profile — no
-administrator, its icon in the notification area, and `verkstead` on your
-`PATH` for a terminal. It is unsigned there too, so SmartScreen stops the
-install behind a **More info** link with **Run anyway** under it — also written
-out beside the download in
-[adoption](docs/adoption.md#the-desktop-app-on-windows). Which of the four you
-want is [adoption](docs/adoption.md#getting-it-running).
+administrator, its icon in the notification area, and `verkstead` on your `PATH`
+for a terminal. It is unsigned there too, so SmartScreen stops the install
+behind a **More info** link with **Run anyway** under it — also written out
+beside the download in [adoption](docs/adoption.md#the-desktop-app-on-windows).
+Which of the four you want is [adoption](docs/adoption.md#getting-it-running).
 
 **Sessions run on all three, and on all three behind a boundary.** One
 description of what a session may reach, rendered over the mechanism each
