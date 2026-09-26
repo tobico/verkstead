@@ -76,14 +76,24 @@ why both are exceptions and what makes them safe.
 ## What the legs are, and what holds them to their floors
 
 The CLI legs each run on a runner of their own architecture; the Linux desktop
-leg runs in an `ubuntu:22.04` container on top of one. That is the whole of what
-decides the AppImage's floor — a bundle carries the libraries it links but not
-the C runtime, so a downloader's loader has to satisfy the glibc the file was
-compiled against, and 22.04's 2.35 reaches Ubuntu 22.04, Debian 12 and
-everything above them. The leg reads the symbols back afterwards and fails on
-anything higher, so the floor and the promise
-[adoption.md](adoption.md#the-desktop-app-on-a-linux-machine) makes about it
-cannot drift apart. Move the image and both move.
+leg runs on a plain `ubuntu-24.04` runner and compiles nothing at all. It waits
+on the whole of the matrix above, takes the `verkstead-linux-x64` artifact that
+matrix built — the static musl binary — puts it where
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml) expects the
+CLI this app carries, and packs the Electron app around it with `pnpm run pack`
+([ADR-0020](adr/0020-electron-desktop.md)). Nothing is built twice: the sidecar
+a downloader gets is the very file the CLI leg published beside it.
+
+Which is also what moved that artifact's floor. A bundle carries the libraries
+it links but not the C runtime, so a downloader's loader has to satisfy the
+highest glibc anything inside the file names — and where that used to be the
+image the leg compiled in, it is now Electron's own, the musl CLI naming no
+glibc at any version. So the number is stated rather than inherited: the leg
+reads every versioned reference out of the mounted image with `objdump` and
+fails on anything above the 2.25
+[adoption.md](adoption.md#the-desktop-app-on-a-linux-machine) promises.
+Whichever way round it is written, the promise and the check are one number —
+move Electron and both move.
 
 The macOS desktop leg is one runner for both Macs: `macos-15` is the Apple
 silicon image, an Apple host cross-compiles to the other Apple architecture, and
@@ -92,13 +102,12 @@ silicon image, an Apple host cross-compiles to the other Apple architecture, and
 joins is the unified `verkstead`, built with the `desktop` feature its default
 leaves on, and the bundle's executable is a launcher script beside it that
 supplies the `desktop` verb — a bundle names an executable and has nowhere to
-write a command line for it, so the launcher does the job `AppRun` does in the
-AppImage (ADR-0012, as amended). The script is called `Verkstead-launcher`
-rather than `Verkstead` because a Mac's filesystem is case-insensitive and the
-binary beside it is called `verkstead`. Its floor
-is written into the bundle rather than inherited from a runner —
-`LSMinimumSystemVersion`, 11.0, which is the Apple silicon half's own and the
-higher of the two — and it is the number
+write a command line for it, so the launcher is where that verb is said
+(ADR-0012, as amended). The script is called `Verkstead-launcher` rather than
+`Verkstead` because a Mac's filesystem is case-insensitive and the binary beside
+it is called `verkstead`. Its floor is written into the bundle rather than
+inherited from a runner — `LSMinimumSystemVersion`, 11.0, which is the Apple
+silicon half's own and the higher of the two — and it is the number
 [adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
 
 The Windows desktop leg is the one with an installer in it, and it is an
@@ -106,17 +115,17 @@ installer because a Windows install became two files:
 [`tools/build-windows-msi.sh`](../tools/build-windows-msi.sh) builds the unified
 `verkstead` with the `desktop` feature its default leaves on, and beside it the
 windows-subsystem shim that supplies the `desktop` verb a Start-menu shortcut
-has nowhere to write — the job `AppRun` does in the AppImage and the launcher
-script does in the bundle. Two files beside each other are not a portable
-download, so [`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them
-in `Verkstead-x86_64.msi` (ADR-0012, as amended). That package is per-user
+has nowhere to write — the job the launcher script does in the bundle. Two files
+beside each other are not a portable download, so
+[`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them in
+`Verkstead-x86_64.msi` (ADR-0012, as amended). That package is per-user
 throughout — the binaries under `%LOCALAPPDATA%\Programs\Verkstead`, the
 shortcut in the user's own Start menu, the install directory appended to the
-user's `PATH` — because the app is unsigned and elevation would buy a
-downloader nothing they wanted. The WiX toolset that compiles it is the runner
-image's own. There is no floor to hold any of it to: what an AppImage promises
-about glibc and a bundle about macOS 11, an exe gets from the C runtime Windows
-itself ships.
+user's `PATH` — because the app is unsigned and elevation would buy a downloader
+nothing they wanted. The WiX toolset that compiles it is the runner image's own.
+There is no floor to hold any of it to: what an AppImage promises about glibc
+and a bundle about macOS 11, an exe gets from the C runtime Windows itself
+ships.
 
 One thing about that package cannot say what the tag says. A Windows Installer
 version is three numbers and nothing after them, so `v0.1.0-rc.1` and
@@ -131,7 +140,10 @@ asked of the install it left. What they assert is the same three things — it
 starts, it serves a document with the viewer's bundle named in it, and its own
 log says an icon went up — and each of them is bounded, because the failures
 these apps draw are dialogs and a dialog nobody dismisses would hold a runner
-for six hours.
+for six hours. The Linux leg mounts the file before it reads anything out of it,
+which is an assertion in its own right and the one the adoption documents make
+to a downloader: the runtime packed into it carries its own squashfuse, so it
+mounts on a machine with a `/dev/fuse` and no libfuse2 at all.
 
 Every leg then asserts a fourth, and it is the one the running app cannot be
 asked for: the half of the binary a *session* gets. In the AppImage and the
@@ -205,18 +217,18 @@ newcomer actually follows.
    $ curl -fsSL -O \
        https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage
    $ chmod +x Verkstead-x86_64.AppImage
-   $ ./Verkstead-x86_64.AppImage --help
+   $ ./Verkstead-x86_64.AppImage
    ```
 
-   The help that comes back is the tray app's rather than the CLI's, and that is
-   the file saying what it is: the entry point inside supplies the `desktop`
-   verb, because a desktop launcher names a file and cannot say one (ADR-0012,
-   as amended). Which release this is was step 2's question, and the bare binary
+   There is no `--help` to ask this one for: it is an app rather than a CLI, and
+   what says the file is what it claims to be is that it comes up — the
+   workbench in a window of its own, and an icon in the tray beside it. Click
+   through a Conversation or two, which is the part a runner under Xvfb cannot
+   judge. Which release this is was step 2's question, and the bare binary
    answered it.
 
-   Then run it with no arguments: it serves, opens the viewer in the browser,
-   and puts an icon in the tray. A desktop with no tray host shows no icon and
-   is serving all the same, which is
+   A desktop with no tray host shows no icon and is serving all the same, and a
+   machine with no `/dev/fuse` will not mount the file at all — both of them are
    [what a downloader is told](adoption.md#the-desktop-app-on-a-linux-machine).
 
 4. **The dmg, downloaded in a browser and opened** on a Mac. In a browser

@@ -421,9 +421,14 @@ off with their desktop's own settings has unchecked the box, and Verkstead
 agrees with them rather than argues. **Every launch rewrites it while it is
 there**, with the path of the app that is running and no verb in front of it —
 the app is the one way into itself, where the tray app's binary had several and
-the registration had to say which — so an app that was moved — downloaded again
-elsewhere, an AppImage put somewhere else — heals its own registration the next
-time it is started by hand; a machine that never asked for one is left alone.
+the registration had to say which. **What that path is on Linux is `$APPIMAGE`**
+where the runtime set one, and the running executable otherwise: an AppImage runs
+out of a filesystem mounted for that run alone, so the executable inside it is a
+path under `/tmp` that is nothing at all by the next login, and the variable is
+the runtime saying where the file the human actually has is. So an app that was
+moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
+own registration the next time it is started by hand; a machine that never asked
+for one is left alone.
 **And what a login start comes to is a Verkstead with no window on the screen**
 while there is an icon in the tray to reach it by, and one with a window where
 there is not: a window arriving over whatever the human is doing at every login
@@ -490,6 +495,18 @@ platform draws them, and neither is worth redrawing by hand. `titleBarStyle:
 "hidden"` is the whole of what asks for it, and there is no platform branch
 behind it: a Mac reads that option as the two platforms with an overlay do, and
 what it does with the overlay beside it is nothing.
+**What the overlay holds is Chromium's answer rather than the desktop's.** On a
+Wayland desktop it is one button wide — a close and nothing else — where the same
+app over Xwayland draws the usual three: measured on a COSMIC session whose
+toplevel advertised all four window capabilities, and moved by neither the
+compositor's own toolkit settings nor a decoration layout written into the app's
+config. So the pair that is missing follows the platform Chromium picked rather
+than a desktop refusing anything, and what answers it is the app's own chrome
+rather than a control the page draws — which stays rejected. A double-click on any
+pane head maximises the window and a second one restores it; and **Minimize** is
+on the hidden menu bar under **Window**, on the platform's own
+`CommandOrControl+M`, because that desktop binds no minimise of its own out of the
+box and putting the window away is the one gesture the overlay leaves wanting.
 **The strip is the app's to paint and the page's to say what in**: the paper a
 head is drawn on, the ink its marks are in, and how tall the head's band stands,
 pushed over the preload bridge on load and again at every flip of the machine's
