@@ -756,6 +756,15 @@ being un-authenticated: the cancel has to come under it, and so does the
 the row is drawn — it is not a **Member** and does not count as one — and a
 device turned away is free to ask again, a cluster being a membership rather
 than a list of verdicts.
+**And it is the one thing a stranger writes into this machine, so how much of it
+a join is worth is this machine's to say.** A post is refused for saying more
+about itself than is kept — an id, a name, an OS word or an address longer than
+any real one, or more addresses than a device is reachable at — and refused
+again once this device is already holding as many questions as it will, the ones
+that have run out being let go of first. Not stinginess but arithmetic: a held
+question is a row, a push to a human's phone, a Nudge to every open workbench and
+a dial down every address it named ten minutes later, and without a ceiling how
+often all of that is spent is decided by whoever can reach the port.
 _Avoid_: pairing, invitation, handshake (which is the TLS one), link request
 
 **Exchange**:

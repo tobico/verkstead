@@ -370,7 +370,16 @@ impl Word {
             // The device rather than what it wants: a phone that lights up
             // while somebody is standing at another machine is one the name is
             // the whole answer on.
-            Word::ADeviceIsAsking { name } => format!("{name} is asking to link with this device"),
+            //
+            // And the name is the one thing in any title here that a *stranger*
+            // wrote — a join arrives from a device this one holds no membership
+            // for, which is what a join is. So it is cut to [`A_NAME`] before it
+            // goes in, which is what keeps the rule below from being a rule
+            // about the titles this tree writes rather than about the ones a
+            // phone shows.
+            Word::ADeviceIsAsking { name } => {
+                format!("{} is asking to link with this device", fitting(name))
+            }
         }
     }
 
@@ -392,6 +401,36 @@ impl Word {
             Word::ADeviceIsAsking { .. } => "the device asking to link",
         }
     }
+}
+
+/// How much of a name a title will carry.
+///
+/// Forty, which is the longest a name can be before the sentence around it goes
+/// past the eighty characters a lock screen shows whole — the rule every title
+/// here is written to and the suite below asserts. It is not a bound on what a
+/// device may be called: the join that carries one has its own, in
+/// [`crate::peer::joining`], and it is generous enough to hold any real
+/// hostname. This is a bound on the one line where somebody else's hostname is
+/// a sentence of this machine's.
+const A_NAME: usize = 40;
+
+/// A name as a title will carry it: whole where it fits, and cut with an ellipsis
+/// where it does not.
+///
+/// **Because this is the one thing in a notification that a stranger wrote.** A
+/// device asking to link is a non-member by definition, and the name it gives is
+/// its own word for itself — so what stops it from being the whole of a lock
+/// screen is this rather than anything the far end did.
+///
+/// Counted in characters rather than bytes, and cut on one: a name in kanji is
+/// forty characters like any other, and cutting a string mid-character would
+/// panic rather than shorten anything.
+fn fitting(name: &str) -> String {
+    if name.chars().count() <= A_NAME {
+        return name.to_owned();
+    }
+
+    name.chars().take(A_NAME).collect::<String>() + "…"
 }
 
 /// Tell every subscribed device something that happened to this machine, without
@@ -724,6 +763,42 @@ mod tests {
             asking.title(),
         );
         assert_eq!(asking.path(), "/settings/remote");
+    }
+
+    /// And a device that calls itself something enormous is cut to fit rather
+    /// than allowed to be the whole of a lock screen.
+    ///
+    /// The one title here whose substance a stranger writes: a join comes from a
+    /// device this one holds no membership for, so the name in it is whatever
+    /// that device said. Every other title on this enum is about work this
+    /// machine is doing.
+    #[test]
+    fn a_name_a_stranger_chose_is_cut_to_fit_a_lock_screen() {
+        let title = Word::ADeviceIsAsking {
+            name: "l".repeat(400),
+        }
+        .title();
+
+        assert!(
+            title.chars().count() <= 80,
+            "a title a lock screen would cut off mid-sentence: {title:?}",
+        );
+        assert!(
+            title.ends_with("is asking to link with this device"),
+            "the sentence has to survive the cutting: {title:?}",
+        );
+    }
+
+    /// And a name that fits goes in whole, ellipsis and all left off.
+    #[test]
+    fn a_name_that_fits_is_left_alone() {
+        assert_eq!(
+            Word::ADeviceIsAsking {
+                name: "laptop".to_owned(),
+            }
+            .title(),
+            "laptop is asking to link with this device",
+        );
     }
 
     #[test]
