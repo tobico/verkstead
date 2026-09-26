@@ -1852,7 +1852,9 @@ pub async fn run_on_keyed(
     // by the first read of that list rather than here — a server nobody is
     // looking at browses nothing — and dropped again once nothing has read it
     // for a spell, which is what the reading being read is the only signal for
-    // (ADR-0020) — see [`discovery::Browse`].
+    // (ADR-0020) — see [`discovery::Browse`]. An open pane re-reads on an interval
+    // of its own to keep it, a browse that hears nothing new having nothing to
+    // announce and so nothing to prompt the next read with.
     //
     // The nudges, because a browse is the one reading here that answers before
     // it knows: a cold one has heard nothing, so the rows arrive over the seconds

@@ -1364,7 +1364,8 @@ export function loadDevices(): Promise<DevicesView> {
 /// **And asking is what holds the browse open.** The server starts browsing on
 /// the first of these and stops once nothing has asked for a spell — a phone that
 /// closes a tab says nothing, so the reading being read is the whole of what
-/// governs it. Which is why the first answer is empty or short: a cold browse has
+/// governs it, and an open pane asks again on an interval to say it is still
+/// looking. Which is why the first answer is empty or short: a cold browse has
 /// heard nothing yet, and the rows arrive over the seconds after it, each with a
 /// Nudge to say so.
 export function loadDiscovered(): Promise<DiscoveredDevice[]> {

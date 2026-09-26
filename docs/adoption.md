@@ -150,10 +150,21 @@ with no address for anybody to type. On by default, for `openFirewall`'s reason:
 a discovery nothing can hear is a feature that silently does not work. Set
 `advertising = false;` on a LAN that is not yours alone — a hostname, an
 operating system and a device id is more than some networks are worth telling —
-and link by a typed address instead. `openFirewall` opens UDP 5353 for this
-beside the peer port, and opens it whether or not the host advertises: the
-answers to its *own* browsing arrive there too, so a host that only looks for
-others still has to be able to hear.
+and link by a typed address instead.
+
+**It turns off what other machines hear *of* this one, and not this one's
+listening.** With it off, nothing of this host's hostname, OS or device id goes
+out and no other Verkstead can find it — but its own **Discovered** list still
+works, so opening the Remote access pane still puts a query for
+`_verkstead._tcp.local` on the LAN from this machine's address. That is all the
+LAN learns: that something here is looking for Verksteads, and not what it is —
+no hostname, no OS and no device id. A host that is to say nothing at all on that
+wire is one whose Remote access pane stays closed; `openFirewall = false;` shuts
+the answers out rather than the question in.
+
+`openFirewall` opens UDP 5353 for this beside the peer port, and opens it whether
+or not the host advertises: the answers to its *own* browsing arrive there too, so
+a host that only looks for others still has to be able to hear.
 
 What device this install is reads in the **Devices** list at the foot of that
 same **Remote access** section: its name with an icon for its OS, and the

@@ -153,10 +153,19 @@ const WITHDRAWING: Duration = Duration::from_secs(2);
 /// being read — the pane's first draw, every announcement the browse itself
 /// makes, and the re-read the viewer does on coming back to a page.
 ///
+/// **And an open pane re-reads on an interval of its own inside this one**, which
+/// is what makes a read something there certainly *is*. A browse that has heard
+/// nothing new announces nothing, so on a quiet LAN the reads above amount to one
+/// at the moment the pane was opened — and a spell measured from that would run
+/// out under somebody who is still sitting in front of the list, leaving a device
+/// started a few minutes later unheard for the rest of the visit. The viewer's own
+/// `LOOKING` is that interval: see `useDiscovered` in `web/src/settings/Remote.tsx`.
+///
 /// Five minutes because the cost of being wrong is lopsided. Held too long, a
 /// browse nobody is reading costs a multicast group and a thread; dropped too
 /// soon, a pane somebody is still looking at stops hearing about the machine
-/// they are waiting to appear. The next read starts another either way.
+/// they are waiting to appear. Comfortably more than that interval, so a handful
+/// of lost ticks is still a browse.
 const SPELL: Duration = Duration::from_secs(5 * 60);
 
 /// And how long the browse waits on the wire before looking at the clock.
@@ -462,14 +471,17 @@ pub struct Found {
 /// The browse starts when the Discovered reading is first asked for and is
 /// dropped once nothing has asked for it in [`SPELL`] — a phone that closes a
 /// tab says nothing, so what keeps it alive is the reading being read rather
-/// than a pane announcing itself. What it costs while it is running is a
+/// than a pane announcing itself, and an open pane re-reads on an interval well
+/// inside the spell for exactly that. What it costs while it is running is a
 /// multicast group and a thread; what it costs when it is not is nothing.
 ///
 /// **And a browse finds things after the fact.** A cold one has heard nothing,
 /// so the first read is empty or short and the rows arrive over the seconds
 /// after it: what draws them is [`Nudge::Discovered`], announced as the found
 /// list moves, which is the arrangement ADR-0009 put every other list in this
-/// viewer on. Nothing polls.
+/// viewer on. Nothing polls for the rows — the pane's interval says somebody is
+/// looking and nothing else, and a read that answers what it answered last
+/// leaves the page as it stands.
 #[derive(Debug, Clone)]
 pub struct Browse {
     heard: Heard,
@@ -554,8 +566,18 @@ impl Browse {
     /// device that has gone off the LAN says nothing on its way out unless it was
     /// asked to stop: the press is the moment this device *learns* the row is
     /// stale, so the row goes then rather than at the end of a TTL nobody is
-    /// watching. A device that is really there is heard again within the minute
-    /// and is a row again, which is the whole of what makes this safe to do.
+    /// watching.
+    ///
+    /// **And a forget is not cheaply undone, which is why only a press that
+    /// reached nobody makes one.** `mdns-sd` announces a resolution when a record
+    /// *changes*, so a device whose advertisement is exactly what this browse
+    /// already cached is not heard again for it: what brings a forgotten row back
+    /// is that device saying something new — a restart, a move, an address — or
+    /// this browse being dropped at the end of its [`SPELL`] and a later read
+    /// starting a fresh one, which begins with nothing cached. So a device that
+    /// answered and merely said no keeps its row: see
+    /// [`crate::device::Devices::add_found`], where that is told from a row
+    /// nothing answered at.
     ///
     /// **The browse is the half a forget lands on**, because it is the half that
     /// holds rows at all: the tailnet half is asked afresh on every read, so a
@@ -868,13 +890,26 @@ fn looking(mdns: u16) -> Option<(ServiceDaemon, Receiver<ServiceEvent>)> {
 /// is the record the resolution answers with: the two carry the same number and
 /// the one that cannot be a string that is not a number is the one to stand on.
 ///
-/// Nothing at all where the id, the name or the OS word is missing: a row with
-/// no id cannot be keyed, excluded or pressed, and one with no name or mark is a
-/// row that says nothing to the person reading it.
+/// Nothing at all where the id, the name or the OS word is missing **or blank**:
+/// a row with no id cannot be keyed, excluded or pressed, and one with no name or
+/// mark is a row that says nothing to the person reading it. Blank as well as
+/// missing because `mdns-sd` reads a TXT value that is empty — and one whose
+/// bytes are not UTF-8 — as the empty string, so a broken advertisement arrives
+/// here looking like a present one.
+///
+/// **And nothing where it said too much**, by the bounds a join is refused over —
+/// see [`crate::peer::joining::too_much_said`]. This is [`row_of`]'s judgement of
+/// what a probed peer answered, made of what a device advertised, and it is the
+/// same judgement rather than a second one like it: what is at stake either way
+/// is a stranger's words drawn on somebody's page.
 fn row(service: &ResolvedService) -> Option<Found> {
     let device = service.get_property_val_str(ID)?;
     let name = service.get_property_val_str(NAME)?;
     let os = service.get_property_val_str(OS)?;
+
+    if device.trim().is_empty() || name.trim().is_empty() || os.trim().is_empty() {
+        return None;
+    }
 
     // Sorted, the resolution answering a set: IPv4 before IPv6 and each of them
     // in order, so that the addresses a row draws are the same two reads running
@@ -892,14 +927,27 @@ fn row(service: &ResolvedService) -> Option<Found> {
         return None;
     }
 
+    let addresses: Vec<String> = addresses
+        .into_iter()
+        .map(|address| SocketAddr::new(address, service.get_port()).to_string())
+        .collect();
+
+    if let Some(too_much) = crate::peer::joining::too_much_said(device, name, os, &addresses) {
+        tracing::debug!(
+            fullname = service.get_fullname(),
+            too_much,
+            "something advertising this service said more about itself than a device says, \
+             so it is left off the Discovered list",
+        );
+
+        return None;
+    }
+
     Some(Found {
         device: device.to_owned(),
         name: name.to_owned(),
         os: os.to_owned(),
-        addresses: addresses
-            .into_iter()
-            .map(|address| SocketAddr::new(address, service.get_port()).to_string())
-            .collect(),
+        addresses,
     })
 }
 

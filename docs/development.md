@@ -131,8 +131,15 @@ the first read of it and stops once nothing has read it for five minutes — a p
 that closes a tab says nothing, so the reading being read is the whole of what
 governs it. Which means the first read is empty or short however many machines are
 out there: a browse is cold when it starts, and the rows arrive over the seconds
-after it, each as a `discovered` nudge that an open pane redraws on. Reading it
-again is what a test does and a Nudge is what the viewer does; nothing polls.
+after it, each as a `discovered` nudge that an open pane redraws on.
+
+The rows are the Nudge's and nothing polls for them. The one interval in the
+viewer is on this read alone, once a minute while the pane is open, and what it is
+for is the spell above rather than the rows: a browse that has heard nothing new
+announces nothing, so without it the server would stop browsing five minutes into
+a pane somebody was still watching, and a second Verkstead started after that
+would never be heard. A test reads the list again itself, which renews the spell
+the same way.
 
 **And `found` is a list because there are two ways of being found.** A tailnet
 carries no multicast, so there is nothing to hear on one: the tailnet half asks
@@ -208,9 +215,11 @@ three.
 The pending row and the discovered row are never both drawn: a device a join is
 pending for is one the Discovered list leaves out, so the press moves a row from
 under the list to above it. And a row that went stale between being drawn and
-being pressed — the machine switched off in between — is refused naming the device
-and dropped from the list, rather than sitting there refusing again; it is back on
-the list within the minute if that machine comes back.
+being pressed — the machine switched off in between, so nothing answers at any of
+the addresses it was found at — is refused naming the device and dropped from the
+list, rather than sitting there refusing again. A far end that *answered* and said
+no keeps its row, being exactly where the row said it was: only a press that
+reached nobody says the row was wrong.
 
 Through the API rather than the pane, which is what a test does — the discovered
 press first, then the typed one:

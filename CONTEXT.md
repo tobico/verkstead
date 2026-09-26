@@ -806,10 +806,14 @@ list, so a device found both ways is left out once.
 **The browse is held while somebody is looking.** It starts when this list is
 first read and is dropped once nothing has read it for five minutes: a phone that
 closes a tab says nothing, so the reading being read is the whole of what governs
-it. Which is why the first read of it is empty or short — a browse is cold when it
-starts — and why the LAN rows arrive over the seconds after a pane is drawn, each
-announced. The tailnet rows are in the first answer instead, a probe being made
-as the list is read.
+it — and an open pane reads it again every minute, which is the one thing in this
+viewer on an interval and is there to say *somebody is still looking* rather than
+to fetch anything. Without it a browse that heard nothing new would announce
+nothing, prompt no read, and be dropped under a pane somebody was sitting in
+front of. Which is why the first read of it is empty or short — a browse is cold
+when it starts — and why the LAN rows arrive over the seconds after a pane is
+drawn, each announced. The tailnet rows are in the first answer instead, a probe
+being made as the list is read.
 **A device that stopped advertising leaves it**, at once on the goodbye an ordered
 stop sends and at the end of its TTL where there was none, which is a machine
 whose lid shut; both arrive as one event. One that stopped answering a probe
@@ -827,8 +831,12 @@ one device.
 LAN or left the tailnet since it was drawn. That press is refused in the words a
 dial that reached nobody uses, naming the device rather than failing bare — and
 the row is forgotten, so the list the refusal is drawn beside is one without it.
-A device that is really there advertises again within the minute and is a row
-again, which is what makes forgetting one safe.
+**Only a press that reached nobody forgets one.** A far end that answered and
+said no — one already holding as many join requests as it will, say — is a
+machine exactly where the row said it was, so its row stands: forgetting it is not
+cheaply undone, a browse announcing a resolution only when a record *changes*, so
+a row taken away comes back when that device says something new or when the browse
+itself is dropped at the end of its spell and a later read starts a fresh one.
 _Avoid_: found devices, nearby devices, the browse (which is how half of it is
 read), available devices
 

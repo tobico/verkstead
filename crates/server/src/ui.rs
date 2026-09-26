@@ -5663,9 +5663,10 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
 /// **And asking for it is what holds the browse open.** It starts on the first
 /// read and is dropped once nothing has read it for a spell — a phone that
 /// closes a tab says nothing, so the reading being read is the only thing there
-/// is to govern it by. Which also means the first read of a cold browse is empty
-/// or short: the rows arrive over the seconds after it, each announced as
-/// [`Nudge::Discovered`] — see [`crate::discovery::Browse`].
+/// is to govern it by, and an open pane asks again on an interval inside that
+/// spell to say it is still there. Which also means the first read of a cold
+/// browse is empty or short: the rows arrive over the seconds after it, each
+/// announced as [`Nudge::Discovered`] — see [`crate::discovery::Browse`].
 ///
 /// Refused where there is no identity, for [`devices`]'s reason: the three kinds
 /// of device this list leaves out include this device itself, and a server that

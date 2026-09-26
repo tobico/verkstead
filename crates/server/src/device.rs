@@ -87,7 +87,7 @@ use x509_parser::prelude::FromDer;
 
 use crate::discovery::{self, Browse, Probe};
 use crate::peer::Members;
-use crate::peer::dialling::Peers;
+use crate::peer::dialling::{Peers, Reached};
 use crate::peer::joining::Joins;
 use crate::settings::write_atomically;
 
@@ -875,8 +875,15 @@ impl Devices {
     /// gone off the LAN or left the tailnet between the browse hearing it and
     /// somebody pressing Add, so the press is refused in the words a dial that
     /// reached nobody uses, naming the device — and the row is forgotten, which is
-    /// what makes the next read of the list one without it. A device that is
-    /// really there advertises again within the minute and is a row again.
+    /// what makes the next read of the list one without it.
+    ///
+    /// **A device that answered and said no keeps its row**, which is the one
+    /// thing the forget above must not reach. A far end already holding as many
+    /// join requests as it will, or one that could not write the question down,
+    /// is a machine that is exactly where the row said it was — and forgetting it
+    /// would take away the row somebody would press again in a minute. Only a
+    /// walk that reached *nobody* says the row was wrong, which is what
+    /// [`Reached`] is for.
     pub(crate) async fn add_found(&self, device: &str) -> Result<()> {
         let device = device.trim();
 
@@ -901,12 +908,16 @@ impl Devices {
         let saying = self.reading.identity(&self.device).await;
 
         let (address, held) = match self.peers.join_found(&found, &saying).await {
-            Ok(answered) => answered,
+            // A device that spoke is a device that is there, whether what it said
+            // was a question held or a refusal: the row stays exactly as it was,
+            // and the press is refused in the far end's own terms.
+            Reached::Answered(answered) => answered?,
 
-            Err(why) => {
-                // The row was wrong, and this press is where that was learned:
-                // forgotten here rather than left for a TTL, so that the answer
-                // this refusal is drawn beside is a list without it.
+            Reached::Nobody(why) => {
+                // Nothing answered anywhere, so the row was wrong and this press
+                // is where that was learned: forgotten here rather than left for a
+                // TTL, so that the answer this refusal is drawn beside is a list
+                // without it.
                 self.browse.forgotten(&found.device);
 
                 return Err(why);

@@ -45,6 +45,7 @@ use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::discovery::{AT_ONCE, Browse, Found, MOST_PEERS, Probe};
 use verkstead_server::nudge::Nudges;
+use verkstead_server::peer::dialling::MOST_SAID;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::Platform;
@@ -266,6 +267,43 @@ impl FarEnd {
         )
     }
 
+    /// And one that answers a perfectly good identity with a great deal of
+    /// padding on the end of it, which is the answer no probe will read to the
+    /// end of.
+    ///
+    /// **Padding rather than a long name**, because a long name is refused by the
+    /// bounds a row is drawn under and this is asking about something else: what
+    /// the far end says here would draw a row in every respect but its size, so
+    /// the absent row is the cap and nothing else. A field `DeviceIdentity` does
+    /// not carry, because one it does carry would be refused before the size ever
+    /// came up.
+    fn answering_far_too_much(id: &str) -> FarEnd {
+        let dir = tempfile::tempdir().unwrap();
+        let device = Device::stated(dir.path(), id).unwrap();
+
+        let said = serde_json::json!({
+            "device": id,
+            "fingerprint": device.fingerprint(),
+            "name": "kitchen-mini",
+            "os": "macOS",
+            "addresses": ["100.64.0.2"],
+            "padding": "a".repeat(MOST_SAID * 2),
+        });
+
+        FarEnd::serving(
+            dir,
+            &device,
+            Router::new().route(
+                peer::IDENTITY,
+                get(move || {
+                    let said = said.clone();
+
+                    async move { Json(said) }
+                }),
+            ),
+        )
+    }
+
     /// And one that answers something which is not a device identity at all,
     /// which is what a machine with anything else on that port does.
     fn answering_something_else() -> FarEnd {
@@ -393,6 +431,35 @@ async fn a_peer_that_is_not_a_verkstead_is_not_drawn() {
             "{what} draws nothing, and the device heard on the LAN is untouched",
         );
     }
+}
+
+/// And a peer that answers more than an identity is no row either, the probe
+/// stopping at the cap rather than reading whatever a stranger cares to send.
+///
+/// **Because this half dials machines nobody typed an address for.** Every other
+/// bound on a probe is on how many nodes are asked and how long one has; this is
+/// the bound on what one of them may cost, and without it a node that answers
+/// endlessly is a read with no end but a deadline — sixteen of them at a time.
+///
+/// What the far end here says would draw a row in every respect but its size, so
+/// the absent row is the cap and nothing else. The LAN row beside it is what says
+/// the list was not simply empty.
+#[tokio::test]
+async fn a_peer_that_says_far_more_than_an_identity_is_not_drawn() {
+    let far = FarEnd::answering_far_too_much(OVER_THERE);
+
+    let (_dir, _pool, app) = workbench(
+        Browse::stated(vec![heard(A_THIRD)]),
+        Probe::of_this_tailnet_on(far.address.port(), tailscale_naming(&[LOOPBACK.to_owned()])),
+    )
+    .await;
+
+    assert_eq!(
+        rows(&app).await,
+        vec![(A_THIRD.to_owned(), vec![FoundOn::Lan])],
+        "the peer that would not keep to an identity's size draws nothing, and the \
+         device heard on the LAN is untouched",
+    );
 }
 
 /// A device found both ways is one row, and its source reads both: it is one
