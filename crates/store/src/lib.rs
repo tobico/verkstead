@@ -50,6 +50,7 @@ mod placements;
 mod profiles;
 mod pull_requests;
 mod push;
+mod ranks;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -114,6 +115,7 @@ pub use members::{
     member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
     record_member, record_renewal, renewal_acknowledged,
 };
+pub use migrations::rank_the_conversations;
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{

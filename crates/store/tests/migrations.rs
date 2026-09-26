@@ -56,6 +56,13 @@
 //! sessions share the account's memory. Every Profile from before arrives on,
 //! because the shared store is what they have always been given.
 //!
+//! And one column added empty on purpose, which is the one arrival an open cannot
+//! finish: where a Conversation sits in the sidebar is a Rank, and a Rank names
+//! the device that issued it — an id read out of the very pool the open is
+//! running on. So the column arrives and nothing fills it here; what does is
+//! `rank_the_conversations`, at the first start that has an identity in hand, and
+//! what it does with the rows is tested in `ranks.rs`.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -75,6 +82,10 @@ use verkstead_store::{
     timeline, update_profile, wrap_up_settled,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A database with the old table in it, and a Conversation to hang stops off.
 ///
 /// The pool is handed back so the old rows can be written, and the path so the
@@ -88,7 +99,7 @@ async fn before(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -421,7 +432,7 @@ async fn beside(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -853,7 +864,7 @@ async fn commits_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1036,7 +1047,7 @@ async fn pull_requests_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1200,7 +1211,7 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1485,7 +1496,7 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1550,7 +1561,7 @@ async fn a_conversation_from_before_the_branch_name_had_an_owner_keeps_its_name(
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1604,7 +1615,7 @@ async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1670,7 +1681,7 @@ async fn a_commit_from_before_merges_were_told_apart_is_no_merge() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1750,7 +1761,7 @@ async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody(
     // The one that would be waiting if anything were: started on a name
     // Verkstead invented, and past drafting, which is where the instruction goes
     // out.
-    let id = start_unnamed_conversation(&pool, repo, "brave-otter")
+    let id = start_unnamed_conversation(&pool, repo, "brave-otter", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2056,6 +2067,27 @@ async fn a_fresh_database_declares_the_memory_switch() {
     assert_eq!(declared, ("INTEGER".to_owned(), 1, "1".to_owned()));
 }
 
+/// And a fresh database declares where a Conversation sits in the sidebar,
+/// nullable: the column is a Rank's, and the rank itself is written by the start
+/// that makes the row rather than by anything here — see `ranks.rs`.
+#[tokio::test]
+async fn a_fresh_database_declares_the_rank_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let declared: (String, i64) = sqlx::query_as(
+        "SELECT type, \"notnull\" FROM pragma_table_info('conversations')
+         WHERE name = 'rank'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(declared, ("TEXT".to_owned(), 0));
+}
+
 /// A database whose every session record had to name a Profile, which is every
 /// Verkstead before a Profile could go unnamed.
 ///
@@ -2074,7 +2106,7 @@ async fn sessions_of_before(dir: &Path) -> i64 {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

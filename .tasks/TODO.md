@@ -16,6 +16,6 @@ Roadmap stage: [05: Ranks](docs/roadmaps/cluster-mode/05-ranks.md)
 
 ## Tasks
 
-- [ ] 01: Every Conversation carries a rank — [details](01-every-conversation-carries-a-rank.md)
+- [x] 01: Every Conversation carries a rank — [details](01-every-conversation-carries-a-rank.md)
 - [ ] 02: The order is the rank, and a drag writes one row — [details](02-the-order-is-the-rank.md)
 - [ ] 03: Retire the whole-list order — [details](03-retire-the-whole-list-order.md)

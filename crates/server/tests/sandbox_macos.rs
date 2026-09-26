@@ -63,6 +63,10 @@ use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// Where the server this Conversation belongs to is listening — which is what a
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
@@ -617,7 +621,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     .unwrap()
     .expect("the Profile saves");
 
-    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting")
+    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Conversation starts");

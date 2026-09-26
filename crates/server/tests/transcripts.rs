@@ -23,6 +23,10 @@ use tower::ServiceExt;
 use verkstead_render::TranscriptView;
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A session's log, in the shape a backend writes one: the conversation itself
 /// and the backend's own bookkeeping among it — because what an incremental
 /// read has to keep in step is both numberings and the lines they were counted
@@ -58,7 +62,7 @@ async fn talking(said: usize) -> (tempfile::TempDir, SqlitePool, Router, i64, i6
     .unwrap()
     .unwrap();
 
-    let conversation = store::start_conversation(&pool, repo.id, "rate-limiting")
+    let conversation = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -198,7 +202,7 @@ async fn a_cursor_that_cannot_be_carried_on_from_reads_the_record_whole() {
 async fn a_transcript_of_another_conversation_is_no_more_readable_with_a_cursor() {
     let (_dir, pool, app, _conversation, event) = talking(LOG.len()).await;
 
-    let elsewhere = store::start_conversation(&pool, 1, "another-branch")
+    let elsewhere = store::start_conversation(&pool, 1, "another-branch", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

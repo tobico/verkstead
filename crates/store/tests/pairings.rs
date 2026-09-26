@@ -15,6 +15,10 @@ use verkstead_store::{
     skip_review, start_building, start_conversation, start_grilling, update_profile,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -67,7 +71,7 @@ async fn grilled(
     implementation: &Profile,
     review: &Profile,
 ) {
-    let id = start_conversation(pool, repo.id, "amber-kestrel")
+    let id = start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -89,7 +93,7 @@ async fn grilled(
 
 /// And one grilled with the Review picker on the row that runs nothing.
 async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implementation: &Profile) {
-    let id = start_conversation(pool, repo.id, "amber-kestrel")
+    let id = start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -111,7 +115,7 @@ async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implemen
 /// which is the press that starts the work rather than an interview — the same
 /// moment, and so the same memory written.
 async fn ungrilled(pool: &SqlitePool, repo: &Repo, implementation: &Profile, review: &Profile) {
-    let id = start_conversation(pool, repo.id, "amber-kestrel")
+    let id = start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -186,7 +190,7 @@ async fn choosing_without_grilling_remembers_nothing() {
     let repo = repo(&pool, "verkstead").await;
     let fable = saved(&pool, "fable").await;
 
-    let id = start_conversation(&pool, repo.id, "amber-kestrel")
+    let id = start_conversation(&pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -476,7 +480,7 @@ async fn drafted(
     implementation: &Profile,
     review: &Profile,
 ) -> i64 {
-    let id = start_conversation(pool, repo.id, "amber-kestrel")
+    let id = start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

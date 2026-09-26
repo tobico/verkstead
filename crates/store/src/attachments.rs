@@ -375,6 +375,10 @@ pub async fn detach_from_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<
 mod tests {
     use super::*;
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     /// A Conversation to attach to, over a database with nothing else in it.
     async fn conversation() -> (tempfile::TempDir, SqlitePool, i64) {
         let dir = tempfile::tempdir().unwrap();
@@ -391,7 +395,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        let id = crate::start_conversation(&pool, repo.id, "attachments")
+        let id = crate::start_conversation(&pool, repo.id, "attachments", THIS_DEVICE)
             .await
             .unwrap()
             .unwrap();
@@ -443,7 +447,7 @@ mod tests {
     #[tokio::test]
     async fn another_conversations_attachment_is_not_this_ones() {
         let (_dir, pool, mine) = conversation().await;
-        let theirs = crate::start_conversation(&pool, 1, "elsewhere")
+        let theirs = crate::start_conversation(&pool, 1, "elsewhere", THIS_DEVICE)
             .await
             .unwrap()
             .unwrap();

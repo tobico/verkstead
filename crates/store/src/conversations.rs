@@ -1023,6 +1023,15 @@ pub enum Closing {
 /// And a third column beside them for the stretch between: `naming` says the
 /// work has started on a name Verkstead invented and the first session has been
 /// told to pick a real one — see [`Conversation::naming`].
+///
+/// `rank` is where the row sits in the sidebar: a fractional-indexing key with
+/// the device that issued it suffixed after it (ADR-0020, *Ranks*) — see
+/// [`super::ranks`]. Nullable here and filled by nothing that writes a row:
+/// every start mints one, and a database written before the column existed has
+/// every row of it ranked at the first start that can say which device it is —
+/// see [`super::rank_the_conversations`]. Which is the one thing a column on
+/// this table can be, `conversations` being STRICT and the arrival being what
+/// the rewrites in [`super::migrations`] are.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -1035,6 +1044,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_commit               TEXT,
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
+             rank                      TEXT,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
              implementation_profile_id INTEGER REFERENCES profiles(id),
              review_profile_id         INTEGER REFERENCES profiles(id)
@@ -1339,12 +1349,26 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// The Brief goes in with it, in the same transaction: the Brief is the first
 /// Event, and a Conversation whose Timeline was empty because the second insert
 /// failed would be one the human could not write anything into.
+///
+/// `device` is this Verkstead's own id, and what it is for is the Rank: the row
+/// is ranked above everything in the sidebar as it is written, with that id
+/// suffixed after the key (ADR-0020, *Ranks*) — see [`started`], where every
+/// start path's minting is.
 pub async fn start_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Settled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Settled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// The same, on a name Verkstead invented rather than one anybody settled on.
@@ -1357,8 +1381,17 @@ pub async fn start_unnamed_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Prefilled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Prefilled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// Start a Conversation adopting `roadmap` against a registered Repo, on
@@ -1378,11 +1411,13 @@ pub async fn start_adoption(
     repo_id: i64,
     branch: &str,
     roadmap: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
+        device,
         Named::Prefilled,
         Adopts::Roadmap(roadmap),
     )
@@ -1407,11 +1442,13 @@ pub async fn start_pull_request_adoption(
     repo_id: i64,
     branch: &str,
     pull_request: &AdoptedPullRequest,
+    device: &str,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
+        device,
         Named::Prefilled,
         Adopts::PullRequest(pull_request),
     )
@@ -1481,21 +1518,43 @@ enum Named {
     Prefilled,
 }
 
-/// What all three of them do: the row, its empty Brief, and the adoption mark
-/// where there is one to write.
+/// What all three of them do: the row, its Rank, its empty Brief, and the
+/// adoption mark where there is one to write.
 ///
 /// All of it in one transaction. A Conversation whose Timeline was empty
 /// because the second insert failed would be one the human could not write
 /// anything into, and one that lost its mark to a third would be a Draft drawn
 /// on the wrong page.
+///
+/// **And the rank is read and written inside that same transaction**, which is
+/// the other thing being one place buys. Ranking above everything means reading
+/// what is at the top, and two Conversations started a moment apart would
+/// otherwise read the same top and mint the same key — they carry the same
+/// suffix, being the same device's, so the suffix is no help at all here. See
+/// [`super::ranks`], and [`super::rank_the_conversations`], which is where the
+/// rows written before there were ranks got theirs.
 async fn started(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
     named: Named,
     adopts: Adopts<'_>,
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
+
+    // Above everything, which is where a Conversation nobody has had the chance
+    // to place belongs — and writing it down rather than leaving the row
+    // unranked is what makes *the unplaced float to the top* a rule the sidebar
+    // no longer needs.
+    let top: Option<String> = sqlx::query_scalar(
+        "SELECT rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("reading the rank at the top of the sidebar")?;
+
+    let rank = super::ranks::between(None, top.as_deref(), device)?;
 
     // The registry is asked in the insert's own `SELECT` rather than before it,
     // for the reason the path's uniqueness is left to the index: a look taken
@@ -1508,8 +1567,8 @@ async fn started(
     // name somebody chose has that name to fall back on and no other.
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO conversations
-             (repo_id, created_at, branch, named_branch, base_commit, state)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?
+             (repo_id, created_at, branch, named_branch, base_commit, state, rank)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?, ?
          FROM repos
          WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
@@ -1517,6 +1576,7 @@ async fn started(
     .bind(branch)
     .bind((named == Named::Settled).then_some(branch))
     .bind(Lifecycle::Draft.stored())
+    .bind(&rank)
     .bind(repo_id)
     .fetch_optional(&mut *tx)
     .await

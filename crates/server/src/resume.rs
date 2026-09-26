@@ -739,6 +739,10 @@ fn driven(lifecycle: Lifecycle) -> bool {
 mod tests {
     use super::*;
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     /// A server that runs no sessions takes nothing up, so a Conversation
     /// mid-run is left exactly as it was found.
     ///
@@ -761,10 +765,11 @@ mod tests {
             .unwrap()
             .expect("nothing is registered at that path yet");
 
-        let conversation = store::start_conversation(&pool, repo.id, "outbound-retries")
-            .await
-            .unwrap()
-            .expect("the Repo was just registered");
+        let conversation =
+            store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE)
+                .await
+                .unwrap()
+                .expect("the Repo was just registered");
 
         // Grilling before the router exists, which is the shape that makes the
         // take-up certain rather than a race: what a restart looks at is

@@ -87,6 +87,10 @@ use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
 use verkstead_store::Decision;
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
 const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
@@ -13982,7 +13986,7 @@ const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;
 
 /// One archived Conversation with a session's worth of bulk on it.
 async fn archived_printing(pool: &SqlitePool, repo: i64, branch: &str) -> Archived {
-    let id = verkstead_store::start_conversation(pool, repo, branch)
+    let id = verkstead_store::start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered");

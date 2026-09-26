@@ -32,6 +32,10 @@ use tower::ServiceExt;
 use verkstead_render::OpenPullRequestRepo;
 use verkstead_server::{Gh, open_database, router_asking_github, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A router whose `gh` answers out of whatever directory it is run in.
 ///
 /// The script prints `gh-stdout` where the directory has one, and otherwise
@@ -235,7 +239,7 @@ async fn a_pull_request_a_closed_conversation_holds_says_which_one() {
 
     // A Conversation that finished on #41 and was then closed out, which is the
     // shape of work the human is done with.
-    let conversation = store::start_conversation(&pool, repo.id, "rate-limiting")
+    let conversation = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -295,7 +299,7 @@ async fn a_number_held_in_one_repo_leaves_the_same_number_free_in_another() {
     let verkstead = repo_answering(&pool, dir.path(), "verkstead", &one).await;
     repo_answering(&pool, dir.path(), "askance", &one).await;
 
-    let conversation = store::start_conversation(&pool, verkstead.id, "rate-limiting")
+    let conversation = store::start_conversation(&pool, verkstead.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -454,7 +458,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // The one already in the pipeline, which is the row that leads to a
     // Conversation rather than loading anything.
-    let conversation = store::start_conversation(&pool, verkstead.id, "flaky-probe")
+    let conversation = store::start_conversation(&pool, verkstead.id, "flaky-probe", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

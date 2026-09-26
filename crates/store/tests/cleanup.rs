@@ -40,6 +40,10 @@ use verkstead_store::{
     transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -78,7 +82,7 @@ struct Worked {
 async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
     let repo = repo(pool).await;
 
-    let id = start_conversation(pool, repo, branch)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -515,7 +519,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .map(|repo| repo.id)
         .unwrap_or(2);
 
-    let id = start_conversation(pool, repo, branch)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered");
