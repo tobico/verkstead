@@ -53,6 +53,7 @@ import type {
   FolderListing,
   GrillingStarted,
   Merging,
+  NewRank,
   NoticeEvent,
   Nudge,
   PendingSteerView,
@@ -699,6 +700,28 @@ function sent(
     `expected the page to have written to ${path} ${which + 1} time(s)`,
   ).toBeTruthy();
   return JSON.parse(String(written[which]![1]?.body));
+}
+
+/// The path a move is saved to: one Conversation, and where the human just put
+/// it.
+const RANK = /^\/api\/ui\/conversations\/(\d+)\/rank$/;
+
+/// Every move the sidebar saved, in the order it saved them: which Conversation
+/// moved, and the row it said that one now sits under — `null` being the top of
+/// the list.
+///
+/// Read off the path as well as the body, because *one row* is half of what a
+/// reorder is now: what goes out names the Conversation that moved and nothing
+/// else on the list.
+function ranked(
+  fetching: ReturnType<typeof serving>,
+): Array<{ id: number; below: number | null }> {
+  return fetching.mock.calls
+    .filter(([asked, init]) => init?.method === "PUT" && RANK.test(String(asked)))
+    .map(([asked, init]) => ({
+      id: Number(RANK.exec(String(asked))![1]),
+      below: (JSON.parse(String(init?.body)) as NewRank).below,
+    }));
 }
 
 /// How many times the page wrote to `path`, for the tests about *when* a save
@@ -1432,8 +1455,9 @@ describe("how a card says where its conversation has got to", () => {
 });
 
 /// The order the sidebar is in, which is the human's own: they drag a card and
-/// the whole list goes to the server, so it survives a reload, a restart and a
-/// second device without any of the three being a case this page knows about.
+/// where that one row landed goes to the server, so the order survives a reload,
+/// a restart and a second device without any of the three being a case this page
+/// knows about.
 ///
 /// What the server does with the order is asked over there — the tests in
 /// `crates/server/tests/conversations.rs` say where an unplaced Conversation
@@ -1455,10 +1479,12 @@ describe("the order the human puts the sidebar in", () => {
           })),
         ),
       ),
-      whenever(
-        "/api/ui/conversations/order",
-        () => Promise.resolve(new Response(null, { status: 204 })),
-        "POST",
+      ...[1, 2, 3].map((id) =>
+        whenever(
+          `/api/ui/conversations/${id}/rank`,
+          () => Promise.resolve(new Response(null, { status: 204 })),
+          "PUT",
+        ),
       ),
       ...answers,
     );
@@ -1567,7 +1593,7 @@ describe("the order the human puts the sidebar in", () => {
     return open;
   }
 
-  it("moves the row under the hand and sends the whole list", async () => {
+  it("moves the row under the hand and sends the one row that moved", async () => {
     const fetching = three();
     const { container } = mount();
 
@@ -1579,12 +1605,10 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await order(container)).toEqual(["third", "first", "second"]);
 
-    // The list as it now stands, by id, rather than the row that moved: what is
-    // on the screen is what they meant.
+    // The row that moved and where it landed, rather than the list it landed
+    // in: it is at the top, so there is no row under which it sits.
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
-        order: [3, 1, 2],
-      }),
+      expect(ranked(fetching)).toEqual([{ id: 3, below: null }]),
     );
   });
 
@@ -1618,9 +1642,7 @@ describe("the order the human puts the sidebar in", () => {
     expect(await order(container)).toEqual(["third", "first", "second"]);
     expect(await holding(container), "nothing is under the hand now").toEqual([]);
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
-        order: [3, 1, 2],
-      }),
+      expect(ranked(fetching)).toEqual([{ id: 3, below: null }]),
     );
 
     // And the list is there to be dragged again, rather than held by a hand
@@ -1664,9 +1686,7 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await holding(container), "let go where the hand did").toEqual([]);
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
-        order: [1, 3, 2],
-      }),
+      expect(ranked(fetching)).toEqual([{ id: 3, below: 1 }]),
     );
   });
 
@@ -1701,9 +1721,7 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await order(container)).toEqual(["first", "third", "second"]);
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
-        order: [1, 3, 2],
-      }),
+      expect(ranked(fetching)).toEqual([{ id: 3, below: 1 }]),
     );
   });
 
@@ -1716,9 +1734,9 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await order(container)).toEqual(["first", "second", "third"]);
     expect(
-      askedFor(fetching, "/api/ui/conversations/order"),
+      ranked(fetching),
       "there is nowhere to move it to, so there is nothing to save",
-    ).toBe(0);
+    ).toEqual([]);
   });
 
   /// There is no grip beside the card to be dragged, and none to be tabbed to
@@ -1824,9 +1842,7 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await order(container)).toEqual(["third", "first", "second"]);
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
-        order: [3, 1, 2],
-      }),
+      expect(ranked(fetching)).toEqual([{ id: 3, below: null }]),
     );
   });
 
@@ -1852,9 +1868,9 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(await order(container)).toEqual(["first", "second", "third"]);
     expect(
-      askedFor(fetching, "/api/ui/conversations/order"),
+      ranked(fetching),
       "nothing was moved, so there is nothing to save",
-    ).toBe(0);
+    ).toEqual([]);
   });
 
   /// Once a card has lifted, though, the list must not scroll out from under
@@ -1893,9 +1909,9 @@ describe("the order the human puts the sidebar in", () => {
   it("says so and puts the list back when the order will not save", async () => {
     three(
       whenever(
-        "/api/ui/conversations/order",
+        "/api/ui/conversations/3/rank",
         json({ error: "the server is not taking orders" }, 503),
-        "POST",
+        "PUT",
       ),
     );
     const { container } = mount();
@@ -2188,9 +2204,9 @@ describe("what a right-click on a card offers", () => {
       `/conversations/${OPEN.id}/events/${BRIEF.id}`,
     );
     expect(
-      askedFor(fetching, "/api/ui/conversations/order"),
+      ranked(fetching),
       "nothing was dragged, so there is nothing to save",
-      ).toBe(0);
+    ).toEqual([]);
   });
 
   /// A finger has no right-click, and the long press it might have been is

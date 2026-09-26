@@ -27,7 +27,7 @@ use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
 use axum::response::{IntoResponse, Response as HttpResponse};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
@@ -41,7 +41,7 @@ use verkstead_render::{
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
     InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, PairingView, Parked,
+    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, NewRank, PairingView, Parked,
     PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
     RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
@@ -123,6 +123,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the sidebar rather than about any one Conversation, and the whole
         // order is what a drag produces.
         .route("/api/ui/conversations/order", post(place_conversations))
+        // And where one row of it has just been dropped, which is what letting go
+        // of a card says now. Under the Conversation rather than under the list,
+        // because one row is the whole of what a drag moves: its **Rank** is the
+        // list's order, and the row it landed under is all the server needs to
+        // mint one (ADR-0020, *Ranks*).
+        .route("/api/ui/conversations/{id}/rank", put(rank_conversation))
         // And whether that list is drawing what has been archived, which is
         // about the sidebar in exactly the same way — the human's standing
         // choice rather than this device's, so it is read back here on every
@@ -1237,6 +1243,47 @@ async fn place_conversations(
         }
         Err(error) => {
             tracing::error!(error = ?error, "placing the Conversations failed");
+            unavailable("the order could not be saved")
+        }
+    }
+}
+
+/// `PUT /api/ui/conversations/{id}/rank` — where the human just dropped this
+/// one.
+///
+/// `below` is the row it now sits directly under, and nothing at all is the top
+/// of the list. The key between that row's rank and the rank under the gap is
+/// minted here rather than in the browser, so the arithmetic exists once and in
+/// one language — see [`store::rank_conversation`], which does the reading and
+/// the writing in one transaction.
+///
+/// Refused for nothing, as the whole-list order it replaces was. A neighbour
+/// that has gone since the list was drawn leaves the order where the rest of
+/// the list puts it, and an id naming no Conversation writes nothing: a viewer
+/// sends what it drew, and by the time it lands a row may have been closed and
+/// swept. There is nothing to answer with beyond that it was taken, so it
+/// answers with nothing.
+///
+/// The rank carries this device's id, which is the device that owns the row.
+///
+/// The Nudge is what carries it to the other devices: a row that moved is the
+/// one thing every open sidebar has to read again.
+async fn rank_conversation(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(ranked): Json<NewRank>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match store::rank_conversation(&state.pool, id, ranked.below, &state.device).await {
+        Ok(()) => {
+            state.nudges.announce(Nudge::Conversations);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "ranking a Conversation failed");
             unavailable("the order could not be saved")
         }
     }

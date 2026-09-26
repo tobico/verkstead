@@ -12,6 +12,11 @@
 //! And two devices ranking above their own list are two ranks rather than a tie,
 //! which is what the suffix is for.
 //!
+//! And the sidebar's own order is the rank, so what the placement tests used to
+//! ask is asked here: the order the human made comes back to them, a reorder
+//! names one row rather than the list, and a neighbour that has gone since the
+//! list was drawn is passed over rather than refused.
+//!
 //! The arithmetic itself is tested where it lives, over a few thousand random
 //! inserts — see the store's own `ranks` module. What is tested here is what the
 //! database does with it.
@@ -21,7 +26,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     archive_conversation, close_conversation, conversations, open_database, place_conversations,
-    rank_the_conversations, register_repo, start_conversation,
+    rank_conversation, rank_the_conversations, register_repo, start_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -67,7 +72,8 @@ async fn by_rank(pool: &SqlitePool) -> Vec<i64> {
         .unwrap()
 }
 
-/// And the sidebar as it stands today, which is still the place order.
+/// And the sidebar as the human sees it, which is that same order with what has
+/// been put away left out.
 async fn sidebar(pool: &SqlitePool) -> Vec<i64> {
     conversations(pool)
         .await
@@ -322,4 +328,172 @@ async fn rows_from_before_land_under_what_is_already_ranked() {
         vec![started_first, before],
         "what was ranked keeps its place, and the row from before goes under it",
     );
+}
+
+/// Three Conversations on one Repo, newest first, which is the order a start
+/// ranks them into — and the Repo, for the one test that starts a fourth.
+async fn three(pool: &SqlitePool) -> (i64, i64, i64, i64) {
+    let repo = repo(pool).await;
+
+    let first = start(pool, repo, "first").await;
+    let second = start(pool, repo, "second").await;
+    let third = start(pool, repo, "third").await;
+
+    (repo, first, second, third)
+}
+
+/// The rank of one Conversation, whole — the key and the device on it.
+async fn rank(pool: &SqlitePool, id: i64) -> String {
+    sqlx::query_scalar("SELECT rank FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The whole of what a drag says: this Conversation now sits under that one.
+async fn dropped(pool: &SqlitePool, id: i64, below: Option<i64>) {
+    rank_conversation(pool, id, below, THIS_DEVICE)
+        .await
+        .unwrap();
+}
+
+/// A card let go at the top of the list, which is the one drop with no row to
+/// name: the key minted is outside the range rather than between two of them.
+#[tokio::test]
+async fn a_row_dropped_at_the_top_is_ranked_above_everything() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, first, None).await;
+
+    assert_eq!(sidebar(&pool).await, vec![first, third, second]);
+    assert!(
+        rank(&pool, first).await < rank(&pool, third).await,
+        "the row that moved is above the one that was the top",
+    );
+}
+
+/// And one let go at the foot, which is the other end of the same thing: the row
+/// it lands under is the last one there is, so there is nothing under the gap.
+#[tokio::test]
+async fn a_row_dropped_at_the_foot_is_ranked_below_everything() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, third, Some(first)).await;
+
+    assert_eq!(sidebar(&pool).await, vec![second, first, third]);
+    assert!(
+        rank(&pool, third).await > rank(&pool, first).await,
+        "the row that moved is under the one that was the foot",
+    );
+}
+
+/// The drop everything else is a special case of: the key minted sorts between
+/// its two neighbours **with the suffixes on**, which is what the separator is
+/// there to buy — the arithmetic never sees a device, and the strings the
+/// database sorts always carry one.
+#[tokio::test]
+async fn a_row_dropped_between_two_sorts_between_them() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    // The top row, dropped into the gap the other two leave.
+    dropped(&pool, third, Some(second)).await;
+
+    assert_eq!(sidebar(&pool).await, vec![second, third, first]);
+
+    let moved = rank(&pool, third).await;
+
+    assert!(
+        rank(&pool, second).await < moved && moved < rank(&pool, first).await,
+        "the minted rank sorts between its neighbours, suffixes and all: {moved}",
+    );
+    assert!(
+        moved.ends_with(THIS_DEVICE),
+        "and the row that moved carries its own device: {moved}",
+    );
+}
+
+/// A viewer sends the list it drew, and a row can be gone by the time it lands —
+/// the way an id in the whole-list order it replaces was passed over rather than
+/// refusing the drag it was only partly about. There is nothing left to rank
+/// against, so the list stays as the rest of it says.
+#[tokio::test]
+async fn a_neighbour_that_has_gone_is_not_a_refusal() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, third, Some(9_999)).await;
+
+    assert_eq!(sidebar(&pool).await, vec![third, second, first]);
+}
+
+/// And an id naming no Conversation at all is the same non-event from the other
+/// side: nothing is written, and nothing is refused.
+#[tokio::test]
+async fn ranking_a_conversation_that_is_not_there_changes_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, 9_999, Some(second)).await;
+
+    assert_eq!(sidebar(&pool).await, vec![third, second, first]);
+}
+
+/// What the whole feature is for: the order the human made is still theirs after
+/// the database has been closed and opened again. A reload reads the same rows,
+/// and a restart reads the same column.
+#[tokio::test]
+async fn the_order_a_drag_made_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
+    let pool = open_database(&database).await.unwrap();
+
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, second, Some(first)).await;
+
+    let after = vec![third, first, second];
+    assert_eq!(sidebar(&pool).await, after);
+
+    pool.close().await;
+
+    let pool = open_database(&database).await.unwrap();
+
+    assert_eq!(
+        sidebar(&pool).await,
+        after,
+        "the order is a column, so a restart reads what the drag wrote",
+    );
+}
+
+/// A row dropped where it already is has to be a row that has not moved. It is
+/// its own neighbour's neighbour, and a key minted between a row and itself is
+/// one the arithmetic has nothing to compute.
+#[tokio::test]
+async fn a_row_dropped_where_it_already_sits_stays_there() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, second, Some(third)).await;
+
+    assert_eq!(sidebar(&pool).await, vec![third, second, first]);
+}
+
+/// And a Conversation started while the sidebar is open arrives at the top of
+/// whatever the human has dragged it into, rather than under it: every start
+/// ranks above everything, which is the rule that replaces *the unplaced float
+/// to the top*.
+#[tokio::test]
+async fn a_conversation_started_after_a_drag_lands_at_the_top() {
+    let (_dir, pool) = fresh_pool().await;
+    let (repo, first, second, third) = three(&pool).await;
+
+    dropped(&pool, third, Some(first)).await;
+
+    let fourth = start(&pool, repo, "fourth").await;
+
+    assert_eq!(sidebar(&pool).await, vec![fourth, second, first, third]);
 }

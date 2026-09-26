@@ -27,7 +27,7 @@ use crate::{
     FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
     FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress,
     LinkedDevice, Locked, NewAdoption, NewCompanion, NewConversation, NewJoin, NewOrder,
-    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PendingJoin, PrefillView,
+    NewPullRequestAdoption, NewRank, OnboardingView, OpenPullRequestRepo, PendingJoin, PrefillView,
     ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
     PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
     RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
@@ -109,8 +109,9 @@ fn the_viewers_types_are_written_from_these() {
     // than saying them over again.
     ShareCommented::export_all(&config).unwrap();
 
-    // And the order the human dragged that sidebar into, which is the one thing
-    // they say about the list itself rather than about anything on it.
+    // And where they have just dragged one row of that sidebar to, which is the
+    // one thing they say about the list itself rather than about anything on it.
+    NewRank::export_all(&config).unwrap();
     NewOrder::export_all(&config).unwrap();
 
     // And the other: whether what has been put away is drawn among them, which

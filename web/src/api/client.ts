@@ -61,6 +61,7 @@ import type {
   FileWritten,
   FolderListing,
   GrillingStarted,
+  NewRank,
   OnboardingView,
   OpenPullRequestRepo,
   PrefillView,
@@ -448,20 +449,34 @@ export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");
 }
 
-/// Say where the whole list goes, which is what letting go of a dragged row
-/// does.
+/// Say where one Conversation now sits, which is what letting go of a dragged
+/// card does — and what an arrow key on one does.
 ///
-/// The whole order rather than the row that moved: the list the human is
-/// looking at is what they meant, and a move replayed against a list the server
-/// has added to since would not be it.
+/// `below` is the row it landed directly under, or `null` for the top of the
+/// list. One row rather than the whole order: the row is what moved, and the
+/// key that says where it sits is minted on the server, so nothing here knows
+/// what a rank looks like.
 ///
-/// Answered with nothing at all — there is no outcome to read. An id naming a
-/// Conversation that has gone is passed over on the other side, which is what a
-/// list drawn a moment ago is allowed to carry.
-export async function placeConversations(order: number[]): Promise<void> {
-  const at = "/api/ui/conversations/order";
+/// Answered with nothing at all — there is no outcome to read. A neighbour that
+/// has gone since this list was drawn is not a refusal on the other side, which
+/// is what a list drawn a moment ago is allowed to carry.
+export async function rankConversation(
+  id: number,
+  below: number | null,
+): Promise<void> {
+  const at = `/api/ui/conversations/${id}/rank`;
 
-  await refused(at, await sent(at, { order }));
+  await refused(
+    at,
+    await fetch(at, {
+      method: "PUT",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ below } satisfies NewRank),
+    }),
+  );
 }
 
 /// Whether the sidebar is drawing what has been archived, and whether there is

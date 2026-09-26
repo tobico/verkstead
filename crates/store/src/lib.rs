@@ -91,14 +91,14 @@ pub use conversations::{
     Switched, Taking, TimelineEvent, Work, adopted_pull_request, adopting, ask, asked_from,
     closable, close_conversation, conversation_branch, conversations, follow_branch,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
-    open_set, opened_at, pick_direction, picked_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
-    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
-    skip_review, stacks_on, stage_roadmap, start_adoption, start_building, start_conversation,
-    start_grilling, start_implementing, start_pull_request_adoption, start_stage,
-    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, timeline,
-    unfinished_conversations, waiting, work_on_repo,
+    open_set, opened_at, pick_direction, picked_direction, rank_conversation, record_backlog,
+    record_handoff, record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch,
+    rename_branch, resolve_conflicts, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, set_state, settle_naming,
+    skip_grilling, skip_review, stacks_on, stage_roadmap, start_adoption, start_building,
+    start_conversation, start_grilling, start_implementing, start_pull_request_adoption,
+    start_stage, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
+    timeline, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};

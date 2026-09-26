@@ -1127,23 +1127,25 @@ async fn order(app: &Router) -> Vec<i64> {
     sidebar(app).await.into_iter().map(|row| row.id).collect()
 }
 
-/// Say where the whole list goes, which is what letting go of a dragged row
-/// sends. Answered with nothing, because there is nothing to answer.
-async fn place(app: &Router, ids: &[i64]) {
+/// Say where one row of the list now sits, which is what letting go of a dragged
+/// card sends: the Conversation that moved, and the row it landed under —
+/// `None` being the top of the list. Answered with nothing, because there is
+/// nothing to answer.
+async fn rank(app: &Router, id: i64, below: Option<i64>) {
     let (status, body) = fetch(
         app,
         Request::builder()
-            .method("POST")
-            .uri("/api/ui/conversations/order")
+            .method("PUT")
+            .uri(format!("/api/ui/conversations/{id}/rank"))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::to_vec(&serde_json::json!({ "order": ids })).unwrap(),
+                serde_json::to_vec(&serde_json::json!({ "below": below })).unwrap(),
             ))
             .unwrap(),
     )
     .await;
 
-    assert_eq!(status, StatusCode::NO_CONTENT, "placing failed: {body}");
+    assert_eq!(status, StatusCode::NO_CONTENT, "ranking failed: {body}");
 }
 
 #[tokio::test]
@@ -1156,44 +1158,77 @@ async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
     assert_eq!(
         order(&app).await,
         vec![third, second, first],
-        "unplaced, the list is newest first",
+        "nobody having dragged anything, the list is newest first",
     );
 
-    place(&app, &[second, first, third]).await;
+    // The top card dropped between the two under it, which is one row moving and
+    // so one request naming one Conversation.
+    rank(&app, third, Some(second)).await;
 
     assert_eq!(
         order(&app).await,
-        vec![second, first, third],
+        vec![second, third, first],
         "and afterwards it is where the human put it — which is what a reload, a \
          restart and a second device each read",
     );
+
+    // And the same row again, this time to the top, which is the drop with no
+    // row to name.
+    rank(&app, first, None).await;
+
+    assert_eq!(order(&app).await, vec![first, second, third]);
 }
 
-/// The one row nobody could have placed, because it did not exist when they
-/// dragged. Above the order rather than at the end of it: it is where the work
-/// they just started will be looked for.
+/// The one row nobody could have dragged, because it did not exist when they
+/// did. Above the order rather than at the end of it: it is where the work they
+/// just started will be looked for, and it is there because a start ranks it
+/// there rather than because the list makes a case of it.
 #[tokio::test]
 async fn a_conversation_started_after_the_order_lands_at_the_top() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[first, second]).await;
+    rank(&app, first, Some(second)).await;
     let third = started(&app, repo_id).await;
 
-    assert_eq!(order(&app).await, vec![third, first, second]);
+    assert_eq!(order(&app).await, vec![third, second, first]);
 }
 
-/// A viewer sends the list it drew, and a row can be gone by the time it lands.
+/// A viewer sends the list it drew, and the row it names as a neighbour can be
+/// gone by the time it lands. There is nothing left to rank against, so the list
+/// stays as the rest of it says rather than the drag being refused.
 #[tokio::test]
-async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
+async fn a_neighbour_that_is_not_there_is_still_taken() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[second, 9_999, first]).await;
+    rank(&app, first, Some(9_999)).await;
 
     assert_eq!(order(&app).await, vec![second, first]);
+}
+
+/// An id out of a URL, which is not always a number — and a rank is a PUT under
+/// the Conversation, so it has one to parse like every other row does.
+#[tokio::test]
+async fn ranking_something_that_is_not_a_conversation_is_not_found() {
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/ui/conversations/nonsense/rank")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "below": null })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// A claude dir and config file pair inside `elsewhere`, so a Profile saved from

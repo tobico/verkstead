@@ -10,9 +10,12 @@
 //! list, which is what will let a drag on a merged list be written to the device
 //! that owns the row and nothing else.
 //!
-//! **The order-by is still the places**, this being the stage that mints the
-//! keys rather than the one that reads them — see [`super::placements`]. What is
-//! here is a rank on every row there is, and what reads them comes next.
+//! **And the order-by is this column**, so what a drag saves is one row: the
+//! viewer says which row it landed under, and the server reads that row's rank
+//! and the rank under the gap and mints between the two — see
+//! [`super::rank_conversation`], which is the one place a key is minted for a
+//! row that already has one, and [`super::conversations::conversations`], whose
+//! `ORDER BY` this is.
 //!
 //! **Fractional indexing rather than a dense integer**, for the reason the ADR
 //! gives: a key between any two always exists, so there is no arrangement a drag
