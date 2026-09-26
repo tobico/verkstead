@@ -672,6 +672,15 @@ and an unlink are owed on, and is told by the next call that gets through to it 
 which is also when the changeover it was holding up finishes. One that never
 answers leaves it in flight rather than failing anything, and is a member the
 human unlinks; that press is what lets the changeover finish.
+**And a device that arrives in the middle of one is told at once**, however it
+arrived — an Allow pressed here, a **Member** naming a newcomer, or a whole
+roster handed over by an **Exchange**. A row written while a changeover is in
+flight has acknowledged nothing and is one more holdout by the fact of being
+written, and nothing at the other end of the call that wrote it knows there is a
+changeover to hear about. Untold, it is not a link that breaks but a changeover
+that cannot end: the device holding it up is answering perfectly well, and the
+certificate still going out is the one with at most the renewal window left on
+it.
 **Both fingerprints are printable while one is in flight**, on a startup line
 of its own, because that is the only way anybody tells which of the two a peer
 met.

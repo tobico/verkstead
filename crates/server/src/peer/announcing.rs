@@ -74,6 +74,14 @@ pub(crate) struct Told {
     /// device that happens to be open: the Devices section has a row it did not
     /// have a moment ago, and nothing else would say so.
     pub(crate) nudges: crate::nudge::Nudges,
+
+    /// And this device's cluster as something to dial, held for the one thing a
+    /// newcomer landing here sets off: where a changeover of this device's own
+    /// is in flight, the device just recorded is one more member that has
+    /// acknowledged nothing — and nobody over there knows that, the announcement
+    /// being this end's to make. See
+    /// [`crate::device::Devices::announcing_renewal`].
+    pub(crate) devices: crate::device::Devices,
 }
 
 /// `POST /api/peer/v1/members` — a member, naming a device this cluster now
@@ -146,6 +154,18 @@ pub(crate) async fn announced(
     // Devices list that was not there a moment ago, and nobody over here
     // pressed anything for it.
     told.nudges.announce(Nudge::Devices);
+
+    // And where this device is in the middle of a changeover of its own, the
+    // newcomer is one more member that has yet to acknowledge the certificate
+    // coming in — it has never heard of this device's changeover, and nothing
+    // over at the introducer's end could tell it. Left undone, a changeover one
+    // acknowledgement from finishing is held open by a device that is perfectly
+    // reachable, until the next start.
+    //
+    // In a task, so the member that announced this is answered now rather than
+    // after a dial down somebody else's addresses, and nothing at all where no
+    // changeover is in flight.
+    told.devices.announcing_renewal();
 
     StatusCode::NO_CONTENT.into_response()
 }

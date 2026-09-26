@@ -79,6 +79,11 @@ const PATIENCE: Duration = Duration::from_millis(300);
 /// A day, for standing a start inside the renewal window.
 const A_DAY: time::Duration = time::Duration::days(1);
 
+/// How long a test will wait for an announcement that is made in a task of its
+/// own: generous, because it is only ever paid in full when the assertion is
+/// about to fail.
+const TELLING: Duration = Duration::from_secs(5);
+
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
 /// that is not there, which is what having none *is*.
 fn no_tailscale() -> Tailscale {
@@ -177,6 +182,38 @@ impl Verkstead {
 
         self.device = device;
         changeover
+    }
+
+    /// And the peer listener stood up again over the identity as it now stands,
+    /// on a port the machine picked again.
+    ///
+    /// **Which is the order a real start does these in**, and the one thing
+    /// [`Verkstead::re_issued`] above cannot get right on its own: a start reads
+    /// the membership, makes the certificate again against it, and only then
+    /// serves — so the routes on that listener answer out of a device that knows
+    /// it is in the middle of a changeover. Re-issuing behind a listener that is
+    /// already up is faithful for everything a *dial* does, which is what the
+    /// rest of this file asks about, and is not for anything the listener itself
+    /// has to do about one.
+    ///
+    /// A fresh port because a socket cannot be handed back and taken again in the
+    /// same breath, and a member that has to be told where this device went is a
+    /// member told the way a member is told anything — see [`back_again`]. The
+    /// old listener is left where it is and nothing dials it.
+    async fn serving_again(&mut self) {
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &self.device)
+            .expect("the loopback on a port the machine picked is free");
+
+        self.address = listener.address();
+        self.reading = Reading::advertising(no_tailscale(), Platform::Linux, None, vec![self.at()]);
+
+        tokio::spawn(listener.serving(peer::router(
+            self.device.clone(),
+            self.reading.clone(),
+            self.members.clone(),
+            self.joins.clone(),
+            self.nudges.clone(),
+        )));
     }
 
     /// And the start after all this, which is what reads the files a finished
@@ -731,6 +768,104 @@ async fn a_member_that_was_not_there_is_told_when_it_answers_and_the_changeover_
         "a newcomer is not a member the changeover quietly finished behind",
     );
     assert_eq!(a.cluster().await, sorted(&[B, C, D]));
+}
+
+/// And a device written on to the list by somebody *else's* press is told too,
+/// rather than left holding the changeover open.
+///
+/// **The one a changeover has no other trigger for.** Everywhere else a member
+/// lands here, this device did something to put it there and can tell it on the
+/// way past — an Allow is its own human's press, and
+/// [`Devices::announce_renewal`] runs at the end of it. An announcement is the
+/// other shape: a member names a newcomer, this device writes the row, and the
+/// newcomer has acknowledged nothing and has never heard of the changeover.
+/// Nobody at the introducer's end knows there is one to hear about.
+///
+/// Left untold it is not a link that breaks but a changeover that cannot finish:
+/// the member holding it up is perfectly reachable, and the old certificate —
+/// the one with a month left on it — goes on going out until the next start.
+#[tokio::test]
+async fn a_newcomer_a_member_named_is_told_about_the_changeover_too() {
+    let mut a = Verkstead::nearly_expired(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&b, &a).await;
+    linked(&c, &a).await;
+
+    // And C switched off between the join and the re-issue, so the changeover
+    // stays in flight for the whole of this rather than finishing the moment B
+    // answers.
+    switched_off(&a, C).await;
+
+    assert_eq!(a.re_issued().await, Changeover::YetToTell(2));
+
+    let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
+
+    a.devices().waiting(PATIENCE).announce_renewal().await;
+
+    assert!(
+        a.device.incoming_path().exists(),
+        "C never answered, so the changeover is in flight",
+    );
+
+    // And A answering out of the identity that start read, which is the order a
+    // real one does these in — see [`Verkstead::serving_again`]. B is told where
+    // it went, the way a member is told anything.
+    a.serving_again().await;
+    back_again(&b, &a).await;
+
+    // D joins the cluster through B rather than through A, so what puts D on A's
+    // list is B's announcement and no press of A's own.
+    let d = Verkstead::answering(D).await;
+
+    linked(&d, &b).await;
+
+    assert_eq!(a.cluster().await, sorted(&[B, C, D]));
+
+    // The announcement to A is answered before the dial it sets going, so what
+    // is waited on here is that dial rather than B's call — and the last thing
+    // that dial does is write the answer down, which is why the wait is on this
+    // end of it.
+    let told = tokio::time::timeout(TELLING, async {
+        loop {
+            if verkstead_store::members(&a.pool)
+                .await
+                .unwrap()
+                .iter()
+                .any(|member| {
+                    member.device == D && member.acknowledged.as_deref() == Some(&incoming)
+                })
+            {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+
+    told.await.expect(
+        "a device recorded off a member's announcement should be told about the \
+         changeover it has just become one of the holdouts for",
+    );
+
+    assert_eq!(
+        d.holds(A).await.fingerprint,
+        incoming,
+        "which is the far end of the same call: D records the fingerprint \
+         against A's id, and answering is the acknowledgement",
+    );
+
+    // Which leaves C, and C alone, standing between this changeover and the end
+    // of it — rather than C and a device nothing would ever have told.
+    back_again(&a, &c).await;
+    a.devices().waiting(PATIENCE).announce_renewal().await;
+
+    assert!(
+        !a.device.incoming_path().exists(),
+        "the last member that had not heard has heard, so the changeover is over",
+    );
+    assert_eq!(a.started_again().await.fingerprint(), incoming);
 }
 
 /// And a member that never answers at all is one the human unlinks, which is the
