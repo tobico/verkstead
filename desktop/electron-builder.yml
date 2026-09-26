@@ -1,13 +1,13 @@
 # What a packed Verkstead is, on every platform it is packed for.
 #
 # One configuration for the three artifacts a Release ships (ADR-0020) — an
-# x86_64 AppImage, a universal dmg and an msi — with only the Linux target
-# filled in: stages 06 and 07 of the Electron roadmap add a `mac:` and a `win:`
-# section beside the `linux:` one below, and nothing here is a step they have to
-# undo first. Everything above those sections is every platform's.
+# x86_64 AppImage, a universal dmg and an msi — with the Linux and the Mac
+# targets filled in: stage 07 of the Electron roadmap adds a `win:` section
+# beside them, and nothing here is a step it has to undo first. Everything above
+# those sections is every platform's.
 #
 # **What runs it is `pnpm run pack`** — see `scripts/pack.mjs`, which is where
-# the CLI this app carries comes from and what the two staged paths below are
+# the CLI this app carries comes from and what the staged paths below are
 # written by. electron-builder on its own would pack an app with no sidecar in
 # it.
 #
@@ -48,8 +48,8 @@ directories:
   # Under the directory cargo already writes to, so that one `.gitignore` line
   # covers both of them and `cargo clean` takes them away — which is where the
   # Rust AppImage kept its AppDir too. `out/` is electron-builder's own output,
-  # `staged/` beside it is what `scripts/pack.mjs` writes for the two paths
-  # below to read.
+  # `staged/` beside it is what `scripts/pack.mjs` writes for the paths below to
+  # read.
   output: ../target/electron/out
   buildResources: build
 
@@ -70,7 +70,8 @@ extraResources:
   #
   # Staged rather than named outright, because which binary it is is the
   # developer's or the release leg's to say: `scripts/pack.mjs` is what puts it
-  # there.
+  # there — and on a Mac what joins the two Apple builds into the one universal
+  # file this is.
   - from: ../target/electron/staged/cli
     to: cli
 
@@ -139,3 +140,69 @@ appImage:
 # `--no-sandbox` on the desktop entry the way the legacy path does.
 toolsets:
   appimage: "1.0.3"
+
+mac:
+  # **The committed icns, staged rather than pointed at**, the way the launcher
+  # icons are: `tools/generate-packaging.sh` writes it from the same artwork
+  # those come from, and staging keeps that script the only thing in the
+  # repository that writes artwork — see `scripts/pack.mjs`.
+  #
+  # electron-builder copies it into the bundle and writes the
+  # `CFBundleIconFile` naming it, which is worth saying twice: v0.1.2 shipped a
+  # perfectly good icns under a key naming no file at all and drew the generic
+  # application icon on every Mac that downloaded it. The Finder icon is the one
+  # thing about a bundle that nothing running the app can tell you about, so it
+  # is read back off what was packed.
+  icon: ../target/electron/staged/icon.icns
+
+  # `Development` above, in Apple's own vocabulary: `LSApplicationCategoryType`,
+  # which is what a Mac groups the app under.
+  category: public.app-category.developer-tools
+
+  # **Ad-hoc signed, which is not the signing this roadmap decided against.**
+  # `null` here would skip code signing outright, and Apple silicon refuses to
+  # execute a Mach-O carrying no signature at all — so the app would not start on
+  # half the Macs it is built for. `-` is `codesign --sign -` through
+  # @electron/osx-sign, which is exactly what `tools/build-macos-dmg.sh` did by
+  # hand. It buys nothing from Gatekeeper: there is no Developer ID, the download
+  # is unsigned in the sense `docs/adoption.md` means, and the three steps it
+  # describes stay (ADR-0020).
+  identity: "-"
+
+  # **And the hardened runtime goes off beside it.** It defaults on, and
+  # electron-builder's own schema warns what that means under an ad-hoc
+  # signature: library validation, which rejects the pre-signed Electron
+  # framework for carrying a different Team ID — an app that packs and then will
+  # not launch. Nothing here is notarized, which is the only thing the hardened
+  # runtime is required for.
+  hardenedRuntime: false
+
+  # **No `LSUIElement`, said as a line about what is not here.** That key is what
+  # made the Rust bundle a menu-bar app with no Dock tile, and ADR-0020 retires
+  # it: this is a regular Dock app, closing the window hides it and the Dock is
+  # the way back. electron-builder writes no such key, so there is nothing to
+  # turn off — and the packed `Info.plist` is read back for its absence, that
+  # absence being the whole of what the Dock behaviour rests on.
+  #
+  # `LSMinimumSystemVersion` is left unsaid for the opposite reason: it is
+  # Electron's own floor rather than a number this repository has an opinion
+  # about, and what `docs/adoption.md` promises a downloader is read off the
+  # packed bundle.
+
+  target:
+    - target: dmg
+      # **One file for both Macs**, as the Rust bundle was: electron-builder
+      # builds the x64 app and the arm64 app and hands the two to
+      # @electron/universal, which `lipo`s the Mach-O files that differ and
+      # refuses anything else that does. The sidecar is universal by
+      # construction — `scripts/pack.mjs` joins both CLI builds before either
+      # app is built — so it is byte-identical in the two halves and there is
+      # nothing for an `x64ArchFiles` pattern to excuse.
+      arch:
+        - universal
+
+dmg:
+  # Written down rather than defaulted, for the reason the AppImage's is:
+  # `release.yml` uploads this name, `docs/adoption.md` spells it, and
+  # electron-builder's own pattern would put the version in the middle of both.
+  artifactName: Verkstead-universal.dmg
