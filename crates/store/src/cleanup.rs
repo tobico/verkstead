@@ -112,11 +112,12 @@ const EVENT_KEYED: &[&str] = &[
     // And the summary a commit card is drawn from. The commit itself names the
     // Conversation as well and goes with the rest of those.
     "commit_summaries",
-    // And the companion rows a steer asked for, which hang off the row that
-    // says what else it settled — so these go before it and it goes with the
-    // rest of those.
+    // And the companion rows a steer asked for and the state it came out of,
+    // which hang off the row that says what else it settled — so these go before
+    // it and it goes with the rest of those.
     "steer_additions",
     "steer_upgrades",
+    "steer_sources",
 ];
 
 /// The tables one Question Set's own rows live in, emptied a Set at a time

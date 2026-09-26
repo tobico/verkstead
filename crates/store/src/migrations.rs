@@ -17,14 +17,15 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Eight of them are a column arriving rather than rows moving between tables —
+//! Nine of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
-//! is a merge, which Answer an attached file was put on, and whether a Profile
-//! shares its account's memory — which is the same kind of one-time rewrite:
-//! the rows already there are given the value that says what was true of them
-//! before the column existed.
+//! is a merge, which Answer an attached file was put on, whether a Profile
+//! shares its account's memory, and the question a half-written steer would open
+//! an investigation on — which is the same kind of one-time rewrite: the rows
+//! already there are given the value that says what was true of them before the
+//! column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -55,7 +56,44 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     attached_files_that_named_no_answer(pool).await?;
     profiles_that_had_to_be_named(pool).await?;
     sessions_that_had_to_name_a_profile(pool).await?;
-    profiles_that_had_no_memory_switch(pool).await
+    profiles_that_had_no_memory_switch(pool).await?;
+    pending_steers_that_had_no_investigation(pool).await
+}
+
+/// Give every half-written steer from before Investigating was a target the
+/// column that holds the question one would be opened on.
+///
+/// Nobody wrote one: the target arrives with the column, so every row this
+/// reaches is a form whose human could not have picked Investigating. So the
+/// column stands empty and there is no `UPDATE` under it — which is what the
+/// empty slot means anyway, on this column as on every other one of the form's:
+/// nothing written. See [`super::pending_steers`].
+///
+/// A column rather than the follow-up's own read twice, because the form holds
+/// one slot per target's payload: a human who wrote a follow-up's brief, moved
+/// the picker to Investigating and moved it back would otherwise find their own
+/// sentence read back as a question they never asked.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn pending_steers_that_had_no_investigation(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pending_steers') WHERE name = ?")
+            .bind("investigation")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the question a half-written steer would investigate")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE pending_steers ADD COLUMN investigation TEXT")
+        .execute(pool)
+        .await
+        .context("settling the half-written steers from before Investigating was a target")?;
+
+    Ok(())
 }
 
 /// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put

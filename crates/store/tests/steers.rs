@@ -20,6 +20,12 @@
 //! forgotten, and the Worktree and base commit the steer had to make written
 //! beside the move.
 //!
+//! And the state the steer found it in, beside the Steer Event: where the work
+//! went is the Event's own, and where it came from is nowhere at all the moment
+//! the state column is written over. An Investigating steered into goes back to
+//! it when the human says there is nothing else, so it is a fact somebody
+//! recorded rather than one read back off the Timeline afterwards.
+//!
 //! And the review a steer into Wrapping puts back to waiting, from whatever
 //! state it was steered: a steer is the human saying look at this again, so the
 //! wrap-up it lands in reads the branch rather than inheriting what the last one
@@ -1069,6 +1075,12 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
         record.upgraded[0].branch, "",
         "empty is mirroring, which is what the row was left on",
     );
+
+    assert_eq!(
+        record.source,
+        Some(Lifecycle::Grilling),
+        "and the state the press found it in, which the Event's target cannot say",
+    );
 }
 
 /// The ordinary steer settles nothing and asks for nothing, and its record says
@@ -1141,6 +1153,103 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
             .pairing,
         RecordedPairing::Removed,
     );
+}
+
+/// The state each steer found the Conversation in, written down beside its own
+/// Event.
+///
+/// One press has one source, and a Conversation steered a few times has one per
+/// press: what the record holds is where each of them came *from*, which the
+/// Event's own target says nothing about. Read back with the rest of the form,
+/// and read again out of a second pool over the same file — the ending that
+/// wants it may be hours and a restart away.
+#[tokio::test]
+async fn a_steer_records_the_state_it_came_out_of() {
+    let (dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    // Out of Grilling and into Investigating: the question asked about work that
+    // is still being interviewed, which is the source nothing else would say.
+    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+        .await
+        .unwrap();
+
+    // And out of Investigating again, which is what makes this a fact per press
+    // rather than one per Conversation.
+    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&pool, id).await,
+        [
+            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
+            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+        ],
+        "each steer says where it went and where it came from",
+    );
+
+    pool.close().await;
+
+    let reopened = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&reopened, id).await,
+        [
+            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
+            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+        ],
+        "and a restart reads back what the press wrote down",
+    );
+}
+
+/// And a steer from before the source was written down has none, which is a
+/// steer recorded by an older Verkstead rather than a steer out of nowhere.
+///
+/// ADR-0006's rule again, said of the one thing this task adds. The row is taken
+/// away by hand, which is the only way to have a Timeline that old in a database
+/// this build made.
+#[tokio::test]
+async fn a_steer_from_before_the_source_was_written_down_reads_back_without_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+        .await
+        .unwrap();
+
+    sqlx::query("DELETE FROM steer_sources")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sources(&pool, id).await,
+        [(Lifecycle::Investigating, None)],
+        "the rest of the record is exactly where it was",
+    );
+}
+
+/// Where each steer on this Timeline went, and where the record says it came
+/// from.
+///
+/// The pair rather than the source alone, because the source is a fact about one
+/// press: a Conversation steered three times has three of them, and a reading
+/// that dropped the target could not say which press each belonged to.
+async fn sources(pool: &SqlitePool, id: i64) -> Vec<(Lifecycle, Option<Lifecycle>)> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Steer(target, _, recorded) => {
+                Some((target, recorded.and_then(|record| record.source)))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// And a steer written before any of this was kept reads back as the steer it

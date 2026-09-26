@@ -246,6 +246,7 @@ fn held(form: &SteerForm) -> store::PendingForm {
         digest: form.digest,
         instruction: form.instruction.clone(),
         follow_up: form.follow_up.clone(),
+        investigation: form.investigation.clone(),
         pairing: form.pairing.as_ref().map(|picked| store::PendingPairing {
             profile_id: picked.profile_id,
             model: picked.model.clone(),
@@ -285,6 +286,7 @@ pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
         digest: form.digest,
         instruction: form.instruction,
         follow_up: form.follow_up,
+        investigation: form.investigation,
         pairing: form.pairing.map(|picked| ProfileChoice {
             profile_id: picked.profile_id,
             model: picked.model,
@@ -461,6 +463,7 @@ pub(crate) async fn submit(
 
     let instruction = instruction(submission);
     let follow_up = follow_up(submission);
+    let investigation = investigation(submission);
 
     // The rows the added companions become, borrowed off what was read back
     // above rather than off the submit: an empty branch name is *mirroring* and
@@ -506,9 +509,10 @@ pub(crate) async fn submit(
         target,
         pairings: &settling,
         brief: brief(submission),
-        // Whichever of the two the target takes, both landing in the one place:
-        // the Steer Event's own body is what the human wrote to steer it with.
-        instruction: instruction.or(follow_up),
+        // Whichever of the three the target takes, all of them landing in the
+        // one place: the Steer Event's own body is what the human wrote to steer
+        // it with, whatever field the form drew it in.
+        instruction: instruction.or(follow_up).or(investigation),
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base: made.base_commit.as_deref().map(|commit| store::Base {
@@ -657,12 +661,12 @@ pub(crate) async fn submit(
             }
         },
 
-        // And a session on the investigating skill, started on the same brief:
-        // the question the human wants found out, which is required and so has
-        // already been made sure of above. See
+        // And a session on the investigating skill, started on the question the
+        // human wants found out — which is required, so [`refusal`] has already
+        // made sure there is one and this cannot come to nothing. See
         // [`crate::runner::investigating`], which drives the Conversation while
         // it runs.
-        SteerTarget::Investigating => match follow_up {
+        SteerTarget::Investigating => match investigation {
             Some(brief) => {
                 tokio::spawn(crate::runner::investigating(
                     state.clone(),
@@ -735,19 +739,19 @@ async fn refusal(
 
     // And a follow-up is whatever the human wrote it about. Nothing on the branch
     // could stand in for it — a follow-up is not a step of the run to be picked
-    // up — so it is the one written payload with no quiet meaning, and the form
-    // holds the submit shut without one rather than offering it.
-    //
-    // An investigation is refused by the same name and for the same reason: it
-    // is a question the human wrote, and nothing on the branch could stand in
-    // for one. It carries it in the same field, that field being *the brief
-    // this session is started on* rather than anything about following up.
-    if matches!(
-        submission.target,
-        SteerTarget::FollowUp | SteerTarget::Investigating
-    ) && follow_up(submission).is_none()
-    {
+    // up — so it is one of the two written payloads with no quiet meaning, and
+    // the form holds the submit shut without one rather than offering it.
+    if submission.target == SteerTarget::FollowUp && follow_up(submission).is_none() {
         return Ok(Some(ConversationSteered::NoFollowUpBrief));
+    }
+
+    // And an investigation is whatever the human asked about, which is the same
+    // rule on the payload beside it: a question is a thing they wanted asked
+    // rather than a step of the run, so nothing on the branch could stand in for
+    // one. Refused under its own name because the follow-up's words name a pull
+    // request, and an investigation is steerable from states that have none.
+    if submission.target == SteerTarget::Investigating && investigation(submission).is_none() {
+        return Ok(Some(ConversationSteered::NoInvestigationBrief));
     }
 
     // And a steer into Implementing either carries on what the branch already
@@ -890,6 +894,29 @@ fn follow_up(submission: &SteerSubmission) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|follow_up| !follow_up.is_empty())
+}
+
+/// And what the human wants found out, or `None` where they wrote nothing.
+///
+/// The follow-up's reading word for word, on the field beside it: whitespace
+/// alone is nothing written, what is written is trimmed at the ends the way every
+/// document reaching a prompt is, and `None` is a refusal rather than an ordinary
+/// case — there is nothing on the branch an investigation could carry on instead.
+/// See [`refusal`].
+///
+/// A reading of its own rather than the follow-up's read twice, because the form
+/// keeps the two payloads apart: a question that arrived beside another target is
+/// a page sending a field it should not have drawn.
+fn investigation(submission: &SteerSubmission) -> Option<&str> {
+    if submission.target != SteerTarget::Investigating {
+        return None;
+    }
+
+    submission
+        .investigation
+        .as_deref()
+        .map(str::trim)
+        .filter(|investigation| !investigation.is_empty())
 }
 
 /// How the work is built from here, or `None` where the Conversation has already

@@ -19,6 +19,15 @@
 //! of questions, and a column would be a list encoded into a string nothing
 //! could read back a row at a time.
 //!
+//! **And the state the steer found it in is a fourth**, keyed by the Event the
+//! way the companion rows are and written in the same transaction as the move.
+//! Where the work *went* is the Steer Event's own; where it *came from* is
+//! nowhere at all once the state column has been written over, and there is one
+//! moment it is known — this one. An Investigating steered into ends by going
+//! back to it, and reading it off the Timeline instead, as the last
+//! [`super::Event::Moved`] before the Steer, would make the ending a decision
+//! inferred from history rather than a fact somebody recorded.
+//!
 //! **An Event with no row is a steer recorded before any of this was written
 //! down**, and it is not an error anywhere: what it means is a steer whose
 //! ticks and Pairing were never kept, and the pane draws it with the fields it
@@ -39,7 +48,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use sqlx::{Sqlite, Transaction};
 
-use super::{CompanionMode, Pairing};
+use super::{CompanionMode, Lifecycle, Pairing};
 
 /// Everything one steer settled that its Event's own body does not carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +73,15 @@ pub struct SteerRecord {
 
     /// And the ones already there it opened up, one per row ticked up.
     pub upgraded: Vec<SteerUpgrade>,
+
+    /// The state the steer found the Conversation in, which is where a steer
+    /// into Investigating goes back to when the human says there is nothing
+    /// else.
+    ///
+    /// `None` is a steer recorded before this was written down, which is not an
+    /// error anywhere: ADR-0006's rule again — a record is read as it was
+    /// written.
+    pub source: Option<Lifecycle>,
 }
 
 /// The Pairing a steer recorded, as it reads back now.
@@ -205,6 +223,49 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the steer upgrades table")?;
 
+    // And where the work came from, one row per Steer Event. The Conversation is
+    // not on it, unlike the row above: this is read through `steers`, which
+    // already says which Timeline each Event belongs to.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS steer_sources (
+             event_id INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             state    TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the steer sources table")?;
+
+    Ok(())
+}
+
+/// Write down the state a steer found the Conversation in, beside the Steer
+/// Event it became.
+///
+/// Read off `conversations` in the statement that writes it, which is what makes
+/// this the state at the submit rather than one somebody passed in: the insert
+/// selects the column, so it has to be called **before** the move writes over
+/// it. See [`super::steer_conversation`], its one caller, which does exactly
+/// that.
+///
+/// In the move's own transaction, because a press that recorded where the work
+/// went without recording where it came from would be half an account of one
+/// press and nothing could say which half.
+pub(crate) async fn came_from(
+    tx: &mut Transaction<'_, Sqlite>,
+    event_id: i64,
+    conversation_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO steer_sources (event_id, state)
+         SELECT ?, state FROM conversations WHERE id = ?",
+    )
+    .bind(event_id)
+    .bind(conversation_id)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("recording what Conversation {conversation_id} was steered out of"))?;
+
     Ok(())
 }
 
@@ -306,6 +367,7 @@ pub(crate) async fn on_timeline(
 
     let mut added = additions(pool, conversation_id).await?;
     let mut upgraded = upgrades(pool, conversation_id).await?;
+    let mut sources = sources(pool, conversation_id).await?;
 
     let mut records = HashMap::with_capacity(rows.len());
 
@@ -337,6 +399,10 @@ pub(crate) async fn on_timeline(
                 // exactly one Event and the Events are walked once.
                 added: added.remove(&event_id).unwrap_or_default(),
                 upgraded: upgraded.remove(&event_id).unwrap_or_default(),
+                // And where the work came from, which is one row apiece.
+                // Nothing there is a steer from before it was written down
+                // rather than a steer out of nowhere.
+                source: sources.remove(&event_id),
             },
         );
     }
@@ -387,6 +453,37 @@ async fn additions(
     }
 
     Ok(added)
+}
+
+/// The state each steer on this Timeline was made out of, by the Event.
+///
+/// Driven off the steers the way the companion rows are, and for the same
+/// reason: the row that says which Conversation a steer belongs to is the
+/// steer's own, and this hangs off it.
+///
+/// A steer with no row is one recorded before any of this was written down,
+/// which is why nothing here fills a gap in: the map has no entry for it, and
+/// the record reads back as the steer it is.
+async fn sources(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64, Lifecycle>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT f.event_id, f.state
+         FROM steer_sources f
+         JOIN steers s ON s.event_id = f.event_id
+         WHERE s.conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading what the steers of Conversation {conversation_id} came out of")
+    })?;
+
+    rows.into_iter()
+        // Read rather than guessed past, as every other stored state word is: a
+        // state this build does not know is a database written by a Verkstead
+        // this one is not.
+        .map(|(event_id, state)| Ok((event_id, Lifecycle::read(&state)?)))
+        .collect()
 }
 
 /// And the ones each opened up, read the same way and in the same order.

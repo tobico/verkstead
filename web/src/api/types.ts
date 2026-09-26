@@ -1263,7 +1263,7 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -4871,6 +4871,15 @@ instruction: string | null,
  */
 follow_up: string | null, 
 /**
+ * And the question, for a steer into Investigating.
+ *
+ * A slot of its own rather than the follow-up's read twice, which is the
+ * rule every payload here is kept under: the form holds what was written
+ * under each target, so a human who moves the picker across and back reads
+ * their own sentence back where they wrote it.
+ */
+investigation: string | null, 
+/**
  * What the work would run under from here, which is what the submit would
  * send — the Conversation's own prefill included, rather than only a pick
  * made by hand.
@@ -5055,6 +5064,21 @@ instruction: string | null,
  * Whitespace alone is nothing written, as everywhere else here.
  */
 follow_up: string | null, 
+/**
+ * And the question, for a steer into Investigating.
+ *
+ * The follow-up's rule word for word: it lands as the Steer Event's own
+ * body, the session started on it is primed with it as its Brief, it is
+ * **required** because nothing on the branch could stand for a question
+ * somebody wanted asked, and whitespace alone is nothing written. A submit
+ * that names Investigating without one is refused by name — see
+ * [`ConversationSteered::NoInvestigationBrief`].
+ *
+ * Its own field rather than [`Self::follow_up`] sent under another name,
+ * because the form keeps the two apart: what a submit carries is what the
+ * human wrote under the target they picked.
+ */
+investigation: string | null, 
 /**
  * Whether the session is primed with everything the human has already
  * answered.

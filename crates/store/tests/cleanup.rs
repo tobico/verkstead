@@ -815,6 +815,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
+    // And where that steer came from, which is the other row hung off the same
+    // Event.
+    sqlx::query("INSERT INTO steer_sources (event_id, state) VALUES (?, 'grilling')")
+        .bind(event)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("INSERT INTO stage_branches (conversation_id, stacks_on) VALUES (?, NULL)")
         .bind(id)
         .execute(pool)

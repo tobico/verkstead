@@ -4497,6 +4497,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 /// the move on its Timeline to say when it got there, and one steered always has
 /// the human's own line above it.
 ///
+/// **And the state it was steered out of**, beside the Steer Event, in a table
+/// of its own: where the work went is the Event's, and where it came from would
+/// be nowhere the moment the state column is written over. Which is what an
+/// Investigating steered into reads at its ending to know where to go back to —
+/// see [`super::steers::came_from`], which is called before the move for that
+/// reason, and [`super::SteerRecord::source`], which is where it reads back.
+///
 /// **And the Pairing the human picked, where they picked one.** In the same
 /// transaction as the move, because it is the same act: steering re-settles what
 /// runs the work rather than picking for one session, and a Conversation that
@@ -4590,6 +4597,14 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // just written it rather than looked up afterwards: two steers landing in
     // the same millisecond are told apart by their ids and by nothing else.
     let steered = landed.last_insert_rowid();
+
+    // And where the work came from, beside that Event. Before the move rather
+    // than after it, because what it writes down is the state column as the
+    // steer found it — see [`super::steers::came_from`], which selects it in the
+    // statement that records it. Where the work *went* is the Steer's own target;
+    // where it came from is nowhere else at all once the update below has run,
+    // and an Investigating steered into ends by going back to it.
+    super::steers::came_from(&mut tx, steered, id).await?;
 
     // And what came into the sandbox with it, directly under the human's own
     // line. The Steer says a person moved this; this says which repositories

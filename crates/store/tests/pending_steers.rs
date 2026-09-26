@@ -256,6 +256,7 @@ async fn a_save_writes_the_whole_form_and_reads_it_back() {
         digest: true,
         instruction: Some("Take the modal out".to_owned()),
         follow_up: Some("And say what came of it".to_owned()),
+        investigation: Some("Does it count the 429s it sends?".to_owned()),
         pairing: Some(PendingPairing {
             profile_id: account,
             model: "opus".to_owned(),

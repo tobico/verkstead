@@ -848,6 +848,22 @@ impl Grilling {
         .await
     }
 
+    /// And the submit into Investigating, which carries the payload beside the
+    /// follow-up's: the question the session it starts is set going on, required
+    /// for the same reason and refused by a name of its own without one.
+    async fn steer_investigating(&self, question: &str) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": "Investigating",
+                "interrupt": false,
+                "investigation": question,
+            }),
+        )
+        .await
+    }
+
     /// What the next session to start printed, waited for from a Timeline that
     /// held `before` of them.
     ///
@@ -23292,6 +23308,41 @@ esac
     )
 }
 
+/// The same backlog and wrap-up, plus a session that plays an investigation: it
+/// writes down what it was primed with and then waits on the human, which is what
+/// an investigation spends its time doing.
+///
+/// The prompt goes to a file rather than to the terminal, as every other
+/// investigating stub's does: what is being read back is a whole prompt, and a
+/// terminal is eighty columns wide.
+fn a_backlog_then_an_investigation(reviews: &Path, prompts: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{REVIEW_AND_FIND_NOTHING}
+    ;;
+*responding/SKILL.md*)
+{RESPOND_AND_FIND_NOTHING}
+    ;;
+*investigating/SKILL.md*)
+    SAYING='finding it out'
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+        prompts = quoted(prompts),
+    )
+}
+
 /// A follow-up session that does its round and then stays there, which is what
 /// one waiting on the human looks like: it has asked, and it is holding the
 /// Worktree until they answer.
@@ -24750,6 +24801,114 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
         "and nothing stopped it: a follow-up session is registered as driving, \
          so the sweep leaves it alone: {:?}",
         notices(&view),
+    );
+}
+
+/// A Conversation Verkstead has finished with is steered into Investigating, and
+/// the session that starts is the investigating one, on the question the human
+/// typed.
+///
+/// The other way into the state, beside a Start on an **Investigate** draft: work
+/// that has been through the whole ladder and reached Done, with something left to
+/// ask about it. The Worktree is already there, the branch already named, and what
+/// the session is primed with is the Steer's own body rather than the
+/// Conversation's Brief — the Brief is what the work was built from, and this is
+/// the question somebody asked a minute ago.
+///
+/// Nothing promises a pull request, whatever this Conversation has: an
+/// investigation never ends on one.
+#[tokio::test]
+async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_backlog_then_an_investigation(&reviews, &written_to),
+        &gh_about(GREEN, "", ""),
+        *SWEEPING,
+        &[],
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let before = outputs(
+        &fixture
+            .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+            .await,
+    )
+    .len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened,
+        "everything had finished, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture
+            .steer_investigating("Where does the 429 count come from?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // Waited for through what the session printed, which it does after writing
+    // the prompt down: a read of the file before then would be a read of a
+    // session that has not started yet.
+    fixture.printed_after(before).await;
+
+    // And the round it puts, up from the moment it starts: an investigation
+    // waiting on the human is one with an ask of its own open, which is what keeps
+    // the rescue and the sweep off it while this reads the record.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Investigating,
+        "the steer put it there rather than into a follow-up",
+    );
+    assert!(
+        view.worktree.is_some_and(|worktree| !worktree.missing),
+        "in the Worktree the work was already being done in",
+    );
+    assert_eq!(
+        fixture.set(set).await.ending,
+        Some(verkstead_render::Ending::Investigation),
+        "and its round carries the Nothing-else box, which is how the human \
+         says the investigation is over",
+    );
+
+    let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one session, the investigating one: {started:?}",
+    );
+
+    let prompt = started[0];
+
+    assert!(
+        prompt.contains("/verkstead/skills/investigating/SKILL.md"),
+        "inside the investigating skill, which is the one that keeps asking and \
+         commits nothing: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        "and in no other: an investigation is not a follow-up: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("Where does the 429 count come from?"),
+        "and it is started on what the human typed on the form: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("pull request"),
+        "with nothing promising one, whatever this Conversation is on: an \
+         investigation never ends on one: {prompt:?}",
     );
 }
 

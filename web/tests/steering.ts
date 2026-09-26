@@ -15,6 +15,7 @@ export const UNANSWERED: SteerForm = {
   digest: false,
   instruction: null,
   follow_up: null,
+  investigation: null,
   pairing: null,
   interrupt: false,
   added: [],

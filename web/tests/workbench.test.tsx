@@ -11026,6 +11026,7 @@ describe("steering a conversation", () => {
     expect(targets(await openSteer(container))).toEqual([
       "Grilling",
       "Implementing",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
@@ -11043,6 +11044,7 @@ describe("steering a conversation", () => {
       "Grilling",
       "Implementing",
       "Wrapping",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
@@ -11064,6 +11066,7 @@ describe("steering a conversation", () => {
       "Grilling",
       "Implementing",
       "Wrapping",
+      "Investigating",
       "Done",
     ]);
     unmount();
@@ -11084,6 +11087,7 @@ describe("steering a conversation", () => {
       "Implementing",
       "Wrapping",
       "FollowUp",
+      "Investigating",
       "Done",
     ]);
     expect(screen.getByText(/The pull request followed up on/)).toBeTruthy();
@@ -11152,6 +11156,84 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: "Does it count the 429s it sends?",
+        // Nor is the question beside it: each payload goes under its own target.
+        investigation: null,
+      }),
+    );
+  });
+
+  /// And investigating is offered wherever the form opens, including on work
+  /// that is on no pull request: a question about the work is not a step of it,
+  /// so there is nowhere the work can have got to that makes asking one wrong.
+  ///
+  /// Which is the whole difference between it and the two beside it, and it is
+  /// what the target is for: the answer comes back and the conversation goes
+  /// back to the state it was steered from.
+  it("offers investigating from every state, and requires the question", async () => {
+    const fetching = theGrillingSteering(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    // Grilling, which is on no pull request at all: neither wrapping up nor
+    // following up is offered here, and investigating is.
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toContain("Investigating");
+    expect(pane.querySelector("#steer-investigation")).toBeNull();
+
+    fireEvent.click(
+      await drawn(
+        pane,
+        `.${steerForm.steerTarget} input[value="Investigating"]`,
+      ),
+    );
+
+    // The implementation pairing is what it runs under, so the picker is drawn.
+    await drawn(pane, "#steer-pairing");
+
+    const press = (await drawn(
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
+    )) as HTMLButtonElement;
+
+    // Nothing written is nothing to find out, so the press is held shut rather
+    // than offered and then refused by name.
+    await waitFor(() => expect(press.disabled).toBe(true));
+
+    fireEvent.input(await drawn(pane, "#steer-investigation"), {
+      target: { value: "   " },
+    });
+
+    await waitFor(() => expect(press.disabled).toBe(true));
+
+    fireEvent.input(await drawn(pane, "#steer-investigation"), {
+      target: { value: "Where does the 429 count come from?" },
+    });
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    fireEvent.click(press);
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Investigating",
+        interrupt: false,
+        pairing: { profile_id: building.profile.id, model: building.model },
+        brief: null,
+        digest: false,
+        added: [],
+        upgraded: [],
+        instruction: null,
+        follow_up: null,
+        investigation: "Where does the 429 count come from?",
       }),
     );
   });
@@ -11328,6 +11410,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: "Note the window the count is against.",
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11397,6 +11480,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11458,6 +11542,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
   });
@@ -11615,6 +11700,7 @@ describe("steering a conversation", () => {
         upgraded: [],
         instruction: null,
         follow_up: null,
+        investigation: null,
       }),
     );
 
@@ -11928,6 +12014,11 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(pane, `.${steerForm.steerDigest} input`));
     await under("Implementing", "#steer-instruction", "Rebase this onto main.");
     await under("FollowUp", "#steer-follow-up", "Does it count the 429s?");
+    await under(
+      "Investigating",
+      "#steer-investigation",
+      "Where does the count come from?",
+    );
 
     fireEvent.click(await drawn(pane, `.${steerForm.steerInterrupt} input`));
 
@@ -11967,11 +12058,12 @@ describe("steering a conversation", () => {
       expect(
         sent(fetching, STEER_SAVE, writes(fetching, STEER_SAVE) - 1),
       ).toEqual({
-        target: "FollowUp",
+        target: "Investigating",
         brief: "# Retries\n",
         digest: true,
         instruction: "Rebase this onto main.",
         follow_up: "Does it count the 429s?",
+        investigation: "Where does the count come from?",
         pairing: {
           profile_id: PROFILES[0]!.id,
           model: PROFILES[0]!.models[0],
