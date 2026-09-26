@@ -18,6 +18,25 @@
    the conversations pane drew its header a rem past the paper, and everywhere
    else the fade below the block was lying over the first line of the record
    instead of hanging in the gap kept for it. See `Panes.module.css`. */
+
+/* And the region the window is dragged by, which is what a window with no title
+   bar has instead of one (ADR-0020). Every pane's head goes through this one
+   component, so the sidebar's wordmark, the timeline's name, the details pane,
+   the settings, the composer, the Set sheet and the share's details all move the
+   window without any of them being told about it.
+
+   Nothing of it reaches a browser. `-webkit-app-region` is Chromium's own
+   property and only a frameless Electron window reads one, so the same document
+   served to a browser on this machine or to a phone on the tailnet behaves
+   exactly as it did — which is why the standalone share keeps the rule it
+   inherits from this head rather than being given a build without it.
+
+   The text in a head stops being selectable, and that is the price rather than
+   an oversight: a bar the pointer sweeps a selection across cannot also be the
+   bar the window moves by. So a Conversation's name and the Timeline's
+   truncated branch no longer take a selection. ADR-0020 settled the heads as
+   the drag region knowing that, and it is written here so the next reader does
+   not take it for a bug. */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -26,6 +45,41 @@
   gap: 0.8rem;
   margin: -1rem 0 0;
   padding: 1rem 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* And everything pressable inside a head is excepted from it — said as one rule
+   over the head's descendants rather than as a class each control is handed. A
+   head carries buttons, the ⋯ menu's trigger, switches, icon buttons and the
+   card a menu drops, and a codebase that marked each of them would be a codebase
+   where the next control added to a head is the one nobody marked.
+
+   The way back out is the one to look at twice. It is a button that takes the
+   whole width of the row — see `.back` below — so it is the largest thing in
+   here the exception has to reach, and a head whose way out of the pane dragged
+   the window instead would be the loudest way to get this wrong.
+
+   `[tabindex]` and the two roles are in the list for what is not written yet:
+   anything focusable, the card a menu drops inside a head, and a group of
+   controls like the Transcript/Screen pair `Output.module.css` draws are all
+   things standing in a head that the window must not be moved by. */
+.head
+  :where(
+    a,
+    button,
+    input,
+    label,
+    select,
+    summary,
+    textarea,
+    [contenteditable],
+    [role="button"],
+    [role="group"],
+    [role="menu"],
+    [tabindex]
+  ) {
+  -webkit-app-region: no-drag;
 }
 
 /* The title takes whatever the row has left, and never asks for more: the pane's
