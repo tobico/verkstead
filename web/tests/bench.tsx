@@ -198,9 +198,6 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
       whenever(`/api/ui/repos/${repo.id}/pairings`, json(NO_PAIRINGS)),
     ),
     whenever("/api/ui/abandoned-roadmaps", json([])),
-    // And the pull requests open in them, which the compose page asks for
-    // alongside. Nothing open, unless a test says so.
-    whenever("/api/ui/open-pull-requests", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,
   );

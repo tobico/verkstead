@@ -35,15 +35,6 @@
 //! rather than a draft against a Repo, and what kicks it off at the end is the
 //! adopt endpoint rather than the grill one.
 //!
-//! **A pull request loaded into it is held the same way and creates the third
-//! kind** — see [`AdoptingPullRequest`]. What is different is what it does to
-//! the box: a roadmap locks a card over it, where a pull request *fills* it with
-//! the title as a heading and the description under it, and what is left there
-//! is the Brief. So the text that was being written is stowed on the record that
-//! displaced it and given back when it is cleared, and the replay saves the box
-//! as it would for any brief the human wrote — the three the pull request
-//! answers for itself being the branch, the base and the target, all settled by
-//! the row that loaded it and by the take-up.
 //!
 //! **And the Target field is filled from the box as it is typed**, while it is
 //! empty — see [`written`], which is the rule the server keeps for a saved
@@ -68,7 +59,6 @@ import {
   startAdoption,
   startConversation,
   startGrilling,
-  startPullRequestAdoption,
   takeUpPullRequest,
 } from "../api/client";
 import type { CompanionMode, Process, Started } from "../api/types";
@@ -140,39 +130,6 @@ export type Adopting = {
   base: string;
 };
 
-/// The pull request a compose page is loaded with, as the row that loaded it
-/// worded it: which repository it is in, which pull request, and the two
-/// branches it sits between.
-///
-/// Everything here was read off the open-pull-requests list, and nothing is read
-/// again to draw it — the card over the box is this record rather than a
-/// request. Which is what a card over a *pull request* has to be: the list it
-/// came off is a `gh` per registered Repo, so a page that re-read it to draw one
-/// row would be calling out to GitHub to name what it is already holding.
-export type AdoptingPullRequest = {
-  repo_id: number;
-  /// What the Repo is called, for the card — [`Adopting.repo`]'s reason, and
-  /// one more: a number says nothing without the repository it is in.
-  repo: string;
-  number: number;
-  title: string;
-  url: string;
-  /// The branch the work is on, which is the branch the take-up checks out.
-  head: string;
-  /// And the branch it goes into.
-  base: string;
-
-  /// What was in the box when this was loaded over it, given back when it is
-  /// cleared.
-  ///
-  /// Held here rather than left in `brief` because a pull request *fills* the
-  /// box — the title as a heading and the description under it — where a roadmap
-  /// locks a card over it. So the brief that was being written has to go
-  /// somewhere, and it goes with the thing that displaced it: clearing gives it
-  /// back and drops this record in the one act.
-  stowed: string;
-};
-
 /// The whole of a compose page, as it sits on the device between visits.
 ///
 /// Four of the fields are `null` where they are **untouched** rather than
@@ -221,14 +178,6 @@ export type Composed = {
   /// and the base under it are left exactly where they were — which is what
   /// clearing it restores.
   adopting: Adopting | null;
-
-  /// And the pull request it is loaded with, or `null` where it is composing a
-  /// piece of work of its own.
-  ///
-  /// Never `Some` alongside [`Self.adopting`]: the menu that loads either is
-  /// drawn only while nothing is loaded, so there is one thing over the box at
-  /// a time and the way to another is to clear the one that is there.
-  pull: AdoptingPullRequest | null;
 };
 
 /// The box written into, with the Target filled out of it where it is empty.
@@ -262,7 +211,6 @@ export function blank(): Composed {
     implementation: null,
     review: null,
     adopting: null,
-    pull: null,
   };
 }
 
@@ -271,10 +219,9 @@ export function blank(): Composed {
 ///
 /// The one reading everything about the repository is drawn off — the trigger's
 /// name, the companions an add is refused for, the pairings the Repo is
-/// remembered to have been grilled with. A loaded pull request settles it the
-/// way a loaded roadmap does: `#41` is a fact about one repository.
+/// remembered to have been grilled with.
 export function on(state: Composed): number | null {
-  return state.adopting?.repo_id ?? state.pull?.repo_id ?? state.repo;
+  return state.adopting?.repo_id ?? state.repo;
 }
 
 /// Whether there is nothing in it worth coming back to. An untouched page is
@@ -292,8 +239,7 @@ export function empty(state: Composed): boolean {
     state.grilling === null &&
     state.implementation === null &&
     state.review === null &&
-    state.adopting === null &&
-    state.pull === null
+    state.adopting === null
   );
 }
 
@@ -376,24 +322,17 @@ export type Created =
 /// is left to put on is the companions and the pairings. What the press does at
 /// the end of it is adopt rather than grill, which is the same act — the work
 /// beginning — under the other name.
-///
-/// **And a page loaded with a pull request creates the third**, which keeps the
-/// Brief and loses the same branch and base: what it is worked on is the head
-/// branch. What the press does at the end of *it* is the take-up, which is that
-/// act again at the far end of the pipeline — the work is built, so what begins
-/// is its wrap-up.
 export async function create(
   state: Composed,
   work: boolean,
   files: Holding,
 ): Promise<Created> {
   const held = state.adopting;
-  const pull = state.pull;
-  if (held === null && pull === null && state.repo === null) {
+  if (held === null && state.repo === null) {
     return "NoSuchRepo";
   }
 
-  const started = await opened(state, held, pull);
+  const started = await opened(state, held);
   if (started === "NoSuchRepo") {
     return started;
   }
@@ -421,13 +360,10 @@ export async function create(
     }
   }
 
-  // And the three the pull request answers as well, two of which the roadmap
-  // answers too: its branch is the head branch and its base is what GitHub
-  // names, both recorded by the take-up rather than settled here, and what it
-  // is pointed at is the row that loaded it. The Brief is *not* one of them —
-  // a pull request prefills the box rather than locking a card over it, so
-  // what is in the box is the human's and goes up above.
-  if (held === null && pull === null) {
+  // And the three the roadmap answers for itself besides the Brief: its branch
+  // is the stage's slug, its base was fixed by the row that loaded it, and it is
+  // pointed at nothing — adopting is not one of the Processes that take a target.
+  if (held === null) {
     if (state.branch !== "") {
       const outcome = await renameBranch(id, state.branch);
       said(
@@ -465,10 +401,7 @@ export async function create(
   // does, and the server's own reading of a Conversation with no row of its own
   // is what stands.
   //
-  // Not asked of a page holding a pull request, which answers this for itself
-  // the way it answers the branch and the base: what a take-up makes is a
-  // Review, and that is the reading rather than a row anybody wrote.
-  if (pull === null && state.process !== null) {
+  if (state.process !== null) {
     const outcome = await pickProcess(id, state.process);
     said(
       outcome === "Picked",
@@ -531,15 +464,10 @@ export async function create(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
       );
-    } else if (pull !== null || state.process === "Review") {
-      // The third kickoff, and the one that starts no session: the take-up puts
-      // the Conversation on the pull request's head branch and moves it into
+    } else if (state.process === "Review") {
+      // The third kickoff, and the one that starts no session: the take-up reads
+      // the Target, puts the Conversation on what it names and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
-      //
-      // Two pages reach it. One is holding a pull request loaded off the menu;
-      // the other is composing a **Review**, which names its target in the brief
-      // and has the server read it at the press. One press on a composer, so
-      // both are the same button and the same endpoint.
       const outcome = await takeUpPullRequest(id);
       said(
         outcome === "TakenUp",
@@ -557,24 +485,18 @@ export async function create(
   return { conversation: id, refused };
 }
 
-/// The Conversation this page's press makes, which is one of three starts.
+/// The Conversation this page's press makes, which is one of two starts.
 ///
-/// Three endpoints rather than one with a shape inside it, for the reason every
+/// Two endpoints rather than one with a shape inside it, for the reason every
 /// other field here goes through the endpoint that already existed: what a
 /// Conversation is started *over* is a different question in each case — a Repo,
-/// a roadmap in one, a pull request open in one — and each of them is refused
-/// for its own reasons.
+/// or a roadmap in one — and each of them is refused for its own reasons.
 async function opened(
   state: Composed,
   held: Adopting | null,
-  pull: AdoptingPullRequest | null,
 ): Promise<Started> {
   if (held !== null) {
     return startAdoption(held.repo_id, held.roadmap, held.base);
-  }
-
-  if (pull !== null) {
-    return startPullRequestAdoption(pull.repo_id, pull);
   }
 
   return startConversation(state.repo!);
@@ -698,8 +620,7 @@ function parsed(body: string): Composed | null {
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
-    !loaded(held.adopting) ||
-    !taken(held.pull)
+    !loaded(held.adopting)
   ) {
     return null;
   }
@@ -735,7 +656,6 @@ function parsed(body: string): Composed | null {
     implementation: held.implementation,
     review: held.review,
     adopting: held.adopting ?? null,
-    pull: held.pull ?? null,
   };
 }
 
@@ -763,33 +683,6 @@ function loaded(value: unknown): value is Adopting | null | undefined {
     typeof roadmap.stage === "string" &&
     typeof roadmap.stage_title === "string" &&
     typeof roadmap.base === "string"
-  );
-}
-
-/// And whether this is a pull request loaded into the page, or none at all.
-///
-/// Every field of one, for [`loaded`]'s reason — the card is drawn straight off
-/// it — and a body from a build before this one has no `pull` at all, which
-/// reads as none loaded rather than as a fault.
-function taken(value: unknown): value is AdoptingPullRequest | null | undefined {
-  if (value === null || value === undefined) {
-    return true;
-  }
-
-  if (typeof value !== "object") {
-    return false;
-  }
-
-  const pull = value as Partial<AdoptingPullRequest>;
-  return (
-    typeof pull.repo_id === "number" &&
-    typeof pull.repo === "string" &&
-    typeof pull.number === "number" &&
-    typeof pull.title === "string" &&
-    typeof pull.url === "string" &&
-    typeof pull.head === "string" &&
-    typeof pull.base === "string" &&
-    typeof pull.stowed === "string"
   );
 }
 

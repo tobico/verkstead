@@ -188,7 +188,10 @@ A field of its own rather than the Branch field re-read, that one being a rename
 and git refusing a URL as a ref: what the Conversation's branch is called is
 take-up's to decide from the head, and what to take up is this. A pull request
 hides the base picker, GitHub's base being the fact; a branch keeps it, and that
-is what its pull request opens against.
+is what its pull request opens against. A **Draft** from before there were
+Processes, started off the retired *Wrap up a pull request* level, has no field of
+its own and reads the pull request it holds as its target — the weakest of the
+three, so typing in the field wins over it.
 
 **Which roles a Process uses is the Process's**: Develop the three, Review and
 Tinker the Implementation and Review Pairings, Investigate and Fix Merge Issues

@@ -374,15 +374,6 @@ pub struct Conversation {
     /// what is stored about the roadmap — see [`start_adoption`].
     pub adopting: Option<String>,
 
-    /// And which pull request it is holding, where it is holding one.
-    ///
-    /// `None` for every Conversation but one started off the *Wrap up a pull
-    /// request* level, and never `Some` alongside [`Self::adopting`]: a
-    /// Conversation adopts one thing or none. What is inside is GitHub's own
-    /// reading of the pull request as it was listed — see
-    /// [`start_pull_request_adoption`].
-    pub adopting_pull_request: Option<AdoptedPullRequest>,
-
     /// And what it is pointed at, where the human or the Brief has named
     /// anything: a pull request URL, a `#number`, or a branch — see [`target`].
     ///
@@ -1605,43 +1596,14 @@ pub async fn start_adoption(
     .await
 }
 
-/// Start a Conversation holding `pull_request` against a registered Repo, on
-/// `branch`, with an empty Brief already in its Timeline.
+/// The pull request a Conversation is taking up, as `gh` answered about it.
 ///
-/// The roadmap start's sibling, and the same Conversation underneath: a Draft
-/// with one thing more written about it, which is what puts its page on the
-/// shape that names a pull request instead of asking for a branch. What is
-/// written down is what GitHub said when the row was listed — see
-/// [`AdoptedPullRequest`] — and it is written down rather than read again
-/// because reading it again is a `gh` per registered Repo.
-///
-/// Whether the branch is still there, whether it has moved and whether anything
-/// else is standing on it are questions about a repository *now*, and the
-/// take-up is where they are asked. Nothing here touches git at all.
-pub async fn start_pull_request_adoption(
-    pool: &SqlitePool,
-    repo_id: i64,
-    branch: &str,
-    pull_request: &AdoptedPullRequest,
-) -> Result<Option<i64>> {
-    started(
-        pool,
-        repo_id,
-        branch,
-        Named::Prefilled,
-        Adopts::PullRequest(pull_request),
-    )
-    .await
-}
-
-/// The pull request a drafting Conversation is holding, as it was listed.
-///
-/// GitHub's own five facts and nothing of Verkstead's: this is what a row off
-/// the *Wrap up a pull request* level said, carried through the create and kept
-/// until the take-up records the pull request properly — see
-/// [`super::take_up`], which reads the head branch out of git rather than out
-/// of here. What the take-up does take from this is the two facts git cannot
-/// answer: what the pull request is called and where it is.
+/// GitHub's own five facts and nothing of Verkstead's: what the press asked for
+/// and got back, written down by [`hold_pull_request`] and kept for the whole of
+/// the Conversation's life — it is what [`process`] reads a **Review** back off,
+/// and it is what a Draft from before there were Processes is still pointed at.
+/// What the take-up itself takes from it is the two facts git cannot answer:
+/// what the pull request is called and where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptedPullRequest {
     /// The number GitHub gave it, which is what everybody calls it by — in this
@@ -1666,9 +1628,9 @@ pub struct AdoptedPullRequest {
 /// What a Conversation is being started to adopt, where it is being started to
 /// adopt anything.
 ///
-/// Three cases rather than two `Option`s, because a Conversation adopts one
-/// thing or none: a pair of arguments would let a caller ask for both, and the
-/// row that came back would be a Draft drawn on two pages at once.
+/// Two cases rather than an `Option`, because what is being adopted decides what
+/// else the start writes: a named case is one more row in the same transaction,
+/// and a caller cannot ask for a roadmap and leave the name out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Adopts<'a> {
     /// The ordinary Conversation, which begins with a Brief and a grilling.
@@ -1676,9 +1638,6 @@ enum Adopts<'a> {
 
     /// A roadmap, by its directory name under `docs/roadmaps/`.
     Roadmap(&'a str),
-
-    /// Or a pull request that is already open, as GitHub listed it.
-    PullRequest(&'a AdoptedPullRequest),
 }
 
 /// Whose the branch name a Conversation is started on is.
@@ -1769,22 +1728,6 @@ async fn started(
                 .execute(&mut *tx)
                 .await
                 .with_context(|| format!("recording what Conversation {id} is adopting"))?;
-        }
-        Adopts::PullRequest(pull_request) => {
-            sqlx::query(
-                "INSERT INTO pull_request_adoptions
-                     (conversation_id, number, title, url, head, base)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-            )
-            .bind(id)
-            .bind(pull_request.number)
-            .bind(&pull_request.title)
-            .bind(&pull_request.url)
-            .bind(&pull_request.head)
-            .bind(&pull_request.base)
-            .execute(&mut *tx)
-            .await
-            .with_context(|| format!("recording the pull request Conversation {id} is holding"))?;
         }
     }
 
@@ -2154,7 +2097,6 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         direction: direction(pool, id).await?,
         process: process(pool, id).await?,
         adopting: adopting(pool, id).await?,
-        adopting_pull_request: adopted_pull_request(pool, id).await?,
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
     }))
@@ -2533,6 +2475,15 @@ pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result
 /// `None` is the field empty, which is no row: nothing is written until
 /// somebody types something or a Brief fills it, and clearing it takes the row
 /// away again.
+///
+/// **Except where a pull-request adoption is all there is**, which is a Draft
+/// from before there were Processes: it was started off the retired *Wrap up a
+/// pull request* level and pointed by the row that was pressed rather than by a
+/// field, and it reads as a [`Process::Review`] for that reason. So its target
+/// is that pull request's own URL — where nothing else names one, the field
+/// staying the human's the moment they type in it. One reading rather than a
+/// case in every reader: the page draws the field, Start resolves it and
+/// readiness counts it, all off this.
 pub async fn target(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT target FROM targets WHERE conversation_id = ?")
@@ -2541,7 +2492,11 @@ pub async fn target(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
             .await
             .with_context(|| format!("reading what Conversation {id} is pointed at"))?;
 
-    Ok(row.map(|(target,)| target))
+    if let Some((target,)) = row {
+        return Ok(Some(target));
+    }
+
+    Ok(adopted_pull_request(pool, id).await?.map(|held| held.url))
 }
 
 /// Name what a drafting Conversation is pointed at, or take the name away.
@@ -2664,10 +2619,11 @@ pub async fn adopted_pull_request(
 
 /// Write down the pull request a Conversation is taking up.
 ///
-/// The row [`start_pull_request_adoption`] wrote when a pull request was loaded
-/// off a menu, written at the press instead: a **Review** names its target in
-/// the Brief, and what GitHub answered about it is not known until the press
-/// asks. Which makes this row two things rather than bookkeeping — it is what
+/// The row the retired *Wrap up a pull request* level wrote when a pull request
+/// was loaded off a menu, written at the press instead: a **Review** names its
+/// target in its own field, and what GitHub answered about it is not known until
+/// the press asks. Which makes this row two things rather than bookkeeping — it is
+/// what
 /// lets a Draft through the one door into Wrapping (see
 /// [`super::record_pull_request`]), and it is what a Conversation's Process is
 /// read back as for the whole of its life (see [`process`]).

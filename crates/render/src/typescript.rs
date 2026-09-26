@@ -25,17 +25,16 @@ use crate::{
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
     FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
     FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView,
+    PrefillView, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -84,11 +83,6 @@ fn the_viewers_types_are_written_from_these() {
     // And what is offered beside the sidebar: the Repos holding roadmaps
     // nothing is driving, which writes the roadmap inside it.
     AbandonedRepo::export_all(&config).unwrap();
-
-    // And the other thing offered there: the open pull requests Verkstead did
-    // not open, grouped by the Repo each was read in, which writes the pull
-    // request inside it.
-    OpenPullRequestRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
 
@@ -122,10 +116,6 @@ fn the_viewers_types_are_written_from_these() {
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.
     NewAdoption::export_all(&config).unwrap();
-
-    // And starting one to wrap a pull request up with, which is the same way in
-    // over the other kind of thing to take up.
-    NewPullRequestAdoption::export_all(&config).unwrap();
     Started::export_all(&config).unwrap();
     BriefEdit::export_all(&config).unwrap();
     BriefSaved::export_all(&config).unwrap();

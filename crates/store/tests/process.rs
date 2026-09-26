@@ -16,8 +16,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AdoptedPullRequest, Edited, Process, load_conversation, open_database, process, register_repo,
-    save_brief, set_process, start_conversation, start_grilling, start_pull_request_adoption,
+    AdoptedPullRequest, Edited, Process, hold_pull_request, load_conversation, open_database,
+    process, register_repo, save_brief, set_process, start_conversation, start_grilling,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -53,15 +53,19 @@ async fn drafting(pool: &SqlitePool) -> i64 {
     id
 }
 
-/// And one started off a pull request, which is the other kind of Draft there
-/// is.
+/// And one holding a pull-request adoption, which is what the retired *Wrap up a
+/// pull request* level left behind and what the Review start writes now.
 async fn holding_a_pull_request(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
-    start_pull_request_adoption(
+    let id = start_conversation(pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    hold_pull_request(
         pool,
-        repo,
-        "rate-limiting",
+        id,
         &AdoptedPullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
@@ -71,8 +75,9 @@ async fn holding_a_pull_request(pool: &SqlitePool) -> i64 {
         },
     )
     .await
-    .unwrap()
-    .expect("the Repo was just registered")
+    .unwrap();
+
+    id
 }
 
 /// The Process the loaded Conversation carries, which is what every reader but

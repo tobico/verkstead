@@ -20,12 +20,12 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     AdoptedPullRequest, Event, Finished, Landing, Lifecycle, Merging, PullRequest, Rebuilding,
     Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
-    close_conversation, finish_wrap_up, implement_again, load_conversation, merges, merging,
-    open_database, pick_direction, pull_request, pull_request_repo, pull_requests,
+    close_conversation, finish_wrap_up, hold_pull_request, implement_again, load_conversation,
+    merges, merging, open_database, pick_direction, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
     record_standing, register_repo, resolve_conflicts, save_brief, settle_wrap_up, standing,
-    start_conversation, start_grilling, start_pull_request_adoption, start_tinkering, take_up,
-    timeline, unfinished_pull_requests, wrap_up_settled,
+    start_conversation, start_grilling, start_tinkering, take_up, timeline,
+    unfinished_pull_requests, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -327,10 +327,14 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_pull_request_adoption(
+    let id = start_conversation(&pool, repo.id, "verkstead-1")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    hold_pull_request(
         &pool,
-        repo.id,
-        "verkstead-1",
+        id,
         &AdoptedPullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
@@ -340,8 +344,7 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
         },
     )
     .await
-    .unwrap()
-    .expect("the Repo was just registered");
+    .unwrap();
 
     assert_eq!(
         take_up(

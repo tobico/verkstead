@@ -128,42 +128,6 @@ pub(crate) async fn start_adopting(
     )
 }
 
-/// Start a Conversation to wrap `pull_request` up in a registered Repo with.
-///
-/// [`start_adopting`]'s sibling over the other kind of thing that can be taken
-/// up, and the same start underneath: a Draft with the pull request written
-/// beside it, which is what draws the page that names one. The branch name is
-/// the server's here too and is discarded at the take-up — the Conversation's
-/// name is the pull request's own head branch — so what it does until then is
-/// stand in the record for a branch nobody has named.
-///
-/// Nothing about the pull request is checked here, and nothing about the
-/// repository is touched. Whether the head branch is still where GitHub said it
-/// was, and whether anything is standing on it, are questions about a repository
-/// *now*: they are the take-up's, and asking them at the moment a row was
-/// pressed would answer them a page too early.
-///
-/// No base is fixed either, unlike an adoption's. The base commit a taken-up
-/// Conversation gets is the pull request's head at take-up, so there is nothing
-/// to record until then.
-pub(crate) async fn start_wrapping_up(
-    state: &AppState,
-    repo_id: i64,
-    pull_request: &store::AdoptedPullRequest,
-) -> Result<Started> {
-    Ok(
-        match store::start_pull_request_adoption(&state.pool, repo_id, &branch_name(), pull_request)
-            .await?
-        {
-            Some(id) => {
-                prefill(state, id, repo_id).await;
-                Started::Started { id }
-            }
-            None => Started::NoSuchRepo,
-        },
-    )
-}
-
 /// Fix a new adopting Conversation's base to the branch its roadmap was found
 /// on.
 ///
@@ -2499,11 +2463,11 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// there — typed in, or filled out of the Brief when it was saved — and the
 /// press reads that field and decides which of the two it is; see [`resolve`],
 /// which is that whole half. One place to look, so the field the human is
-/// reading and the name the press acts on cannot come apart. A Draft
-/// from before there were Processes was
-/// started holding one instead, off the retired *Wrap up a pull request* level,
-/// and that one is taken as it stands: it is on the record already, and nothing
-/// about the pull request has been touched since.
+/// reading and the name the press acts on cannot come apart — including for a
+/// Draft from before there were Processes, which was started holding a pull
+/// request off the retired *Wrap up a pull request* level: that one's field reads
+/// as the URL of what it was made for, so it comes down this road like every
+/// other Review. See [`store::target`].
 ///
 /// **A branch is the same take-up with nothing at the end of it.** The work is
 /// built and pushed and nobody opened a pull request, so the fetch, the
@@ -2583,14 +2547,12 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         return Ok(TakenUp::NotDrafting);
     }
 
-    // Whether this press is a take-up at all. Two Conversations reach it: a
-    // **Review**, which is what this Process is, and a Draft from before there
-    // were Processes that was started holding a pull request off the retired
-    // *Wrap up a pull request* level — which reads as a Review for exactly that
-    // reason. Anything else has no target and nothing to wrap up.
-    let held = conversation.adopting_pull_request.clone();
-
-    if held.is_none() && conversation.process != store::Process::Review {
+    // Whether this press is a take-up at all, which is the Process and nothing
+    // else. A Draft from before there were Processes that was started holding a
+    // pull request reads as a **Review** for that very reason — see
+    // [`store::process`] — so it reaches this by the one road every other Review
+    // does, and anything else has nothing to wrap up.
+    if conversation.process != store::Process::Review {
         return Ok(TakenUp::NotHoldingOne);
     }
 
@@ -2605,19 +2567,14 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         return Ok(refusal.taking_up());
     }
 
-    // And what is being taken up. A Draft that was started holding one has the
-    // answer already — it was written when the row was pressed, and nothing
-    // about the pull request has been touched since; a Review names its target
-    // in its own field, so the field is read and, where it names a pull request,
-    // GitHub is asked. Everything above this line costs nothing, which is why it
-    // is above it: the record's own state and the pair of accounts it would run
-    // under are answered before a call goes out to GitHub.
-    let taking = match held {
-        Some(held) => Target::PullRequest(held),
-        None => match resolve(state, &conversation).await? {
-            Ok(resolved) => resolved,
-            Err(refusal) => return Ok(refusal),
-        },
+    // And what is being taken up: the Target field read, and GitHub asked about
+    // it where it names a pull request. Everything above this line costs
+    // nothing, which is why it is above it — the record's own state and the pair
+    // of accounts it would run under are answered before a call goes out to
+    // GitHub.
+    let taking = match resolve(state, &conversation).await? {
+        Ok(resolved) => resolved,
+        Err(refusal) => return Ok(refusal),
     };
 
     // And whether somebody is already on it. There is one Conversation per piece

@@ -94,9 +94,9 @@ pub use conversations::{
     resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
     set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
     settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption, start_conversation,
-    start_grilling, start_implementing, start_investigating, start_pull_request_adoption,
-    start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
-    switch_repo, take_up, target, timeline, unfinished_conversations, waiting, work_on_repo,
+    start_grilling, start_implementing, start_investigating, start_stage, start_tinkering,
+    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, target, timeline,
+    unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
@@ -115,9 +115,9 @@ pub use profiles::{
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,
-    conversation_on_pull_request, held_pull_requests, merges, merging, pull_request,
-    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
-    record_merging, record_pull_request, record_standing, standing, unfinished_pull_requests,
+    conversation_on_pull_request, merges, merging, pull_request, pull_request_repo, pull_requests,
+    record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
+    record_standing, standing, unfinished_pull_requests,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,

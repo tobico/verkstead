@@ -341,12 +341,6 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// offer.
   const adopting = () => props.conversation.adopting !== null;
 
-  /// And whether it was settled by the pull request the conversation is holding,
-  /// which is the same fact about the other thing a draft adopts: `#41` is a
-  /// number in one repository, and the same number over there is a different
-  /// pull request or none at all.
-  const holding = () => props.conversation.adopting_pull_request !== null;
-
   return (
     <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
       {() => (
@@ -355,28 +349,23 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
               one this picks. */}
           <RepoPicker
             conversation={props.conversation}
-            disabled={branched() || adopting() || holding()}
+            disabled={branched() || adopting()}
           />
 
           <Show when={!branched()}>
             {/* No branch field where the conversation is adopting a roadmap: a
                 stage is worked on its own slug, so the name invented when the
                 row was made is discarded when the stage is adopted, and naming
-                it here would be a field with nothing behind it. The same is
-                true of a pull request, whose branch is the head branch GitHub
-                names — and of the base under it, which is recorded at the
-                take-up as the head commit rather than picked here. */}
-            <Show when={!adopting() && !holding()}>
+                it here would be a field with nothing behind it. */}
+            <Show when={!adopting()}>
               <BranchName conversation={props.conversation} />
             </Show>
 
             {/* And what the work is pointed at, under the branch it will be
                 done on — drawn for the Processes that are pointed at work
                 already somewhere else and for no other, which is
-                `processes.ts`'s list to keep. Not on a draft holding a pull
-                request off the retired menu: that one was pointed when the row
-                was pressed. */}
-            <Show when={targeted(props.conversation.process) && !holding()}>
+                `processes.ts`'s list to keep. */}
+            <Show when={targeted(props.conversation.process)}>
               <TargetName conversation={props.conversation} />
             </Show>
 
@@ -384,7 +373,7 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
                 is the fact then, and the take-up records it. A branch keeps
                 the picker, because what its pull request is opened against is
                 what is picked here. */}
-            <Show when={!holding() && !onAPullRequest(props.conversation)}>
+            <Show when={!onAPullRequest(props.conversation)}>
               <BaseBranch conversation={props.conversation} />
             </Show>
             <AddCompanion conversation={props.conversation} />
@@ -783,14 +772,10 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
   /// closing.
   const branched = () => props.conversation.worktree !== null;
 
-  /// And whether the Process was settled by the pull request this Conversation
-  /// is holding rather than by anybody's pick.
-  const holding = () => props.conversation.adopting_pull_request !== null;
-
   return (
     <ProcessPicker
       chosen={props.conversation.process}
-      disabled={branched() || holding() || say.isPending}
+      disabled={branched() || say.isPending}
       pick={(picked) => say.mutate(picked)}
     >
       <Show when={refused()}>

@@ -118,41 +118,6 @@ by: string, } } | "WorktreeRefused" | { "Companion": {
 repo: string, why: CompanionRefusal, } };
 
 /**
- * The pull request a drafting Conversation is holding, as its own page names
- * it: which one, what it is called, and the two branches it sits between.
- *
- * Kept rather than read off GitHub every time the page is drawn, which is where
- * this parts company with [`AdoptionView`] beside it. A roadmap is a document
- * in the Conversation's own repository and costs a file read; a pull request is
- * a call out to GitHub, and a page that made one every time it was opened would
- * be a page waiting on somebody else's server to say what it is about. What is
- * authoritative is asked again at the take-up, which is the one moment it
- * matters.
- */
-export type AdoptedPullRequestView = { 
-/**
- * The number GitHub gave it, which is what everybody calls it by — in the
- * Conversation's own Repo and nowhere else.
- */
-number: number, 
-/**
- * Its title, as it read when the row was listed.
- */
-title: string, 
-/**
- * The whole URL, so the card can lead out to GitHub.
- */
-url: string, 
-/**
- * The branch the work is on, which is the branch the take-up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into.
- */
-base: string, };
-
-/**
  * The stage an adoption would start, named.
  */
 export type AdoptedStage = { 
@@ -1503,17 +1468,6 @@ ready_to_continue: boolean,
  */
 adopting: AdoptionView | null, 
 /**
- * And the pull request it is holding, where it is holding one.
- *
- * `null` alongside [`Self::adopting`] on every ordinary Conversation, and
- * never both at once: a Draft adopts one thing or none. `Some` is one
- * started off the *Wrap up a pull request* level, and it is what puts the
- * page on that shape — the pull request named over a Brief the human still
- * writes, the two Pairings that will run the wrap-up, and no branch, base
- * or grilling to settle.
- */
-adopting_pull_request: AdoptedPullRequestView | null, 
-/**
  * And what the work is pointed at, where the human or the Brief has named
  * anything: the **Target** field, as it stands.
  *
@@ -2652,27 +2606,6 @@ export type NewConversation = { repo_id: number, };
 export type NewOrder = { order: Array<number>, };
 
 /**
- * And starting one to wrap a pull request up with: which Repo, and the row off
- * the *Wrap up a pull request* level that was pressed.
- *
- * The whole row rather than a number, unlike [`NewAdoption`] beside it. A
- * roadmap is a document in the Conversation's own repository and is read back
- * off it wherever it is wanted; a pull request is somebody else's server, and
- * a server that had only the number would have to make a `gh` call of its own
- * to draw the card the human has already been looking at. So the five facts
- * travel, and the take-up is where GitHub is asked again.
- */
-export type NewPullRequestAdoption = { repo_id: number, number: number, title: string, url: string, 
-/**
- * The branch the work is on, which is the branch the take-up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into.
- */
-base: string, };
-
-/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -2781,103 +2714,6 @@ run: RunView | null,
  * at a directory.
  */
 data_directory: string | null, };
-
-/**
- * One open pull request, as a row of that level draws it.
- *
- * Any author, because whose pull request it is says nothing about whether it is
- * worth wrapping up — what the pipeline takes up is the branch rather than the
- * person. Forks are the one exclusion, and they are excluded for what taking
- * one up would have to do rather than out of taste: a head branch in another
- * repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
- * check would have nowhere to put the fix.
- */
-export type OpenPullRequest = { 
-/**
- * The number GitHub gave it, which is what everybody calls it by — in
- * this repository and nowhere else.
- */
-number: number, 
-/**
- * Its title, which is the line a row leads with.
- */
-title: string, 
-/**
- * The whole URL, so a row can lead out to GitHub without a repository
- * name being guessed at.
- */
-url: string, 
-/**
- * The branch the work is on, which is the branch taking it up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into, which is what the wrap-up watches for
- * conflicts against.
- */
-base: string, 
-/**
- * Who opened it, by their GitHub login. Empty where GitHub named nobody,
- * which is what a deleted account leaves behind.
- */
-author: string, 
-/**
- * What it says about itself: the description as it was written, raw
- * markdown. Empty where nobody wrote one.
- *
- * Never drawn on the row — a row is a line, and this is a document — but
- * carried on it all the same, because loading a pull request prefills the
- * box with the title as a heading and this under it. Raw rather than
- * rendered, unlike every other piece of markdown crossing this wire: what
- * it becomes is a Brief the human edits, and a field cannot be filled from
- * HTML.
- */
-body: string, 
-/**
- * The Conversation already holding this pull request, where one does —
- * any state, Done and Closed included, because a pull request stays on a
- * Conversation's record once it is recorded there.
- *
- * `null` is a pull request nothing has taken up. What a held row does
- * instead of loading is lead to the Conversation holding it: there is one
- * Conversation per piece of work, and a second one over the same branch
- * would be two wrap-ups pushing to it.
- */
-conversation_id: number | null, };
-
-/**
- * One Repo's open pull requests, as the *Wrap up a pull request* level lists
- * them.
- *
- * Grouped by Repo for the reason the abandoned roadmaps are — a number is a
- * fact about a repository, and `#41` says something different in each of them,
- * so a flat list would be one whose rows could not be told apart without
- * carrying the repository anyway.
- *
- * Nothing here is stored. Every field is read off GitHub through the host's
- * `gh` at the moment the level is drawn, which is why a pull request somebody
- * has since merged simply stops appearing rather than having to be taken off
- * anything.
- *
- * A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
- * logged in, a GitHub that would not answer — contributes no group at all
- * rather than an empty one or a failure: what Verkstead does not know is not
- * an empty list, but it is not a broken page either.
- */
-export type OpenPullRequestRepo = { 
-/**
- * Which Repo, by the id a Conversation is started against.
- */
-repo_id: number, 
-/**
- * And what it is called, which is what each row says it is in.
- */
-repo: string, 
-/**
- * The open pull requests in it, in the order GitHub listed them. Never
- * empty: a Repo with nothing open contributes no group at all.
- */
-pull_requests: Array<OpenPullRequest>, };
 
 /**
  * One Option as the page draws it: the number a Response answers by, its text

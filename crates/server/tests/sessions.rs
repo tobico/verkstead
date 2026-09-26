@@ -1221,7 +1221,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
     ;;
 esac
 "#;
@@ -1247,7 +1247,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1279,7 +1279,7 @@ case "$5" in
     printf '{{"comments":[{said}],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1309,7 +1309,7 @@ case "$5" in
     printf '{{"comments":[{said}],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1340,7 +1340,7 @@ case "$5" in
     printf '{{"comments":[%s],"reviews":[]}}' "$said"
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1384,7 +1384,7 @@ mergeable,state)
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1457,7 +1457,7 @@ mergeable,state)
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1667,7 +1667,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1692,7 +1692,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
     ;;
 esac
 "#;
@@ -1729,7 +1729,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1778,7 +1778,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -19653,18 +19653,18 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
     bench.holding(id)
 }
 
-/// The Brief a taken-up Conversation carries: the pull request's title and
-/// description as the compose box prefilled them, with the line the human added
-/// before they pressed.
+/// The Brief a taken-up Conversation carries: the human's own words about the
+/// work, with the pull request named among them.
 ///
-/// Nothing about it comes from a grilling — a take-up has none — so this is the
-/// whole of what every session over such a Conversation is told the work is,
-/// and the added line is what makes *edited* a fact a test can read back.
+/// Nothing about it comes from a grilling — a Review has none — and nothing about
+/// it comes from the pull request either: the Brief is the human's. So this is
+/// the whole of what every session over such a Conversation is told the work is,
+/// and the `#41` in it is what fills the Target the press reads.
 const A_TAKEN_UP_BRIEF: &str = "# Rate limiting for the public API\n\nA token bucket per key.\n\n\
-                                Wrap this up: I want the window tests looked at.\n";
+                                Wrap #41 up: I want the window tests looked at.\n";
 
 /// Stand a workbench up with a pull request already open on the upstream, and
-/// press the take-up on a Draft holding it.
+/// press Start on a **Review** pointed at it.
 ///
 /// The third way into the pipeline, and the one that starts inside it: the work
 /// is built and pushed by somebody else, so there is nothing to grill and
@@ -19723,15 +19723,8 @@ async fn taking_up_however_reviewed(
 
     let started: Started = post(
         &bench.app,
-        "/api/ui/pull-request-adoptions",
-        &serde_json::json!({
-            "repo_id": bench.repo_id,
-            "number": 41,
-            "title": "Rate limiting for the public API",
-            "url": "https://github.com/tobico/verkstead/pull/41",
-            "head": "rate-limiting",
-            "base": "main",
-        }),
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
     )
     .await;
     let Started::Started { id } = started else {
@@ -19744,8 +19737,17 @@ async fn taking_up_however_reviewed(
         bench.unreviewed(id).await;
     }
 
+    let picked: ProcessPicked = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Review }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
     // What the human left in the compose box, which is the Brief and the whole
-    // of what any session over this Conversation is told the work is.
+    // of what any session over this Conversation is told the work is — and, since
+    // it names the pull request, what fills the Target the press reads.
     let saved: BriefSaved = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/brief"),
@@ -20638,7 +20640,7 @@ async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_sa
         "under the Review Pairing, which is the fresh set of eyes: {sent}",
     );
     assert!(
-        sent.contains("Wrap this up: I want the window tests looked at."),
+        sent.contains("Wrap #41 up: I want the window tests looked at."),
         "started on the Brief the human edited on the compose page: {sent}",
     );
     assert!(
@@ -20685,7 +20687,7 @@ async fn a_taken_up_pull_request_with_no_review_answers_what_was_said_on_it() {
         "the batch session was sent what was written on the pull request: {said}",
     );
     assert!(
-        said.contains("Wrap this up: I want the window tests looked at."),
+        said.contains("Wrap #41 up: I want the window tests looked at."),
         "under the same edited Brief every session over this Conversation gets: {said}",
     );
     assert!(
@@ -25134,7 +25136,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -31370,7 +31372,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -32067,7 +32069,7 @@ case "$5" in
 {own}
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#

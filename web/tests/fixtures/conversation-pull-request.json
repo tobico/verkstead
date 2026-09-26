@@ -1,12 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": {
-    "base": "main",
-    "head": "rate-limiting",
-    "number": 41,
-    "title": "Rate limiting for the public API",
-    "url": "https://github.com/tobico/verkstead/pull/41"
-  },
   "archived": false,
   "attachments": [],
   "base_commit": null,
@@ -41,7 +34,7 @@
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,
-  "target": null,
+  "target": "https://github.com/tobico/verkstead/pull/41",
   "timeline": [
     {
       "Brief": {
