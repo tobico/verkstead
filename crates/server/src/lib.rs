@@ -171,6 +171,9 @@ mod pull_requests;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
+/// A call for one of this device's members, put to that member over the Peer
+/// Listener and answered back to the browser untouched.
+mod relaying;
 /// Whether this machine can be reached from a phone: what its Tailscale is
 /// doing, and whether the tailnet name is in front of the workbench.
 pub mod remote;
@@ -1336,6 +1339,17 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
         // that answers every page of the workbench, which is put on in
         // [`routers_with_ui`]. See [`key`].
         .merge(gate.guarding(ui::routes()))
+        // And the same namespace again for each of this device's members,
+        // under a prefix of its own: a call the browser makes here and this
+        // device puts to the member over the Peer Listener (ADR-0020, *The
+        // opened device relays*). Behind the same gate, because it is the
+        // human's browser asking — what admits it over *there* is this
+        // device's certificate, and a member's own key is no part of it.
+        //
+        // Here rather than in [`ui::routes`], which is the router that is
+        // mounted twice: a member reaching this would be a relay of a relay.
+        // See [`relaying`].
+        .merge(gate.guarding(relaying::routes()))
         .with_state(state)
 }
 
@@ -1490,12 +1504,16 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
 /// [`peer::router`], which is what puts the Member Gate in front of it — a
 /// router asked in process is a namespace with no gate at all, which is why the
 /// suite dials a real socket instead.
-pub fn router_over_the_link(pool: SqlitePool) -> Router {
+///
+/// `data_dir` is what it keeps in, which the relay suite needs a real one of:
+/// an attachment put on a Conversation through the hop is a file on the far
+/// end's disk, and what that suite asserts is that it landed there.
+pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
     peer::workbench::served(standing(
         pool,
         updates::Updates::nothing_learned(),
         nothing_bound(),
-        nowhere(),
+        data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
         tailnet(),

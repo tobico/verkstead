@@ -247,6 +247,31 @@ it is bounded at both ends: a post saying more about itself than is kept is
 refused, and so is one that would take this device past sixteen questions held
 at once.
 
+**Once two devices are linked, either one's whole workbench is reachable through
+the other.** A member serves `/api/ui/` over its peer listener behind the member
+gate, and the device the browser opened relays for the rest: everything under
+`/api/ui/members/{device}/…` is put to that device verbatim — method, path,
+query, body and the headers that matter — and its answer comes back untouched,
+status and body and all. The prefix takes the place of `/api/ui`, so
+`/api/ui/members/0011…ee/conversations/4` is that device's own
+`/api/ui/conversations/4` and nothing else. The browser stays same-origin
+throughout and a device's workbench key never leaves it: what admits the hop at
+the far end is this device's certificate, and the cookie is not passed on.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/members/0011…ee/conversations
+$ curl -X POST -H 'Content-Type: application/octet-stream' --data-binary @notes.md \
+    http://127.0.0.1:8422/api/ui/members/0011…ee/conversations/4/attachments/notes.md
+```
+
+The body is streamed rather than held, in both directions, so an attachment is
+an ordinary post here and the limit that refuses an oversized one is the far
+end's own `413` rather than a judgement made after buffering the file. Three
+Device Ids are refused by name instead of dialled: one that is no member's, this
+device's own — local URLs keep their shape, so nothing should ask — and a member
+that answered at none of the addresses it advertised, which is the row the pane
+is already drawing dimmed.
+
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
 account anywhere the server can read, and every path field browses the same
