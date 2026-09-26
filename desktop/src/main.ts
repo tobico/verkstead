@@ -437,8 +437,13 @@ async function run(): Promise<void> {
     ...machine,
   };
 
+  // The arguments go into the read as well as the write, and they have to: on
+  // Windows a registration is a command line, and Electron answers
+  // `openAtLogin` by comparing it against the arguments it was asked about — so
+  // a bare read would say Verkstead does not start with the session while it
+  // does. Which ones they are is `startup.ts`'s, in [`ARGS`](./startup.js).
   const login: LoginItem = {
-    registered: () => app.getLoginItemSettings().openAtLogin,
+    registered: (args) => app.getLoginItemSettings({ args }).openAtLogin,
     register: (asked) => app.setLoginItemSettings(asked),
   };
 

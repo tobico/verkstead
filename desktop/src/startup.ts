@@ -145,18 +145,26 @@ export interface Registration {
   readonly refused?: string;
 }
 
+/// The arguments a login start is registered with, on the two platforms whose
+/// registration is a call — the flag, exactly as the Linux entry's `Exec` line
+/// writes it, and nothing else.
+///
+/// **One list rather than two, because Electron compares them.** Asking whether
+/// the app opens at login is asking about a *command line* on Windows, so a read
+/// that named different arguments from the write answers `false` about a
+/// registration this app had just made — see [`LoginItem.registered`]. Both
+/// calls are handed this same value, and there is nowhere for the two of them to
+/// disagree.
+export const ARGS: string[] = [HIDDEN];
+
 /// What Electron's `app.setLoginItemSettings` is told, on the two platforms that
 /// have one.
 export interface LoginAsked {
   /// Whether the app opens at login at all.
   openAtLogin: boolean;
 
-  /// Whether it opens with no window on the screen. A Mac's own word for what
-  /// [`HIDDEN`] says on the other two, and the only one that platform reads.
-  openAsHidden: boolean;
-
-  /// And the arguments the login start carries, which is how Windows is told the
-  /// same thing — the flag, exactly as the Linux entry's `Exec` line writes it.
+  /// And the arguments the login start carries, which is how Windows is told to
+  /// come up with no window — [`ARGS`], rather than anything worked out here.
   args: string[];
 }
 
@@ -166,9 +174,19 @@ export interface LoginAsked {
 /// gives: `app` is `main.ts`'s, and everything that decides anything is a
 /// function of values vitest can hand in.
 export interface LoginItem {
-  /// Whether the app is registered to open at login —
-  /// `app.getLoginItemSettings().openAtLogin`.
-  registered(): boolean;
+  /// Whether the app is registered to open at login with `args` —
+  /// `app.getLoginItemSettings({ args }).openAtLogin`.
+  ///
+  /// **The arguments are half the question rather than a detail of it.** On
+  /// Windows a registration is a command line under the Run key, and Electron
+  /// answers `openAtLogin` by comparing that line against the executable and
+  /// the arguments it was *asked* about — which it defaults to none. So a read
+  /// that left them out says Verkstead does not start with the session while it
+  /// does: a box that springs back the moment it is ticked, and a registration
+  /// [`Startup.refresh`] never rewrites. They are taken here rather than known
+  /// at the far end for that reason — what was written and what is read back are
+  /// one value.
+  registered(args: string[]): boolean;
 
   /// Register or unregister — `app.setLoginItemSettings`.
   register(asked: LoginAsked): void;
@@ -217,7 +235,7 @@ export function startup(registering: Registering, login: LoginItem): Startup {
       return false;
     }
     if ("login" in put) {
-      return login.registered();
+      return login.registered(ARGS);
     }
 
     const written = read(put.entry);
@@ -239,7 +257,7 @@ export function startup(registering: Registering, login: LoginItem): Startup {
 
     try {
       if ("login" in put) {
-        login.register({ openAtLogin: asked, openAsHidden: true, args: [HIDDEN] });
+        login.register({ openAtLogin: asked, args: ARGS });
       } else if (asked) {
         write(put.entry, written(named(registering)));
       } else {
