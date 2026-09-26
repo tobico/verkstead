@@ -2994,15 +2994,6 @@ export type NewConversation = { repo_id: number, };
 export type NewJoin = { address: string, };
 
 /**
- * The order the human has just dragged the sidebar into: every Conversation
- * they can see, by id, top first.
- *
- * Nothing sends one any more — see [`NewRank`], which is what letting go of a
- * card says now.
- */
-export type NewOrder = { order: Array<number>, };
-
-/**
  * Where the human has just put one Conversation: the row it now sits directly
  * under, or nothing at all for the top of the list.
  *

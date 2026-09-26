@@ -31,14 +31,14 @@ use verkstead_store::{
     add_companion, append_capture, append_transcript, archive_conversation, ask, attach,
     attach_mcp_server, capture, close_conversation, create_profile, deletable, delete_conversation,
     deleted_tables, end_session, load_conversation, load_response, lock_set, nothing_else,
-    open_database, open_pending_steer, pick_direction, place_conversations, reclaim,
-    record_addressed_comments, record_backlog, record_check_rollup, record_commit,
-    record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
-    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
-    save_brief, save_pending_steer, session_id, set_grilling_pairing, set_process, set_target,
-    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
-    start_implementing, stop, submit_response, timeline, transcript, trim_conversation, trimmable,
-    trimmed, unarchive_conversation,
+    open_database, open_pending_steer, pick_direction, reclaim, record_addressed_comments,
+    record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
+    record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
+    record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
+    session_id, set_grilling_pairing, set_process, set_target, settle_wrap_up, skip_review,
+    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
+    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
+    unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -720,7 +720,6 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     // control: a name rather than a file, in a table of its own.
     attach_mcp_server(pool, id, "docs").await.unwrap();
 
-    place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 
     // And the stop, whose Notice is the one row pointing back the other way: the

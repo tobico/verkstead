@@ -17,6 +17,12 @@
 //! names one row rather than the list, and a neighbour that has gone since the
 //! list was drawn is passed over rather than refused.
 //!
+//! The places themselves go once they have become ranks, which is the rest of
+//! that rewrite: a database from before comes out of it with the table taken
+//! away, and one that never had the table is nothing to do rather than a query
+//! that fails. So the old shape is written out here by hand — that code has
+//! gone, and what has to keep working is a database rather than a function.
+//!
 //! The arithmetic itself is tested where it lives, over a few thousand random
 //! inserts — see the store's own `ranks` module. What is tested here is what the
 //! database does with it.
@@ -25,8 +31,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    archive_conversation, close_conversation, conversations, open_database, place_conversations,
-    rank_conversation, rank_the_conversations, register_repo, start_conversation,
+    archive_conversation, close_conversation, conversations, open_database, rank_conversation,
+    rank_the_conversations, register_repo, start_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -89,6 +95,42 @@ async fn ranks(pool: &SqlitePool) -> Vec<(i64, Option<String>)> {
         .fetch_all(pool)
         .await
         .unwrap()
+}
+
+/// The table the sidebar's order was kept in before ranks, with the rows the
+/// human had dragged into it: the shape and the places both, written out the way
+/// `migrations.rs`'s tests write out the old shapes they are about.
+async fn placed(pool: &SqlitePool, order: &[i64]) {
+    sqlx::query(
+        "CREATE TABLE placements (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             place           INTEGER NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    for (place, id) in order.iter().enumerate() {
+        sqlx::query("INSERT INTO placements (conversation_id, place) VALUES (?, ?)")
+            .bind(id)
+            .bind(i64::try_from(place).unwrap())
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+}
+
+/// Whether that table is there at all, which is what the rewrite reads to decide
+/// there is anything to do — and what it takes away when it is finished.
+async fn places(pool: &SqlitePool) -> bool {
+    sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'placements'",
+    )
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+    .is_some()
 }
 
 /// A Conversation is ranked as it is started, so the newest is the first row
@@ -206,7 +248,7 @@ async fn a_database_from_before_ranks_opens_in_the_order_it_was_drawn_in() {
 
     // Two of them dragged into an order of the human's own, which leaves two
     // that nobody has ever placed.
-    place_conversations(&pool, &[third, first]).await.unwrap();
+    placed(&pool, &[third, first]).await;
 
     // And one closed and put away, which is a row the sidebar does not draw and
     // still a row a rank has to reach: a Conversation unarchived later would
@@ -214,6 +256,9 @@ async fn a_database_from_before_ranks_opens_in_the_order_it_was_drawn_in() {
     close_conversation(&pool, second).await.unwrap();
     archive_conversation(&pool, second).await.unwrap();
 
+    // What the sidebar shows, which is what the old rule drew and what the
+    // starts ranked both: the unplaced newest first, above the placed. Which is
+    // what makes it the thing to hold the rewrite against.
     let drawn = sidebar(&pool).await;
 
     assert_eq!(
@@ -259,10 +304,45 @@ async fn a_database_from_before_ranks_opens_in_the_order_it_was_drawn_in() {
             "Conversation {id} was ranked by this device: {rank}",
         );
     }
+
+    assert!(
+        !places(&pool).await,
+        "and the table those places were kept in has gone with them",
+    );
+}
+
+/// And a database that never had that table — every one made from now on — is
+/// nothing for the rewrite to do rather than a query against a table that is not
+/// there. It runs at every start, so this is the case it meets on every start but
+/// the first.
+#[tokio::test]
+async fn ranking_a_database_that_never_had_places_ranks_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+
+    let first = start(&pool, repo, "first").await;
+    let second = start(&pool, repo, "second").await;
+
+    assert!(
+        !places(&pool).await,
+        "a database made now has no places to read",
+    );
+
+    let before = ranks(&pool).await;
+
+    rank_the_conversations(&pool, THIS_DEVICE).await.unwrap();
+
+    assert_eq!(ranks(&pool).await, before, "nothing was rewritten");
+    assert_eq!(
+        by_rank(&pool).await,
+        vec![second, first],
+        "and the order is the one the starts made",
+    );
 }
 
 /// And it runs at every start, so running it twice has to be running it once: a
-/// second pass that re-ranked would be a sidebar that moved on a restart.
+/// second pass that re-ranked would be a sidebar that moved on a restart. The
+/// first pass takes the places away with it, so the second is the case above.
 #[tokio::test]
 async fn ranking_a_database_twice_ranks_it_once() {
     let dir = tempfile::tempdir().unwrap();
@@ -273,7 +353,7 @@ async fn ranking_a_database_twice_ranks_it_once() {
     let first = start(&pool, repo, "first").await;
     let second = start(&pool, repo, "second").await;
 
-    place_conversations(&pool, &[first, second]).await.unwrap();
+    placed(&pool, &[first, second]).await;
 
     sqlx::query("ALTER TABLE conversations DROP COLUMN rank")
         .execute(&pool)
@@ -313,6 +393,10 @@ async fn rows_from_before_land_under_what_is_already_ranked() {
 
     let repo = repo(&pool).await;
     let before = start(&pool, repo, "before").await;
+
+    // A row from before, which is a place and no rank — and the table being
+    // there is what says this database is one the rewrite has anything to do to.
+    placed(&pool, &[before]).await;
 
     sqlx::query("UPDATE conversations SET rank = NULL")
         .execute(&pool)
