@@ -23,9 +23,17 @@
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
 //! sort's — they say it by dragging a card, and what they said is the server's
-//! to keep. So a drag sends the whole list and the list comes back from the
-//! server on every read, which is what makes the order survive a reload, a
+//! to keep. So letting go of a card says where that one row landed — the row it
+//! now sits under, or nothing at all for the top — and the list comes back from
+//! the server on every read, which is what makes the order survive a reload, a
 //! restart and a second device without any of the three being a case.
+//!
+//! One row rather than the whole list, because one row is what moved: the order
+//! is a **Rank** per Conversation, and the key that says where this one sits is
+//! minted on the server, between the ranks of the two rows it landed between.
+//! Nothing here knows what a rank looks like, and a drag on a list merged from
+//! several devices is a write to the device that owns the row and to nobody
+//! else.
 //!
 //! A card also answers a right-click with what there is to do about the
 //! Conversation it stands for — the same rows the status button at the head of
@@ -74,7 +82,7 @@ import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
 import {
   listConversations,
-  placeConversations,
+  rankConversation,
   showingArchived,
 } from "../api/client";
 import type { ConversationEntry } from "../api/types";
@@ -147,8 +155,8 @@ export function Conversations(props: {
   // Conversation laid over it — a row closed a moment ago, one taken off the
   // list, one put back on it — and in the order being dragged where there is
   // one. A Conversation that has appeared since the drag began is not in that
-  // order and goes to the top, which is where an unplaced one goes on the
-  // server too.
+  // order and goes to the top, which is where a start ranks one on the server
+  // too.
   const shown = (): ConversationEntry[] => {
     const rows = pressedRows(
       conversations.data ?? [],
@@ -165,7 +173,8 @@ export function Conversations(props: {
   };
 
   const place = useMutation(() => ({
-    mutationFn: (order: number[]) => placeConversations(order),
+    mutationFn: (put: { id: number; below: number | null }) =>
+      rankConversation(put.id, put.below),
     onSuccess: () => {
       // Read the list back, which is what lets go of the local order below.
       // The other devices hear the same news as a Nudge.
@@ -401,7 +410,7 @@ export function Conversations(props: {
     setHeld(null);
 
     const order = dragged();
-    if (order) place.mutate(order);
+    if (order) place.mutate({ id: at.id, below: sitsUnder(order, at.id) });
   };
 
   // A sidebar that goes away mid-drag takes the whole drag with it: the
@@ -450,7 +459,7 @@ export function Conversations(props: {
 
   /// And the same move made from the keyboard, which is the whole of what a card
   /// has to offer somebody who is not dragging anything: one row up, one row
-  /// down, and the list saved each time as a drag saves it.
+  /// down, and the row saved each time as a drag saves it.
   const step = (id: number, by: number) => {
     const order = shown().map((row) => row.id);
     const from = order.indexOf(id);
@@ -459,7 +468,7 @@ export function Conversations(props: {
 
     const put = moved(order, id, to);
     setDragged(put);
-    place.mutate(put);
+    place.mutate({ id, below: sitsUnder(put, id) });
   };
 
   return (
@@ -744,6 +753,18 @@ function moved(order: number[], id: number, to: number): number[] {
   put.splice(put.indexOf(id), 1);
   put.splice(to, 0, id);
   return put;
+}
+
+/// The row a moved one now sits directly under, or `null` where it has landed at
+/// the top — which is the whole of what the server is told about a move.
+///
+/// The row above rather than the row below, because the top of the list is the
+/// one end with nothing to name: a card dropped at the foot still has a row
+/// above it.
+function sitsUnder(order: number[], id: number): number | null {
+  const at = order.indexOf(id);
+
+  return at > 0 ? order[at - 1]! : null;
 }
 
 /// Which row the pointer is over: the first whose bottom edge is below it, and
