@@ -985,6 +985,26 @@ pub enum Taking {
     NotDrafting,
 }
 
+/// Where a take-up leaves the Conversation it has just put on a branch.
+///
+/// The one thing the two kinds of target differ over down here, and they differ
+/// because of what follows the write. A pull request is *recorded* next, and that
+/// record is the move every wrapping Conversation comes through — see
+/// [`super::record_pull_request`] — so a take-up over one stops a step short and
+/// leaves the state alone. A bare branch has no pull request to record and
+/// nothing else would ever move it, so the move is made here, inside the same
+/// transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landing {
+    /// Drafting still, because recording the pull request is the move — which is
+    /// the very next thing the caller does.
+    Drafting,
+
+    /// Wrapping, with the move on the Timeline: there is no pull request to come
+    /// through the other door.
+    Wrapping,
+}
+
 /// What became of a direction picked on a wrap-up proposal.
 ///
 /// Driven by a Response arriving rather than by anything the human pressed, so
@@ -5431,24 +5451,28 @@ pub async fn start_stage<'a>(
     Ok(Staged::Started)
 }
 
-/// Put a Draft holding a pull request on that pull request's branch: the branch
-/// it is on, the head it was taken up at, the branch GitHub says it goes into,
-/// and where the whole of it is checked out.
+/// Put a Draft on the branch it is taking up: the branch it is on, the head it
+/// was taken up at, the branch it goes into, and where the whole of it is
+/// checked out.
 ///
 /// [`start_stage`]'s sibling over the other kind of thing a Draft takes up, and
-/// it stops one step short of it: the state is left alone here, because
-/// recording the pull request is what moves this Conversation — see
+/// where it leaves the Conversation is `landing`'s to say — see [`Landing`],
+/// which is the whole of what a pull request and a bare branch differ over here.
+/// Over a pull request it stops one step short of a move, because recording that
+/// pull request is what moves this Conversation — see
 /// [`super::record_pull_request`], which is the very next thing the take-up
 /// does. A Conversation that arrived in Wrapping by its own finish step was
 /// moved by that same record, and a take-up is that ending reached by the other
-/// door rather than a second kind of move.
+/// door rather than a second kind of move. Over a branch there is no such record
+/// to come, so the move is made here.
 ///
-/// `base` is the pull request's head at take-up with GitHub's base branch beside
-/// it, which is deliberately not the pair every other start writes. The commit
-/// is the branch's own tip rather than what it came off, so that the sweep draws
-/// only what Verkstead adds from here — the pull request's own commits are the
-/// pull request's record. The name beside it is the branch the pull request
-/// merges into, which is what a conflict is measured against.
+/// `base` is the head at take-up with the branch it goes into beside it, which is
+/// deliberately not the pair every other start writes. The commit is the
+/// branch's own tip rather than what it came off, so that the sweep draws only
+/// what Verkstead adds from here — what is on the branch already is somebody
+/// else's record. The name beside it is GitHub's base branch where there is a
+/// pull request to give one, and the base the human picked where there is not,
+/// that being what its pull request will be opened against.
 ///
 /// No direction is written, unlike a stage's. There is no backlog and no inline
 /// run here: the work is built, and what follows this is a wrap-up.
@@ -5462,6 +5486,7 @@ pub async fn take_up<'a>(
     base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
+    landing: Landing,
 ) -> Result<Taking> {
     let base = base.into();
     let worktree = super::repos::text(worktree)?;
@@ -5484,9 +5509,9 @@ pub async fn take_up<'a>(
 
     // The branch is settled rather than invented, which is the one thing this
     // writes that a stage's start does not have to: a stage is worked on a name
-    // read out of a roadmap, and this one is worked on the branch the pull
-    // request is already on. So `naming` stays where it is — nobody is waiting
-    // for a better name for a branch that has a review on it.
+    // read out of a roadmap, and this one is worked on the branch the work is
+    // already on. So `naming` stays where it is — nobody is waiting for a better
+    // name for a branch that has work on it.
     sqlx::query(
         "UPDATE conversations SET named_branch = ?, base_commit = ?, base_ref = ? WHERE id = ?",
     )
@@ -5496,7 +5521,7 @@ pub async fn take_up<'a>(
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("putting Conversation {id} on the pull request's branch"))?;
+    .with_context(|| format!("putting Conversation {id} on the branch it is taking up"))?;
 
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
         .bind(id)
@@ -5507,7 +5532,20 @@ pub async fn take_up<'a>(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    tx.commit().await.context("taking up a pull request")?;
+    // And the move, where there is no pull request coming to make it — see
+    // [`Landing`]. The state and the Timeline together, as every move is written.
+    if landing == Landing::Wrapping {
+        sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+            .bind(Lifecycle::Wrapping.stored())
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("moving Conversation {id} to wrapping a branch up"))?;
+
+        moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    }
+
+    tx.commit().await.context("taking a branch up")?;
 
     Ok(Taking::Recorded)
 }

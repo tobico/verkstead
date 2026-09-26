@@ -123,7 +123,7 @@ export const TAKE_UP_REFUSAL: Record<
   NotHoldingOne:
     "This conversation is holding no pull request, so there is nothing for it to wrap up.",
   NoTarget:
-    "The target names no pull request — put one in the Target field, by its link or as #number.",
+    "Nothing is named in the Target field — put a pull request in it, by its link or as #number, or the branch to wrap up.",
   Fork:
     "That pull request's branch is in a fork, so nothing fixed here could be pushed to it.",
   NoImplementationProfile:
@@ -134,7 +134,7 @@ export const TAKE_UP_REFUSAL: Record<
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoHeadBranch:
-    "Origin has no branch by the name GitHub gave for this pull request's head.",
+    "Origin has no branch by that name, so there is nowhere for a review to happen. Push it, or name another.",
   BranchAhead:
     "The local branch of that name holds commits origin does not. Push them, or take them off, and try again.",
   BranchDiverged:

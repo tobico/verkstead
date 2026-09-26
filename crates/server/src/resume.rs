@@ -442,6 +442,47 @@ async fn recompute(
             ));
         }
 
+        // **A wrap-up still owed its own pull request**, which is a **Review**
+        // taken up over a bare branch whose `submitting` session left none — see
+        // [`crate::conversations::take_up`]. That one is moved into Wrapping by
+        // the take-up rather than by a pull request being recorded, so it is the
+        // one wrap-up that can stand here with nothing of its own on the record,
+        // and the watchers below over the top of it would read the branch, watch
+        // no checks and never open the one thing missing. So the press asks for
+        // that instead, which is the promise the run makes about a finish that
+        // stopped short of its push, kept for the other ending that sends for one
+        // — see [`crate::runner::owed_for_a_branch`].
+        //
+        // Asked of the record and nothing else: every other way into Wrapping
+        // comes through the pull request being recorded, so a Conversation's own
+        // Repo having no row is the whole of the reading.
+        Lifecycle::Wrapping
+            if store::pull_request(&state.pool, conversation_id, conversation.repo.id)
+                .await?
+                .is_none() =>
+        {
+            starting(state, conversation_id, resuming).await?;
+
+            // The base the take-up recorded, which is the branch the picker held
+            // and what the pull request is to be opened against. Where the record
+            // has none — a Conversation from before the name was kept — the
+            // repository's own rule stands, as it does everywhere else that reads
+            // this column.
+            let against = conversation
+                .base_ref
+                .clone()
+                .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+            let state = state.clone();
+
+            tokio::spawn(crate::runner::owed_for_a_branch(
+                state,
+                conversation_id,
+                against,
+                driving,
+            ));
+        }
+
         // The wrap-up's watchers over the top of nothing, which is what a
         // restarting server does with a Conversation it left wrapping up. Each
         // of the five decides for itself whether there is anything left to do,

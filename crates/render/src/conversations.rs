@@ -4591,9 +4591,10 @@ pub enum TakenUp {
     /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
 
-    /// The **Target** field names no pull request — nothing in it at all, or
-    /// something that is neither a `github.com/<owner>/<repo>/pull/<n>` URL
-    /// nor a bare `#<n>` — so there is nothing for this Review to take up.
+    /// The **Target** field is empty, so there is nothing for this Review to take
+    /// up. Anything in it at all is a pull request or a branch — see
+    /// [`Self::NoHeadBranch`], which is what a name origin has nothing under
+    /// comes back as.
     ///
     /// The press is inert on the page while the field is empty, so this is
     /// what a page whose copy of the world has gone stale gets back.
@@ -4657,8 +4658,10 @@ pub enum TakenUp {
     /// that may be a week old.
     FetchFailed,
 
-    /// Origin has no branch by the name GitHub gave as the pull request's head
-    /// — deleted since it was listed, or never pushed to this remote.
+    /// Origin has no branch by the name being taken up — the head GitHub gave for
+    /// a pull request, deleted since or never pushed to this remote, or a
+    /// **Target** naming a branch that is not on origin at all. Which is nothing
+    /// to wrap up either way: there is nowhere for a review to happen.
     NoHeadBranch,
 
     /// There is a local branch by that name, and it holds commits origin does

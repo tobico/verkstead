@@ -415,8 +415,8 @@ const missing = (process: Process): string =>
 ///
 /// One press on a composer, so both shapes read *Start work* and both stand in
 /// the same row beside the paperclip. What differs is the endpoint behind it and
-/// the words a refusal comes back in: a **Review** is the wrap-up over a pull
-/// request the Brief names, so its press is the take-up — and every refusal the
+/// the words a refusal comes back in: a **Review** is the wrap-up over whatever
+/// the Target names, so its press is the take-up — and every refusal the
 /// take-up already had keeps its name and its sentence. See [`Starting`], which
 /// is the row both draw.
 function Start(props: {
@@ -557,13 +557,16 @@ function StartGrilling(props: {
   );
 }
 
-/// And the press on a **Review**, which opens no round at all: the pull request
-/// the Brief names is taken up, and the Conversation lands in Wrapping with the
-/// ordinary wrap-up running over it.
+/// And the press on a **Review**, which opens no round at all: what the Target
+/// names is taken up, and the Conversation lands in Wrapping with the ordinary
+/// wrap-up running over it.
 ///
-/// Everything it turns on is the server's — the Brief read for a pull request,
-/// GitHub asked about it, the head branch settled against origin — so what this
-/// does with an answer that is not *TakenUp* is say it and read the page again.
+/// Everything it turns on is the server's — the field read for a pull request or
+/// a branch, GitHub asked about the one and origin about the other, and the branch
+/// settled against origin either way — so what this does with an answer that is
+/// not *TakenUp* is say it and read the page again. A branch has one more step
+/// behind the press and it is the server's too: the pull request nobody opened is
+/// sent for, and the wrap-up runs over what comes back.
 function StartReview(props: {
   conversation: ConversationView;
   files: Attaching;

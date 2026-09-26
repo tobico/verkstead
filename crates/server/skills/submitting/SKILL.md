@@ -59,6 +59,13 @@ push the branch and open a draft pull request titled for the work —
     git push -u origin HEAD
     gh pr create --draft --title '<what this built>' --body '<what the branch delivered>'
 
+**Where this prompt names a branch to open it against**, under *The branch to
+open it against*, that is the base — `--base <that branch>` on the create, and
+the same branch wherever the repository's own sequence asks for one. It is
+there because the work was taken up off a base somebody chose rather than cut
+from one, and nothing on the branch itself says which it was. Where the prompt
+names none, the base is the repository's own rule and there is nothing to pass.
+
 **A pull request may already be half there.** The session before you may have
 pushed and got no further, so a push that says everything is up to date is not a
 failure — go on and open the pull request. And if `gh pr view` finds one on this

@@ -7242,11 +7242,12 @@ describe("starting the work", () => {
   });
 
   /// And the refusals that press comes back with are the take-up's own, each in
-  /// its own sentence: a brief naming nothing, a link into another repository, a
-  /// number GitHub has nothing open under, a fork, and a `gh` that would not
-  /// answer are five different things to go and do.
+  /// its own sentence: an empty target, a branch origin has nothing under, a link
+  /// into another repository, a number GitHub has nothing open under, a fork, and
+  /// a `gh` that would not answer are six different things to go and do.
   it.each([
-    ["NoTarget", /names no pull request/],
+    ["NoTarget", /Nothing is named in the Target field/],
+    ["NoHeadBranch", /Origin has no branch by that name/],
     ["Fork", /in a fork/],
     [
       { AnotherRepository: { named: "tobico/askance" } },

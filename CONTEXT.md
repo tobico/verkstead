@@ -159,7 +159,12 @@ and a steered Investigating ends in the state it was steered from instead, see
 **Investigating**.
 **Review** is the wrap-up run over the pull request or branch it is pointed at:
 Draft to Wrapping, reviewed under the Review Pairing, which it always has — no
-*No review* row, a Review without a review being the last Process here.
+*No review* row, a Review without a review being the last Process here. Over a
+pull request, recording it is the move and the wrap-up runs from there; over a
+bare branch there is nothing to record, so the take-up makes the move itself and
+one `submitting` session is sent for the pull request nobody opened — told the
+base picker's branch to open it against, and what it opens is written beside the
+wrap-up rather than being what starts one.
 **Tinker** is Follow-up entered from a Draft, on a fresh branch and primed with
 the Brief: rounds for as long as the human wants, and on their Nothing-else mark
 commits on the branch mean Wrapping — the pull request opened by the
@@ -1919,23 +1924,38 @@ on, and building on an unmerged branch is the human's move, made by picking
 that branch as the base.
 
 **A pull request is taken up** by a **Review** or **Fix Merge Issues**
-Conversation at Start, named in the Brief rather than picked off a list — the
-list of every open pull request read off GitHub when the compose page opened is
-gone with the menu level. One a Conversation already holds, Closed included, is
-refused by name and leads to that Conversation instead, the branch being that
+Conversation at Start, named in the Target field rather than picked off a list —
+the list of every open pull request read off GitHub when the compose page opened
+is gone with the menu level. One a Conversation already holds, Closed included,
+is refused by name and leads to that Conversation instead, the branch being that
 Conversation's; one from a fork is refused too, its head branch being nowhere
 origin can be pushed to. Taking it up puts the Conversation on the pull
 request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
-one ahead, diverged or checked out anywhere else is refused by name, on the
-composer where the press was — with the head at take-up as its base commit and
-GitHub's base branch beside it, so the Timeline draws only what Verkstead adds
-from here and a conflict merge of the base drags nothing. Recording the pull
-request is the move, from Draft straight into **Wrapping**, and the wrap-up is
-the Process's from there: the ordinary one with its review for Review, and one
-narrowed to Mergeable and the checks for Fix Merge Issues. No grilling and no
-handoff: the human's Brief is the Brief, and nothing about the pull request
-itself — its draft flag, its description — is touched.
+one ahead, diverged, not on origin at all or checked out anywhere else is refused
+by name, on the composer where the press was — with the head at take-up as its
+base commit and GitHub's base branch beside it, so the Timeline draws only what
+Verkstead adds from here and a conflict merge of the base drags nothing.
+Recording the pull request is the move, from Draft straight into **Wrapping**,
+and the wrap-up is the Process's from there: the ordinary one with its review for
+Review, and one narrowed to Mergeable and the checks for Fix Merge Issues. No
+grilling and no handoff: the human's Brief is the Brief, and nothing about the
+pull request itself — its draft flag, its description — is touched.
+
+**A branch is taken up the same way, with nothing at the end of it.** A Target
+that is neither a URL nor a `#number` is a branch: nothing is asked of GitHub,
+the same fetch and the same refusals settle it against origin, and what is
+recorded is the head at take-up with *the base picker's branch* beside it, GitHub
+having no base to give. Nothing about a pull request is written, so the move into
+**Wrapping** is the take-up's own — the branch, the base pair, the worktree and
+the state in one transaction — and the one thing owed is asked for next: one
+`submitting` session, in the worktree, **told which branch to open the pull
+request against**, because the skill's own fallback opens against the
+repository's default branch. What it opens is recorded beside the wrap-up the way
+a companion's is, with no second move, and the wrap-up's watchers start on it.
+One that opens none stops the run over what it last said, and Resume is another
+go at the same one thing — a wrapping Conversation with no pull request of its own
+being the one reading that says a branch is still owed one.
 _Avoid_: import, attach, resume, take over, migrate, improve
 
 **Abandoned**:
