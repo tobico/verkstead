@@ -40,6 +40,8 @@ mod deferrals;
 mod deliveries;
 mod endings;
 mod escalations;
+mod joins;
+mod members;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -101,6 +103,17 @@ pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, 
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
+pub use joins::{
+    AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
+    held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
+    refuse_asked_join,
+};
+pub use members::{
+    Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
+    announcements_owed_to, changeover_over, forget_every_member, forget_member, member_count,
+    member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
+    record_member, record_renewal, renewal_acknowledged,
+};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -822,6 +835,21 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // several of, a Conversation taking as many files as the human has to hand.
     // See [`attachments`].
     attachments::apply_schema(pool).await?;
+
+    // And the devices this one is linked to, which hang off nothing on this
+    // database at all: a cluster is other machines, and what is kept about each
+    // is what that machine said about itself — see [`members`]. The member gate
+    // on the peer listener reads it at every call, the Devices section of the
+    // Remote access pane draws a row per member, and a changeover asks it how
+    // many are owed an announcement of a new fingerprint.
+    members::apply_schema(pool).await?;
+
+    // And the joins in flight, which are what puts a row in that table: a link
+    // asked for and not yet settled, kept on both sides of the asking because
+    // neither side's record is the other's — see [`joins`]. After the members
+    // because what a join becomes is one of those, and hanging off nothing all
+    // the same: a join arrives from a device this one has not met.
+    joins::apply_schema(pool).await?;
 
     // And the one flag on this database that is about nothing on it: whether the
     // human is done with the banner pointing at Remote access. It hangs off

@@ -634,7 +634,9 @@ a tailnet has an identity all the same, and a list that vanished on one would be
 a cluster feature that appeared to need Tailscale.
 **And the card above it says how many devices are linked** — *other* devices,
 this one being the row the list already holds — after whichever of its sentences
-the machine's Tailscale earned.
+the machine's Tailscale earned. **Counted off the rows themselves** rather than
+answered beside them: there is one membership, and a number that could disagree
+with the list would be two answers about it.
 _Avoid_: linked devices pane, cluster list, machines, the device list (it is
 **Devices**, as **Repos** is)
 
@@ -645,17 +647,46 @@ Directory**: `device.pem`, which is what the **Peer Listener** presents, and
 `device.next.pem`, which is what is coming.
 **The outgoing one goes on being presented** until every member has
 acknowledged the new fingerprint, so a changeover never costs a call — what a
-member holds is what it is answered with. A member that was unreachable is
-announced to again when it next answers, and one that never answers is a member
-the human unlinks anyway.
+member holds is what it is answered with.
+**Every member is told over the link this device already holds**, presenting the
+outgoing certificate, because that is the only one any of them holds and so the
+only one that gets through a **Member Gate**. A member records the new
+fingerprint against the same **Device Id** and answers, and that answer is the
+acknowledgement — one member fewer to wait on. Nobody over there confirms
+anything: the call arrives down a link that device verified, and the id it
+arrives under is one its human allowed once already.
+**And a member holds both certificates while one is in flight.** The incoming
+fingerprint is what its row is keyed on from then, and the outgoing one is kept
+beside it and goes on being accepted — a member that let go the moment it
+acknowledged would be refusing the device it had just acknowledged, for as long
+as the last machine in the cluster stayed switched off. It lets go of the old one
+when it meets the new, that being the only unambiguous sign the far end has
+stopped presenting it.
+**The last acknowledgement completes it**: the new certificate is written over
+the old and the file it was waiting in goes — by the same path a re-issue with
+nobody to tell takes at the start that began it. What a running process presents
+does not change then; the next start reads the file, and every member has both by
+then.
+**A member that was unreachable is owed the telling**, on the one record a join
+and an unlink are owed on, and is told by the next call that gets through to it —
+which is also when the changeover it was holding up finishes. One that never
+answers leaves it in flight rather than failing anything, and is a member the
+human unlinks; that press is what lets the changeover finish.
+**And a device that arrives in the middle of one is told at once**, however it
+arrived — an Allow pressed here, a **Member** naming a newcomer, or a whole
+roster handed over by an **Exchange**. A row written while a changeover is in
+flight has acknowledged nothing and is one more holdout by the fact of being
+written, and nothing at the other end of the call that wrote it knows there is a
+changeover to hear about. Untold, it is not a link that breaks but a changeover
+that cannot end: the device holding it up is answering perfectly well, and the
+certificate still going out is the one with at most the renewal window left on
+it.
 **Both fingerprints are printable while one is in flight**, on a startup line
 of its own, because that is the only way anybody tells which of the two a peer
 met.
 **With no member there is nobody to announce to**, and then it completes at the
-start that began it: the new certificate is written over the old, the file it
-was waiting in goes, and the line says it had nobody to tell. Which is every
-re-issue a Verkstead of this build can make — a member is made by a join, and
-the join is the linking stage's.
+start that began it, and the line says it had nobody to tell. Which is every
+re-issue on a Verkstead that has never been linked to anything.
 **A device keeps its id through one.** It is the certificate that is renewed —
 the **Device Id** was invented once and lasts as long as the **Data Directory**
 does.
@@ -710,12 +741,110 @@ its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Join**:
+One **Device** asking another to let it into its cluster, and the whole of what
+follows the press on **Add**. The asking device dials the address somebody
+typed, takes whatever certificate that address presents for the one call, and
+posts what it is — its **Device Id**, that certificate's fingerprint, and its
+**Device Reading**. The device asked writes the question down, pinning the
+certificate the handshake took from the caller, and asks its human: a modal in
+every open workbench, and a push to every phone. The asking device is left a
+**pending row** reading *waiting for confirmation on* that device, with **its
+own** fingerprint under it — the same string the modal over there draws, so
+that two people at two screens compare one certificate by eye — and a Cancel.
+**Held for ten minutes, written down as the moment it runs out at** rather than
+as a length, so a restart inside them is a question still being held rather than
+ten fresh minutes. Both sides keep a row, and the two are not one record: one
+knows the address that was typed and the certificate it met, the other the whole
+of what a stranger said about itself.
+**The certificate pinned into the request is what everything after it is matched
+against**, which is why the post may stand outside the **Member Gate** without
+being un-authenticated: the cancel has to come under it, and so does the
+**Exchange** that answers it.
+**A join asks for a membership rather than taking one.** Nothing is agreed while
+the row is drawn — it is not a **Member** and does not count as one — and a
+device turned away is free to ask again, a cluster being a membership rather
+than a list of verdicts.
+**And it is the one thing a stranger writes into this machine, so how much of it
+a join is worth is this machine's to say.** A post is refused for saying more
+about itself than is kept — an id, a name, an OS word or an address longer than
+any real one, or more addresses than a device is reachable at — and refused
+again once this device is already holding as many questions as it will, the ones
+that have run out being let go of first. Not stinginess but arithmetic: a held
+question is a row, a push to a human's phone, a Nudge to every open workbench and
+a dial down every address it named ten minutes later, and without a ceiling how
+often all of that is spent is decided by whoever can reach the port.
+_Avoid_: pairing, invitation, handshake (which is the TLS one), link request
+
+**Exchange**:
+How a **Join** ends: the device that was asked dials the device that asked it,
+at the addresses that device advertised and pinned on the certificate the
+request is holding, and says what came of the question.
+**On Allow it hands over the roster** — itself and every **Member** it holds, in
+the one call — and the asking device checks the certificate it is dialled under
+is the one it met when it posted, then records the lot. A member arriving that
+way needs no press of its own: it came over a link that has just been proved
+against a certificate this device pinned itself, which is the same vouching that
+lets the introducer announce the newcomer to each of them. The roster is one
+shape whatever the cluster's size — empty beside the introducer in a cluster of
+two — so that a newcomer is never half linked while some second call is made.
+**On Deny it says so**, and the pending row reads *refused* until it is
+dismissed. The ADR spelled the dial back out on an Allow and left this one; the
+human settled that a refusal comes back the same way, without it the asking
+device reading *waiting* until somebody over there gets bored. **An expiry is
+told the same way and records nothing**: the moment it is about is already
+written on the asking device's own row, so what that call is worth is the row
+redrawing as it happens — and one that never arrives costs nothing, the clock
+reaching the same answer alone.
+**It is the third route outside the Member Gate and the last of them.** It
+arrives before the asking device has recorded anybody, so it cannot be a
+member's call; what stands in the gate's place is the request — its certificate
+and its ten minutes — and a call failing either is refused with nothing written.
+**A dial back that reaches nobody does not undo the press.** The human pressed
+Allow and the device is a member for it; what is left over there is a row that
+runs out and an **Add** to press again.
+_Avoid_: the callback, the confirmation call, the handshake, the reply
+
+**Member**:
+A **Device** this one is linked to, as a row this one keeps: its **Device Id**,
+the name and the OS and the addresses it last advertised, the fingerprint of the
+certificate it presents, and when it was last heard from. Keyed by the id,
+because that is what outlives both the others — a certificate is renewed and an
+address moves, and the id lasts as long as the far end's **Data Directory**.
+**A cluster is a membership rather than a set of pairs**: every member holds the
+same list, so what is kept here is what a device is to all of them rather than
+what two machines agreed between themselves.
+**The addresses are a list and the order is load-bearing** — the tailnet name
+and its addresses first, then the LAN — because a peer dials them in the order
+the far end advertised them, and the address typed at link time is only the
+first one ever known.
+**And a Changeover puts two more things on the row, one for each direction it
+runs in.** What that member is changing over *from* is a second fingerprint this
+device goes on accepting, because a device in the middle of one presents the
+certificate it was presenting until the last of *its* members has acknowledged —
+so both get through the **Member Gate** and both satisfy a dial. And what it has
+*acknowledged* is the fingerprint of this device's own certificate it last said it
+holds, which is what this device's changeover counts: a positive record rather
+than the absence of a debt, because a device that joined in the middle of one has
+no debt and has heard nothing.
+**Three things read it**: the **Member Gate**, which asks whether a caller's
+certificate is a member's; the **Changeover**, which asks which of them have yet
+to acknowledge a new fingerprint; and **Devices**, which draws a row apiece.
+Each asks at the moment it asks — a membership read once and held would be a
+device that went on being admitted after the human unlinked it.
+_Avoid_: peer (which is what a device is to another device), linked device,
+node, cluster member (it is a **Member**)
+
 **Member Gate**:
 What stands over every route on the **Peer Listener** but the un-gated three:
-the certificate the handshake took is matched against this device's members by
-fingerprint, and a caller that is not one of them is refused. The handshake
+the certificate the handshake took is matched against this device's **Members**
+by fingerprint, and a caller that is not one of them is refused. The handshake
 asks for a certificate and does not insist on one, so this is the first place a
 path and a caller are known together and the only place either is judged.
+**The rows are read at every call**, so a member taken off the list is refused
+on the next one — and a membership that cannot be read at all admits nobody,
+refusing a member being a call that is retried where admitting a stranger is the
+whole of what the gate is for.
 **The un-gated surface is a list of three and nothing grows it.** The identity
 endpoint, which asks for no certificate at all; the join post, which comes from
 a non-member by definition and whose certificate is pinned into the pending

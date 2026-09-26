@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
+use crate::joining::PendingJoin;
+
 /// One device, as it answers for itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -95,6 +97,39 @@ pub struct DeviceIdentity {
     pub addresses: Vec<String>,
 }
 
+/// What a device tells each of its members when it has made its certificate
+/// again (ADR-0020, *The certificate is renewed before it runs out*).
+///
+/// **Not a viewer type.** This one crosses the peer listener rather than the
+/// workbench — it is one Verkstead telling another what it is becoming, and no
+/// browser ever reads it.
+///
+/// **The identity whole, and the incoming fingerprint beside it.** A renewal is
+/// the one call in a cluster where a device has two certificates at once, and
+/// the two have to be told apart by the machine reading this or the reading is
+/// worthless. So [`DeviceIdentity`] keeps the meaning it has everywhere else —
+/// the fingerprint in it is the certificate this call was *made* under, which
+/// the receiver checks against what its own handshake handed over, exactly as it
+/// would on any other exchange — and the one being changed to is a field of its
+/// own. A single fingerprint field that meant something different here would be
+/// a payload the receiver had to know which call it had arrived on to read.
+///
+/// **And the addresses ride along**, because every device advertises all of them
+/// on every exchange and this is one: a laptop that moved and renewed is reached
+/// at its new addresses on the next call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewedCertificate {
+    /// What this device is, as it answers anybody — with the certificate it is
+    /// still *presenting* named in it, which over a changeover is the outgoing
+    /// one.
+    pub identity: DeviceIdentity,
+
+    /// And the fingerprint of the certificate it is changing over to: what the
+    /// receiver records against the same Device Id, and what it answers to say
+    /// that it holds.
+    pub incoming: String,
+}
+
 /// The **Devices** list, as the Remote access pane reads it off this machine.
 ///
 /// The other side of [`DeviceIdentity`]: that one is what this device tells a
@@ -111,17 +146,59 @@ pub struct DeviceIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct DevicesView {
-    /// This device, which is the whole of the list until something is linked to
-    /// it: the one row, marked *this device* and offering no Unlink.
+    /// This device, which is the row marked *this device* and the one the list
+    /// always holds: a Verkstead linked to nothing still has an identity.
     pub this: DeviceIdentity,
 
-    /// And how many other devices are linked to it, which is the clause the
-    /// Remote access card's line carries beside what Tailscale is doing.
+    /// And every other device in its cluster, each as it last answered for
+    /// itself — with whether it is still answering beside it.
     ///
-    /// A count rather than the devices themselves, because a count is the whole
-    /// of what anything in this build can draw: a member is made by a join, and
-    /// the join is the next stage's — so this is nought on every Verkstead that
-    /// can be built from here, and it is nought because there is nothing to
-    /// count rather than because nobody looked.
-    pub linked: usize,
+    /// The identity is the same shape as the row above, because it is the same
+    /// thing said: a member is drawn with its name, the mark for its OS and the
+    /// addresses a peer could reach it on, exactly as this device is. What is
+    /// different is where the answer came from — this device reads its own
+    /// machine as the pane is drawn, and a member was read off the far end at
+    /// the last exchange.
+    ///
+    /// **The count on the Remote access card comes off this**, rather than
+    /// being answered beside it: there is one membership, and a number that
+    /// could disagree with the rows would be two answers about it. An
+    /// unreachable member counts like any other — it is linked, and a count
+    /// that left it out would say the cluster had shrunk.
+    pub members: Vec<LinkedDevice>,
+
+    /// And every join this device has asked for and not yet been answered on —
+    /// see [`PendingJoin`].
+    ///
+    /// **Beside the members rather than among them**, because a pending join is
+    /// not a device: nothing has been agreed, and a row that sat in the list
+    /// looking like a member would be a cluster this device had joined itself
+    /// to. The count on the card is the members' alone for the same reason.
+    ///
+    /// Read at the moment the pane asks, the way the members are: a request
+    /// whose ten minutes ran out a second ago reads expired on this answer and
+    /// waiting on the one before it, and both are true when they are given.
+    pub pending: Vec<PendingJoin>,
+}
+
+/// One device linked to this one: what it says it is, and whether the last dial
+/// to it got through.
+///
+/// **Two things rather than one, because only one of them is the far end's.**
+/// The identity is what that machine said about itself at the last exchange;
+/// whether it is answering is this device's own finding, written by a dial that
+/// worked down its addresses and reached none of them. So it sits beside the
+/// identity rather than inside it — a device does not tell anybody it is
+/// unreachable, and the row a peer reads off [`DeviceIdentity`] is the same
+/// whichever machine is asking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct LinkedDevice {
+    /// The device, as it last answered for itself.
+    pub identity: DeviceIdentity,
+
+    /// And whether the last dial to it got through. False is the row drawn
+    /// dimmed, reading *unreachable* — it stays on the list, with everything
+    /// about it, and an Unlink on it still works.
+    pub reachable: bool,
 }

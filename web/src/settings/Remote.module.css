@@ -227,7 +227,12 @@
   border-top: 1px solid var(--edge);
 }
 
+/* The rows, one under another with air between them: a cluster is a handful of
+   machines and each row is two lines, so they run together without it. */
 .list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -270,6 +275,25 @@
   color: var(--ink-soft);
 }
 
+/* And *unreachable*, which stands in the same place on a member's row and is the
+   same kind of thing said — the last dial found nobody there. Set exactly as the
+   word above rather than as a warning: nothing has gone wrong, and a machine
+   with its lid shut is not an error to draw in red. */
+.away {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* And the row it is on, dimmed whole. What it says is that a press on this row
+   would find nobody — so the name, the mark and the addresses all go quiet
+   together, rather than the row growing a mark of its own to be read beside
+   them. Not `display: none` and nothing left out: the device is still one of
+   this cluster, and this is the row an Unlink will be pressed on. */
+.unreachable {
+  opacity: 0.55;
+}
+
 /* And every address a peer could reach it on, set the way the tailnet name
    above is: exact strings, to be read character by character and typed into
    another machine. */
@@ -280,4 +304,190 @@
   color: var(--ink-soft);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* Taking a pending request back, drawn quietly: the row is a thing that is
+   happening rather than a thing that went wrong, and Cancel on it is the same
+   weight of press as Reset key — a plain word under the line, rather than a
+   filled button competing with Add below it. */
+.take {
+  margin-top: 0.5rem;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.take:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .take:not(:disabled):hover {
+    text-decoration: underline;
+  }
+}
+
+/* The press that undoes, on every member's row and on no other. Drawn as an
+   outline rather than as a filled one, the way Remove on a Repo is and for its
+   reason: it undoes rather than does — and it sits at the end of the row,
+   where the eye is not on its way to anything.
+
+   `flex: none` and the margin above it set it to the first line of the row
+   rather than to the row's height, so a device with three addresses under its
+   name keeps its press beside the name. */
+.unlink {
+  flex: none;
+  margin-top: 0.1rem;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--removed);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.unlink:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* And under the pointer, which is the only thing it says before it is pressed:
+   the edge takes the colour the words already have. */
+@media (hover: hover) {
+  .unlink:not(:disabled):hover {
+    border-color: var(--removed);
+  }
+}
+
+/* The card an Unlink is answered with before anything happens, on the one modal
+   in the UI — the same shape the Repos pane's confirm takes, and drawn here in
+   this module because the words are this section's.
+
+   `Modal.module.css` is the card and everything around it; what is here is what
+   stands on it. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. Said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find
+   itself under it instead. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* And the box the whole section is here for, set off from the rows above it by
+   the same rule the section itself stands under: it is the one control on this
+   pane that configures rather than reads, and it reads as a form rather than as
+   another row. */
+.adding {
+  margin-top: 1.25rem;
+}
+
+.adding label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* The address and the press beside it, the shape every other typed field on
+   this page has. The address grows and the button does not: what somebody types
+   is a hostname or an IP, and neither is short on a phone. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  flex: none;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled,
+.field input:disabled {
+  cursor: not-allowed;
+}
+
+.field button:disabled {
+  opacity: 0.65;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }

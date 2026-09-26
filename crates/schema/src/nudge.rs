@@ -76,6 +76,26 @@ pub enum Nudge {
     /// Something about the Repos moved, roadmaps nothing is driving included.
     Repos,
 
+    /// The joins in flight moved: one was asked of this device, or one it was
+    /// holding was settled or ran out.
+    ///
+    /// **It says which kind of thing moved and not which request**, as every
+    /// other kind here does: the page reads the pending joins back, which is a
+    /// handful of rows. A kind that carried the request id would be a second
+    /// account of what that read already says, and a page drawing a modal out
+    /// of an event rather than out of the server.
+    Joins,
+
+    /// The cluster moved without anybody here pressing anything: a member of it
+    /// named a device this one had not heard of, and it is a member now.
+    ///
+    /// A kind of its own rather than [`Nudge::Joins`], because there is no join
+    /// on this device to have moved — the press was on some other machine, and
+    /// what arrives here is the announcement that followed it. What it names is
+    /// the Devices section of the Remote access pane, which is where a row
+    /// appears with nothing beside it to explain itself.
+    Devices,
+
     /// The Agent Profiles moved.
     ///
     /// Nothing announces this yet: a Profile is only ever saved or deleted by a

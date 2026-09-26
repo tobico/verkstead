@@ -135,6 +135,19 @@ enum Lan {
 
     /// The ones a suite says it has.
     Stated(Vec<IpAddr>),
+
+    /// Or the whole advertised list, said outright — the tailnet half included,
+    /// which is to say instead of one.
+    ///
+    /// **Because an address a device advertises may carry a port and neither
+    /// half above can.** The tailnet half is a daemon's answer and the LAN half
+    /// is an interface's address, and what a device *advertises* is places to
+    /// dial: a peer reads the list and knocks at each in turn, at the peer port
+    /// unless the entry says otherwise — see [`crate::peer::dialling`]. On a
+    /// running server nothing ever says otherwise; in a suite where two devices
+    /// really dial each other the port is the one the operating system picked,
+    /// and there is nowhere else to put it.
+    Advertised(Vec<String>),
 }
 
 impl Reading {
@@ -171,6 +184,30 @@ impl Reading {
         }
     }
 
+    /// The same again, with the whole advertised list said outright rather than
+    /// assembled out of a daemon and an interface list.
+    ///
+    /// For the suites where two devices really dial each other: what a device
+    /// is reachable at inside a test is the loopback on a port the operating
+    /// system picked, and a port is the one thing neither half of the reading
+    /// can say — see [`Lan::Advertised`]. `tailscale` is taken for the shape of
+    /// it and never asked, this being the list rather than a way of finding
+    /// one.
+    pub fn advertising(
+        tailscale: Tailscale,
+        platform: Platform,
+        kernel: Option<String>,
+        advertised: Vec<String>,
+    ) -> Reading {
+        Reading {
+            tailscale,
+            platform,
+            kernel,
+            lan: Lan::Advertised(advertised),
+            held: Arc::default(),
+        }
+    }
+
     /// What `device` answers a caller who asked who it is: the id and the
     /// fingerprint it keeps, and the three things read off the machine now.
     ///
@@ -197,11 +234,19 @@ impl Reading {
     /// machine with no Tailscale still answers with a list rather than with a
     /// failure.
     async fn addresses(&self) -> Vec<String> {
+        // Said outright, which is the whole list rather than a half of it: the
+        // daemon is not asked, there being nothing for its answer to be added
+        // to.
+        if let Lan::Advertised(advertised) = &self.lan {
+            return advertised.clone();
+        }
+
         let tailnet = self.tailnet().await;
 
         let lan = match &self.lan {
             Lan::OfThisMachine => of_this_machine(),
             Lan::Stated(stated) => stated.clone(),
+            Lan::Advertised(_) => unreachable!("answered above"),
         };
 
         addresses(tailnet, &lan)

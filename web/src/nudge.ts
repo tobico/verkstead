@@ -348,6 +348,25 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     case "repos":
       return [["repos"], ["abandoned-roadmaps"]];
 
+    // The joins in flight: one was asked of this device, or one it was holding
+    // was settled or ran out.
+    //
+    // The list the modal is drawn from, which is what raises it and what takes
+    // it down — a device asking is a request that appeared, a press on another
+    // workbench is one that is gone, and the ten minutes running out is the
+    // same. And the Devices list beside it, because an Allow has just written a
+    // member into it: the section on the Remote access pane is where the device
+    // that was let in shows up, and nothing else would say so.
+    case "joins":
+      return [["joins"], ["devices"]];
+
+    // And the cluster moving with no join here to have moved it: a member of it
+    // named a device this one had not heard of, and it is a member now. Nobody
+    // over here pressed anything, so the Devices section is the whole of what
+    // this says — there is a row in it that was not there a moment ago.
+    case "devices":
+      return [["devices"]];
+
     case "profiles":
       return [["profiles"]];
 

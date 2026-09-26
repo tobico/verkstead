@@ -19,6 +19,12 @@
 //! guessing at both. What it owns is where the card sits and every way out of
 //! it.
 //!
+//! **Except for the one card nobody opened.** A join arriving from another
+//! machine raises a modal over whatever the human was reading, and there is no
+//! way back for a press on the backdrop to be: `insist` is what turns both those
+//! ways out off, so the only ways out of that one are the two presses on it.
+//! See `Joining.tsx`, which is the whole of why the flag exists.
+//!
 //! Whether it is open is the caller's, though, rather than this component's: one
 //! modal is opened from several places — a button that adds, a row that rewrites
 //! — and which of them it was is the caller's to hold anyway. So it is told
@@ -51,6 +57,21 @@ type Sheet = {
   /// The heading inside the card that names it, by id, for the usual case where
   /// there is one.
   labelledBy?: string;
+  /// Whether this card insists on being answered: Escape and a press on the
+  /// backdrop do nothing, and the only ways out are the caller's own.
+  ///
+  /// **Off for every modal a press opened**, which is all of them but one: the
+  /// human opened it, the way back is the way out, and a card that would not
+  /// close is a card that has taken the page hostage.
+  ///
+  /// **On for the one nobody opened.** A join arrives from another machine
+  /// while somebody is reading something else — see `Joining.tsx` — and there
+  /// is no way back to close to, because there was nowhere they were going. A
+  /// press away from it would leave the question unanswered with nothing on the
+  /// page left saying it had been asked, and the human finding out ten minutes
+  /// later that the link they were setting up had quietly run out.
+  insist?: boolean;
+
   /// The card's contents, whole: whatever the caller would have drawn inline.
   children: JSX.Element;
 };
@@ -72,6 +93,7 @@ export function Modal(
         close={props.close}
         name={props.name}
         labelledBy={props.labelledBy}
+        insist={props.insist}
       >
         {props.children}
       </Drawn>
@@ -122,12 +144,19 @@ function Drawn(props: Sheet): JSX.Element {
       onClose={() => {
         if (!taken) props.close();
       }}
+      // And the one that insists is the one Escape does not reach. `cancel` is
+      // what Escape fires and it is cancelable, so refusing it is the platform's
+      // own way of saying this dialog has no way out but its contents — rather
+      // than the key being swallowed somewhere up the page.
+      onCancel={(event) => {
+        if (props.insist) event.preventDefault();
+      }}
       // The one way out `dialog` has no opinion about. A press on the backdrop
       // lands on the dialog itself, which is why the card underneath carries the
       // padding: with any of its own, a press on the card's margin would read as
       // a press away from it.
       onClick={(event) => {
-        if (event.target === dialog) dialog.close();
+        if (event.target === dialog && !props.insist) dialog.close();
       }}
     >
       <div class={styles.card}>{props.children}</div>

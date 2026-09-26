@@ -11,6 +11,7 @@ import type {
   AnswerAttached,
   AnswerAttachmentRemoved,
   ApiError,
+  AskingDevice,
   Attached,
   AttachmentRemoved,
   BacklogPane,
@@ -799,10 +800,7 @@ export function readFileStatus(id: number): Promise<FileStatusView> {
 /// out of the repository by the server rather than out of its database — the
 /// commit is in git, which is what a commit is — where the summary was kept by
 /// the sweep that recorded the commit.
-export function loadCommitPane(
-  id: number,
-  event: number,
-): Promise<CommitPane> {
+export function loadCommitPane(id: number, event: number): Promise<CommitPane> {
   return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
@@ -954,17 +952,13 @@ export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
   return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
 }
 
-
 /// Move a drafting Conversation onto another registered Repo.
 ///
 /// Which Repo is the whole of what goes out, the way an added companion is:
 /// what follows — the base back on the new repo's rule, and a companion that
 /// has just become this Conversation's own Repo going away — is the server's to
 /// do rather than this page's to ask for.
-export function switchRepo(
-  id: number,
-  repoId: number,
-): Promise<RepoSwitched> {
+export function switchRepo(id: number, repoId: number): Promise<RepoSwitched> {
   return post<RepoSwitched>(`/api/ui/conversations/${id}/repo`, {
     repo_id: repoId,
   });
@@ -1015,7 +1009,6 @@ export function removeCompanion(
     {},
   );
 }
-
 
 /// Say how far into one of them the work may reach.
 export function setCompanionMode(
@@ -1117,9 +1110,7 @@ export function closeAndArchiveConversation(
 /// Nothing is sent with it either — which Conversation it is is the whole of
 /// what the press says, and whether it is one to put away is the server's to
 /// answer.
-export function archiveConversation(
-  id: number,
-): Promise<ConversationArchived> {
+export function archiveConversation(id: number): Promise<ConversationArchived> {
   return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
 }
 
@@ -1360,6 +1351,95 @@ export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
 }
 
+/// Ask the device at an address to let this one into its cluster.
+///
+/// The one thing in that section that is pressed rather than read, which is the
+/// same departure Unlink makes beside it and Remove on a Repo made before
+/// either. A port is optional: every device answers on the peer port unless its
+/// host was told another.
+///
+/// What comes back is the section read again, the way a serve press answers —
+/// so the pending row this leaves behind arrives out of this answer rather than
+/// out of a second request. A refusal is the far end's own words for what went
+/// wrong, because what the human can do about a machine that is off and about a
+/// Verkstead that refused are two different things.
+export function addDevice(address: string): Promise<DevicesView> {
+  return post<DevicesView>("/api/ui/devices/joins", { address });
+}
+
+/// And take that request back: Cancel on a row still waiting, Dismiss on one
+/// whose ten minutes have run out.
+///
+/// One call for the two because they are one act at two moments — the human is
+/// done with a request nobody has answered — and which of them it is is a fact
+/// about the row. A second press is not a second thing happening.
+export function cancelJoin(request: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/joins/${encodeURIComponent(request)}/cancel`,
+  );
+}
+
+/// **Unlink**: take a device out of this cluster, for everybody.
+///
+/// A membership rather than a set of pairs (ADR-0020), so this is not cutting
+/// this device's own half of a link: every member drops the same device, and
+/// the device itself is told to let go of the lot of them. Which is why it is
+/// asked once before it is called — one card over the page, naming the device,
+/// as Remove on a Repo is — and why nothing about it can be taken back.
+///
+/// A member that is not answering is unlinked exactly as one that is: it simply
+/// cannot be told, and nothing waits on telling it. So what comes back is the
+/// section read again, the way the two presses above answer, rather than
+/// anything some third machine made of the press.
+export function unlinkDevice(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/members/${encodeURIComponent(device)}/unlink`,
+  );
+}
+
+/// And the other side of a join: every device asking to be let into *this*
+/// one's cluster.
+///
+/// Read by the shell every page sits inside rather than by a page, because the
+/// question belongs to no page: a join arrives while somebody is reading a
+/// Transcript, and it is theirs to answer wherever they are.
+///
+/// A request whose ten minutes have run out is not in the answer, which is what
+/// takes the modal down when nobody pressed anything: the page reads this again
+/// and the question it was holding open is not in it.
+export function loadAsking(): Promise<AskingDevice[]> {
+  return get<AskingDevice[]>("/api/ui/devices/asking");
+}
+
+/// **Allow**: let the device that asked into this one's cluster.
+///
+/// One press joins it to the whole cluster: it is recorded as a member here,
+/// dialled back with this device and every member it holds, and announced to
+/// each of those members over the link this one already has to them — so
+/// nothing is pressed anywhere else. What comes back is the list read again, so
+/// a modal that has just been answered goes out of this answer rather than out
+/// of a second request.
+///
+/// A second press is not a second thing happening: two workbenches may both be
+/// showing the modal, and the one that presses second finds the request settled
+/// and the list empty.
+export function allowJoin(request: string): Promise<AskingDevice[]> {
+  return post<AskingDevice[]>(
+    `/api/ui/devices/asking/${encodeURIComponent(request)}/allow`,
+  );
+}
+
+/// **Deny**: settle the request and record nothing.
+///
+/// The same answer and the same shrug at a second press. Nothing is remembered
+/// about the device refused — a cluster is a membership rather than a list of
+/// verdicts, and a device turned away is free to ask again.
+export function denyJoin(request: string): Promise<AskingDevice[]> {
+  return post<AskingDevice[]>(
+    `/api/ui/devices/asking/${encodeURIComponent(request)}/deny`,
+  );
+}
+
 /// Put this machine's tailnet name in front of the workbench, or take it off
 /// again.
 ///
@@ -1501,9 +1581,7 @@ export async function pushKey(): Promise<string> {
 }
 
 /// Hand this device's subscription over, so a Set arriving can reach it.
-export function subscribePush(
-  subscription: Subscription,
-): Promise<Subscribed> {
+export function subscribePush(subscription: Subscription): Promise<Subscribed> {
   return post<Subscribed>("/api/ui/push/subscribe", subscription);
 }
 

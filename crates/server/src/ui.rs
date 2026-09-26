@@ -31,8 +31,8 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
+    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, AskingDevice,
+    Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
     CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
@@ -41,14 +41,15 @@ use verkstead_render::{
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
     InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewConversation, NewJoin, NewOrder, NewPullRequestAdoption, PairingView, Parked,
+    PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -599,6 +600,42 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And the one thing in that section that is pressed rather than read:
+        // Add, against an address somebody typed. A route of its own beside the
+        // read for the serve switch's reason — it is the half of the section
+        // that changes something, and what it changes is on another machine
+        // entirely — and it answers with that read, made again.
+        //
+        // Under the devices rather than under `remote`, because what it is about
+        // is a device: the pane is where the section happens to live.
+        .route("/api/ui/devices/joins", post(add_device))
+        // And taking one of those back, which is Cancel on a pending row and
+        // Dismiss on one that has run out. One route, because they are one act
+        // seen at two moments — see [`crate::device::Devices::take_back`].
+        .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
+        // And the other side of a join: the devices asking to be let into *this*
+        // one's cluster, which is what the modal in every open workbench is
+        // drawn from. A read of its own beside the section above rather than a
+        // field of it, because the modal belongs to no page — a join has to be
+        // raised whatever the human happens to be looking at, so it is drawn in
+        // the shell every page sits inside and reads this for itself.
+        .route("/api/ui/devices/asking", get(asking))
+        // And the press that settles one, which is the whole of what this task
+        // delivers on this side. Two routes rather than one with a verdict in
+        // the body: they are two different acts — one writes a member and the
+        // other writes nothing — and a body that said which would be the same
+        // fact in a worse place.
+        .route("/api/ui/devices/asking/{request}/allow", post(allow_join))
+        .route("/api/ui/devices/asking/{request}/deny", post(deny_join))
+        // And the other press on a row, which is the one that undoes: Unlink,
+        // asked once over the page as Remove on a Repo is. Spelled the way
+        // that one is — the thing, and what is being done to it — rather than
+        // as a `DELETE` on the row, because that is how every press in this
+        // API is spelled and a second spelling would be a second convention.
+        .route(
+            "/api/ui/devices/members/{device}/unlink",
+            post(unlink_device),
+        )
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -5570,8 +5607,8 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
     }
 }
 
-/// `GET /api/ui/devices` — this device, and how many others are linked to it,
-/// which is the **Devices** section of the Remote access pane (ADR-0020).
+/// `GET /api/ui/devices` — this device and every other in its cluster, which is
+/// the **Devices** section of the Remote access pane (ADR-0020).
 ///
 /// **The same answer a peer reads, told to the browser instead.** A stranger
 /// asks the identity endpoint on the peer listener; the browser cannot, that
@@ -5595,7 +5632,218 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
         return unavailable("this server holds no device identity to answer for");
     };
 
-    let view: DevicesView = devices.listing().await;
+    listed(&devices).await
+}
+
+/// `POST /api/ui/devices/joins` — **Add**: ask the device at an address to let
+/// this one into its cluster (ADR-0020, *The join*).
+///
+/// **The one thing on the Remote access pane that is configured rather than
+/// read**, which is the departure Unlink makes beside it and Remove on a Repo
+/// made before either. Everything else on that pane is the machine read again.
+///
+/// A press rather than a save, like the serve switch above and for its reason:
+/// what it changes is not a setting on this machine but the state of another
+/// one — and what it answers with is the section read again, so the pending row
+/// it leaves behind arrives out of this answer rather than out of a second
+/// request.
+///
+/// **An address that answered nothing is not this server's failure**, so it is
+/// not said as one: a machine that is off, an address nobody is at, a Verkstead
+/// too old to have the route, a Verkstead that refused — all of them are the far
+/// end, and what the human can do about each of them is different. So the
+/// refusal carries what went wrong in the words the dial put it in, for the pane
+/// to draw under the box.
+async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if new.address.trim().is_empty() {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            ApiError::new("an address to ask at is the one thing Add takes"),
+        );
+    }
+
+    if let Err(why) = devices.add(&new.address).await {
+        tracing::info!(address = %new.address, %why, "a request to link was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/joins/{request}/cancel` — **Cancel** on a pending row,
+/// and **Dismiss** on one whose ten minutes have run out.
+///
+/// One route for the two because they are one act at two moments — see
+/// [`crate::device::Devices::take_back`], which is also where a second press
+/// being nothing new is settled. It answers with the section read again, the way
+/// the press above does.
+async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.take_back(&request).await {
+        return unavailable(&format!("the request could not be taken back: {why:#}"));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
+/// out of this cluster, for everybody (ADR-0020, *A cluster is a membership*).
+///
+/// **The second of the two departures the Remote access pane makes** from
+/// *nothing is confirmed twice, everything is read rather than configured* —
+/// Add above is the first — and it departs for the reason Remove on a Repo
+/// does: it cannot be taken back. The asking is the browser's, over the page,
+/// and by the time this is called the human has already said yes.
+///
+/// **Not a failure when the far ends cannot be reached.** The press is about
+/// this cluster rather than about a call: the device is dropped here, every
+/// member that answers is told, and the ones that do not are owed the telling
+/// — so this answers with the section read again rather than with what some
+/// third machine made of it. See [`crate::device::Devices::unlink`].
+async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.unlink(&device).await {
+        return unavailable(&format!("the device could not be unlinked: {why:#}"));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `GET /api/ui/devices/asking` — every device asking to be let into this one's
+/// cluster, which is what the confirmation modal is drawn from (ADR-0020, *The
+/// join*).
+///
+/// **Read by the shell rather than by a page.** A join arrives while somebody is
+/// reading a Transcript, and the question is theirs to answer wherever they are
+/// — so this is asked by the one thing that is drawn over every page, beside the
+/// toast layer, and the Nudge that says the joins moved is what makes it ask
+/// again.
+///
+/// A request whose ten minutes have run out is not in the answer. Which is what
+/// takes the modal down when nobody pressed anything: the page reads this again
+/// and the question it was holding open is not in it — see
+/// [`crate::peer::joining::Joins::asking`].
+async fn asking(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    are_asking(&devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/allow` — **Allow**: let the device
+/// that asked into this one's cluster.
+///
+/// **One press, and the cluster is one device bigger everywhere.** It records
+/// the asker as a member, settles the request, dials the asker back with this
+/// device and every member it holds, and announces the asker to each of those
+/// members over the link it already has to them — so nobody anywhere else is
+/// asked to press anything. See [`crate::device::Devices::allow`], which is
+/// also where a second press being nothing new is settled, and where a far end
+/// that could not be reached is a line in this machine's log rather than a
+/// press that failed.
+async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if let Err(why) = devices.allow(&request).await {
+        return unavailable(&format!("the device could not be let in: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/deny` — **Deny**: settle the request
+/// and record nothing.
+async fn deny_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.deny(&request).await {
+        return unavailable(&format!("the device could not be refused: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// What both presses answer with: the list read again, and every other open
+/// workbench told the joins moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement every press on this pane makes — what
+/// differs here is that there is a rest of them to tell: two workbenches may
+/// both be showing the modal, and the one that did not press has to see it go.
+/// Which is the same word a join arriving sends, because it is the same fact:
+/// the joins moved, and a page reads them back.
+async fn settled(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Joins);
+
+    are_asking(devices).await
+}
+
+/// The devices asking, as the modal reads them: one reading, made at the moment
+/// it is asked for.
+async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
+    let asking: Vec<AskingDevice> = match devices.asking().await {
+        Ok(asking) => asking,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices asking to link with this one could not be read: {why:#}"
+            ));
+        }
+    };
+
+    Json(asking).into_response()
+}
+
+/// What the three presses on the section answer with: the list read again, and
+/// every other open workbench told the cluster moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement [`settled`] makes beside this and the one
+/// every other way this section moves already made: a member naming a newcomer,
+/// a member saying a device is out, and a member's renewed certificate each
+/// announce [`Nudge::Devices`] as they land. A press made over here is the same
+/// list moving, so it says the same word — and without it the one press that
+/// takes a row away would be the only change a second workbench of the pressing
+/// device went on drawing the old answer for, while every other device in the
+/// cluster had it right. Re-reads in the viewer are the Nudge and nothing else;
+/// nothing polls.
+///
+/// [`Nudge::Devices`] rather than [`Nudge::Joins`] for all three, Add and Cancel
+/// included: a pending row is part of the reading the Devices section is drawn
+/// from, and the joins this device is being *asked* — which is what the other
+/// word names — have not moved.
+async fn moved(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Devices);
+
+    listed(devices).await
+}
+
+/// The Devices section as the pane reads it, which is what all of the above
+/// answer with: one reading, made at the moment it is asked for.
+async fn listed(devices: &crate::device::Devices) -> HttpResponse {
+    let view: DevicesView = match devices.listing().await {
+        Ok(view) => view,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices this one is linked to could not be read: {why:#}"
+            ));
+        }
+    };
 
     Json(view).into_response()
 }

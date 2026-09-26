@@ -24,6 +24,7 @@ mod browsing;
 mod conversations;
 mod device;
 mod files;
+mod joining;
 mod onboarding;
 mod profiles;
 mod push;
@@ -64,12 +65,13 @@ pub use conversations::{
     resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event, stage_list_reached,
     steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
 };
-pub use device::{DeviceIdentity, DevicesView};
+pub use device::{DeviceIdentity, DevicesView, LinkedDevice, RenewedCertificate};
 pub use files::{
     FileDeleted, FileDeleting, FileList, FileListsView, FileMade, FileMaking, FileMark,
     FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView, FileStatus, FileStatusView,
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
+pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,

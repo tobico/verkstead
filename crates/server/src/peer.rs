@@ -40,12 +40,16 @@
 //! the join post, which comes from a non-member by definition and whose
 //! certificate is pinned into the pending request it creates; and the dial-back
 //! answering a join, matched against the certificate that pending request is
-//! holding. The last two are the next stage's, so the list has one entry today
-//! and [`gate`] stands over everything else — and with nothing in [`Members`]
-//! yet, refused is what everything else is. The refusal says that much: a
-//! caller this device holds no membership for, rather than a path that is not
-//! there. A device posting a join has to be able to tell a Verkstead that will
-//! not have it from one too old to have the route at all.
+//! holding. The first two are [`joining`]'s — the post and the cancel that takes
+//! a question back, both matched against that same pinned certificate — and the
+//! third is [`exchange`]'s, answered by the device that *asked* rather than by
+//! the one that was. That list is closed: everything the stages after this one
+//! put on this listener is a member's own call. [`gate`] stands over
+//! everything else — asking [`Members`] of every caller,
+//! which is rows now rather than a number nobody wrote. The refusal says what
+//! it is: a caller this device holds no membership for, rather than a path that
+//! is not there. A device posting a join has to be able to tell a Verkstead that
+//! will not have it from one too old to have the route at all.
 //!
 //! **The accept loop never waits on a handshake, and no handshake waits for
 //! ever.** Each connection's is run in a task of its own and the completed ones
@@ -63,6 +67,19 @@
 //! workbench traffic — sockets for the Screen and the file watcher included —
 //! and a WebSocket over HTTP/2 is a different mechanism on both sides for
 //! nothing gained here.
+//!
+//! **And the outbound half is [`dialling`]**, which is how this device reaches
+//! one of these rather than answers on one. Everything above is what a caller
+//! meets; that is what this end *is* when it is the caller — the certificate
+//! presented, the far end's checked against the fingerprint a member row holds,
+//! and every address that row carries tried in the order it was advertised.
+
+pub mod announcing;
+pub mod dialling;
+pub mod exchange;
+pub mod joining;
+pub mod renewing;
+pub mod unlinking;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -76,7 +93,7 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{delete, get, post};
 use axum::serve::IncomingStream;
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -85,16 +102,19 @@ use rustls::{
 };
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
+use sqlx::SqlitePool;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
-use verkstead_render::DeviceIdentity;
+use verkstead_render::{DeviceIdentity, LinkedDevice};
+use verkstead_store::Member;
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
 use crate::device::Device;
 use crate::device::reading::Reading;
+use joining::Joins;
 
 /// The port a device is dialled on when nobody has said otherwise, and the
 /// whole of what an operator has to open on a firewall for linking to work.
@@ -251,11 +271,18 @@ impl Listener {
 /// Everything this listener answers: the un-gated surface, with everything
 /// else behind [`gate`].
 ///
-/// One route stands outside it for now — the identity endpoint, which is
-/// nobody's, which is why a device nothing has heard of can read it. The join
-/// and the dial-back that answers one come out here beside it when there is a
-/// pending join for either to be matched against; a member's relayed traffic
-/// goes the other way, inside [`members_only`] with the gate over it.
+/// Three routes stand outside it, and they are the whole of the un-gated
+/// surface. The identity endpoint, which is nobody's, which is why a device
+/// nothing has heard of can read it; the join post, which comes from a device
+/// this one holds no membership for, that being what a join is — and the cancel
+/// beside it, which is that same post's own request taken back under the same
+/// pinned certificate rather than a surface of its own (see [`joining`]); and
+/// the dial back that answers one, which arrives before this device has
+/// recorded anybody and is matched against the request it is answering — see
+/// [`exchange`]. Nothing grows that list afterwards: a member's relayed traffic
+/// goes the other way, inside [`members_only`] with the gate over it, and so
+/// does every call the stages after this one add — the first of which is the
+/// announcement in [`announcing`], where a member names a newcomer to this one.
 ///
 /// **What is not a route is refused rather than missed**, because the gate is
 /// the fallback: a path nothing here answers is one this caller has no
@@ -263,11 +290,96 @@ impl Listener {
 /// endpoints existed would be telling a stranger what to reach for. That is
 /// the Workbench Key's own arrangement, where a path under `/api/` that no
 /// route answers is refused at the gate rather than missed at the fallback.
-pub fn router(device: Device, reading: Reading, members: Members) -> Router {
+/// And `nudges` is the stream this device's open workbenches are listening on,
+/// which is the one thing this listener shares with the other one: a join
+/// arriving here raises a modal over there, so the handle is made once at the
+/// start and given to both — see [`crate::nudge`].
+pub fn router(
+    device: Device,
+    reading: Reading,
+    members: Members,
+    joins: Joins,
+    nudges: crate::nudge::Nudges,
+) -> Router {
+    // This device's cluster as something to *do* things to, which two of the
+    // routes below need for one thing apiece: a device written into this
+    // membership by somebody else's call has acknowledged nothing, so where a
+    // changeover is in flight it is one more member holding it up and this end
+    // is the only end that can tell it — see
+    // [`crate::device::Devices::announcing_renewal`].
+    //
+    // Built here out of the four handles this router already has rather than
+    // passed in, because there is nothing to choose: it is the same four,
+    // assembled the same way the start assembles them for the workbench.
+    let devices = crate::device::Devices::of(
+        device.clone(),
+        reading.clone(),
+        members.clone(),
+        joins.clone(),
+    );
+
     Router::new()
         .route(IDENTITY, get(identity))
-        .with_state(Answering { device, reading })
-        .fallback_service(members_only(members))
+        .with_state(Answering {
+            device: device.clone(),
+            reading: reading.clone(),
+        })
+        .merge(
+            Router::new()
+                .route(joining::JOIN, post(joining::join))
+                .route(joining::CANCEL, post(joining::cancel))
+                .with_state(joining::Holding {
+                    device: device.clone(),
+                    reading,
+                    joins: joins.clone(),
+                    nudges: nudges.clone(),
+
+                    // How a question that nobody answered tells the device that
+                    // asked it — see [`joining::asked`], which is the one place
+                    // a join ends with nobody standing in front of it.
+                    peers: dialling::Peers::of(device.clone(), members.clone()),
+                }),
+        )
+        .merge(
+            Router::new()
+                .route(exchange::SETTLED, post(exchange::settled))
+                .with_state(exchange::Settling {
+                    device: device.clone(),
+                    members: members.clone(),
+                    joins,
+                    nudges: nudges.clone(),
+                    devices: devices.clone(),
+                }),
+        )
+        .fallback_service(members_only(
+            Router::new()
+                .route(announcing::MEMBERS, post(announcing::announced))
+                .with_state(announcing::Told {
+                    device: device.clone(),
+                    members: members.clone(),
+                    nudges: nudges.clone(),
+                    devices,
+                })
+                .merge(
+                    Router::new()
+                        .route(unlinking::MEMBER, delete(unlinking::dropped))
+                        .with_state(unlinking::Dropping {
+                            device: device.clone(),
+                            members: members.clone(),
+                            nudges: nudges.clone(),
+                        }),
+                )
+                .merge(
+                    Router::new()
+                        .route(renewing::CERTIFICATE, post(renewing::renewed))
+                        .with_state(renewing::Renewing {
+                            device,
+                            members: members.clone(),
+                            nudges,
+                        }),
+                ),
+            members,
+        ))
 }
 
 /// What the identity endpoint answers out of: what this device *is*, and the
@@ -284,57 +396,93 @@ struct Answering {
     reading: Reading,
 }
 
-/// Everything a membership admits, which today is nothing at all.
+/// Everything a membership admits, with the gate over the lot of it.
 ///
-/// The routes go in here as the stages that need them arrive, and the gate over
-/// them is one layer rather than a check inside each: a route added without its
-/// check is the kind of mistake that reads as working code, and there is no
-/// spelling of this router that has a route outside the gate.
-fn members_only(members: Members) -> Router {
-    Router::new().layer(axum::middleware::from_fn_with_state(members, gate))
+/// `routes` rather than a router built in here, because the gate is one layer
+/// over everything a member may reach and axum applies a layer to the routes
+/// added *before* it: a member-only route added after the fact would be a route
+/// outside the gate, and a route added without its check is the kind of mistake
+/// that reads as working code. So there is one call, and everything that goes
+/// through it is gated.
+///
+/// Three routes on this listener, and they are one membership said three ways:
+/// the announcement in [`announcing`], which puts a device on this one's list,
+/// the unlink in [`unlinking`], which takes one off it, and the renewal in
+/// [`renewing`], which changes the certificate one of them stands under. It is
+/// public all the same, because
+/// the suite stands its own one-line route behind the real gate: what is being
+/// asked of the gate is which callers get *through* it, and the path no route
+/// answers is what tells a refusal from a miss.
+pub fn members_only(routes: Router, members: Members) -> Router {
+    routes.layer(axum::middleware::from_fn_with_state(members, gate))
 }
 
-/// The devices this one has linked to, as the two things that ask after them
-/// do: the gate over every route here, and the changeover a re-issued
-/// certificate is in the middle of.
+/// The devices this one is linked to, as the things that ask after them do: the
+/// gate over every route a membership admits, the changeover a re-issued
+/// certificate is in the middle of, the Devices section of the Remote access
+/// pane — and a dial, which is the one of them that writes, recording what it
+/// found of a member at the far end of one.
 ///
-/// **Empty, and read from nowhere.** A member is made by a join, and the join
-/// is the next stage's — so what this holds is not a store that happens to
-/// have nothing in it yet, it is the two questions that have to be askable,
-/// with the only answers this stage can honestly give: no, this caller is not
-/// one of them, and no, there is nobody owed an announcement.
+/// **Rows, read at the moment each question is asked.** A join writes one and
+/// an unlink takes one away — see [`verkstead_store::Member`] — and nothing
+/// here holds a copy between two questions: a membership that was cached would
+/// be a device that went on being admitted after the human unlinked it, which
+/// is the one thing an unlink has to mean.
+///
+/// A handle over the store rather than the pool itself, so that each caller
+/// asks a membership its own question rather than writing its own query — and
+/// so that a suite can state one.
 #[derive(Debug, Clone)]
 pub struct Members {
-    /// How many there are, which is the whole of what a membership can be said
-    /// in until there is a join to record one properly.
-    ///
-    /// Nought in every Verkstead this build can make. A number rather than a
-    /// list because the two questions a number can answer are the two that are
-    /// asked — how many are there, and how many are owed an announcement — and
-    /// the one it cannot is the one whose answer is no either way: a stated
-    /// membership holds no fingerprint, so [`Members::holds`] is false for
-    /// every caller, which is what this build would say in any case.
-    linked: usize,
+    recorded: Recorded,
 }
 
-impl Members {
-    /// None of them, which is the membership of every Verkstead this build can
-    /// make.
-    pub fn none() -> Members {
-        Members { linked: 0 }
-    }
+/// Where a membership's answers come from.
+#[derive(Debug, Clone)]
+enum Recorded {
+    /// The rows this Verkstead keeps, read afresh at every question. Which is
+    /// every running server.
+    InTheStore(SqlitePool),
 
-    /// And the membership a fixture states: `linked` devices, none of which
-    /// has acknowledged anything.
+    /// And the membership a fixture states: this many devices, none of which
+    /// this end holds a certificate for.
     ///
     /// Here for the reason [`Device::stated`] is. What a changeover does
     /// depends on whether anybody is owed an announcement of the new
-    /// fingerprint, and a suite that could only ever ask a membership of
-    /// nobody could only ever see one of the two answers — so the half of the
-    /// changeover that keeps presenting the outgoing certificate would be a
-    /// claim nothing stood behind.
+    /// fingerprint, and a suite about the renewal stands on nothing but that —
+    /// so it says how many there are rather than standing a store up to hold
+    /// them. Nothing is admitted by one: a stated membership holds no
+    /// fingerprint, so [`Members::holds`] is false for every caller, and a test
+    /// that wants a caller through the gate records a real row.
+    Stated(usize),
+}
+
+impl Members {
+    /// None of them, which is what a Verkstead that has never been linked to
+    /// anything has.
+    pub fn none() -> Members {
+        Members {
+            recorded: Recorded::Stated(0),
+        }
+    }
+
+    /// And the membership a fixture states: `linked` devices, none of which has
+    /// acknowledged anything — see [`Recorded::Stated`].
     pub fn stated(linked: usize) -> Members {
-        Members { linked }
+        Members {
+            recorded: Recorded::Stated(linked),
+        }
+    }
+
+    /// The membership this Verkstead really keeps: the rows in `pool`.
+    ///
+    /// Built at the start, after the database is open and before the identity
+    /// is read — the identity consults it, which is why the two are in that
+    /// order. See `run_on_keyed`.
+    pub fn recorded(pool: SqlitePool) -> Members {
+        Members {
+            recorded: Recorded::InTheStore(pool),
+        }
     }
 
     /// Whether the device whose certificate has this fingerprint is one of
@@ -345,36 +493,333 @@ impl Members {
     /// listener is the certificate it presented at the handshake, and the
     /// fingerprint is that certificate said in the spelling both ends of a
     /// link compare — see [`Device::fingerprint`].
-    fn holds(&self, _fingerprint: &str) -> bool {
-        false
+    ///
+    /// **A membership that cannot be read admits nobody.** This is the gate's
+    /// own question, and the two ways of not knowing the answer are not the
+    /// same: refusing a member while the database is unreachable costs a call
+    /// that is retried, and admitting a stranger because the read failed costs
+    /// the whole of what the gate is for. So a failure is said in the log and
+    /// answered no.
+    async fn holds(&self, fingerprint: &str) -> bool {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                match verkstead_store::member_holding(pool, fingerprint).await {
+                    Ok(held) => held,
+                    Err(what) => {
+                        tracing::error!(
+                            %what,
+                            "this device's membership could not be read, so the caller \
+                             presenting a certificate is refused rather than admitted",
+                        );
+
+                        false
+                    }
+                }
+            }
+
+            // A stated membership holds no certificate, so it admits nobody.
+            Recorded::Stated(_) => false,
+        }
     }
 
     /// How many of them have yet to acknowledge `fingerprint`, which is the
     /// question a changeover asks — see [`crate::device::Changeover`].
     ///
-    /// **All of them, whatever the fingerprint is.** An acknowledgement is a
-    /// member answering an announcement, the announcement is the linking
-    /// stage's, and neither has anywhere to be recorded yet — so a member here
-    /// has acknowledged nothing and every one of them is owed. Which comes to
-    /// nought, there being no member; and nought is the answer that completes
-    /// a changeover at the start that began it.
+    /// Nought is what completes a changeover at the start that began it, which
+    /// is what a Verkstead that has never been linked to anything does: a
+    /// membership with nobody in it owes nothing to anybody.
     ///
-    /// What the stage after this fills in is the acknowledgement: this becomes
-    /// the members whose recorded fingerprint is not the one being changed to,
-    /// and the announcement is what takes them off that list one at a time.
-    pub(crate) fn unacknowledged(&self, _fingerprint: &str) -> usize {
-        self.linked
+    /// The length of the list below rather than a count of its own, because two
+    /// readings of one table would be two answers to *is the changeover over* —
+    /// and the thing that acts on this reads the list.
+    pub(crate) async fn unacknowledged(&self, fingerprint: &str) -> Result<usize> {
+        match &self.recorded {
+            // A stated membership holds no rows to acknowledge anything, so
+            // every one of them is owed — which is what the suite about the
+            // changeover stands on, and what was true of every member before
+            // there was anywhere to record an acknowledgement.
+            Recorded::Stated(linked) => Ok(*linked),
+
+            Recorded::InTheStore(_) => Ok(self.yet_to_acknowledge(fingerprint).await?.len()),
+        }
     }
 
-    /// And how many of them there are, which is the clause the Remote access
-    /// card carries beside what Tailscale is doing — see
-    /// [`crate::device::Devices`], which is the workbench's side of this.
+    /// And which of them they are, which is who the announcement of a renewed
+    /// certificate is made to — see
+    /// [`verkstead_store::members_yet_to_acknowledge`].
     ///
-    /// Nought, for the reason [`Members::holds`] is false: there is no join to
-    /// make a member with, so nought is what there is to count rather than
-    /// what nobody looked for.
-    pub(crate) fn count(&self) -> usize {
-        self.linked
+    /// A member that has acknowledged nothing is on this list, which is both a
+    /// changeover that has just begun and a device that joined in the middle of
+    /// one: what is recorded is what a member *has* said it holds, so a row
+    /// nobody has written an acknowledgement on is owed the telling rather than
+    /// quietly taken for told.
+    pub(crate) async fn yet_to_acknowledge(&self, fingerprint: &str) -> Result<Vec<Member>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                verkstead_store::members_yet_to_acknowledge(pool, fingerprint)
+                    .await
+                    .context("reading which members are owed an announcement of a certificate")
+            }
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Write down that a member has made its certificate again — see
+    /// [`verkstead_store::record_renewal`], which keeps the one it is still
+    /// presenting beside the one it is changing to.
+    ///
+    /// `false` is a renewal about a device this membership does not hold, which
+    /// is an unlink that arrived between the gate and this write rather than
+    /// anything to fail.
+    ///
+    /// A stated membership has no rows to renew. It is a number, and a suite
+    /// standing on one is asking about a changeover rather than about a member.
+    pub(crate) async fn renewing(&self, renewal: &verkstead_store::Renewal) -> Result<bool> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::record_renewal(pool, renewal)
+                .await
+                .with_context(|| {
+                    format!(
+                        "recording the certificate device {} is changing over to",
+                        renewal.device,
+                    )
+                }),
+
+            Recorded::Stated(_) => Ok(false),
+        }
+    }
+
+    /// And write down that a member has said it holds *this* device's new
+    /// certificate — see [`verkstead_store::renewal_acknowledged`].
+    ///
+    /// Which is what takes it off the list above, and so what a changeover is
+    /// worked off one member at a time by. The answer to the announcement is the
+    /// acknowledgement: nothing else says that a member holds a certificate.
+    pub(crate) async fn acknowledged(&self, device: &str, fingerprint: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                verkstead_store::renewal_acknowledged(pool, device, fingerprint)
+                    .await
+                    .with_context(|| {
+                        format!("recording that device {device} holds this device's certificate")
+                    })
+            }
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And let go of the certificate a member was changing over *from*, which is
+    /// what meeting the new one says is safe — see
+    /// [`verkstead_store::changeover_over`].
+    pub(crate) async fn changed_over(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::changeover_over(pool, device)
+                .await
+                .with_context(|| {
+                    format!("letting go of what device {device} was changing over from")
+                }),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And every one of them as it answers for itself, which is what the
+    /// Devices section of the Remote access pane draws a row from — see
+    /// [`crate::device::Devices`].
+    ///
+    /// The same shape a device answers a stranger with on [`IDENTITY`],
+    /// because it is the same thing said: what was read off the far end's
+    /// machine at the last exchange, kept because this end cannot read another
+    /// machine's hostname for itself.
+    ///
+    /// A stated membership draws nothing. It is a number and not a set of
+    /// devices, and a row invented to make the count come out would be a row
+    /// naming a machine that does not exist.
+    pub(crate) async fn listed(&self) -> Result<Vec<LinkedDevice>> {
+        Ok(self
+            .rows()
+            .await?
+            .into_iter()
+            .map(|member| LinkedDevice {
+                reachable: member.reachable,
+                identity: DeviceIdentity {
+                    device: member.device,
+                    fingerprint: member.fingerprint,
+                    name: member.name,
+                    os: member.os,
+                    addresses: member.addresses,
+                },
+            })
+            .collect())
+    }
+
+    /// Every member as the table holds one: the identity above, and the two
+    /// things that are this device's own findings rather than the far end's —
+    /// when it was last heard from, and whether the last dial got through.
+    ///
+    /// What [`Members::listed`] is drawn from, and what a dial is handed one of:
+    /// the addresses and the fingerprint are the whole of how a member is
+    /// reached — the list in the order it was advertised, and the certificate
+    /// the far end has to turn out to be presenting. See
+    /// [`dialling::Peers::identity`].
+    pub(crate) async fn rows(&self) -> Result<Vec<Member>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::members(pool)
+                .await
+                .context("reading the devices this one is linked to"),
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Write down what a member said about itself at an exchange that has just
+    /// got through — see [`verkstead_store::record_member`], which is where the
+    /// moment and the un-dimming come from.
+    ///
+    /// One of the two things here that write, the mark below being the other. A
+    /// membership is read at every question so that an unlink means something,
+    /// and this is the other half of that: a row is what a dial found rather
+    /// than what a start remembered, so a device that moved or was renamed is
+    /// right again on the next call to it.
+    ///
+    /// A stated membership has no rows to write, so nothing is written. It is a
+    /// number, and a suite standing on one is asking about a changeover rather
+    /// than about a member.
+    pub(crate) async fn refreshed(&self, linking: &verkstead_store::Linking) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::record_member(pool, linking)
+                .await
+                .with_context(|| format!("recording what device {} says it is", linking.device)),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And mark one as answering nothing, which is what a dial that reached none
+    /// of its addresses does — see [`verkstead_store::member_unreachable`].
+    ///
+    /// Nothing else about the row moves: it stays on the list, dimmed, with its
+    /// addresses and its fingerprint exactly as they were, and the next dial
+    /// that gets through puts it back.
+    pub(crate) async fn unreachable(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_unreachable(pool, device)
+                .await
+                .with_context(|| format!("marking device {device} as answering nothing")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// Write down that `device` has yet to be told about `about` — see
+    /// [`verkstead_store::owe_announcement`].
+    ///
+    /// **What an announcement that reached nobody leaves behind.** The thing
+    /// being announced happened whatever some third machine made of it — a
+    /// human pressed Allow, and the newcomer is a member here — so a member
+    /// that was off is owed the telling rather than the join being undone. What
+    /// pays it is the next thing that finds that member answering — see
+    /// [`crate::device::Devices::caught_up`], which is run against every member
+    /// a dial gets through to and says everything that member missed.
+    ///
+    /// A stated membership has no rows and no debts. It is a number, and a
+    /// suite standing on one is asking about a changeover rather than about a
+    /// member.
+    pub(crate) async fn owed(
+        &self,
+        device: &str,
+        about: &str,
+        telling: verkstead_store::Telling,
+    ) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => {
+                verkstead_store::owe_announcement(pool, device, about, telling)
+                    .await
+                    .with_context(|| {
+                        format!("writing down that device {device} has not heard about {about}")
+                    })
+            }
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And everything `device` has yet to be told, which is what a dial that
+    /// got through to it asks — see
+    /// [`verkstead_store::announcements_owed_to`].
+    ///
+    /// **The trigger rather than a loop.** Nothing here retries on a timer: a
+    /// member that was off is caught up the moment something finds it
+    /// answering, and something dials a member whenever the cluster does
+    /// anything at all.
+    pub(crate) async fn owing(
+        &self,
+        device: &str,
+    ) -> Result<Vec<(String, verkstead_store::Telling)>> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::announcements_owed_to(pool, device)
+                .await
+                .with_context(|| format!("reading what device {device} has yet to be told")),
+
+            Recorded::Stated(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// Take a device out of the membership — see
+    /// [`verkstead_store::forget_member`], which takes its addresses and its
+    /// debts with it.
+    ///
+    /// **What an Unlink does here, and what being told about one does.** The
+    /// two are the same act arriving from two directions: the human pressed it
+    /// on this workbench, or a member this device holds a link to says the
+    /// cluster has dropped that device. A membership is not a set of pairs, so
+    /// there is one answer to both.
+    ///
+    /// Nothing is refused, the stance the store takes: unlinking a device that
+    /// is not a member is not a thing to fail.
+    pub(crate) async fn forget(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::forget_member(pool, device)
+                .await
+                .with_context(|| format!("forgetting device {device}")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And forget the lot of them, which is what this device does when a member
+    /// tells it that it has been unlinked — see
+    /// [`verkstead_store::forget_every_member`].
+    ///
+    /// The leaver's own half. Every other device in the cluster has dropped
+    /// this one, so every one of them would refuse it at the gate; what is left
+    /// here is a list of machines that no longer hold this device, and holding
+    /// it would be a Devices section that lied.
+    pub(crate) async fn forget_everybody(&self) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::forget_every_member(pool)
+                .await
+                .context("forgetting every device this one was linked to"),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And take that away, which is what an announcement that got through does
+    /// — see [`verkstead_store::announcement_made`].
+    ///
+    /// Made whether or not anything was owed, the ordinary case being an
+    /// announcement that got through the first time and was never written down.
+    pub(crate) async fn told(&self, device: &str, about: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::announcement_made(pool, device, about)
+                .await
+                .with_context(|| format!("clearing what device {device} was owed about {about}")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
     }
 }
 
@@ -391,7 +836,7 @@ async fn gate(
     next: Next,
 ) -> Response {
     match caller.fingerprint() {
-        Some(fingerprint) if members.holds(&fingerprint) => next.run(request).await,
+        Some(fingerprint) if members.holds(&fingerprint).await => next.run(request).await,
         _ => refused(),
     }
 }

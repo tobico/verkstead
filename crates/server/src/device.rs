@@ -48,31 +48,45 @@
 //! The fresh one waits beside the one being presented until every member has
 //! acknowledged its fingerprint, so a re-issue never costs a call; with no
 //! member to acknowledge anything the changeover completes at the start that
-//! began it, and says it had nobody to tell. Telling them is the linking
-//! stage's, there being no member to tell yet.
+//! began it, and says it had nobody to tell. How many are owed is read off the
+//! members this device keeps — see [`Members`] — and the telling that works that
+//! list off one member at a time is [`Devices::announce_renewal`], made
+//! presenting the outgoing certificate because that is the only one any member
+//! holds. The last acknowledgement finishes the changeover, by the same two
+//! writes the start that had nobody to tell makes — see
+//! [`Device::changed_over`]. A member that was switched off is owed the telling
+//! on the record a newcomer and an unlink are owed on, and is told by the next
+//! dial that gets through to it — see [`Devices::caught_up`].
 //!
 //! **And [`Devices`] is what the human's own browser reads of all this**: this
-//! device and how many others are linked to it, which is the Devices section of
-//! the Remote access pane. The same answer a stranger reads off the peer
-//! listener's identity endpoint, told to the browser instead — that listener
-//! presents a certificate nothing but another Verkstead has a reason to trust,
-//! so the workbench is where the pane asks.
+//! device and every other device in its cluster, a row apiece, which is the
+//! Devices section of the Remote access pane. This device's own row is the same
+//! answer a stranger reads off the peer listener's identity endpoint, told to
+//! the browser instead — that listener presents a certificate nothing but
+//! another Verkstead has a reason to trust, so the workbench is where the pane
+//! asks.
 
 pub mod reading;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
-use verkstead_render::DevicesView;
+use time::format_description::well_known::Rfc3339;
+use verkstead_render::{
+    AskingDevice, DeviceIdentity, DevicesView, JoinSettled, RenewedCertificate,
+};
+use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
 use crate::peer::Members;
+use crate::peer::dialling::Peers;
+use crate::peer::joining::Joins;
 use crate::settings::write_atomically;
 
 /// What the id's file is called inside the Data Directory, and what the
@@ -156,10 +170,9 @@ pub const RENEW_WITHIN: time::Duration = time::Duration::days(30);
 /// What a start did about the expiry: whether a re-issue was due, and whether
 /// anybody is owed an announcement of the certificate it made (ADR-0020).
 ///
-/// Read off the handle rather than logged and forgotten, because it is where
-/// the linking stage picks the announcement up: a changeover still owed one is
-/// a changeover with a member to tell, and telling them is the whole of what
-/// that stage adds to what is here.
+/// Read off the handle rather than logged and forgotten, because it is where the
+/// announcement is picked up: a changeover still owed one is a changeover with a
+/// member to tell, and [`Devices::announce_renewal`] is what tells them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Changeover {
     /// Nothing was due: the certificate has more than [`RENEW_WITHIN`] left, so
@@ -171,8 +184,8 @@ pub enum Changeover {
     /// moment on: nobody was owed an announcement of its fingerprint, so the
     /// changeover completed at the start that began it.
     ///
-    /// Which is every re-issue this build can make. A member is made by a join
-    /// and there is no join yet — see [`Members`] — so the answer to *is
+    /// Which is every re-issue on a Verkstead that has never been linked to
+    /// anything: with no member recorded — see [`Members`] — the answer to *is
     /// anything still owed an announcement* is no, and saying so is the whole
     /// of what a changeover here has to do about it.
     NobodyToTell,
@@ -276,7 +289,7 @@ impl Device {
     /// **And the expiry is seen to here**, which is the one thing a start does
     /// *to* an identity it found rather than with it — see [`Device::renewed`],
     /// which is where `members` is asked its one question.
-    pub fn issued(data_dir: &Path, members: &Members) -> std::io::Result<Device> {
+    pub async fn issued(data_dir: &Path, members: &Members) -> std::io::Result<Device> {
         let id_path = data_dir.join(ID_FILE);
         let certificate_path = data_dir.join(CERTIFICATE_FILE);
 
@@ -314,7 +327,9 @@ impl Device {
             }
         };
 
-        Device::holding(data_dir, id, certificate)?.renewed(members)
+        Device::holding(data_dir, id, certificate)?
+            .renewed(members)
+            .await
     }
 
     /// The identity a fixture states, so that what a suite asserts against is
@@ -398,10 +413,11 @@ impl Device {
     /// changeover that completes here and now; anybody owed one is a
     /// changeover in flight, the old certificate still going out and the new
     /// one waiting in [`INCOMING_FILE`] for the start after this. That is the
-    /// whole of the bookkeeping. Telling them is the linking stage's, and
-    /// there is no member to tell yet — so what this answers is *nobody*, and
-    /// [`Changeover::NobodyToTell`] is it saying so.
-    fn renewed(self, members: &Members) -> std::io::Result<Device> {
+    /// whole of the bookkeeping. Telling them is still to come, so what a
+    /// member is owed is never worked off and every member there is is owed —
+    /// which on a Verkstead that has never been linked to anything is nobody,
+    /// and [`Changeover::NobodyToTell`] is it saying so.
+    async fn renewed(self, members: &Members) -> std::io::Result<Device> {
         // A changeover an earlier start began, where there is one. The
         // certificate it made is read back rather than a third one minted:
         // every restart during a changeover would otherwise be another
@@ -434,17 +450,17 @@ impl Device {
             return Ok(self);
         };
 
-        match members.unacknowledged(&incoming.fingerprint) {
+        match members
+            .unacknowledged(&incoming.fingerprint)
+            .await
+            .map_err(|why| std::io::Error::other(format!("{why:#}")))?
+        {
             // Nobody is owed an announcement, so the changeover completes at
-            // once: the new certificate becomes the presented one and the file
-            // it was waiting in goes. In that order, so that a machine losing
-            // power between the two leaves a start holding two copies of one
-            // certificate rather than none — which is a changeover that
-            // completes again and comes out where this one did.
+            // once — by the same two writes the last acknowledgement makes, this
+            // being one path rather than two things that have to stay in step:
+            // see [`Device::changed_over`].
             0 => {
-                write_atomically(&self.certificate_path(), &incoming.certificate, DEVICE_MODE)?;
-
-                taken_away(&self.incoming_path())?;
+                self.changed_over(&incoming)?;
 
                 Ok(Device {
                     presenting: incoming,
@@ -469,6 +485,51 @@ impl Device {
                     ..self
                 })
             }
+        }
+    }
+
+    /// The changeover finished, on disk: the certificate that was waiting becomes
+    /// the one this Data Directory holds, and the file it was waiting in goes.
+    ///
+    /// **In that order**, so that a machine losing power between the two leaves a
+    /// start holding two copies of one certificate rather than none — which is a
+    /// changeover that completes again and comes out where this one did. Taking
+    /// the file away counts one that is already gone as taken away, for the same
+    /// reason.
+    ///
+    /// **Two callers and one path.** A re-issue with nobody to tell finishes at
+    /// the start that began it — see [`Device::renewed`] — and one with members
+    /// finishes at the last acknowledgement, in
+    /// [`Devices::changeover_settled`]. They are the same two writes, so they are
+    /// the same function: a second copy of them beside this one would be two
+    /// changeovers that ended in subtly different states.
+    ///
+    /// **What it does *not* do is change what this process presents.** The
+    /// certificate a running listener stands behind was built into its TLS
+    /// configuration at the start, and the handle every dial is made with is a
+    /// clone of this one — so a changeover that completes under a running server
+    /// goes on presenting the outgoing certificate until the next start, which is
+    /// where this file is read. That costs nothing: every member holds both by
+    /// then, having acknowledged the new one and kept the old beside it precisely
+    /// against this — see [`verkstead_store::Member::renewing_from`] — and it is
+    /// what keeps a completing changeover from having to rebuild a listener and a
+    /// client under live traffic.
+    fn changed_over(&self, incoming: &Held) -> std::io::Result<()> {
+        write_atomically(&self.certificate_path(), &incoming.certificate, DEVICE_MODE)?;
+
+        taken_away(&self.incoming_path())
+    }
+
+    /// The same, for the changeover that finishes while this process is running:
+    /// the last member has acknowledged, so the certificate waiting in
+    /// [`INCOMING_FILE`] is the one this Data Directory holds from now on.
+    ///
+    /// Nothing at all where no changeover is in flight, which is a caller that
+    /// counted nobody owed on a device that never re-issued anything.
+    pub(crate) fn changeover_complete(&self) -> std::io::Result<()> {
+        match &self.incoming {
+            Some(incoming) => self.changed_over(incoming),
+            None => Ok(()),
         }
     }
 
@@ -548,7 +609,7 @@ impl Device {
 }
 
 /// What the **Devices** section of the Remote access pane reads: this device,
-/// and how many others are linked to it (ADR-0020).
+/// and every other device in its cluster (ADR-0020).
 ///
 /// **The browser's side of the identity endpoint.** A peer reads what this
 /// device is off [`crate::peer::IDENTITY`], over TLS on a port of its own; the
@@ -573,23 +634,61 @@ pub struct Devices {
     /// see [`reading::Reading`].
     reading: reading::Reading,
 
-    /// And who it is linked to, which is what the count on the card comes off.
-    /// Nobody, in every Verkstead this build can make: a member is made by a
-    /// join, and the join is the next stage's — see [`crate::peer::Members`].
+    /// And who it is linked to, which is a row apiece on the list and the count
+    /// on the card — the count coming off the rows rather than being answered
+    /// beside them, there being one membership and one answer about it. Rows in
+    /// the store, read at the moment the pane asks — see [`crate::peer::Members`].
     members: Members,
+
+    /// And who it has *asked* to be linked to and not yet been answered by,
+    /// which is a row apiece under those — see [`crate::peer::joining::Joins`].
+    joins: Joins,
+
+    /// And how it reaches another device, which is what the one press in this
+    /// section goes out over: Add dials the address somebody typed and posts a
+    /// join, and Cancel dials the same address and takes it back.
+    ///
+    /// Built here out of the two handles above rather than passed in, because
+    /// there is nothing to choose: what a dial presents is this device's own
+    /// certificate and what it writes into is this device's own membership, and
+    /// both are already in hand.
+    peers: Peers,
 }
 
 impl Devices {
-    /// The list a server answers out of: what it is, the machine it is on, and
-    /// its membership.
+    /// The list a server answers out of: what it is, the machine it is on, its
+    /// membership, and the joins it is waiting on.
     ///
-    /// The same three the peer listener is built from, because they are the
-    /// same three things — what is different is who is asking.
-    pub fn of(device: Device, reading: reading::Reading, members: Members) -> Devices {
+    /// The same four the peer listener is built from, because they are the same
+    /// four things — what is different is who is asking.
+    pub fn of(
+        device: Device,
+        reading: reading::Reading,
+        members: Members,
+        joins: Joins,
+    ) -> Devices {
+        let peers = Peers::of(device.clone(), members.clone());
+
         Devices {
             device,
             reading,
             members,
+            joins,
+            peers,
+        }
+    }
+
+    /// The same, giving every dial this section makes `patience` rather than the
+    /// deadlines a running server keeps — see [`Peers::waiting`].
+    ///
+    /// For a suite standing in front of an address nothing answers at: what is
+    /// being asked there is what the press says when nobody is home, and a test
+    /// that waited out the real deadline would be spending its time on the clock
+    /// rather than on the question.
+    pub fn waiting(self, patience: std::time::Duration) -> Devices {
+        Devices {
+            peers: self.peers.waiting(patience),
+            ..self
         }
     }
 
@@ -597,12 +696,882 @@ impl Devices {
     ///
     /// `async` for the reason the identity endpoint's handler is: the tailnet
     /// half of the addresses is a command run on this machine, and a pane opened
-    /// a moment later would get a different and equally true answer.
-    pub(crate) async fn listing(&self) -> DevicesView {
-        DevicesView {
+    /// a moment later would get a different and equally true answer. And the
+    /// members are read now for the same reason again — a join or an unlink on
+    /// another tab is a different and equally true answer too.
+    ///
+    /// Fallible where the row for this device is not, because the membership is
+    /// a database and the identity is two files already in hand. A pane that
+    /// drew this device alone when the members could not be read would be a
+    /// cluster that looked dissolved.
+    pub(crate) async fn listing(&self) -> Result<DevicesView> {
+        Ok(DevicesView {
             this: self.reading.identity(&self.device).await,
-            linked: self.members.count(),
+            members: self.members.listed().await?,
+            pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
+        })
+    }
+
+    /// **Add**: ask the device at `address` to let this one into its cluster.
+    ///
+    /// The one place on the Remote access pane where something is configured
+    /// rather than read — which is the departure Unlink makes beside it, and the
+    /// one Remove on a Repo made before either.
+    ///
+    /// **Three things happen and the third is what is left behind.** This device
+    /// says what it is; the far end writes that down as a question for its own
+    /// human and answers with what *it* is; and this device writes a pending row
+    /// naming the request, so that Cancel has something to name and the pane has
+    /// something to draw. Nothing has been agreed: no member is recorded here and
+    /// none is recorded there, and what settles it is a press on the other
+    /// machine.
+    ///
+    /// **A device cannot ask itself.** The pane shows this machine's own
+    /// addresses a few lines above the box, so typing one in is an easy mistake
+    /// and a confusing state to be left in — a modal on this workbench asking
+    /// whether to link to this workbench. It cannot be told before the dial,
+    /// there being nothing to compare until the far end has answered, so what is
+    /// done is to take the question straight back off the machine that turned
+    /// out to be this one.
+    pub(crate) async fn add(&self, address: &str) -> Result<()> {
+        let address = address.trim();
+
+        if address.is_empty() {
+            bail!("an address to ask at is the one thing Add takes");
         }
+
+        let saying = self.reading.identity(&self.device).await;
+        let held = self.peers.join(address, &saying).await?;
+
+        if held.identity.device == self.device.id() {
+            // Taken back rather than left to run out, because the question is
+            // this device's own and it is standing in front of its own human.
+            // A cancel that cannot get through changes nothing: the request runs
+            // out on its own, which is what it was going to do anyway.
+            if let Err(why) = self
+                .peers
+                .cancel(address, &held.request, &held.identity.fingerprint)
+                .await
+            {
+                tracing::info!(%why, "a request this device made to itself could not be taken back");
+            }
+
+            bail!("{address} is this device, and a device is not linked to itself");
+        }
+
+        self.joins
+            .ask(&AskedJoin {
+                request: held.request,
+                address: address.to_owned(),
+                device: held.identity.device,
+                name: held.identity.name,
+
+                // The fingerprint met at the far end, which the answer has just
+                // been checked against — see [`Peers::join`]. What it is *for*
+                // is the dial back that answers an Allow: the machine that dials
+                // this one has to turn out to be the machine this one met.
+                fingerprint: held.identity.fingerprint,
+
+                asked_at: OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .context("saying when this device asked to link")?,
+
+                // The far end's own word for when it lets go, rather than this
+                // device's reckoning — see [`verkstead_render::JoinHeld`].
+                expires_at: held.expires,
+
+                // And nobody has said no, this being the moment the question
+                // was asked: what writes that is the dial back the far end
+                // makes if its human presses Deny.
+                refused: false,
+            })
+            .await
+    }
+
+    /// **Cancel** on a pending row, and **Dismiss** on one that has run out:
+    /// take the request back.
+    ///
+    /// **One press rather than two**, because the two are the same act seen at
+    /// two moments — the human is done with a request that has not been answered
+    /// — and which of them it is is a fact about the row rather than a choice.
+    /// What differs is only whether there is anything at the far end left to
+    /// tell: a request that has run out is one the other device has already let
+    /// go of, so nothing is dialled for it.
+    ///
+    /// **A second press is not a second thing happening.** A row this device is
+    /// not waiting on is one it has already stopped waiting on, and saying so
+    /// twice is not a failure — the stance [`verkstead_store::forget_member`]
+    /// takes, for its reason.
+    ///
+    /// **And a far end that cannot be reached does not keep the row.** The human
+    /// has said they are done with it; a row that would not go away because
+    /// somebody's laptop is shut would be the press not working. What is left
+    /// over there runs out inside the ten minutes on its own.
+    pub(crate) async fn take_back(&self, request: &str) -> Result<()> {
+        let Some(asked) = self.joins.asked(request).await? else {
+            return Ok(());
+        };
+
+        if !crate::peer::joining::run_out(&asked.expires_at, OffsetDateTime::now_utc())
+            && let Err(why) = self
+                .peers
+                .cancel(&asked.address, &asked.request, &asked.fingerprint)
+                .await
+        {
+            tracing::info!(
+                %why,
+                request = %asked.request,
+                "a cancelled request could not be taken off the device it was asked of, \
+                 which lets go of it when its ten minutes run out",
+            );
+        }
+
+        self.joins.forget(request).await
+    }
+
+    /// Every device asking to be let into this one's cluster, as the modal in
+    /// every open workbench draws it.
+    ///
+    /// The other side of the pending rows [`Devices::listing`] carries, and a
+    /// reading of its own rather than a field of that one: the modal is raised
+    /// wherever the human happens to be looking, so it is drawn in the shell
+    /// every page sits inside and reads this on its own — a question that only
+    /// arrived when somebody had the settings open would be a question the
+    /// human never saw.
+    pub(crate) async fn asking(&self) -> Result<Vec<AskingDevice>> {
+        self.joins.asking(OffsetDateTime::now_utc()).await
+    }
+
+    /// **Allow**: let the device that asked into this one's cluster.
+    ///
+    /// **The membership's first real row, and the call that makes it a link.**
+    /// Four things happen: the asker is recorded as a member out of what it
+    /// said about itself in the join post, the request is let go of, the asker
+    /// is dialled back and handed this device and every member it holds — see
+    /// [`Peers::settle`] — and then every one of those members is told about
+    /// the asker. The first three are in that order because the order is what a
+    /// failure between them decides: a member recorded with the request still
+    /// held is an Allow the human can press again, and a request let go of with
+    /// no member written is a join that has to be made from the beginning.
+    ///
+    /// **The fourth is what joins the newcomer to everybody rather than to this
+    /// device.** One press is the cluster's only gate, so the vouching has to
+    /// be carried by something — and what carries it is the link this device
+    /// already holds to each member: the announcement arrives there over a
+    /// certificate that member has verified, and nobody over there is asked to
+    /// confirm anything. A newcomer that introduced itself would be a stranger
+    /// asking to be recorded, which is the arrangement ADR-0020 turned down.
+    /// See [`Devices::announce`], where a member that answers nothing is dimmed
+    /// and owed the telling rather than failing this press.
+    ///
+    /// **And a dial back that cannot be made does not undo the press.** The
+    /// human pressed Allow and the asker is a member; a laptop that was shut
+    /// between the question and the answer is that machine's problem rather
+    /// than this press's, and what is left over there is a row that runs out
+    /// and an Add to press again. So the failure is a line in this machine's
+    /// log, which is where a peer that could not be reached is said.
+    ///
+    /// **The roster rather than this device alone.** Every member goes over in
+    /// the one call, so that a newcomer joining a cluster of three lands
+    /// holding all three — in a cluster of two the list is empty, and it is
+    /// carried all the same, the handover being one shape whatever the
+    /// cluster's size.
+    ///
+    /// **A second press is not a second thing happening**, which is the whole
+    /// of what two workbenches showing one modal need: the first settles the
+    /// request, and the second finds nothing held and does nothing — rather
+    /// than a second member landing or an error being shown for having lost a
+    /// race. A request whose ten minutes ran out is not held either, so an
+    /// expiry settles it in exactly the same words.
+    pub(crate) async fn allow(&self, request: &str) -> Result<()> {
+        let Some(held) = self.joins.held(request, OffsetDateTime::now_utc()).await? else {
+            return Ok(());
+        };
+
+        // What goes over, read before the asker is written down so that the
+        // roster is the cluster as it was asked to be joined: this device as it
+        // answers for itself, and everybody it was already linked to.
+        //
+        // The rows rather than the identities alone, because the same reading
+        // is both halves of what an Allow does: it is the roster the newcomer
+        // is handed, and it is the list of devices the newcomer is announced to
+        // — and a member written down between the two would be announced to
+        // about itself.
+        let introducer = self.reading.identity(&self.device).await;
+        let already = self.members.rows().await?;
+        let members = already.iter().map(presenting).collect();
+
+        self.members
+            .refreshed(&Linking {
+                device: held.device.clone(),
+                name: held.name.clone(),
+                os: held.os.clone(),
+
+                // Every address it advertised, in the order it advertised them,
+                // which is the order a dial to it will work down — see
+                // [`crate::peer::dialling`].
+                addresses: held.addresses.clone(),
+
+                // And the certificate the handshake took from it, which is the
+                // whole of what will prove it at this device's gate from now
+                // on: a member *is* a fingerprint.
+                fingerprint: held.fingerprint.clone(),
+            })
+            .await?;
+
+        self.joins.let_go(request).await?;
+
+        tracing::info!(
+            device = %held.device,
+            name = %held.name,
+            request = %request,
+            "a device has been let into this one's cluster",
+        );
+
+        if let Err(why) = self
+            .peers
+            .settle(
+                &held,
+                &JoinSettled::Joined {
+                    introducer,
+                    members,
+                },
+            )
+            .await
+        {
+            tracing::info!(
+                %why,
+                device = %held.device,
+                request = %request,
+                "a device that was let in could not be told, so it is a member here and \
+                 is still waiting over there until its own request runs out",
+            );
+        }
+
+        // And now the others. One press joins the newcomer to everybody, and
+        // this is what carries it: each member is told over the link this
+        // device already holds to it, and records the newcomer without anybody
+        // over there pressing anything — the claim arrived down a link that
+        // device has verified, which is the whole of why it is worth recording.
+        self.announce(
+            &already,
+            &DeviceIdentity {
+                device: held.device.clone(),
+                fingerprint: held.fingerprint.clone(),
+                name: held.name.clone(),
+                os: held.os.clone(),
+                addresses: held.addresses.clone(),
+            },
+        )
+        .await;
+
+        // And where this device is in the middle of a changeover of its own, the
+        // newcomer is one more member that has not acknowledged the certificate
+        // coming in — it has just met the one going out and written *that* down,
+        // which is the only one it could have met. Told here rather than left for
+        // the next start, because until it holds both it is a member the
+        // changeover is waiting on and the whole cluster would be waiting with it.
+        // Nothing at all where no changeover is in flight, which is every join.
+        self.announce_renewal().await;
+
+        Ok(())
+    }
+
+    /// Tell each of `members` about `newcomer`, and write down the tellings
+    /// that did not get through.
+    ///
+    /// **Nothing here can fail the press.** The human pressed Allow and the
+    /// newcomer is a member of this device whatever some third machine made of
+    /// it, so a member that answers nothing is dimmed, is written down as still
+    /// owed the telling, and the next one is dialled. A join that failed
+    /// because somebody's laptop was shut would be a link nobody could make
+    /// while a member was away.
+    ///
+    /// **And nothing here retries.** The debt is the record, and what pays it
+    /// is the next thing that finds that member answering — which is
+    /// [`Devices::caught_up`], run against each member this did get through to.
+    async fn announce(&self, members: &[verkstead_store::Member], newcomer: &DeviceIdentity) {
+        for member in members {
+            match self.peers.announce(member, newcomer).await {
+                Ok(()) => {
+                    tracing::info!(
+                        device = %member.device,
+                        newcomer = %newcomer.device,
+                        "a member has been told about the device that just joined",
+                    );
+
+                    // Whatever it was owed about this device is paid, which is
+                    // the ordinary case owing nothing and this clearing
+                    // nothing.
+                    if let Err(why) = self.members.told(&member.device, &newcomer.device).await {
+                        tracing::error!(
+                            %why,
+                            "an announcement that was made could not be cleared as made",
+                        );
+                    }
+
+                    // And this member is answering, which is the whole of what
+                    // a debt was waiting on.
+                    self.caught_up(member).await;
+                }
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        newcomer = %newcomer.device,
+                        "a member could not be told about the device that just joined, so it \
+                         is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, &newcomer.device, Telling::Joined)
+                        .await
+                    {
+                        tracing::error!(
+                            %why,
+                            "an announcement that was not made could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Tell every member that has yet to acknowledge it about the certificate
+    /// this device is changing over to, and finish the changeover if that was the
+    /// last of them (ADR-0020, *The certificate is renewed before it runs out*).
+    ///
+    /// **Run at a start, because a start is when a certificate is made again.**
+    /// The re-issue happens as the identity is read — see [`Device::renewed`] —
+    /// and this is the other half of it: without the telling, the day this device
+    /// began presenting the new certificate would be the day every link it holds
+    /// stopped working, which is the failure the whole changeover exists to
+    /// prevent. Nothing at all where no changeover is in flight, which is all but
+    /// one start in a certificate's life.
+    ///
+    /// **A task of its own rather than something the start waits on.** A member
+    /// that is switched off costs a dial's patience apiece down its addresses, and
+    /// a Verkstead that would not finish coming up until somebody's laptop had
+    /// been answered for would be a changeover costing exactly what it is for.
+    ///
+    /// **Made presenting the outgoing certificate**, which is not a choice: it is
+    /// the only one of the two any member holds, so it is the only one that gets
+    /// through a member's gate — see [`Peers::announce_renewal`].
+    ///
+    /// **And a member that could not be told is owed the telling**, exactly as one
+    /// that could not be told about a newcomer or an unlink is, on the same record
+    /// and in the same words — see [`Devices::caught_up`], which is what pays it
+    /// the moment that member is found answering. Nothing here retries and nothing
+    /// here fails: a machine that never answers leaves the changeover in flight,
+    /// the old certificate going out, and the startup line naming both
+    /// fingerprints, which is a device the human unlinks.
+    pub async fn announce_renewal(&self) {
+        let Some(incoming) = self.device.incoming_fingerprint() else {
+            return;
+        };
+
+        let owed = match self.members.yet_to_acknowledge(incoming).await {
+            Ok(owed) => owed,
+
+            Err(why) => {
+                tracing::error!(%why, "which members are owed a new fingerprint could not be read");
+
+                return;
+            }
+        };
+
+        if owed.is_empty() {
+            // Which is a changeover the start that read the identity already
+            // finished, or one this start found nobody owed: either way there is
+            // nothing to tell and nothing to settle.
+            return;
+        }
+
+        tracing::info!(
+            fingerprint = %incoming,
+            owed = owed.len(),
+            "telling the members that have yet to hold this device's new certificate",
+        );
+
+        let saying = self.renewing(incoming).await;
+
+        for member in &owed {
+            match self.peers.announce_renewal(member, &saying).await {
+                Ok(()) => self.acknowledged(member, incoming).await,
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        "a member could not be told this device's certificate has been made \
+                         again, so it is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, self.device.id(), Telling::Renewed)
+                        .await
+                    {
+                        tracing::error!(
+                            %why,
+                            "a renewal that was not announced could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
+
+        self.changeover_settled().await;
+    }
+
+    /// The same announcement, set going in a task of its own rather than waited
+    /// on.
+    ///
+    /// **For the two places a device is written into this membership by somebody
+    /// else's call**: a member naming a newcomer — see
+    /// [`crate::peer::announcing`] — and the roster an Exchange hands over — see
+    /// [`crate::peer::exchange`]. A device recorded there has acknowledged
+    /// nothing, so it is one more member a changeover in flight is waiting on;
+    /// and nothing over there would ever tell it, because the announcement is
+    /// this device's own to make.
+    ///
+    /// Left undone it is not a link that breaks but a changeover that cannot
+    /// finish: the member holding it up is perfectly reachable, so the old
+    /// certificate goes on going out until the next start reads the file again —
+    /// and the old certificate is the one with at most [`RENEW_WITHIN`] left on
+    /// it. [`Devices::allow`] has always done this at the end of its own press,
+    /// for exactly this reason; these two are the same moment arriving from the
+    /// other direction.
+    ///
+    /// **A task, because the caller is a route a peer is waiting on.** A member
+    /// that is switched off costs a dial's patience apiece down its addresses,
+    /// and an announcement that would not be answered until somebody's laptop had
+    /// been dialled for would be a call the announcing device gave up on.
+    ///
+    /// Nothing at all where no changeover is in flight, which is every recording
+    /// on every device but the one in the middle of one.
+    pub(crate) fn announcing_renewal(&self) {
+        if self.device.incoming_fingerprint().is_none() {
+            return;
+        }
+
+        let devices = self.clone();
+
+        tokio::spawn(async move { devices.announce_renewal().await });
+    }
+
+    /// What an announcement of the renewal carries: this device as it answers
+    /// anybody, and the fingerprint of the certificate it is changing to.
+    ///
+    /// The identity keeps the meaning it has everywhere else — the fingerprint in
+    /// it is the certificate this call is *made* under, which the receiver checks
+    /// against its own handshake exactly as it would on any other exchange — and
+    /// the incoming one is beside it. See
+    /// [`verkstead_render::RenewedCertificate`].
+    async fn renewing(&self, incoming: &str) -> RenewedCertificate {
+        RenewedCertificate {
+            identity: self.reading.identity(&self.device).await,
+            incoming: incoming.to_owned(),
+        }
+    }
+
+    /// Write down that `member` holds the certificate coming in, and clear the
+    /// debt that said it did not.
+    ///
+    /// Both, because they are one fact told to the two things that ask after it:
+    /// the changeover counts what a member has acknowledged, and a member coming
+    /// back after a week reads what it is owed. And a member that is answering has
+    /// earned the rest of what it missed, which is the third thing here.
+    async fn acknowledged(&self, member: &verkstead_store::Member, incoming: &str) {
+        tracing::info!(
+            device = %member.device,
+            fingerprint = %incoming,
+            "a member holds this device's new certificate",
+        );
+
+        if let Err(why) = self.members.acknowledged(&member.device, incoming).await {
+            tracing::error!(%why, "an acknowledgement that was given could not be written down");
+        }
+
+        if let Err(why) = self.members.told(&member.device, self.device.id()).await {
+            tracing::error!(%why, "an announcement that was made could not be cleared as made");
+        }
+
+        self.caught_up(member).await;
+    }
+
+    /// And finish the changeover where the last member has acknowledged: the
+    /// certificate that was waiting becomes the one this Data Directory holds, and
+    /// the file it was waiting in goes.
+    ///
+    /// **By the same path a re-issue with nobody to tell takes at the start that
+    /// began it** — see [`Device::changed_over`]. One changeover ends one way.
+    ///
+    /// **What it does not do is switch what this process presents.** The listener
+    /// stands behind the certificate it was built with and every dial is made with
+    /// a clone of the handle that was read at the start, so the outgoing one goes
+    /// on going out until the next start reads the file this just wrote. Which
+    /// costs nothing, because every member has acknowledged the new one and kept
+    /// the old beside it for exactly this — a member that had let go of it the
+    /// moment it acknowledged would be a member refusing the device it had just
+    /// acknowledged, for as long as the last machine in the cluster stayed
+    /// switched off.
+    async fn changeover_settled(&self) {
+        let Some(incoming) = self.device.incoming_fingerprint() else {
+            return;
+        };
+
+        match self.members.unacknowledged(incoming).await {
+            Ok(0) => match self.device.changeover_complete() {
+                Ok(()) => tracing::info!(
+                    fingerprint = %incoming,
+                    "every member holds this device's new certificate, so the changeover is \
+                     over and the next start presents it",
+                ),
+
+                Err(why) => tracing::error!(
+                    %why,
+                    "the changeover could not be finished, so the next start finishes it",
+                ),
+            },
+
+            Ok(owed) => tracing::info!(
+                fingerprint = %incoming,
+                owed,
+                "this device's certificate is still changing over, so the old one goes on \
+                 going out",
+            ),
+
+            Err(why) => {
+                tracing::error!(%why, "how many members are owed a new fingerprint could not be read")
+            }
+        }
+    }
+
+    /// **Unlink**: take `device` out of the cluster, for everybody.
+    ///
+    /// **A membership rather than a set of pairs** (ADR-0020), so the press is
+    /// not this device cutting its own half of a link: every member drops the
+    /// same device, and the device itself is told to let go of the lot of them.
+    /// Cutting one pair was rejected for what it leaves behind — a list that
+    /// reads differently depending on which machine you open it on.
+    ///
+    /// **Three things happen, and the order is the one thing about them that is
+    /// forced.** The leaver is told first, while this device still holds a
+    /// membership for it to be dialled from and it still holds one for this
+    /// device to get through its gate with; then it is dropped here, which is
+    /// the human's own machine being right whatever else fails; then every
+    /// other member is told. A leaver told after it had been dropped would be a
+    /// dial with no row to make it from, and one told after this device had
+    /// been dropped over *there* would be a caller that member refuses.
+    ///
+    /// **Nothing waits on the leaver answering**, which is most of what Unlink
+    /// is for: the machine the human reaches for this on is the one that is
+    /// never coming back. It is told where it can be, and the cluster is right
+    /// either way.
+    ///
+    /// **And a member that could not be told is owed the removal**, exactly as
+    /// one that could not be told about a newcomer is — see
+    /// [`Devices::caught_up`], which is what pays either debt the moment that
+    /// member is found answering.
+    ///
+    /// **A second press is not a second thing happening.** A device that is not
+    /// a member is one this machine has already unlinked, and saying so twice
+    /// is not a failure — the stance [`verkstead_store::forget_member`] takes,
+    /// for its reason.
+    pub(crate) async fn unlink(&self, device: &str) -> Result<()> {
+        let held = self.members.rows().await?;
+
+        let Some(leaver) = held.iter().find(|member| member.device == device).cloned() else {
+            return Ok(());
+        };
+
+        // Told while it is still a member here and this device is still one
+        // there. A laptop that is not there is told nothing, and nothing waits
+        // on it — the cluster it was in has moved on without it, and its own
+        // list is wrong until somebody presses Add again.
+        if let Err(why) = self.peers.unlink(&leaver, device).await {
+            tracing::info!(
+                %why,
+                device = %device,
+                "a device that was unlinked could not be told, so it goes on holding a \
+                 cluster that no longer holds it",
+            );
+        }
+
+        self.members.forget(device).await?;
+
+        tracing::info!(
+            device = %device,
+            name = %leaver.name,
+            "a device has been taken out of this one's cluster",
+        );
+
+        for member in held.iter().filter(|member| member.device != device) {
+            match self.peers.unlink(member, device).await {
+                Ok(()) => {
+                    tracing::info!(
+                        device = %member.device,
+                        leaver = %device,
+                        "a member has been told to drop the device that was unlinked",
+                    );
+
+                    self.caught_up(member).await;
+                }
+
+                Err(why) => {
+                    tracing::info!(
+                        %why,
+                        device = %member.device,
+                        leaver = %device,
+                        "a member could not be told to drop the device that was unlinked, so \
+                         it is owed the telling until it answers again",
+                    );
+
+                    if let Err(why) = self
+                        .members
+                        .owed(&member.device, device, Telling::Removed)
+                        .await
+                    {
+                        tracing::error!(
+                            %why,
+                            "a removal that was not made could not be written down as owed",
+                        );
+                    }
+                }
+            }
+        }
+
+        // And the device that has just gone may have been the one a changeover was
+        // waiting on — which is the case the changeover has no other answer to: a
+        // machine that never comes back is announced to for ever otherwise, and
+        // what the task file says about it is that the human unlinks it. So this is
+        // where that press finishes the changeover it was holding up.
+        self.changeover_settled().await;
+
+        Ok(())
+    }
+
+    /// Say to `member` everything it has yet to be told, which is what a dial
+    /// that just got through to it has earned the right to do.
+    ///
+    /// **The trigger is a dial that answered, rather than a timer.** Nothing in
+    /// a cluster retries in a loop: a debt is written down when a telling could
+    /// not be made, and it is paid the moment that member turns out to be
+    /// there. Something dials a member whenever the cluster does anything at
+    /// all, so a device whose members are all quiet is a device with nothing
+    /// owed that matters yet.
+    ///
+    /// **Whichever of the three it is**, because a member that was away for a
+    /// week may have missed a join, an unlink and a renewal all — see
+    /// [`verkstead_store::Telling`], and the reason those are one record rather
+    /// than three. A join is said again out of this device's own membership, which
+    /// is where the newcomer's addresses and certificate are; a removal carries
+    /// nothing but the id; and a renewal is this device's own changeover, which is
+    /// read off the handle rather than off a row — a debt naming a changeover this
+    /// device is no longer in the middle of is nothing left to say.
+    ///
+    /// **And a renewal paid here is what finishes a changeover for a member that
+    /// was switched off.** The acknowledgement is the answer to the call, so the
+    /// member that has just come back may have been the last one owed — which is
+    /// the moment the certificate that has been waiting becomes this device's, and
+    /// nothing but a dial getting through was ever going to say so.
+    ///
+    /// **And a member that stops answering part way through keeps the rest.**
+    /// The walk stops at the first telling that did not get through, so what is
+    /// left is still owed and is said the next time — rather than every
+    /// remaining one being dialled at a machine that has just gone.
+    ///
+    /// Nothing here can fail its caller. The press that ran it already
+    /// happened, and a debt that could not be paid is a debt.
+    async fn caught_up(&self, member: &verkstead_store::Member) {
+        let owed = match self.members.owing(&member.device).await {
+            Ok(owed) => owed,
+            Err(why) => {
+                tracing::error!(%why, "what a member is owed could not be read");
+
+                return;
+            }
+        };
+
+        if owed.is_empty() {
+            return;
+        }
+
+        // Read once for the whole walk: what a *joined* telling carries is the
+        // device as this one holds it, and the membership does not move while
+        // the debts are being paid.
+        let held = match self.members.rows().await {
+            Ok(held) => held,
+            Err(why) => {
+                tracing::error!(%why, "the membership a debt is paid out of could not be read");
+
+                return;
+            }
+        };
+
+        // Whether one of the debts paid below was a renewal, which is the one of
+        // the three that leaves something to settle afterwards: the member that
+        // has just come back may have been the last one the changeover was
+        // waiting on.
+        let mut renewed = false;
+
+        for (about, telling) in owed {
+            let said = match telling {
+                Telling::Removed => self.peers.unlink(member, &about).await,
+
+                // This device's own changeover, read off the handle rather than
+                // out of a row — the certificate coming in is a file in the Data
+                // Directory and not a thing any membership holds. A debt naming a
+                // changeover that is over is nothing left to say, and the telling
+                // below takes it away.
+                Telling::Renewed => match self.device.incoming_fingerprint() {
+                    None => Ok(()),
+
+                    Some(incoming) => {
+                        let saying = self.renewing(incoming).await;
+                        let said = self.peers.announce_renewal(member, &saying).await;
+
+                        if said.is_ok() {
+                            renewed = true;
+
+                            if let Err(why) =
+                                self.members.acknowledged(&member.device, incoming).await
+                            {
+                                tracing::error!(
+                                    %why,
+                                    "an acknowledgement that was given could not be written down",
+                                );
+                            }
+                        }
+
+                        said
+                    }
+                },
+
+                Telling::Joined => {
+                    let Some(newcomer) = held.iter().find(|held| held.device == about) else {
+                        // Owed a join about a device this one no longer holds,
+                        // which is nothing left to say: the unlink that dropped
+                        // it took its debts with it, so this is a row written
+                        // between the two reads above rather than anything to
+                        // put right.
+                        continue;
+                    };
+
+                    self.peers.announce(member, &presenting(newcomer)).await
+                }
+            };
+
+            if let Err(why) = said {
+                tracing::info!(
+                    %why,
+                    device = %member.device,
+                    about = %about,
+                    "a member stopped answering part way through what it was owed, so the \
+                     rest of it waits for the next call that gets through",
+                );
+
+                return;
+            }
+
+            tracing::info!(
+                device = %member.device,
+                about = %about,
+                "a member that was away has been told what it missed",
+            );
+
+            if let Err(why) = self.members.told(&member.device, &about).await {
+                tracing::error!(%why, "a telling that was made could not be cleared as made");
+            }
+        }
+
+        // And where one of them was a renewal, the changeover may have just had
+        // its last acknowledgement — which is the whole of what it was waiting on,
+        // and what a member coming back after a week finishes.
+        if renewed {
+            self.changeover_settled().await;
+        }
+    }
+
+    /// **Deny**: settle the request, record nothing, and say so.
+    ///
+    /// The same shrug at a second press, and for the same reason: a request
+    /// that is not held is one somebody has already answered or one whose ten
+    /// minutes ran out, and neither is a thing to fail.
+    ///
+    /// Nothing is remembered about the device that was refused. A cluster is a
+    /// membership rather than a list of verdicts, and a device turned away is
+    /// free to ask again — which is what somebody who pressed the wrong button
+    /// would have it do.
+    ///
+    /// **But it is told.** The ADR spelled the dial back out on an Allow and
+    /// left this one, and without it the device that asked reads *waiting*
+    /// until somebody over there gets bored and cancels; the human settled that
+    /// a refusal comes back the same way. What it carries is that there is
+    /// nothing coming and nothing else — a refusal is not a fact about this
+    /// cluster to be handed to a stranger.
+    pub(crate) async fn deny(&self, request: &str) -> Result<()> {
+        let Some(held) = self.joins.held(request, OffsetDateTime::now_utc()).await? else {
+            return Ok(());
+        };
+
+        self.joins.let_go(request).await?;
+
+        tracing::info!(
+            device = %held.device,
+            name = %held.name,
+            request = %request,
+            "a device asking to be let into this one's cluster was refused",
+        );
+
+        if let Err(why) = self.peers.settle(&held, &JoinSettled::Denied).await {
+            tracing::info!(
+                %why,
+                device = %held.device,
+                request = %request,
+                "a device that was refused could not be told, and its own row runs out \
+                 inside the ten minutes",
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// A member as it is described to another device: what it said about itself, with
+/// **the certificate it is presenting** rather than the one this device has
+/// recorded against it.
+///
+/// **Those are two different strings for exactly as long as that member is in the
+/// middle of a changeover of its own.** A device that has re-issued its
+/// certificate presents the outgoing one until the last of its own members has
+/// acknowledged the new one, so the fingerprint a row is keyed on can be a
+/// certificate nothing on that machine is offering yet — see
+/// [`verkstead_store::Member::renewing_from`], which is the one it *is* offering.
+///
+/// And a roster or an announcement is read by a device that has met neither: what
+/// it does with this is complete a handshake against it. Handed the one that is
+/// not being presented, a newcomer would hold a fingerprint that refused every
+/// call the device it names made, until that device restarted — where handed the
+/// one going out it can talk at once, and the renewal is announced to it like any
+/// other member's, because it has acknowledged nothing.
+///
+/// One function rather than the mapping written at each place that hands a member
+/// over, because it is one judgement and the places are two: the roster an Allow
+/// hands to a newcomer, and the announcement made to each member about it.
+fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
+    DeviceIdentity {
+        device: member.device.clone(),
+        fingerprint: member
+            .renewing_from
+            .clone()
+            .unwrap_or_else(|| member.fingerprint.clone()),
+        name: member.name.clone(),
+        os: member.os.clone(),
+        addresses: member.addresses.clone(),
     }
 }
 
@@ -645,13 +1614,18 @@ fn read_back(path: &Path) -> std::io::Result<Option<String>> {
 
 /// Sixteen bytes of the operating system's own randomness as lower-case hex.
 ///
+/// What a Device Id is, and what a pending join is named by too — see
+/// [`crate::peer::joining`]. One shape for both because they go the same places:
+/// into a URL segment, into a log line, and in front of a person reading one off
+/// a screen.
+///
 /// Hex rather than the base64 the Workbench Key is spelled in, which is the one
 /// place the two part company. The id goes into a URL segment *and* into the
 /// certificate's own subject and subject alternative name, and `_` — which the
 /// URL-safe base64 alphabet has — is not a character a host name may contain.
 /// Hex has nothing either of those has to escape, and it is the alphabet a
 /// person reading an id off a screen is least likely to mistype.
-fn invented() -> std::io::Result<String> {
+pub(crate) fn invented() -> std::io::Result<String> {
     let mut bytes = [0u8; ID_BYTES];
 
     getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;

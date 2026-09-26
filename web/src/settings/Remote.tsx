@@ -94,27 +94,85 @@
 //! hostname, the word for the OS is the platform's own — *Linux (WSL)* where
 //! the kernel says so, which is the one case a hostname cannot tell apart — and
 //! the addresses are read off the machine's interfaces at the moment it
-//! answers. The list holds this device alone until something is linked, and its
-//! row offers no Unlink: there is nothing yet to unlink from.
+//! answers. The list holds this device and a row apiece for the devices linked
+//! to it, drawn the same way — what is read off this machine now is what a
+//! member last said of its own.
+//!
+//! **Every member's row carries an Unlink and this device's row does not**,
+//! there being nothing to unlink this machine from itself. It is the second of
+//! the two departures this pane makes from *nothing is confirmed twice* — Add
+//! is the first — and it departs for the reason Remove on a Repo does: it
+//! cannot be taken back, so it is asked once, over the page, naming the device
+//! — see [`Confirm`]. What it does is not cut this device's own half of a link
+//! but take the device out of the cluster for everybody, which is what the
+//! card says in the sentence under the name.
+//!
+//! **A member the last dial could not reach is the same row, dimmed, reading
+//! *unreachable*.** It is not taken off the list and nothing about it is left
+//! out: a machine with its lid shut is still one of this cluster, and what the
+//! row says is that a press on it would find nobody there. Which is this
+//! device's own finding rather than anything the far end said, so it arrives
+//! beside the identity rather than in it — and its Unlink is drawn and works
+//! exactly as a live row's, the machine that is never coming back being most of
+//! what the press is for.
+//!
+//! **And under the list, the other control on this pane that configures rather
+//! than reads**: Add, against an address somebody types — see [`Add`]. Every
+//! other thing here is the machine said back, so the box is the departure the
+//! Unlink above makes beside it and Remove on a Repo made before either. A port
+//! is optional: every device answers on the peer port unless its host was told
+//! another.
+//!
+//! What a press leaves is a pending row — see [`Waiting`] — reading *waiting for
+//! confirmation on* the device that answered, with **this device's own
+//! fingerprint** under it and a Cancel. This device's rather than the far end's,
+//! deliberately: the modal over there draws the same string, and the pair exists
+//! for one person reading a phone and another reading a screen to compare by
+//! eye. Nothing has been agreed while that row is drawn, so it is not a member
+//! and does not count as one. A request nobody answered inside ten minutes reads
+//! expired, and one the far end came back and said no to reads refused; both are
+//! dismissed by the same press that cancels a live one. What ends a row the
+//! other way is the far end saying yes, which arrives as a member and takes the
+//! pending row with it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch as Choose, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch as Choose,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
-import { faApple, faLinux, faWindows } from "@fortawesome/free-brands-svg-icons";
-import { faDesktop, type IconDefinition } from "@fortawesome/free-solid-svg-icons";
+import { faHourglassHalf } from "@fortawesome/free-solid-svg-icons";
 
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { Copy } from "../Copy";
 import { Icon } from "../Icon";
+import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
-import { loadDevices, loadRemote, pressServe, resetKey } from "../api/client";
+import {
+  addDevice,
+  cancelJoin,
+  loadDevices,
+  loadRemote,
+  pressServe,
+  resetKey,
+  unlinkDevice,
+} from "../api/client";
 import type {
+  DeviceIdentity,
   DevicesView,
+  LinkedDevice,
+  PendingJoin,
   RemoteView,
   ServePress,
   ServeView,
 } from "../api/types";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -197,7 +255,7 @@ function useRemote() {
 }
 
 /// And what this Verkstead *is*, read for the two panes that draw that too: the
-/// device this machine runs, and how many others are linked to it.
+/// device this machine runs, and every other device in its cluster.
 ///
 /// A read of its own beside the one above rather than a field of it, because
 /// they are two different questions about this machine: what Tailscale is doing
@@ -205,9 +263,8 @@ function useRemote() {
 /// changes when a link is made or an address moves. Neither is a setting, which
 /// is why neither is in the settings query.
 ///
-/// Merged by the device id: what says one row from another is the id, here and
-/// in the list this becomes once anything is linked, so a re-read that found
-/// another device leaves the rows it already drew alone.
+/// Merged by the device id: what says one row from another is the id, so a
+/// re-read that found another device leaves the rows it already drew alone.
 function useDevices() {
   return useReading(() => ({
     queryKey: ["devices"],
@@ -216,34 +273,15 @@ function useDevices() {
   }));
 }
 
-/// Which mark stands beside a device's name, off the word for its operating
-/// system.
-///
-/// Font Awesome's brand set, drawn through [`Icon`] like every other icon in
-/// the app — so the bundle carries these three and nothing else of it.
-///
-/// Matched on what the word *starts* with, because one of them is not a bare
-/// platform name: a WSL reads *Linux (WSL)* and wears the Linux mark, which is
-/// the whole point of the word — a Windows machine and the WSL on it share a
-/// hostname, and this is what tells the two rows apart.
-///
-/// A word this build has no mark for still draws a row, which is what the
-/// desktop is for: a device is worth listing whether or not its OS is one of
-/// the three anybody here has heard of.
-function osIcon(os: string): IconDefinition {
-  if (os.startsWith("macOS")) return faApple;
-  if (os.startsWith("Windows")) return faWindows;
-  if (os.startsWith("Linux")) return faLinux;
-
-  return faDesktop;
-}
-
 /// How many devices are linked to this one, as a sentence.
 ///
 /// The clause the card carries beside what Tailscale is doing — *other*
 /// devices, because this device is the row the list already holds and nothing
 /// is linked to itself. Nought is a sentence rather than a silence: a workbench
 /// that says nothing about devices reads as one that has not heard of them.
+///
+/// Counted off the rows the list draws rather than answered beside them, so the
+/// sentence and the list cannot come to disagree about one membership.
 function linked(count: number): string {
   if (count === 0) return "No other devices are linked.";
   if (count === 1) return "One other device is linked.";
@@ -336,7 +374,7 @@ export function RemoteCard(props: {
             <p class={styles.standing}>
               {standing(told())}{" "}
               <Show when={devices.data}>
-                {(here) => <>{linked(here().linked)}</>}
+                {(here) => <>{linked(here().members.length)}</>}
               </Show>
             </p>
           </CardButton>
@@ -471,9 +509,7 @@ export function RemotePane(props: {
                             disabled={
                               press.isPending || arrivedOver(here.serve)
                             }
-                            title={
-                              arrivedOver(here.serve) ? LOCKED : undefined
-                            }
+                            title={arrivedOver(here.serve) ? LOCKED : undefined}
                             flip={(on) => press.mutate(on)}
                           />
 
@@ -488,8 +524,7 @@ export function RemotePane(props: {
 
                       <Show when={press.isError}>
                         <ErrorLine class={styles.failure}>
-                          The serve could not be changed:{" "}
-                          {press.error?.message}
+                          The serve could not be changed: {press.error?.message}
                         </ErrorLine>
                       </Show>
 
@@ -595,8 +630,8 @@ function TheKey(): JSX.Element {
       </button>
 
       <Note>
-        Resets the secret token used to access the UI. This will disconnect
-        all other devices.
+        Resets the secret token used to access the UI. This will disconnect all
+        other devices.
       </Note>
 
       <Show when={reset.isError}>
@@ -608,7 +643,8 @@ function TheKey(): JSX.Element {
   );
 }
 
-/// The devices this workbench is one of, which today is this one.
+/// The devices this workbench is one of: this one, and every other in its
+/// cluster.
 ///
 /// **A section of this pane rather than a settings section of its own**
 /// (ADR-0020): linking is how this machine is reached as much as the serve and
@@ -619,13 +655,54 @@ function TheKey(): JSX.Element {
 /// of it: a machine that has never heard of a tailnet has a device identity all
 /// the same, and a list that went away on one would say this needed Tailscale.
 ///
-/// One row, and nothing to press on it. The name is the hostname and the mark
-/// beside it is the word for the OS — a WSL wears the Linux mark and reads
-/// *Linux (WSL)*, which is the one thing that tells it from the Windows it
-/// shares a hostname with. *This device* is what the row says instead of an
-/// Unlink, there being nothing yet to unlink it from.
+/// The name is the hostname the machine answers to and the mark beside it is
+/// the word for its OS — a WSL wears the Linux mark and reads *Linux (WSL)*,
+/// which is the one thing that tells it from the Windows it shares a hostname
+/// with, and the case a cluster of two rows is drawn for. *This device* is what
+/// marks which of them is this machine, and it is what stands where a member's
+/// row carries its **Unlink**: there is nothing to unlink this machine from
+/// itself.
+///
+/// A member the last dial found nothing at is dimmed and reads *unreachable*,
+/// which is the one other way a member's row is drawn — and its Unlink works
+/// exactly as any other's, a machine that is never coming back being most of
+/// what the press is for.
+///
+/// **And under the rows, the one thing on this pane that is configured rather
+/// than read**: Add, against an address somebody types. Everything else here is
+/// the machine read again — which is what makes the box worth marking out, and
+/// why it stands below the list rather than among it.
+///
+/// **The asking is this component's**, rather than each row's, for the reason
+/// the Repos pane keeps it above its list: the card names the device it is
+/// about, and one card over a list is one thing on the page at a time. The
+/// device a press asked about is held here and given to it.
 function Devices(): JSX.Element {
   const devices = useDevices();
+
+  // The device a press on Unlink asked about, while the card asking is up — or
+  // `null` while none is. The whole row rather than its id: the card names it,
+  // and the press is made from the card rather than from the row.
+  const [asking, setAsking] = createSignal<DeviceIdentity | null>(null);
+
+  const queries = useQueryClient();
+
+  // And the press itself, which answers with the section read again — so the
+  // row goes out of this answer rather than out of a second request, the way
+  // Add and Cancel below are answered.
+  const drop = useMutation(() => ({
+    mutationFn: (device: string) => unlinkDevice(device),
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  /// And what the press on the card that asked does, which is the unlink.
+  const confirmed = () => {
+    const device = asking();
+    setAsking(null);
+
+    if (device !== null) drop.mutate(device.device);
+  };
 
   return (
     <section class={styles.devices}>
@@ -639,43 +716,379 @@ function Devices(): JSX.Element {
           </ErrorLine>
         </Match>
         <Match when={devices.data}>
-          {(here) => <ThisDevice of={here()} />}
+          {(here) => (
+            <List of={here()} unlink={setAsking} unlinking={drop.isPending} />
+          )}
         </Match>
       </Choose>
+
+      <Show when={drop.isError}>
+        <ErrorLine class={styles.failure}>
+          The device could not be unlinked: {drop.error?.message}
+        </ErrorLine>
+      </Show>
+
+      <Add />
+
+      {/* Asked before anything happens, the way Remove on a Repo is: one press
+          in a list, on a phone, that cannot be taken back. */}
+      <Confirm
+        asked={asking()}
+        keep={() => setAsking(null)}
+        unlink={confirmed}
+      />
     </section>
   );
 }
 
-/// The one row the list holds: the OS mark, the name, *this device*, and every
-/// address a peer could reach it on.
+/// What an Unlink is answered with before anything has happened: which device
+/// it would take out of the cluster, what that means for the rest of it, and
+/// the two ways out.
+///
+/// The device is named on the card because the list it was pressed in is behind
+/// it — the shape the Repos pane's confirm takes, for its reason: a card reading
+/// *Unlink this device?* over a list of them would be asking about whichever row
+/// the human remembers pressing.
+///
+/// And the sentence under the name is what makes this press different from
+/// every other undoing in the app: it is not this device's own half of a link
+/// being cut, it is the device leaving the cluster for everybody.
+function Confirm(props: {
+  /// The device the press asked about, or `null` while nothing is being asked.
+  asked: DeviceIdentity | null;
+  /// The way back, which is what Escape and a press on the backdrop come to as
+  /// well: every way out of this card but the one button leaves the cluster
+  /// alone.
+  keep: () => void;
+  /// And the press it asked about, made.
+  unlink: () => void;
+}): JSX.Element {
+  // The heading's own id, for the `aria-labelledby` that names the card by it.
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Unlink {props.asked?.name}?
+      </p>
+      <p class={styles.confirmingWhy}>
+        It leaves the cluster for every device in it, not just this one, and it
+        is told to forget the rest. Linking it again means somebody allowing it
+        on one of them.
+      </p>
+      <div class={styles.confirmingOut}>
+        {/* Both classes, as every confirm pair in the app carries them: the
+            global one is the paint, and the module's is what the row stands the
+            filled press out of. */}
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep it
+        </button>
+        <button type="button" onClick={() => props.unlink()}>
+          Unlink
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/// The list: this device first, then a row apiece for the devices linked to it,
+/// and last the joins this one has asked for and not been answered on.
+///
+/// This device leads rather than being sorted among them — it is the row
+/// somebody opening this pane is looking for, and it is the only one read off
+/// the machine the page is served from. The members follow in the order the
+/// reading gives them, which is by the name each is shown under.
+///
+/// The pending rows come last, under the box that made them: they are not
+/// devices — nothing has been agreed — so they sit below the cluster rather than
+/// inside it, where the eye goes after pressing Add.
+///
+/// **This device's row is the one without an Unlink**, which is why the press is
+/// given to the members alone rather than to [`Row`] for every row to decide:
+/// there is nothing to unlink this machine from itself, and a row that has no
+/// press is a row that is handed none.
+function List(props: {
+  of: DevicesView;
+  /// What a press on a member's row asks about, which is the whole of what a
+  /// row does with one: the card above this list is what acts.
+  unlink: (device: DeviceIdentity) => void;
+  /// And whether one is going through, which greys every press on the list
+  /// while it is: the list is about to be read again and a second press would
+  /// be about the list before it.
+  unlinking: boolean;
+}): JSX.Element {
+  return (
+    <ul class={styles.list}>
+      <Row of={props.of.this} here />
+
+      <For each={props.of.members}>
+        {(member: LinkedDevice) => (
+          <Row
+            of={member.identity}
+            unreachable={!member.reachable}
+            unlink={() => props.unlink(member.identity)}
+            unlinking={props.unlinking}
+          />
+        )}
+      </For>
+
+      <For each={props.of.pending}>
+        {(join: PendingJoin) => (
+          // This device's own fingerprint rather than the far end's, and that is
+          // the whole point of it: the modal on the other machine draws the same
+          // string, and the two are there for one person reading a phone and
+          // another reading a screen to compare by eye.
+          <Waiting on={join} fingerprint={props.of.this.fingerprint} />
+        )}
+      </For>
+    </ul>
+  );
+}
+
+/// One row: the OS mark, the name, and every address a peer could reach that
+/// device on — with *this device* beside the name on the one that is this
+/// machine.
+///
+/// One component for both because they are one thing drawn: what the pane shows
+/// of a device is the same three facts whether it is this one or another, and
+/// the answer behind them is the same shape either way. What differs is only
+/// where it was read — this machine now, or the far end at the last exchange.
 ///
 /// The addresses are drawn only where there are any. A device on neither a
 /// tailnet nor a network answers with none, which is an answer rather than a
 /// failure — it still has a name and a mark, and an empty line under them would
 /// say something went wrong.
-function ThisDevice(props: { of: DevicesView }): JSX.Element {
+///
+/// *unreachable* stands where *this device* stands on the row above, and dims
+/// the whole of the row with it: the two are the same kind of thing said, a fact
+/// about the row rather than something to press. Everything about the device
+/// stays drawn — the mark, the name and the addresses — because none of it has
+/// stopped being true, and the row is where the Unlink is pressed.
+///
+/// **And the Unlink is drawn wherever one was given**, which is every member's
+/// row and no other: this device's row has none, there being nothing to unlink
+/// this machine from itself. A dimmed row's press is drawn exactly as a live
+/// one's and works exactly as one — the machine that is never coming back is
+/// most of what an Unlink is for, and a press that greyed itself out on the one
+/// row somebody needs it on would be the feature refusing its own case.
+function Row(props: {
+  of: DeviceIdentity;
+  here?: boolean;
+  unreachable?: boolean;
+  /// What a press asks about, where this row has one to press.
+  unlink?: () => void;
+  /// And whether one is already going through.
+  unlinking?: boolean;
+}): JSX.Element {
   return (
-    <ul class={styles.list}>
-      <li class={styles.device}>
-        <Icon
-          of={osIcon(props.of.this.os)}
-          label={props.of.this.os}
-          class={styles.os}
-        />
+    <li
+      class={styles.device}
+      classList={{ [styles.unreachable!]: props.unreachable }}
+    >
+      <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
 
-        <div class={styles.about}>
-          <p class={styles.deviceName}>
-            {props.of.this.name} <span class={styles.here}>this device</span>
-          </p>
-
-          <Show when={props.of.this.addresses.length > 0}>
-            <p class={styles.addresses}>
-              {props.of.this.addresses.join(", ")}
-            </p>
+      <div class={styles.about}>
+        <p class={styles.deviceName}>
+          {props.of.name}
+          <Show when={props.here}>
+            {" "}
+            <span class={styles.here}>this device</span>
           </Show>
-        </div>
-      </li>
-    </ul>
+          <Show when={props.unreachable}>
+            {" "}
+            <span class={styles.away}>unreachable</span>
+          </Show>
+        </p>
+
+        <Show when={props.of.addresses.length > 0}>
+          <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+        </Show>
+      </div>
+
+      <Show when={props.unlink} keyed>
+        {(ask) => (
+          <button
+            type="button"
+            class={styles.unlink}
+            disabled={props.unlinking}
+            onClick={() => ask()}
+          >
+            Unlink
+          </button>
+        )}
+      </Show>
+    </li>
+  );
+}
+
+/// One join this device has asked for and not been answered on: where it
+/// knocked, who answered, and what the person at the other machine is being
+/// asked to compare.
+///
+/// **A row that is not a device.** It wears no OS mark and lists no addresses,
+/// because nothing has been agreed: what is known is that somebody typed an
+/// address, something answered, and a human over there has been asked. The
+/// glass stands where an OS mark stands on the rows above — the one thing this
+/// row has to say is that it is waiting.
+///
+/// **The fingerprint is this device's own.** The modal on the far end draws the
+/// same string, and the pair exists to be read aloud between two people at two
+/// screens; a row that showed the far end's would be each of them reading the
+/// other's back.
+///
+/// **Three things a row can say, and two of them are over.** It is waiting; or
+/// the human at the other machine said no, which came back over the link the
+/// join was posted on; or nobody answered inside ten minutes. A refusal outranks
+/// an expiry, because it is the thing that really happened — a request refused
+/// three minutes in stays a refusal however long the row is left up.
+///
+/// **Cancel, and Dismiss on one that is over**, which are the same press: the
+/// human is done with a request that came to nothing, and which word it wears is
+/// a fact about the row. A row that is over is left drawn rather than taken away
+/// — somebody pressed Add and is owed the answer.
+function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
+  const queries = useQueryClient();
+
+  const take = useMutation(() => ({
+    mutationFn: () => cancelJoin(props.on.request),
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  /// Whether there is anything left to wait for, which is the one question the
+  /// whole row is drawn off: the fingerprint is worth comparing only while
+  /// somebody is standing in front of it, and the press reads Dismiss once
+  /// nobody is.
+  const over = () => props.on.refused || props.on.expired;
+
+  return (
+    <li class={styles.device} classList={{ [styles.unreachable!]: over() }}>
+      <Icon of={faHourglassHalf} label="waiting" class={styles.os} />
+
+      <div class={styles.about}>
+        <p class={styles.deviceName}>
+          <Choose>
+            <Match when={props.on.refused}>
+              {props.on.name} refused the request.
+            </Match>
+
+            <Match when={props.on.expired}>
+              The request to {props.on.name} expired.
+            </Match>
+
+            <Match when={true}>
+              Waiting for confirmation on {props.on.name}.
+            </Match>
+          </Choose>
+        </p>
+
+        <p class={styles.addresses}>{props.on.address}</p>
+
+        {/* Drawn only while somebody could still be comparing it: a request
+            that is over is one nobody is standing in front of any more. */}
+        <Show when={!over()}>
+          <p class={styles.addresses}>{props.fingerprint}</p>
+        </Show>
+
+        <button
+          type="button"
+          class={styles.take}
+          disabled={take.isPending}
+          onClick={() => take.mutate()}
+        >
+          {over() ? "Dismiss" : "Cancel"}
+        </button>
+
+        <Show when={take.isError}>
+          <ErrorLine class={styles.failure}>
+            The request could not be taken back: {take.error?.message}
+          </ErrorLine>
+        </Show>
+      </div>
+    </li>
+  );
+}
+
+/// **Add**: the address of another Verkstead, and the press that asks it.
+///
+/// **The one control on this pane that configures rather than reads.** The three
+/// sections above it are the machine said back — what Tailscale is doing, what
+/// the key is, what devices there are — and this is the one place somebody types
+/// something in. Which is the same departure Unlink will make beside it, and the
+/// one Remove on a Repo made before either.
+///
+/// **A port is optional and usually absent**: every device answers on the peer
+/// port unless its host was told another, and the human should not have to know
+/// which that is. One typed with a port is asked at it.
+///
+/// What the press answers with is the section read again, so the pending row
+/// arrives out of this answer rather than out of a second request. A refusal is
+/// drawn in the words the dial put it in: a machine that is off, an address
+/// nobody is at and a Verkstead that would not have it are three different
+/// things to do something about.
+function Add(): JSX.Element {
+  const queries = useQueryClient();
+  const [typed, setTyped] = createSignal("");
+
+  const ask = useMutation(() => ({
+    mutationFn: (address: string) => addDevice(address),
+    onSuccess: (reading: DevicesView) => {
+      queries.setQueryData(["devices"], reading);
+      setTyped("");
+    },
+  }));
+
+  const press = (ev: Event) => {
+    ev.preventDefault();
+
+    const address = typed().trim();
+    if (address) ask.mutate(address);
+  };
+
+  return (
+    <form class={styles.adding} onSubmit={press}>
+      <label for="link-address">Link another device</label>
+
+      <div class={styles.field}>
+        <input
+          id="link-address"
+          type="text"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          placeholder="hostname or address"
+          value={typed()}
+          disabled={ask.isPending}
+          onInput={(ev) => setTyped(ev.currentTarget.value)}
+        />
+        <button
+          type="submit"
+          disabled={ask.isPending || typed().trim().length === 0}
+        >
+          {ask.isPending ? "Asking…" : "Add"}
+        </button>
+      </div>
+
+      <Note>
+        Asks that device to link with this one. Somebody has to allow it there,
+        and the fingerprint shown here is what they will be comparing against.
+      </Note>
+
+      <Show when={ask.isError}>
+        <ErrorLine class={styles.failure}>
+          The device could not be asked: {ask.error?.message}
+        </ErrorLine>
+      </Show>
+    </form>
   );
 }
 

@@ -18,14 +18,17 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::DevicesView;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{open_database, router, router_answering_devices};
+use verkstead_store::{Linking, forget_member, member_unreachable, record_member};
 
 /// Where the pane reads this device from.
 const DEVICES: &str = "/api/ui/devices";
@@ -34,6 +37,13 @@ const DEVICES: &str = "/api/ui/devices";
 /// string it chose rather than sixteen random bytes it has to filter out of a
 /// payload — see [`Device::stated`], which is here for that reason.
 const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
+/// And the ids the devices this one is linked to are stated as, for the reason
+/// the one above is: a row asserted against is a row named by a string this
+/// suite chose.
+const A_MEMBER: &str = "0011223344556677889900aabbccddee";
+const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
+const A_THIRD_MEMBER: &str = "99887766554433221100aabbccddeeff";
 
 /// What a WSL kernel calls itself, which is the one thing that says one apart
 /// from the Linux it is in every other way.
@@ -49,18 +59,50 @@ fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT)
 }
 
-/// A router answering for a device on a stated machine, and the directory
-/// holding that device's files alive.
-async fn app(reading: Reading) -> (tempfile::TempDir, Router) {
+/// A router answering for a device on a stated machine, with the pool its
+/// membership is read out of and the directory holding both alive.
+///
+/// The membership is the real one rather than a stated number, because what
+/// the list draws is rows: a test that wants a member writes one, which is what
+/// the join of a later task will do.
+async fn app(reading: Reading) -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
     let device = Device::stated(dir.path(), THIS_DEVICE).unwrap();
-    let devices = Devices::of(device, reading, Members::none());
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
 
-    (dir, router_answering_devices(pool, devices))
+    (dir, pool.clone(), router_answering_devices(pool, devices))
+}
+
+/// A device written down as a member of this one's cluster, as the join of a
+/// later task will write one.
+///
+/// A fixture, which is the whole of what this task has to make a row with — and
+/// what the row is *for* is what the list draws off it.
+async fn linked(pool: &SqlitePool, device: &str, name: &str, os: &str, addresses: &[&str]) {
+    record_member(
+        pool,
+        &Linking {
+            device: device.to_owned(),
+            name: name.to_owned(),
+            os: os.to_owned(),
+            addresses: addresses
+                .iter()
+                .map(|address| (*address).to_owned())
+                .collect(),
+            fingerprint: format!("AA:BB:{device}"),
+        },
+    )
+    .await
+    .unwrap();
 }
 
 /// The machine this device is on where nothing about it is interesting: this
@@ -94,8 +136,8 @@ async fn listing(app: &Router) -> DevicesView {
 /// carrying the fingerprint a link is pinned on.
 #[tokio::test]
 async fn the_list_is_this_device() {
-    let (dir, app) = app(plainly()).await;
-    let device = Device::issued(dir.path(), &Members::none()).unwrap();
+    let (dir, _pool, app) = app(plainly()).await;
+    let device = Device::issued(dir.path(), &Members::none()).await.unwrap();
 
     let listing = listing(&app).await;
 
@@ -108,20 +150,124 @@ async fn the_list_is_this_device() {
     );
 }
 
-/// And nothing is linked to it, which is the clause the Remote access card
-/// carries beside what Tailscale is doing.
+/// And a Verkstead nothing has been linked to lists that device alone.
 ///
-/// Nought rather than one: this device is the row the list holds, and a device
-/// is not linked to itself. A count that read one here would put *1 device
+/// Nought members rather than one: this device is a row of its own and is not
+/// linked to itself, so a list that counted it would put *1 other device
 /// linked* on the card of a Verkstead that has never met another.
 #[tokio::test]
 async fn nothing_is_linked_to_it_yet() {
-    let (_dir, app) = app(plainly()).await;
+    let (_dir, _pool, app) = app(plainly()).await;
+
+    assert!(
+        listing(&app).await.members.is_empty(),
+        "a member is made by a join, and there is no join to make one with yet",
+    );
+}
+
+/// And a device written down as a member is a row beside this one's, carrying
+/// the same three things the row above it carries: the word for its OS, the
+/// name it is shown under, and the addresses a peer could reach it on.
+#[tokio::test]
+async fn a_member_is_a_row_beside_this_device() {
+    let (_dir, pool, app) = app(plainly()).await;
+
+    linked(
+        &pool,
+        A_MEMBER,
+        "laptop",
+        "macOS",
+        &["laptop.tailnet-name.ts.net", "192.168.1.31"],
+    )
+    .await;
+
+    let listing = listing(&app).await;
 
     assert_eq!(
-        listing(&app).await.linked,
-        0,
-        "a member is made by a join, and there is no join to make one with yet",
+        listing.this.device, THIS_DEVICE,
+        "this device is still a row"
+    );
+    assert_eq!(listing.members.len(), 1);
+
+    let member = &listing.members[0];
+
+    assert_eq!(member.identity.device, A_MEMBER);
+    assert_eq!(member.identity.name, "laptop");
+    assert_eq!(
+        member.identity.os, "macOS",
+        "the OS word is what draws the mark beside the name, and it is the far \
+         end's rather than this machine's",
+    );
+    assert_eq!(
+        member.identity.addresses,
+        vec!["laptop.tailnet-name.ts.net", "192.168.1.31"],
+        "in the order the far end advertised them, which is the order a peer \
+         dials them in",
+    );
+    assert!(
+        member.reachable,
+        "a member recorded off an exchange that got through is a member that was \
+         answering, which is what the row is drawn as until a dial finds otherwise",
+    );
+}
+
+/// And a member no dial has been able to reach is the same row, drawn dimmed: it
+/// stays on the list with everything about it, which is what an unreachable
+/// member is.
+#[tokio::test]
+async fn a_member_that_answers_nothing_is_still_a_row() {
+    let (_dir, pool, app) = app(plainly()).await;
+
+    linked(&pool, A_MEMBER, "laptop", "macOS", &["192.168.1.31"]).await;
+    member_unreachable(&pool, A_MEMBER).await.unwrap();
+
+    let listing = listing(&app).await;
+
+    assert_eq!(listing.members.len(), 1, "it is not taken off the list");
+
+    let member = &listing.members[0];
+
+    assert!(!member.reachable, "and the row says the dial found nothing");
+    assert_eq!(
+        member.identity.addresses,
+        vec!["192.168.1.31"],
+        "with everything about it still there, which is what the next dial works \
+         down and what an Unlink is pressed on",
+    );
+}
+
+/// And the card's count comes off those rows, so the two cannot disagree: three
+/// members drawn is three others linked.
+#[tokio::test]
+async fn the_count_on_the_card_comes_off_the_rows() {
+    let (_dir, pool, app) = app(plainly()).await;
+
+    for (device, name) in [
+        (A_MEMBER, "laptop"),
+        (ANOTHER_MEMBER, "desk"),
+        (A_THIRD_MEMBER, "wsl"),
+    ] {
+        linked(&pool, device, name, "Linux", &["192.168.1.31"]).await;
+    }
+
+    assert_eq!(listing(&app).await.members.len(), 3);
+}
+
+/// A member taken out of the table is off the list on the next read, which is
+/// what an unlink will have to mean.
+#[tokio::test]
+async fn a_forgotten_member_is_off_the_list() {
+    let (_dir, pool, app) = app(plainly()).await;
+
+    linked(&pool, A_MEMBER, "laptop", "macOS", &["192.168.1.31"]).await;
+    assert_eq!(listing(&app).await.members.len(), 1);
+
+    forget_member(&pool, A_MEMBER).await.unwrap();
+
+    assert!(
+        listing(&app).await.members.is_empty(),
+        "the list is read at the moment the pane asks rather than held, so a \
+         member that is gone is gone",
     );
 }
 
@@ -133,7 +279,7 @@ async fn nothing_is_linked_to_it_yet() {
 /// would be a golden fixture nobody could commit.
 #[tokio::test]
 async fn the_row_names_the_machine_this_device_is_on() {
-    let (_dir, app) = app(plainly()).await;
+    let (_dir, _pool, app) = app(plainly()).await;
 
     let listing = listing(&app).await;
 
@@ -161,7 +307,7 @@ async fn a_wsl_reads_linux_wsl() {
         Vec::new(),
     );
 
-    let (_dir, app) = app(wsl).await;
+    let (_dir, _pool, app) = app(wsl).await;
 
     assert_eq!(listing(&app).await.this.os, "Linux (WSL)");
 }
@@ -178,7 +324,7 @@ async fn the_row_carries_the_addresses_this_device_is_reachable_on() {
         vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
     );
 
-    let (_dir, app) = app(on_the_lan).await;
+    let (_dir, _pool, app) = app(on_the_lan).await;
 
     assert_eq!(
         listing(&app).await.this.addresses,
