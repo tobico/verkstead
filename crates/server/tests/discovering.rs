@@ -16,6 +16,19 @@
 //! device's own id, and none of that is on any wire: those state what was heard
 //! and ask which of it is drawn.
 //!
+//! **And in those, the browse goes up before anything is advertised**, which is
+//! the one order a suite on a port of its own can rely on. A device announces
+//! itself over the multicast as it is registered and every daemon on the group
+//! hears that; a browse that starts afterwards has to *ask* instead — and
+//! `mdns-sd` answers a query whose source port is not 5353 by **unicast** back
+//! to it, that being a legacy resolver as RFC 6762 §6.7 reads one. On a suite
+//! port that source port is the port every daemon in the test is bound to, the
+//! advertisements' and the browse's alike, so the answer is handed to whichever
+//! of them the operating system picks: a fixed hash on Linux, and on Windows the
+//! last socket to have bound, which is a race between the daemons' own threads.
+//! Hence a row that arrives on an announcement rather than on an answer — the
+//! same row, off the same code path, and one no test has to win a race for.
+//!
 //! **And the first read of a cold browse is empty.** The browse starts when this
 //! list is first asked for, so nothing has been heard when that answer is given
 //! and the rows arrive over the seconds after it. Which is not a shortcoming to
@@ -223,6 +236,24 @@ async fn listing(app: &Router) -> DevicesView {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+/// The browse started and listening, which is the first read of the list.
+///
+/// **What every test here that puts something on the wire does first** — see the
+/// note at the top of this file: a browse listening before an advertisement is
+/// registered hears its announcement over the multicast, where one that starts
+/// afterwards has to ask and be answered by unicast on a port every daemon in the
+/// test shares.
+///
+/// The answer being empty is the thing itself rather than an assertion on the
+/// way past: a browse that has heard nothing is what a cold one is, and a row in
+/// this answer would be one heard off the runner's own LAN.
+async fn browsing(app: &Router) {
+    assert!(
+        discovered(app).await.is_empty(),
+        "the read that starts the browse is given before anything has been heard",
+    );
+}
+
 /// Read the list until `device` is on it, and hand back its row.
 ///
 /// Polled, which is what a *test* does rather than what the viewer does: the
@@ -300,9 +331,13 @@ async fn left(app: &Router, device: &str) {
 /// where.
 #[tokio::test]
 async fn a_device_on_the_lan_is_drawn_under_discovered() {
-    let _advertising = Advertisement::of_this_device_on(HEARING, true, &announcement(OVER_THERE));
-
     let (_dir, _pool, app) = workbench(Browse::of_this_device_on(HEARING, Nudges::new())).await;
+
+    // Browsing before the device says anything, which is this suite's order
+    // everywhere it puts something on the wire.
+    browsing(&app).await;
+
+    let _advertising = Advertisement::of_this_device_on(HEARING, true, &announcement(OVER_THERE));
 
     let row = drawn(&app, OVER_THERE).await;
 
@@ -345,10 +380,12 @@ async fn a_device_on_the_lan_is_drawn_under_discovered() {
 /// instance is gone.
 #[tokio::test]
 async fn a_device_that_says_goodbye_leaves_the_list() {
+    let (_dir, _pool, app) = workbench(Browse::of_this_device_on(GOODBYE, Nudges::new())).await;
+
+    browsing(&app).await;
+
     let advertising = Advertisement::of_this_device_on(GOODBYE, true, &announcement(OVER_THERE));
     let _beside_it = Advertisement::of_this_device_on(GOODBYE, true, &announcement(BESIDE_IT));
-
-    let (_dir, _pool, app) = workbench(Browse::of_this_device_on(GOODBYE, Nudges::new())).await;
 
     drawn(&app, OVER_THERE).await;
     drawn(&app, BESIDE_IT).await;
@@ -442,11 +479,13 @@ async fn an_advertisement_that_says_too_little_or_too_much_is_no_row() {
         ..announcement(A_THIRD)
     };
 
+    let (_dir, _pool, app) = workbench(Browse::of_this_device_on(TOO_MUCH, Nudges::new())).await;
+
+    browsing(&app).await;
+
     let _nameless = Advertisement::of_this_device_on(TOO_MUCH, true, &nameless);
     let _shouting = Advertisement::of_this_device_on(TOO_MUCH, true, &shouting);
     let _proper = Advertisement::of_this_device_on(TOO_MUCH, true, &announcement(OVER_THERE));
-
-    let (_dir, _pool, app) = workbench(Browse::of_this_device_on(TOO_MUCH, Nudges::new())).await;
 
     drawn(&app, OVER_THERE).await;
 
