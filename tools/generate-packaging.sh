@@ -89,7 +89,7 @@ done
 
 # The macOS icon, which is those same downscales again inside the one container
 # macOS reads an app's icon out of — `Verkstead.app/Contents/Resources`, put
-# there by tools/build-macos-dmg.sh.
+# there by the pack — see `desktop/scripts/pack.mjs`, which stages it.
 #
 # Written here rather than handed to `iconutil` because that tool is a Mac's and
 # this script runs wherever the dev shell does, while the format is a header and

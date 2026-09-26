@@ -24,7 +24,7 @@ Roadmap stage: [06: The Mac](docs/roadmaps/electron-desktop/06-macos.md)
 ## Tasks
 
 - [x] 01: The universal dmg, packed from a checkout — [details](01-the-universal-dmg.md)
-- [ ] 02: The release leg, and the Rust dmg retired — [details](02-the-release-leg.md)
+- [x] 02: The release leg, and the Rust dmg retired — [details](02-the-release-leg.md)
 - [ ] 03: The Dock, Cmd+Q and the Desktop page on a Mac — [details](03-the-dock-and-the-page.md)
 - [ ] 04: The traffic lights in the head's first row — [details](04-the-traffic-lights.md)
 - [ ] 05: The launch agent taken over, and a hidden login start — [details](05-the-launch-agent.md)

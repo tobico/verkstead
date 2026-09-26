@@ -163,10 +163,10 @@ mac:
   # `null` here would skip code signing outright, and Apple silicon refuses to
   # execute a Mach-O carrying no signature at all — so the app would not start on
   # half the Macs it is built for. `-` is `codesign --sign -` through
-  # @electron/osx-sign, which is exactly what `tools/build-macos-dmg.sh` did by
-  # hand. It buys nothing from Gatekeeper: there is no Developer ID, the download
-  # is unsigned in the sense `docs/adoption.md` means, and the three steps it
-  # describes stay (ADR-0020).
+  # @electron/osx-sign, which is exactly what the Rust bundle this replaced did
+  # by hand. It buys nothing from Gatekeeper: there is no Developer ID, the
+  # download is unsigned in the sense `docs/adoption.md` means, and the three
+  # steps it describes stay (ADR-0020).
   identity: "-"
 
   # **And the hardened runtime goes off beside it.** It defaults on, and

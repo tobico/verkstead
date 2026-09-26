@@ -161,7 +161,7 @@ function stage(binaries) {
 ///
 /// `lipo` copies each half whole and writes a header in front of them saying
 /// which is which, and the loader takes the half the Mac it is on runs. Checked
-/// rather than trusted, as `tools/build-macos-dmg.sh` checked its own output: a
+/// rather than trusted, as the Rust bundle this replaced checked its own: a
 /// `lipo` given one input writes a perfectly good single-architecture file, and
 /// the Mac that could not run it is the one nobody testing this has.
 function universal(halves, packed) {

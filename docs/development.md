@@ -588,18 +588,16 @@ $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
 $ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
-$ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 $ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
 ```
 
-The last two are the Mac and Windows desktop artifacts a release ships — the
-Linux one is the packed Electron app, which is `pnpm run pack` in `desktop/`
-rather than a script here. Each takes everything from the working tree and
-leaves one file under `target/`, and each wants `web/dist` already built,
-because the viewer is compiled into the binary they wrap. Each also runs only
-where its artifact does: the dmg wants a Mac for `lipo` and `hdiutil`, and the
-msi wants Windows for the WiX toolset and the MSVC build under it, so the dev
-shell has neither of the two.
+The last is the Windows desktop artifact a release ships — the Linux and macOS
+ones are the packed Electron app, which is `pnpm run pack` in `desktop/` rather
+than a script here. It takes everything from the working tree and leaves one
+file under `target/`, and it wants `web/dist` already built, because the viewer
+is compiled into the binary it wraps. It also runs only where its artifact does:
+the msi wants Windows for the WiX toolset and the MSVC build under it, so the
+dev shell has not got it.
 
 The AppImage is the Electron app with a `verkstead` packed inside it as its
 sidecar, and which binary that is is the one thing
