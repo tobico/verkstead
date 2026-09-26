@@ -23,19 +23,19 @@ use crate::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DeviceIdentity, DevicesView, DirectoryListing, FileDeleted, FileDeleting, FileListsView,
-    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, LinkedDevice, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewJoin, NewOrder, NewPullRequestAdoption,
-    OnboardingView, OpenPullRequestRepo, PendingJoin, PrefillView, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
-    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
-    ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown, Started,
-    SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, FileDeleted, FileDeleting,
+    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
+    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress,
+    LinkedDevice, Locked, NewAdoption, NewCompanion, NewConversation, NewJoin, NewOrder,
+    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PendingJoin, PrefillView,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
+    RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -415,6 +415,14 @@ fn the_viewers_types_are_written_from_these() {
     // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
+
+    // And the devices nobody has typed an address for, which is the Discovered
+    // list under those rows: a reading of its own rather than a field of the one
+    // above, so that a browse finding something does not re-read the membership
+    // and cannot take the rows the pane already drew with it. Each says where it
+    // was found, which is a list — a device on one LAN and one tailnet is found
+    // twice and is one row.
+    DiscoveredDevice::export_all(&config).unwrap();
 
     // And the one thing in that section that is pressed rather than read: Add,
     // which takes an address to go and ask at. What it leaves behind is a

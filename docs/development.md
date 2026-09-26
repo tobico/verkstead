@@ -115,6 +115,30 @@ operating system and a device id, on a LAN that may not be yours. A server
 out, which is the one ordered stop this server has; a killed one leaves the row
 on the other machine to run out on its own TTL, the way a shut lid does.
 
+**And the other half of it is what the pane draws under those rows.** The same
+service browsed rather than advertised, which is the **Discovered** list: every
+device this one has heard of and is not already in a cluster with, each with the
+port it advertised on every address it was found at, and an **Add** on the row.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/devices/discovered
+[{"device":"0011223344556677889900aabbccddee","name":"kitchen-mini","os":"macOS",
+  "addresses":["192.168.1.31:8423"],"found":["Lan"]}]
+```
+
+**The browse runs while that list is being read and not otherwise.** It starts on
+the first read of it and stops once nothing has read it for five minutes — a phone
+that closes a tab says nothing, so the reading being read is the whole of what
+governs it. Which means the first read is empty or short however many machines are
+out there: a browse is cold when it starts, and the rows arrive over the seconds
+after it, each as a `discovered` nudge that an open pane redraws on. Reading it
+again is what a test does and a Nudge is what the viewer does; nothing polls.
+
+Three kinds of device are left out of it — a member, this device, and one a join
+is already pending for — so what the list holds is only what there is anything to
+press. Start the second Verkstead below with a data directory of its own and this
+lists it; link the two and it is a member above instead.
+
 **Three routes stand outside the member gate and they are the whole of the
 un-gated surface**: that identity endpoint, the join post, and the cancel and
 the dial-back a join is settled through. Every other path on that port answers
@@ -136,10 +160,15 @@ $ cargo run -p verkstead-cli -- serve --data-dir /tmp/other \
 ```
 
 Two installs, two device ids, two certificates. Open the **Remote access** pane
-on the first one's workbench and its **Devices** section holds one row, marked
-*this device*, with **Add** under it. Type `127.0.0.1:8523` — the port is only
-needed because both are on this machine; a device answering on 8423 is reached
-by its name or address alone — and press Add.
+on the first one's workbench: its **Devices** section holds one row, marked *this
+device*, and under **Discovered** the second install appears within a second or
+two of the pane being opened — heard over the multicast, drawn with the port its
+listener bound, and with an **Add** on the row.
+
+That press does nothing yet. Type the address into the box under the list
+instead: `127.0.0.1:8523` — the port is only needed because both are on this
+machine; a device answering on 8423 is reached by its name or address alone — and
+press Add.
 
 What happens then is the whole of the stage. The first device dials that
 address, takes whatever certificate it presents for the one call, and posts what

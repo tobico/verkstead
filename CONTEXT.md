@@ -779,6 +779,38 @@ tidy rather than what makes a stale row impossible.
 _Avoid_: broadcasting, publishing, mDNS registration (it is **Advertising**),
 Bonjour, zeroconf
 
+**Discovered**:
+The list of every **Device** this one has heard of and is not in a cluster with,
+under the rows of the **Devices** section. One row each: the OS icon, the name it
+advertised, the addresses it was found at with the port its **Peer Listener**
+landed on, where it was found — *LAN* — and an **Add** that runs a **Join** with
+nothing typed.
+**The reading half of Advertising**, browsing the same
+`_verkstead._tcp.local` in the same process and keyed by **Device Id**: two
+Verksteads on one machine answer to one hostname at one address, and the id is
+the only thing about either that is nobody else's.
+**A reading of its own rather than a field of the Devices one**, and that is what
+it is for: a browse hears something every few seconds, and a list arriving on the
+same answer as the membership would be the rows the pane had already drawn
+replaced each time the LAN said anything. What moves it is a **Nudge** of its own
+kind, so the membership is not re-read for a device turning up.
+**Three kinds of device are left out**: a **Member**, which is in the cluster
+already and would be a press with nothing behind it; this device, which hears its
+own advertisement; and one this device holds a **Join** for, whose **pending
+row** is already the answer to the press somebody made — a row that was refused
+or ran out included, until it is dismissed.
+**The browse is held while somebody is looking.** It starts when this list is
+first read and is dropped once nothing has read it for five minutes: a phone that
+closes a tab says nothing, so the reading being read is the whole of what governs
+it. Which is why the first read of it is empty or short — a browse is cold when it
+starts — and why the rows arrive over the seconds after a pane is drawn, each
+announced.
+**A device that stopped advertising leaves it**, at once on the goodbye an ordered
+stop sends and at the end of its TTL where there was none, which is a machine
+whose lid shut; both arrive as one event.
+_Avoid_: found devices, nearby devices, the browse (which is how it is read),
+available devices
+
 **Join**:
 One **Device** asking another to let it into its cluster, and the whole of what
 follows the press on **Add**. The asking device dials the address somebody

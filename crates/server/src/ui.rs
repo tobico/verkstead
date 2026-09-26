@@ -600,6 +600,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And the devices nobody has typed an address for, which is the
+        // Discovered list under those rows. A read of its own beside the one
+        // above rather than a field of it, and that is the point of it: a browse
+        // hears something every few seconds, and a list that arrived on the same
+        // answer as the membership would put the rows the pane had already drawn
+        // at the mercy of the LAN. Reading it is also what holds the browse open
+        // — see [`crate::discovery::Browse`].
+        .route("/api/ui/devices/discovered", get(discovered))
         // And the one thing in that section that is pressed rather than read:
         // Add, against an address somebody typed. A route of its own beside the
         // read for the serve switch's reason — it is the half of the section
@@ -5633,6 +5641,39 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
     };
 
     listed(&devices).await
+}
+
+/// `GET /api/ui/devices/discovered` — the devices nobody has typed an address
+/// for, which is the **Discovered** list under those rows (ADR-0020,
+/// *Discovery*).
+///
+/// **A reading of its own rather than a field of the one above**, and that is
+/// what it is for: a browse hears something every few seconds, and a list
+/// arriving on the same answer as the membership would be the cluster's own rows
+/// replaced each time the LAN said anything. What a found device re-reads is
+/// this, and nothing else.
+///
+/// **And asking for it is what holds the browse open.** It starts on the first
+/// read and is dropped once nothing has read it for a spell — a phone that
+/// closes a tab says nothing, so the reading being read is the only thing there
+/// is to govern it by. Which also means the first read of a cold browse is empty
+/// or short: the rows arrive over the seconds after it, each announced as
+/// [`Nudge::Discovered`] — see [`crate::discovery::Browse`].
+///
+/// Refused where there is no identity, for [`devices`]'s reason: the three kinds
+/// of device this list leaves out include this device itself, and a server that
+/// cannot say which device it is cannot leave it out.
+async fn discovered(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    match devices.discovered().await {
+        Ok(found) => Json(found).into_response(),
+        Err(why) => unavailable(&format!(
+            "the devices this one has heard of could not be read: {why:#}"
+        )),
+    }
 }
 
 /// `POST /api/ui/devices/joins` — **Add**: ask the device at an address to let

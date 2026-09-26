@@ -38,6 +38,7 @@ import type {
   Dependency,
   DevicesView,
   DirectoryListing,
+  DiscoveredDevice,
   FileDeleted,
   FileDeleting,
   FileListsView,
@@ -1349,6 +1350,25 @@ export function loadRemote(): Promise<RemoteView> {
 /// workbench is where the pane reads it.
 export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
+}
+
+/// And the devices nobody has typed an address for: the Discovered list under
+/// those rows.
+///
+/// A read of its own beside the one above rather than a field of it, and that is
+/// what it is for: a browse hears something every few seconds, and a list
+/// arriving on the same answer as the membership would be the cluster's own rows
+/// replaced each time the LAN said anything. A `discovered` Nudge re-reads this
+/// and nothing else.
+///
+/// **And asking is what holds the browse open.** The server starts browsing on
+/// the first of these and stops once nothing has asked for a spell — a phone that
+/// closes a tab says nothing, so the reading being read is the whole of what
+/// governs it. Which is why the first answer is empty or short: a cold browse has
+/// heard nothing yet, and the rows arrive over the seconds after it, each with a
+/// Nudge to say so.
+export function loadDiscovered(): Promise<DiscoveredDevice[]> {
+  return get<DiscoveredDevice[]>("/api/ui/devices/discovered");
 }
 
 /// Ask the device at an address to let this one into its cluster.

@@ -1837,7 +1837,23 @@ pub async fn run_on_keyed(
         reading.clone(),
         members.clone(),
         joins.clone(),
-    );
+    )
+    // And the other half of the discovery above: a browse of the same service,
+    // which is what the Discovered list under those rows is drawn from. Started
+    // by the first read of that list rather than here — a server nobody is
+    // looking at browses nothing — and dropped again once nothing has read it
+    // for a spell, which is what the reading being read is the only signal for
+    // (ADR-0020) — see [`discovery::Browse`].
+    //
+    // The nudges, because a browse is the one reading here that answers before
+    // it knows: a cold one has heard nothing, so the rows arrive over the seconds
+    // after the pane was drawn and each of them is a word to the open pages.
+    //
+    // Not behind the advertising switch. What that turns off is what this machine
+    // *says* about itself on a LAN that may not be the human's; hearing the
+    // devices whose operator chose to say something is the other half, and a
+    // machine that has been told to keep quiet has not been told to go deaf.
+    .browsing(discovery::Browse::of_this_device(nudges.clone()));
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it

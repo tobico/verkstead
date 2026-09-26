@@ -78,12 +78,14 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    AskingDevice, DeviceIdentity, DevicesView, JoinSettled, RenewedCertificate,
+    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, JoinSettled,
+    RenewedCertificate,
 };
 use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
+use crate::discovery::Browse;
 use crate::peer::Members;
 use crate::peer::dialling::Peers;
 use crate::peer::joining::Joins;
@@ -644,6 +646,18 @@ pub struct Devices {
     /// which is a row apiece under those — see [`crate::peer::joining::Joins`].
     joins: Joins,
 
+    /// And what it has heard of the devices it is *not* linked to, which is the
+    /// Discovered list under those rows — see [`crate::discovery::Browse`].
+    ///
+    /// Here rather than beside this handle, because the three things a discovered
+    /// row is left out for are all in this one: the id of this device, the
+    /// membership, and the joins it is waiting on. A browse hears a LAN and knows
+    /// none of them.
+    ///
+    /// Heard nothing unless a server said otherwise — see [`Devices::browsing`],
+    /// which is where a start hands over the real one.
+    browse: Browse,
+
     /// And how it reaches another device, which is what the one press in this
     /// section goes out over: Add dials the address somebody typed and posts a
     /// join, and Cancel dials the same address and takes it back.
@@ -674,8 +688,22 @@ impl Devices {
             reading,
             members,
             joins,
+            browse: Browse::heard_nothing(),
             peers,
         }
+    }
+
+    /// The same, browsing the LAN for the devices this one is not linked to — see
+    /// [`crate::discovery::Browse`], which is where the Discovered list comes
+    /// from.
+    ///
+    /// **Handed over rather than made here**, because a browse is a thread of its
+    /// own and a multicast group: a router stood up to answer a question about a
+    /// membership has no business joining one, so what [`Devices::of`] leaves is a
+    /// device that has heard nothing and the one start that serves a workbench is
+    /// what says otherwise.
+    pub fn browsing(self, browse: Browse) -> Devices {
+        Devices { browse, ..self }
     }
 
     /// The same, giving every dial this section makes `patience` rather than the
@@ -712,6 +740,62 @@ impl Devices {
         })
     }
 
+    /// The **Discovered** list as the pane draws it: every device this one has
+    /// heard of and is not already in a cluster with (ADR-0020, *Discovery*).
+    ///
+    /// **A reading of its own rather than a field of [`Devices::listing`]**, and
+    /// that is the point of it: a browse hears something every few seconds, and a
+    /// list that arrived on the same answer as the membership would be the rows
+    /// the pane had already drawn replaced each time the LAN said anything. Two
+    /// readings are two queries, and what a found device re-reads is this one.
+    ///
+    /// **Three kinds of device are left out, and this is where.** A **Member** is
+    /// in the cluster already, so a row offering to link it would be a press with
+    /// nothing behind it. This device hears its own advertisement, and a Verkstead
+    /// is not linked to itself. And a device this one holds a **Join** for is one
+    /// somebody has already pressed Add on — the pending row under the list is
+    /// the answer to that press, and a discovered row beside it would be a second
+    /// thing to press about one device. A refused or run-out row counts: it is
+    /// still drawn up there, and what ends it is the Dismiss on it.
+    ///
+    /// **The exclusions are made here rather than by the browse**, because this
+    /// is where a membership is known: a browse hears a LAN and has no idea which
+    /// of it is already linked. So what it holds is everything it heard — which
+    /// is also why hearing a member costs an announcement the next read draws
+    /// nothing new from.
+    pub(crate) async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
+        let members: Vec<String> = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .map(|member| member.device)
+            .collect();
+
+        let awaiting = self.joins.awaiting().await?;
+
+        Ok(self
+            .browse
+            .found()
+            .into_iter()
+            .filter(|found| {
+                found.device != self.device.id()
+                    && !members.contains(&found.device)
+                    && !awaiting.contains(&found.device)
+            })
+            .map(|found| DiscoveredDevice {
+                device: found.device,
+                name: found.name,
+                os: found.os,
+                addresses: found.addresses,
+
+                // The LAN, there being one browse behind this list so far. The
+                // tailnet is the other source ADR-0020 names, and a device found
+                // both ways is one row saying both.
+                found: vec![FoundOn::Lan],
+            })
+            .collect())
+    }
     /// **Add**: ask the device at `address` to let this one into its cluster.
     ///
     /// The one place on the Remote access pane where something is configured

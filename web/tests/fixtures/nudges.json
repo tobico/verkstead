@@ -40,6 +40,9 @@
     "kind": "devices"
   },
   {
+    "kind": "discovered"
+  },
+  {
     "kind": "profiles"
   }
 ]

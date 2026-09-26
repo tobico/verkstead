@@ -38,6 +38,7 @@ use verkstead_schema::{
 };
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
+use verkstead_server::discovery::{Browse, Found};
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::peer::Members;
 use verkstead_server::peer::joining::Joins;
@@ -3502,6 +3503,21 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &a_stated_machine(&get(&asking, "/api/ui/devices").await),
     );
 
+    // And the list under those rows, which is the other reading that section
+    // makes: the devices nobody has typed an address for. Two of them, because
+    // that is what the list is for — a machine somebody is about to link, and a
+    // WSL beside it, the mark being the one thing that would tell it from the
+    // Windows it shares a hostname with.
+    //
+    // Stated rather than heard, for the reason the machine above is stated:
+    // whatever is advertising itself on the LAN of the box writing these is a
+    // fact about that LAN, and a fixture drawn from one could not be committed.
+    let (_dir, found) = a_discovering_devices_app().await;
+    write(
+        "devices-discovered.json",
+        &get(&found, "/api/ui/devices/discovered").await,
+    );
+
     // And the other side of a join, which is not on that pane at all: the
     // device asking to be let into *this* one's cluster, as the modal every
     // open workbench raises is drawn from. Nothing of this machine is in it —
@@ -3544,17 +3560,20 @@ const A_MACHINE_NAME: &str = "workbench";
 /// machine writing the same bytes.
 #[cfg(unix)]
 async fn devices_app(platform: Platform, kernel: Option<&str>) -> (tempfile::TempDir, Router) {
-    let (dir, _pool, app) = devices_app_over_a_store(platform, kernel).await;
+    let (dir, _pool, app) =
+        devices_app_over_a_store(platform, kernel, Browse::heard_nothing()).await;
 
     (dir, app)
 }
 
-/// The same, with the pool its membership is read out of handed back: what the
-/// linked fixture writes its members into.
+/// The same, with the pool its membership is read out of handed back — what the
+/// linked fixture writes its members into — and what it has heard of the devices
+/// it is not linked to, which is the Discovered list.
 #[cfg(unix)]
 async fn devices_app_over_a_store(
     platform: Platform,
     kernel: Option<&str>,
+    browse: Browse,
 ) -> (tempfile::TempDir, sqlx::SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
@@ -3574,7 +3593,8 @@ async fn devices_app_over_a_store(
         reading,
         Members::recorded(pool.clone()),
         Joins::recorded(pool.clone()),
-    );
+    )
+    .browsing(browse);
 
     (dir, pool.clone(), router_answering_devices(pool, devices))
 }
@@ -3592,7 +3612,8 @@ async fn devices_app_over_a_store(
 /// row. A fixture where both were answering could only ever draw the one of them.
 #[cfg(unix)]
 async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
-    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+    let (dir, pool, app) =
+        devices_app_over_a_store(Platform::Linux, None, Browse::heard_nothing()).await;
 
     for (device, name, os, addresses) in [
         (
@@ -3659,7 +3680,8 @@ const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
 /// names the far ends invented.
 #[cfg(unix)]
 async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
-    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+    let (dir, pool, app) =
+        devices_app_over_a_store(Platform::Linux, None, Browse::heard_nothing()).await;
 
     for (request, address, device, name, asked_at, expires_at, refused) in [
         (
@@ -3726,7 +3748,8 @@ async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
 /// was written would be an empty list.
 #[cfg(unix)]
 async fn an_asked_devices_app() -> (tempfile::TempDir, Router) {
-    let (dir, pool, app) = devices_app_over_a_store(Platform::Linux, None).await;
+    let (dir, pool, app) =
+        devices_app_over_a_store(Platform::Linux, None, Browse::heard_nothing()).await;
 
     verkstead_store::hold_join(
         &pool,
@@ -3746,6 +3769,46 @@ async fn an_asked_devices_app() -> (tempfile::TempDir, Router) {
     )
     .await
     .unwrap();
+
+    (dir, app)
+}
+
+/// The same router with two devices heard of on the LAN and neither of them
+/// linked, which is what the Discovered list under those rows is drawn from.
+///
+/// **Stated rather than browsed**, for the reason the machine is stated: what is
+/// advertising itself on the LAN of the box writing these is a fact about that
+/// LAN, and a committed fixture cannot be written off one. What is being fed to
+/// the viewer is the shape the endpoint answers with.
+///
+/// Two of them, and the second is a WSL: the mark beside the name is the only
+/// thing that would tell it from the Windows it shares a hostname with, which is
+/// the case the whole of cluster mode was written for and the reason the OS word
+/// is on the row at all. The first carries two addresses and the second one,
+/// because a row draws every address the advertisement named.
+///
+/// The ports are the ones those listeners landed on rather than the default,
+/// which is what a row really says: an advertisement naming any other number is
+/// one nothing can be dialled at.
+#[cfg(unix)]
+async fn a_discovering_devices_app() -> (tempfile::TempDir, Router) {
+    let heard = vec![
+        Found {
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "macOS".to_owned(),
+            addresses: vec!["192.168.1.31:8423".to_owned(), "10.0.0.31:8423".to_owned()],
+        },
+        Found {
+            device: ANOTHER_MEMBER.to_owned(),
+            name: "workbench".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: vec!["172.29.0.14:9423".to_owned()],
+        },
+    ];
+
+    let (dir, _pool, app) =
+        devices_app_over_a_store(Platform::Linux, None, Browse::stated(heard)).await;
 
     (dir, app)
 }

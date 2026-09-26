@@ -116,12 +116,33 @@
 //! exactly as a live row's, the machine that is never coming back being most of
 //! what the press is for.
 //!
-//! **And under the list, the other control on this pane that configures rather
-//! than reads**: Add, against an address somebody types — see [`Add`]. Every
-//! other thing here is the machine said back, so the box is the departure the
-//! Unlink above makes beside it and Remove on a Repo made before either. A port
-//! is optional: every device answers on the peer port unless its host was told
-//! another.
+//! **And under those rows, the devices nobody has typed an address for** — see
+//! [`Discovered`], which is the list a browse of the LAN fills. A row there is
+//! what another Verkstead said about itself over mDNS: its name, the mark for its
+//! OS, the addresses it was found at with the port its listener bound, and where
+//! it was found — so two machines on one network are linked with nothing known
+//! about either one's address.
+//!
+//! **A reading of its own rather than a field of the one above**, and that is
+//! what keeps the two apart: a browse hears something every few seconds, and the
+//! cluster's own rows are not re-read for any of it — see [`useDiscovered`]. Its
+//! own kind of Nudge carries it, so a device turning up draws a row without a
+//! reload and without a poll; and because a browse is cold when it starts, the
+//! first answer is empty however many machines are out there. Which is why the
+//! empty list reads as one still listening rather than as a network with nothing
+//! on it.
+//!
+//! Members are not in it, nor is this device, nor is a device a press has already
+//! been made on — the server leaves all three out, so a device moves from that
+//! list to these rows rather than being drawn in both.
+//!
+//! **And under both lists, the other control on this pane that configures rather
+//! than reads**: Add, against an address somebody types — which is what covers
+//! the devices a browse cannot reach, a Windows machine and the WSL on it among
+//! them — see [`Add`]. Every other thing here is the machine said back, so the
+//! box is the departure the Unlink above makes beside it and Remove on a Repo
+//! made before either. A port is optional: every device answers on the peer port
+//! unless its host was told another.
 //!
 //! What a press leaves is a pending row — see [`Waiting`] — reading *waiting for
 //! confirmation on* the device that answered, with **this device's own
@@ -158,6 +179,7 @@ import {
   addDevice,
   cancelJoin,
   loadDevices,
+  loadDiscovered,
   loadRemote,
   pressServe,
   resetKey,
@@ -166,6 +188,7 @@ import {
 import type {
   DeviceIdentity,
   DevicesView,
+  DiscoveredDevice,
   LinkedDevice,
   PendingJoin,
   RemoteView,
@@ -269,6 +292,30 @@ function useDevices() {
   return useReading(() => ({
     queryKey: ["devices"],
     queryFn: loadDevices,
+    freshness: { reconcile: "device" },
+  }));
+}
+
+/// And the devices out there that this one is *not* in a cluster with, which is
+/// the Discovered list under those rows.
+///
+/// **A read of its own beside the one above rather than a field of it**, and that
+/// is what it is for: a browse hears something every few seconds, and a list
+/// arriving on the same answer as the membership would be the rows the pane had
+/// already drawn replaced each time the LAN said anything. What a `discovered`
+/// Nudge re-reads is this and nothing else.
+///
+/// **And this read is what holds the browse open.** The server starts browsing
+/// when it is first asked and stops once nothing has asked for a spell — a phone
+/// that closes a tab says nothing — so the first answer is empty or short and the
+/// rows arrive over the seconds after it, each announced. Nothing polls.
+///
+/// Merged by the device id, like the reading above and for its reason: a browse
+/// that heard one more device leaves the rows it already drew alone.
+function useDiscovered() {
+  return useReading(() => ({
+    queryKey: ["discovered"],
+    queryFn: loadDiscovered,
     freshness: { reconcile: "device" },
   }));
 }
@@ -728,6 +775,11 @@ function Devices(): JSX.Element {
         </ErrorLine>
       </Show>
 
+      {/* And what is out there rather than in the cluster, between the rows and
+          the box: a press here needs nothing typed, and the box below is what is
+          left for the devices a browse cannot reach. */}
+      <Discovered />
+
       <Add />
 
       {/* Asked before anything happens, the way Remove on a Repo is: one press
@@ -928,6 +980,113 @@ function Row(props: {
       </Show>
     </li>
   );
+}
+
+/// **Discovered**: the devices out there that this one is not in a cluster with,
+/// each with one press to link it (ADR-0020, *Discovery*).
+///
+/// **The other half of the box under it.** A device on the same LAN says what it
+/// is over mDNS, and a row here is that said back — the name, the mark for its
+/// OS, where it was found and how — so that linking two machines needs nobody to
+/// know either one's address. What the typed box is left for is the cases a
+/// browse cannot cross: a Windows machine and the WSL on it, which is NAT rather
+/// than a bug, and whatever else is on a network of its own.
+///
+/// **Its own reading rather than a field of the one above**, which is what keeps
+/// the two apart: a browse hears something every few seconds, and the cluster's
+/// own rows are not re-read for any of it — see [`useDiscovered`].
+///
+/// **Empty reads as looking rather than as nothing there**, because a browse is
+/// cold when it starts: the first answer is empty however many machines are on
+/// the LAN, and the rows arrive over the seconds after it. A line saying nothing
+/// was found would be a line that is wrong for the first second of every visit
+/// to this pane.
+///
+/// **Members are not here**, nor is this device, nor is one a press has already
+/// been made on — the server leaves all three out, so a device that has just been
+/// pressed moves from this list to the rows above rather than being drawn twice.
+function Discovered(): JSX.Element {
+  const found = useDiscovered();
+
+  return (
+    <div class={styles.found}>
+      <p class={styles.foundTitle}>Discovered</p>
+
+      <Choose>
+        <Match when={found.isError}>
+          <ErrorLine class={styles.failure}>
+            Could not read what this device has heard: {found.error?.message}
+          </ErrorLine>
+        </Match>
+
+        <Match when={found.data?.length}>
+          <ul class={styles.list}>
+            <For each={found.data}>
+              {(device: DiscoveredDevice) => <Heard of={device} />}
+            </For>
+          </ul>
+        </Match>
+
+        <Match when={true}>
+          <Note>
+            Devices on this network appear here as they are heard, with nothing to
+            type. A machine that never appears is linked by its address below.
+          </Note>
+        </Match>
+      </Choose>
+    </div>
+  );
+}
+
+/// One device heard of: the mark for its OS, the name, where it was found, and
+/// the press that links it.
+///
+/// Drawn as the rows above it are, because it is the same three facts said — a
+/// name, a mark and the addresses under them. What is different is the word
+/// beside the name, which stands where *this device* and *unreachable* stand on
+/// those: where this device was heard, which is a fact about the row rather than
+/// something to press.
+///
+/// **And the press is an Add rather than a link being made.** Nothing has been
+/// agreed with a device that has only advertised itself: what the press does is
+/// the same Join the typed box makes, and what it leaves is the same pending row
+/// with a fingerprint on it for two people to compare.
+function Heard(props: { of: DiscoveredDevice }): JSX.Element {
+  return (
+    <li class={styles.device}>
+      <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
+
+      <div class={styles.about}>
+        <p class={styles.deviceName}>
+          {props.of.name} <span class={styles.source}>{where(props.of)}</span>
+        </p>
+
+        <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+      </div>
+
+      {/* Drawn here and given its press by the task after this one, which is
+          what makes it a Join: the row names a device, and what is dialled is
+          every address the browse found for it. */}
+      <button type="button" class={styles.add}>
+        Add
+      </button>
+    </li>
+  );
+}
+
+/// The word for each way a device was heard of.
+///
+/// A table rather than the words in the markup, because the answer is a list: a
+/// device on one LAN and one tailnet is found twice and is one row, and what the
+/// row says is both.
+const WHERE: Record<DiscoveredDevice["found"][number], string> = {
+  Lan: "LAN",
+};
+
+/// Where a device was heard, as the row reads it: *LAN*, and both words where
+/// both found it.
+function where(device: DiscoveredDevice): string {
+  return device.found.map((on) => WHERE[on]).join(" and ");
 }
 
 /// One join this device has asked for and not been answered on: where it
