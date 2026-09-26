@@ -714,6 +714,39 @@ describe("what the head is drawn in", () => {
   it("is nothing at all where the page is drawn on nothing", () => {
     expect(worn()).toBeUndefined();
   });
+
+  /// And nothing where the browser answered in a notation the page cannot read
+  /// three channels out of, which is the failure that would not have announced
+  /// itself: `oklch(0.97 0.01 80)` is the same near-white paper, and its first
+  /// three numbers make `#010000`. A near-black strip welded to the corner of the
+  /// window is worse than the light one it opened at, so what is not one of the
+  /// two notations Chromium serializes is nothing rather than a guess.
+  ///
+  /// Stood in for rather than set on the body: what is under test is what the
+  /// page does with an answer it has not seen before, and jsdom decides for
+  /// itself which of them it will keep.
+  it("is nothing where the browser answered in a notation it cannot read", () => {
+    vi.stubGlobal("getComputedStyle", () => ({
+      backgroundColor: "oklch(0.97 0.01 80)",
+      color: "oklch(0.2 0.01 80)",
+      fontSize: "16px",
+    }));
+
+    expect(worn()).toBeUndefined();
+  });
+
+  /// While the space-separated spelling of the one it does read is the same three
+  /// channels: that is the notation the comma'd one is being modernised into, and
+  /// a page served by a browser that had is a page that still says its paper.
+  it("is the same colour where the notation has been modernised", () => {
+    vi.stubGlobal("getComputedStyle", () => ({
+      backgroundColor: "rgb(250 248 245)",
+      color: "rgb(28 26 23)",
+      fontSize: "16px",
+    }));
+
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75 });
+  });
 });
 
 describe("telling the app", () => {
