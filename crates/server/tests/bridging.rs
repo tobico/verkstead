@@ -43,11 +43,16 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
+// Reading a press's answer, which is the terminal's alone — see `post`.
+#[cfg(unix)]
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
+// The three a Conversation terminal is driven by, which is the one thing in
+// this file that is a Unix Sandbox's — see the terminal test below.
+#[cfg(unix)]
 use verkstead_render::{Shown, TerminalOpened, Watching};
 use verkstead_schema::Nudge;
 use verkstead_server::attachments::Attachments;
@@ -491,6 +496,10 @@ fn socket(at: SocketAddr, device: &str, path: &str) -> String {
 
 /// A press through the hop, which is every one this file makes: none of them
 /// carries a body.
+///
+/// Unix, because the one press in this file is the terminal opened below, and
+/// that is Unix for its own reason — see there.
+#[cfg(unix)]
 async fn post<T: DeserializeOwned>(app: &Router, path: &str) -> T {
     let answered = app
         .clone()
@@ -592,9 +601,12 @@ impl Pane {
 /// A Conversation terminal, as the pane holds one: the socket dialled through the
 /// device the browser opened, and what has been printed down it so far.
 ///
+/// Unix, with the test below and for its reason.
+///
 /// The grid is not rebuilt here — `tests/sessions.rs` is where a Screen is fed to
 /// a terminal and read off the cells. What this file is about is the bytes making
 /// the crossing, so what it keeps is the bytes.
+#[cfg(unix)]
 struct Terminal {
     socket: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -602,6 +614,7 @@ struct Terminal {
     printed: String,
 }
 
+#[cfg(unix)]
 impl Terminal {
     /// Attach to one of a member's terminals, and take the repaint it opens with.
     async fn attached(at: SocketAddr, device: &str, conversation: i64, number: i64) -> Terminal {
@@ -777,6 +790,20 @@ impl Listening {
 /// A marker nothing else would print is what is looked for, and how the shell
 /// chose to lay it out is nobody's claim here — the grid is read off the cells in
 /// `tests/sessions.rs`, which is the file about what a Screen *shows*.
+///
+/// **Unix, for the reason `tests/sessions.rs` is `#![cfg(unix)]` whole**: what
+/// this needs of the member is the one thing in this file that is a platform's
+/// rather than the hop's — a Sandbox built with bwrap, with a pseudo-terminal
+/// opened inside it. [`sandboxing`] above is that suite's own configuration, and
+/// on Windows a Sandbox is a different machinery with `tests/sessions_windows.rs`
+/// in front of it, so the member here answers `Refused` and the hop never gets a
+/// socket to carry.
+///
+/// Which leaves the *bridge* proved on both platforms all the same, by the two
+/// watcher tests below and by the Screen in `tests/sessions.rs`: nothing about
+/// carrying a socket is different for a terminal, and what is different is only
+/// whether the far end had one to open.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_remote_terminal_echoes_what_is_typed_into_it() {
     let (a, _b, _worktree) = linked().await;

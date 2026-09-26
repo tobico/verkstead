@@ -25,7 +25,6 @@
 //! machines cannot stand on.
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -72,15 +71,6 @@ const FOUND_AS: &str = "kitchen-mini";
 /// The port the workbench is taken to be on, which nothing here asks about: each
 /// reading's Tailscale is built with it and never runs.
 const PORT: u16 = 8422;
-
-/// How long a dial in this suite gives one address, rather than the two seconds a
-/// running server gives one.
-///
-/// Spent by the tests about an address nobody is at: what those are asking is
-/// which address a walk lands on and what it says when none of them answers, and
-/// a test that waited out the real deadline would be spending its time on the
-/// clock rather than on the question.
-const PATIENCE: Duration = Duration::from_millis(300);
 
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
 /// that is not there, which is what having none *is*. Never run, the readings here
@@ -202,9 +192,19 @@ impl Verkstead {
         format!("127.0.0.1:{}", self.address.port())
     }
 
-    /// The workbench its browser would be talking to, with every dial given
-    /// [`PATIENCE`]: the presses here are meant to walk past addresses nobody is
-    /// at, and the real deadlines have nothing to do with what is being asked.
+    /// The workbench its browser would be talking to, with the deadlines a
+    /// running server keeps.
+    ///
+    /// **The real ones rather than a short patience of this suite's own**, which
+    /// is what these dials used to be given. The patience was there so that the
+    /// presses walking past addresses nobody is at would not wait the real
+    /// deadline out at each — but an address nobody is at here is
+    /// [`nothing_there`], a loopback port taken and given straight back, and a
+    /// connection to one of those is refused at once rather than waited out. So
+    /// the short deadline was never spent on a dead address at all; the only
+    /// dial it ever capped was the live one, against a far end that is a real
+    /// Verkstead behind a real TLS handshake — and on a busy two-core runner
+    /// that is a press refused for a machine that is there and answering.
     ///
     /// Built afresh on each call and over the same store, the way
     /// `tests/exchange.rs` builds one — and over the same browse, which is what
@@ -218,8 +218,7 @@ impl Verkstead {
                 self.members.clone(),
                 self.joins.clone(),
             )
-            .browsing(self.browse.clone())
-            .waiting(PATIENCE),
+            .browsing(self.browse.clone()),
             self.nudges.clone(),
         )
     }
