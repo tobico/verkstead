@@ -18,6 +18,10 @@ use tower::ServiceExt;
 use verkstead_schema::{Nudge, SetCreated};
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation every Set in this file is asked from, made by [`fresh_app`]
 /// over a database with nothing in it.
 const ASKING_FROM: i64 = 1;
@@ -66,7 +70,7 @@ async fn fresh_app() -> (tempfile::TempDir, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "nudge")
+    let conversation = store::start_conversation(&pool, repo.id, "nudge", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

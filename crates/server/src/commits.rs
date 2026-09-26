@@ -885,6 +885,10 @@ pub(crate) fn patch(repo: &Path, sha: &str) -> Option<String> {
 mod tests {
     use std::process::{Command, Stdio};
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     use verkstead_schema::Nudged;
 
     use super::*;
@@ -986,10 +990,11 @@ mod tests {
             .unwrap()
             .id;
 
-        let conversation = store::start_unnamed_conversation(&pool, repo_id, "verkstead-7f3a")
-            .await
-            .unwrap()
-            .unwrap();
+        let conversation =
+            store::start_unnamed_conversation(&pool, repo_id, "verkstead-7f3a", THIS_DEVICE)
+                .await
+                .unwrap()
+                .unwrap();
 
         let worktree = dir.path().join("worktrees/verkstead-work");
 
@@ -1718,7 +1723,7 @@ mod tests {
             .unwrap()
             .id;
 
-        let conversation = store::start_conversation(&pool, repo_id, "rate-limiting")
+        let conversation = store::start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .unwrap();

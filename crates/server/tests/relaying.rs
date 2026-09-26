@@ -50,6 +50,10 @@ use verkstead_server::{
 };
 use verkstead_store::{Linking, record_member};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The device the browser is on, which relays.
 const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
@@ -226,7 +230,7 @@ async fn linked() -> (Verkstead, Verkstead) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&b.pool, repo.id, BRANCH)
+    let conversation = store::start_conversation(&b.pool, repo.id, BRANCH, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

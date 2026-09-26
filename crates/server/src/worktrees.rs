@@ -1401,6 +1401,10 @@ pub(crate) fn at_startup(state: &crate::AppState) {
 #[cfg(test)]
 mod tests {
     use std::io::Read;
+
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
     use std::net::{TcpListener, TcpStream};
 
     use super::*;
@@ -2066,7 +2070,7 @@ mod tests {
             .unwrap()
             .expect("nothing is registered at that path yet");
 
-        let id = store::start_conversation(&pool, registered.id, "rate-limiting")
+        let id = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Repo was just registered");

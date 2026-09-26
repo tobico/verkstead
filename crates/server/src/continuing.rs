@@ -443,7 +443,8 @@ async fn start(
     let stacked_on = stands.stacked_on().map(str::to_owned);
     let from = stands.from().to_owned();
 
-    let started = store::start_conversation(&state.pool, conversation.repo.id, &branch).await;
+    let started =
+        store::start_conversation(&state.pool, conversation.repo.id, &branch, &state.device).await;
 
     let id = match started {
         Ok(Some(id)) => id,

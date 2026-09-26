@@ -76,7 +76,9 @@ use crate::worktrees;
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name()).await? {
+        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name(), &state.device)
+            .await?
+        {
             Some(id) => {
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
@@ -114,7 +116,9 @@ pub(crate) async fn start_adopting(
     base: Option<&str>,
 ) -> Result<Started> {
     Ok(
-        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap, &state.device)
+            .await?
+        {
             Some(id) => {
                 if let Some(base) = base {
                     fix(state, id, base).await;

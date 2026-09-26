@@ -16,6 +16,10 @@ use std::time::{Duration, Instant};
 use verkstead_schema::QuestionSet;
 use verkstead_server::store::{self, StoredSet};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation these Sets are asked from, made by the server fixture over a
 /// database with nothing in it — so it is always the first there is.
 pub const ASKING_FROM: i64 = 1;
@@ -67,10 +71,11 @@ impl Server {
                         .unwrap()
                         .expect("nothing is registered at that path yet");
 
-                let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
-                    .await
-                    .unwrap()
-                    .expect("the Repo was just registered");
+                let conversation =
+                    store::start_conversation(&pool, repo.id, "api-core-and-cli", THIS_DEVICE)
+                        .await
+                        .unwrap()
+                        .expect("the Repo was just registered");
                 assert_eq!(conversation, ASKING_FROM);
             }
 

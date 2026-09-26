@@ -40,6 +40,10 @@ use tower::ServiceExt;
 use verkstead_schema::Nudge;
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// How long a test will wait for a Nudge it expects: generous, because it is
 /// only ever paid when the assertion is about to fail. The stream's own tests
 /// wait the same.
@@ -103,7 +107,7 @@ async fn grilling(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "following")
+    let conversation = store::start_conversation(pool, registered.id, "following", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -137,7 +141,7 @@ async fn drafting(pool: &SqlitePool, dir: &Path) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    store::start_conversation(pool, registered.id, "following")
+    store::start_conversation(pool, registered.id, "following", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered")

@@ -115,7 +115,7 @@ impl Linked {
             .unwrap()
             .expect("nothing is registered at that path yet");
 
-        store::start_conversation(&pool, repo.id, BRANCH)
+        store::start_conversation(&pool, repo.id, BRANCH, THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Repo was just registered");
