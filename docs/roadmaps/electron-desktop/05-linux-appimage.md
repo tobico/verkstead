@@ -74,6 +74,84 @@ anything about the graphics stack.
   app reports success and the human sees no log. Worth settling when the
   packaged app's desktop entry is written.
 
+## What stage 04 found on COSMIC
+
+The run that says what the frameless window is like on this desktop, and the
+one that discharges the risk ADR-0020 took on the controls overlay: the same
+nested COSMIC 1.2.0 session stage 03 used — `cosmic-comp` under Xvfb on
+software rendering — with the finished app, the real `verkstead` sidecar and a
+workbench a pointer was driven around by hand. The app came up as a **native
+Wayland client**, which is the path a real COSMIC session takes: that session
+sets `XDG_SESSION_TYPE=wayland` and the pinned Electron picks Wayland by
+itself, with no ozone flag from us. As in stage 03, what a nested session on
+llvmpipe proves is what the app and the compositor say to each other rather
+than anything about the graphics stack.
+
+**Everything this stage built is right there.**
+
+- **No title bar.** Chromium asks COSMIC for client-side decorations
+  (`zxdg_toplevel_decoration_v1.set_mode(1)`) and COSMIC draws nothing but its
+  own thin focus border around the window. The page's own head is the top of
+  the window.
+- **The overlay lands, 32 px wide, and as tall as the band the page pushed** —
+  75 px at a sixteen-pixel root, which is the number the page computes and the
+  app logs. `getTitlebarAreaRect()` reads `{ x: 0, width: innerWidth - 32 }`,
+  the frame carries `--controls-right: 32px`, and the head at that edge is
+  padded by exactly that: the details head in two panes, and the single pane
+  of a narrow window, while the sidebar's head — which is not at that edge —
+  is padded by nothing. No control ended up under the controls in any layout
+  that was drawn.
+- **Every head moves the window.** The sidebar's Wordmark, the details head and
+  the setup page's bare drag bar each dragged it by exactly the pointer's
+  delta. The way back out of a pane — a button across the whole width of the
+  head — does not: a drag on it left the window where it was, which is the
+  `no-drag` exception holding on a real compositor rather than in jsdom. The
+  Settings gear pressed and navigated with the window unmoved.
+- **A flip of the scheme recolours the overlay with no restart.** The machine
+  going dark had the page push `#171614` with `#ece7e0` marks, the app log the
+  push, and the close button turn from a dark mark on light paper into a light
+  mark on dark.
+- **A double-click on any pane head maximises, and a second one restores.**
+
+**And the overlay is one button wide — which is Chromium's doing rather than
+COSMIC's.**
+
+- Under Wayland the overlay is 32 px and a close button alone. The same app, on
+  the same session, over Xwayland is 96 px and the usual three. So the missing
+  pair follows the platform Chromium picked and not the desktop.
+- **COSMIC is not refusing them.** Its `xdg_wm_base` is at version 7 and the
+  toplevel's `wm_capabilities` carries all four — window menu, maximize,
+  fullscreen, minimize. Turning COSMIC's own **show_minimize** and
+  **show_maximize** toolkit settings on and restarting the compositor left the
+  overlay one button wide, and so did writing a GTK decoration layout into the
+  app's config: neither is the lever.
+- **Minimising works when the app asks for it.** `minimize()` sends
+  `set_minimized`, COSMIC takes the window off the screen, and the way back is
+  the app's own — the tray's **Open**, which is the restore, show and focus of
+  `forward()`, put it back.
+- **Nothing COSMIC offers replaces the two buttons.** A right-click on a head
+  sends `xdg_toplevel.show_window_menu` and COSMIC 1.2.0 draws nothing for it.
+  Its shipped shortcut defaults bind Maximize to Super+M, Close to Super+Q and
+  Alt+F4, and Fullscreen to Super+F11 — and bind **no Minimize at all**. The
+  action is in the compositor's vocabulary, so a human can bind a key to it in
+  COSMIC's settings, but nothing is bound out of the box. (The compositor's own
+  window switcher never drew in this nested session, so what Alt+Tab does with
+  a minimised Verkstead on a real machine went untested, as did whether a real
+  COSMIC's own portal reports a button layout that changes any of this.)
+
+**So what is left wanting is minimise, and it is this stage's to settle rather
+than the last one's.** Maximise is reachable from the app's own chrome — a
+double-click on any head — so the one thing a COSMIC user of Verkstead has no
+gesture for is putting the window away. Whether that is a loss or COSMIC's own
+convention was not settled here — what a COSMIC-decorated window of its own
+draws was not measured. Three answers are open and none of them is free:
+accept it and say so in the Linux words, the tray being the way back and
+closing already keeping the app running; force the X11 path for the packaged
+app, which brings the three buttons back and gives up Wayland-native rendering
+on every Wayland desktop to fix one; or give the app a minimise of its own —
+a tray item, a keystroke, or a control the page draws, which is the custom
+control ADR-0020 turned down for the overlay.
+
 ## Proposed tasks (provisional)
 
 1. **The builder configuration** — electron-builder's AppImage target, the
@@ -99,8 +177,12 @@ anything about the graphics stack.
    `tools/build-appimage.sh` and its AppImage paragraph describes the packed
    app. The late-panel case above belongs here too: the icon is lost to a
    panel that arrived after the app, and **Show tray icon** off and on again
-   is what brings it back. Accepts: nothing in the Linux section names
-   `verkstead desktop` or `AppRun`.
+   is what brings it back. The window's own decorations belong here as well:
+   the title bar is gone, the controls are the platform's own, and on a
+   Wayland COSMIC the only one of them drawn is close — a double-click on any
+   pane head maximises, and whatever this stage settles about minimise is what
+   the Linux section has to say about putting the window away. Accepts:
+   nothing in the Linux section names `verkstead desktop` or `AppRun`.
 
 ## Re-verify at start
 

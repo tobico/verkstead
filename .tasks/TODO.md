@@ -27,5 +27,5 @@ Roadmap stage: [04: Client-side decorations](docs/roadmaps/electron-desktop/04-d
 - [x] 03: The frame keeps the outermost heads clear — [details](03-insets-from-the-frame.md)
 - [x] 04: The head's colours and height over the bridge — [details](04-colours-over-the-bridge.md)
 - [x] 05: The bare drag bar — [details](05-the-bare-drag-bar.md)
-- [ ] 06: COSMIC, and a window a compositor would rather decorate — [details](06-cosmic-and-the-overlay.md)
+- [x] 06: COSMIC, and a window a compositor would rather decorate — [details](06-cosmic-and-the-overlay.md)
 - [ ] 07: The words — [details](07-the-words.md)
