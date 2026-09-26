@@ -45,10 +45,20 @@
 //! login for the tray app rather than a **Launch on Startup** that needs the
 //! tray: an app with no icon and no window is a Verkstead nobody can reach.
 //!
-//! All of it is path, text and one injected pair of calls, so every arm is an
-//! ordinary unit test on this Linux runner — the login-item API arrives as
-//! [`LoginItem`] rather than as a reach into `electron`, for the reason the wall
-//! in `eslint.config.js` gives.
+//! **And a login start is said two ways, because the platforms say it two ways.**
+//! Linux's `Exec` line and Windows' Run key are command lines, so both carry
+//! [`HIDDEN`] and [`hidden`] reads it off the arguments. A Mac's login item
+//! carries no arguments — `args` is Windows' alone — and `openAsHidden`, which
+//! was that platform's own word for coming up with no window, has been
+//! deprecated and inert since macOS 13. So a Mac is asked instead whether the
+//! login item started this run, which is [`Startup.atLogin`]; nothing asks for
+//! `openAsHidden` any more, and the window is kept off the screen by this app
+//! rather than by the platform, which is what it already was on the other two.
+//!
+//! All of it is path, text and three injected calls, so every arm is an ordinary
+//! unit test on this Linux runner — the login-item API arrives as [`LoginItem`]
+//! rather than as a reach into `electron`, for the reason the wall in
+//! `eslint.config.js` gives.
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -62,7 +72,10 @@ import type { Settings } from "./settings.js";
 /// is that app's file, so the name has to be that app's name.
 export const APP_ID = "net.tobico.Verkstead";
 
-/// The flag a login start carries: come up with no window on the screen.
+/// The flag a login start carries, on the two platforms whose registration is a
+/// command line — Linux's `Exec` line and Windows' Run key. A Mac's login item
+/// carries no arguments and is asked instead, which is
+/// [`LoginItem.openedAtLogin`].
 ///
 /// The app's own rather than the CLI's — this is not `--no-open`, which told the
 /// tray app to hand nobody a browser, and there is no verb in front of it. What
@@ -155,6 +168,11 @@ export interface Registration {
 /// registration this app had just made — see [`LoginItem.registered`]. Both
 /// calls are handed this same value, and there is nowhere for the two of them to
 /// disagree.
+///
+/// **And Windows is the one of the two that reads them at all.** A Mac's login
+/// item carries no arguments, which is why [`Startup.atLogin`] exists; they are
+/// sent there all the same, Electron ignoring them on that platform, because one
+/// value sent to both is one less thing to keep in step.
 export const ARGS: string[] = [HIDDEN];
 
 /// What Electron's `app.setLoginItemSettings` is told, on the two platforms that
@@ -188,6 +206,18 @@ export interface LoginItem {
   /// one value.
   registered(args: string[]): boolean;
 
+  /// Whether *this launch* is the login item's own doing —
+  /// `app.getLoginItemSettings().wasOpenedAtLogin`.
+  ///
+  /// **A Mac's question, and only a Mac's.** The other two register a command
+  /// line, so [`HIDDEN`] reaches `process.argv` and the flag is the answer; a
+  /// Mac's login item carries no arguments, and the word that platform had for
+  /// coming up hidden — `openAsHidden` — has been deprecated and inert since
+  /// macOS 13. So this is what a Mac has instead: the platform saying the login
+  /// item is what started this run, which [`hidden`] reads exactly as it reads
+  /// the flag.
+  openedAtLogin(): boolean;
+
   /// Register or unregister — `app.setLoginItemSettings`.
   register(asked: LoginAsked): void;
 }
@@ -219,6 +249,15 @@ export interface Startup {
   /// one that was already there, which is what the launch before this one left
   /// — and no reason to stop a Verkstead that is otherwise about to serve.
   refresh(): void;
+
+  /// Whether this launch is the registration's own doing, as the platform says
+  /// rather than as the command line does.
+  ///
+  /// `false` everywhere the command line is the answer, which is Linux and
+  /// Windows: both registrations carry [`HIDDEN`], and [`hidden`] reads it off
+  /// the arguments. A Mac is where this is the whole of the answer — see
+  /// [`LoginItem.openedAtLogin`].
+  atLogin(): boolean;
 }
 
 /// Where this machine keeps the registration, and what may be done to it.
@@ -290,6 +329,12 @@ export function startup(registering: Registering, login: LoginItem): Startup {
         set(true);
       }
     },
+
+    // Asked of a Mac and of nothing else: the other two carry the flag on the
+    // command line, and a machine with no registration to have been started by
+    // was not started by one.
+    atLogin: () =>
+      "login" in put && registering.platform === "darwin" && login.openedAtLogin(),
   };
 }
 
@@ -433,12 +478,21 @@ export function saysOn(entry: string): boolean {
 /// Whether this launch comes up with no window on the screen.
 ///
 /// **A login start while the tray is shown, and nothing else** (ADR-0020, Set
-/// 846 Q9). The flag says a login started this; the icon is what makes a hidden
-/// app reachable, so a login start on a machine with the tray off opens its
-/// window like any other launch. Which is what keeps this a **Launch on Startup**
-/// rather than one that needs the tray.
-export function hidden(argv: readonly string[], chosen: Settings): boolean {
-  return argv.includes(HIDDEN) && chosen.trayIcon;
+/// 846 Q9). The icon is what makes a hidden app reachable, so a login start on a
+/// machine with the tray off opens its window like any other launch. Which is
+/// what keeps this a **Launch on Startup** rather than one that needs the tray.
+///
+/// **And a login start is either of the two ways of saying so.** [`HIDDEN`] in
+/// the arguments is Linux's and Windows', whose registrations are command lines;
+/// `atLogin` is the Mac's, whose login item carries none — see
+/// [`Startup.atLogin`]. A launch by hand is neither, and is a window whatever
+/// the tray says: somebody who started Verkstead is asking for it.
+export function hidden(
+  argv: readonly string[],
+  chosen: Settings,
+  atLogin: boolean,
+): boolean {
+  return (atLogin || argv.includes(HIDDEN)) && chosen.trayIcon;
 }
 
 /// The entry as it stands, or `undefined` where there is nothing to read.

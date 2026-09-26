@@ -26,11 +26,12 @@
 //! child is an app that can refuse having made nothing at all.
 //!
 //! **And a launch may be a login's rather than a human's.** The flag
-//! [`HIDDEN`](./startup.js) is what says so, written into the registration this
-//! app makes of itself, and what it comes to is a window that stays off the
-//! screen while there is an icon to reach the app by — [`hidden`](./startup.js)
-//! is that whole reading, and the registration it was written into is rewritten
-//! here at every launch while there is one.
+//! [`HIDDEN`](./startup.js) is what says so where the registration is a command
+//! line, and the platform itself is what says so on a Mac, whose login item
+//! carries no arguments; either way what it comes to is a window that stays off
+//! the screen while there is an icon to reach the app by —
+//! [`hidden`](./startup.js) is that whole reading, and the registration it was
+//! read out of is rewritten here at every launch while there is one.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +51,6 @@ import { dataDir, logDir } from "./platform.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import {
-  HIDDEN,
   hidden,
   type LoginItem,
   type Registering,
@@ -444,6 +444,11 @@ async function run(): Promise<void> {
   // does. Which ones they are is `startup.ts`'s, in [`ARGS`](./startup.js).
   const login: LoginItem = {
     registered: (args) => app.getLoginItemSettings({ args }).openAtLogin,
+
+    // The Mac's own account of this launch, which is what it has instead of the
+    // flag the other two carry on their command lines.
+    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
+
     register: (asked) => app.setLoginItemSettings(asked),
   };
 
@@ -467,13 +472,13 @@ async function run(): Promise<void> {
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
 
-  // Whether this launch is a login's: the flag the registration writes, read
-  // against the tray, because the icon is the whole of what makes a hidden app
-  // reachable (ADR-0020). Read before the window is opened, that being the one
-  // thing it decides.
-  const unseen = hidden(process.argv, settings(desk));
+  // Whether this launch is a login's — the flag the registration writes, or a
+  // Mac saying its login item started this — read against the tray, because the
+  // icon is the whole of what makes a hidden app reachable (ADR-0020). Read
+  // before the window is opened, that being the one thing it decides.
+  const unseen = hidden(process.argv, settings(desk), starts.atLogin());
   if (unseen) {
-    say(`this launch carries ${HIDDEN} and there is an icon in the tray, so no window comes up`);
+    say("this launch is a login's and there is an icon in the tray, so no window comes up");
   }
 
   // The key is read at every load rather than once here: **Reset key** on the
