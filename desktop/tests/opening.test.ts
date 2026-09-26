@@ -5,7 +5,9 @@
 //! `xdg-open` does not — a machine that fell back where it had a `gio` is a
 //! **View Logs** that opens nothing, which is the case this module exists for.
 //! And **what the child is actually started with**, because a value saying which
-//! program to run is worth nothing if the spawn runs another.
+//! program to run and what to run it with is worth nothing if the spawn does
+//! something else — the mount reaching the human's own editor being what that
+//! would cost here.
 //!
 //! The handing over is asked of a real child, the way `sidecar.test.ts` asks its
 //! stand-in: a script that records what it was given is the only thing that can
@@ -18,6 +20,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { hand, opening } from "../src/opening.js";
+import { APPDIR } from "../src/unmounted.js";
+
+/// Where the runtime mounts a packed run, as in `unmounted.test.ts`.
+const MOUNT = "/tmp/.mount_VerksdVCPsN";
+
+/// A machine's environment out of a packed run, `AppRun` having led the `PATH`
+/// and the loader with that mount: the environment the choice is made out of, and
+/// the one the child must not be given.
+const packed = (path: string) => ({
+  [APPDIR]: MOUNT,
+  HOME: "/home/someone",
+  PATH: `${MOUNT}:${MOUNT}/usr/sbin:${path}`,
+  LD_LIBRARY_PATH: `${MOUNT}/usr/lib`,
+});
 
 /// A look along a `PATH` that says `has` and nothing else is there.
 const holding =
@@ -51,12 +67,36 @@ describe("which program opens something", () => {
     });
   });
 
-  /// The two platforms with no subclass to follow keep Electron's own, which is
-  /// what `undefined` says to both callers.
+  /// The two platforms with no mount and no subclass to follow keep Electron's
+  /// own, which is what `undefined` says to both callers.
   it("is `shell`'s own job on a Mac and on Windows", () => {
     for (const platform of ["darwin", "win32"] as const) {
       expect(opening({ platform, env: {} }, holding("gio")), platform).toBeUndefined();
     }
+  });
+
+  /// The look is along the environment the *child* gets rather than the app's
+  /// own: a `gio` inside the mount is one this app could run and the machine
+  /// could not keep.
+  it("looks for one along the `PATH` the child will have", () => {
+    const paths: (string | undefined)[] = [];
+    opening({ platform: "linux", env: packed("/usr/bin") }, (path, program) => {
+      paths.push(path);
+      return program === "gio";
+    });
+
+    expect(paths).toEqual(["/usr/bin"]);
+  });
+
+  /// And what it is handed is that same environment — the whole of why the log
+  /// file's door and the browser's are one module: a child of `shell` would get
+  /// this process's own, mount and all.
+  it("hands it the environment with the mount out of it", () => {
+    const by = opening({ platform: "linux", env: packed("/usr/bin") }, holding("gio"));
+
+    expect(by?.env.LD_LIBRARY_PATH).toBeUndefined();
+    expect(by?.env.PATH).toBe("/usr/bin");
+    expect(by?.env.HOME).toBe("/home/someone");
   });
 });
 
@@ -96,13 +136,21 @@ describe("handing something over", () => {
     throw new Error(`${record} never said what it was given`);
   }
 
-  it("starts the program on what is being opened", async () => {
+  it("starts the program on what is being opened, in that environment", async () => {
     const { program, record } = standIn();
 
-    hand({ program, before: ["open"], env: {} }, "/tmp/verkstead.log", () => {});
+    hand(
+      { program, before: ["open"], env: { HOME: "/home/someone" } },
+      "/tmp/verkstead.log",
+      () => {},
+    );
 
-    const [said] = await recorded(record);
+    const [said, loader] = await recorded(record);
     expect(said).toBe("open /tmp/verkstead.log");
+    // The environment it was given and not this process's, which has one — the
+    // dev shell exports a loader path, so an inherited environment reads as a
+    // line with something in it here.
+    expect(loader).toBe("");
   });
 
   /// The one refusal `shell` could never report: a program that is not there at

@@ -19,7 +19,20 @@
 //! being where the app says what went wrong. `gio open` follows the subclass, so
 //! it is asked first where the machine has one, and `xdg-open` is what is left.
 //!
-//! **The other platforms keep `shell`.** There is no subclass to follow on a Mac
+//! **And whichever of them it is, it is started with
+//! [`unmounted`](./unmounted.js)'s environment.** A packed run's `AppRun` leads
+//! `LD_LIBRARY_PATH` with the bundle's own `usr/lib` — `libXss`, `libXtst`,
+//! `libnotify`, `libappindicator3`, `libindicator3` and `libgconf-2`, in the
+//! image electron-builder packs — and a child of `shell` inherits it, so the
+//! human's own editor and their own browser would load this bundle's copies of
+//! libraries they link themselves. electron-builder's own `AppRun` guards its
+//! dialogs with an emptied `LD_LIBRARY_PATH` for exactly that. The sidecar is
+//! handed the same answer at the same door — see `main.ts`, which is where the
+//! other one is — and this is the other half of one question rather than a
+//! second one.
+//!
+//! **The other platforms keep `shell`.** There is no mount and no subclass to
+//! follow on a Mac
 //! or on Windows — a `.log` there is opened by whatever the platform associates
 //! with the extension — so [`opening`] says nothing about them and the edge
 //! file's own `shell` call is what runs.
@@ -33,7 +46,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Machine } from "./platform.js";
-import type { Environment } from "./unmounted.js";
+import { type Environment, unmounted } from "./unmounted.js";
 
 /// `gio open <what>`, which follows the subclass — GLib's own opener, and there
 /// wherever GLib is, which on a desktop is everywhere.
@@ -55,7 +68,8 @@ export interface Opening {
   /// What goes in front of the file or the URL on its command line.
   readonly before: readonly string[];
 
-  /// And the environment it is started with.
+  /// And the environment it is started with, which is the one the sidecar is
+  /// given: this process's own, with the AppImage's doing out of it.
   readonly env: Environment;
 }
 
@@ -76,7 +90,10 @@ function onThePath(path: string | undefined, program: string): boolean {
 /// `shell`'s job — which is every platform but Linux.
 ///
 /// `there` is the look on the `PATH`, taken as an argument so that both arms of
-/// the choice are arms a test calls.
+/// the choice are arms a test calls. The `PATH` it is looked along is the
+/// child's own, with the mount already out of it: a `gio` inside the bundle
+/// would be one this app found and the machine could not keep, the mount going
+/// when the app does.
 export function opening(
   machine: Machine,
   there: (path: string | undefined, program: string) => boolean = onThePath,
@@ -85,7 +102,7 @@ export function opening(
     return undefined;
   }
 
-  const env = machine.env;
+  const env = unmounted(machine.env);
   const [program, ...before] = OPENERS.find(([named]) => there(env.PATH, named)) ?? XDG;
 
   return { program, before, env };
