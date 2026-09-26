@@ -87,7 +87,7 @@ pub use conversations::{
     Landed, Lifecycle, Process, Rebuilding, Resolving, Role, RowState, SetOnTimeline, Settling,
     Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work, adopted_pull_request, adopting,
     ask, asked_from, closable, close_conversation, conversation_branch, conversations,
-    follow_branch, follow_up_done, follow_up_over, implement_again, investigation_done,
+    follow_branch, follow_up_done, follow_up_over, implement_again, investigation_over,
     last_batch_proposal, last_proposal, load_conversation, note, open_set, opened_at,
     pick_direction, picked_direction, process, record_backlog, record_handoff, record_roadmap,
     recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,

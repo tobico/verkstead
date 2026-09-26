@@ -26,7 +26,7 @@ use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
     Ask, Ending, Event, Investigated, Lifecycle, PullRequest, Recorded, Settlements, Steer,
     Steering, Submission, WAITED_ON, WaitingOn, ask, ended_on, follow_up_done, follow_up_over,
-    investigation_done, load_conversation, load_response, lock_set, nothing_else, open_database,
+    investigation_over, load_conversation, load_response, lock_set, nothing_else, open_database,
     record_another_pull_request, register_repo, settle_wrap_up, start_conversation,
     steer_conversation, submit_response, timeline, wrap_up_settled,
 };
@@ -751,9 +751,9 @@ async fn a_mark_left_in_another_state_is_not_this_ones_word() {
 /// An investigation ends in Done, with the move on the Timeline and nothing else
 /// written.
 ///
-/// One landing and one only: an investigation writes nothing down on the branch,
-/// so there is no pull request to carry anything to and nothing for a wrap-up to
-/// be about.
+/// Done being what a caller with nowhere to send it back to asks for: an
+/// investigation writes nothing down on the branch, so there is no pull request to
+/// carry anything to and nothing for a wrap-up to be about.
 #[tokio::test]
 async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
     let (_dir, pool) = fresh_pool().await;
@@ -762,8 +762,10 @@ async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
     investigating(&pool, conversation).await;
 
     assert_eq!(
-        investigation_done(&pool, conversation).await.unwrap(),
-        Investigated::Finished,
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::Landed,
     );
 
     let conversation_row = load_conversation(&pool, conversation)
@@ -788,32 +790,123 @@ async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
     );
 }
 
+/// And it lands wherever the caller says, which is what an investigation steered
+/// into being goes back to.
+///
+/// The landing is the caller's whole say here, the way it is for the two ways out
+/// of a follow-up: where an investigation came from is a fact recorded beside the
+/// Steer Event that opened it, and nothing in this move is in a position to read
+/// one. What the move owes either way is the state and the line on the Timeline.
+///
+/// **And nothing else**, which is the other half: the wrap-up this one goes back
+/// to has its settles exactly as the investigation found them. An investigation
+/// commits nothing and pushes nothing, so GitHub has no new run to make up its
+/// mind about and the green standing over the checks is still earned — which is
+/// where this parts from a follow-up that pushed.
+#[tokio::test]
+async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    // The wrap-up it will come back to, and the pull request whose suite is what a
+    // follow-up landing here would have put back to waiting.
+    let repo = own_repo(&pool, conversation).await;
+    record_another_pull_request(&pool, conversation, repo, &opened())
+        .await
+        .unwrap();
+
+    for waiting_on in WAITED_ON {
+        settle_wrap_up(&pool, conversation, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    settle_wrap_up(&pool, conversation, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
+
+    investigating(&pool, conversation).await;
+
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Wrapping)
+            .await
+            .unwrap(),
+        Investigated::Landed,
+    );
+
+    let conversation_row = load_conversation(&pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(
+        conversation_row.state,
+        Lifecycle::Wrapping,
+        "the investigation went back where it came from",
+    );
+
+    let moved = moves(&pool, conversation).await;
+
+    assert_eq!(
+        moved.last(),
+        Some(&Lifecycle::Wrapping),
+        "with the move on its Timeline, as every move has: {moved:?}",
+    );
+    assert!(
+        !moved.contains(&Lifecycle::Done),
+        "and nothing passed through Done on the way: {moved:?}",
+    );
+
+    let settled = wrap_up_settled(&pool, conversation).await.unwrap();
+
+    assert!(
+        settled.contains(&WaitingOn::Checks(repo)),
+        "and the green standing over the checks is still earned: an investigation \
+         commits nothing and pushes nothing, so GitHub has no new run to make up \
+         its mind about — which is where this parts from a follow-up that pushed: \
+         {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Review),
+        "with the review settled as the investigation found it: {settled:?}",
+    );
+}
+
 #[tokio::test]
 async fn nothing_but_an_investigation_can_be_ended_as_one() {
     let (_dir, pool) = fresh_pool().await;
     let conversation = conversation(&pool).await;
 
     assert_eq!(
-        investigation_done(&pool, conversation).await.unwrap(),
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
         Investigated::NotInvestigating,
         "a Conversation that is not investigating anything has no investigation \
          to end",
     );
     assert_eq!(
-        investigation_done(&pool, 404).await.unwrap(),
+        investigation_over(&pool, 404, Lifecycle::Done)
+            .await
+            .unwrap(),
         Investigated::NoSuchConversation,
     );
 
     // And the same once it has been ended: the move out of Investigating is not a
-    // second way into Done from anywhere else.
+    // second way into anywhere from anywhere else, whichever landing it is asked
+    // for.
     investigating(&pool, conversation).await;
 
     assert_eq!(
-        investigation_done(&pool, conversation).await.unwrap(),
-        Investigated::Finished,
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::Landed,
     );
     assert_eq!(
-        investigation_done(&pool, conversation).await.unwrap(),
+        investigation_over(&pool, conversation, Lifecycle::Wrapping)
+            .await
+            .unwrap(),
         Investigated::NotInvestigating,
     );
 }

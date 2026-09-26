@@ -1064,17 +1064,21 @@ pub enum Ending {
     NoSuchConversation,
 }
 
-/// What became of ending an investigation, which is one place and one only.
+/// What became of ending an investigation, which is one move to wherever the
+/// investigation came from.
 ///
-/// An investigation is a question about the code answered without changing it,
-/// so there is nothing on the branch for a landing to depend on and nothing to
-/// decide: it is Done. See [`investigation_done`], and [`Ending`] beside it,
-/// whose follow-up is reached two ways and so lands two.
+/// One variant for the landing rather than one apiece, which is where this parts
+/// from [`Ending`] beside it: a follow-up is reached two ways and so lands in one
+/// of two places, and an investigation goes back to the state it was steered out
+/// of — any state there is, and Done for one that was steered out of nowhere. So
+/// the landing is the caller's word rather than something read back off the
+/// outcome. See [`investigation_over`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Investigated {
-    /// Landed: the Conversation is Done and the move is on its Timeline, with
-    /// its Worktree left as any Done Conversation's is.
-    Finished,
+    /// Landed: the Conversation is in the state it was sent to and the move is
+    /// on its Timeline, with its Worktree left exactly as the investigation
+    /// left it.
+    Landed,
 
     /// It is not investigating anything, so there is no investigation here to
     /// end — closed out from under the session, or steered somewhere else while
@@ -4313,21 +4317,34 @@ async fn out_of_follow_up(
 /// The move and the line on the Timeline are the whole of it. An investigation
 /// answers a question about the code and writes nothing down on the branch, so
 /// there is no pull request to carry anything to and nothing for a wrap-up to be
-/// about: the Conversation is Done, and its Worktree stays as it is for any Done
-/// Conversation. Whatever scratch the session left in it is the scratch every
-/// Set's Diff has already shown.
+/// about — and its Worktree stays as it is, whatever scratch the session left in
+/// it being the scratch every Set's Diff has already shown.
+///
+/// **`landing` is the whole of what the caller decides here**, the way it is for
+/// a start and for the two ways out of a follow-up — see [`follow_up_over`] and
+/// [`follow_up_done`], which share one move with the state as the word that
+/// differs.
+/// Where an investigation goes is where it came from: the state the steer that
+/// opened it found the Conversation in, or Done for one that no steer opened.
+/// Nothing here works that out, and nothing here is in a position to: it is a
+/// fact recorded beside the Steer Event — see [`super::SteerRecord::source`].
 ///
 /// Refused for anything but Investigating, as every move here is refused outside
 /// the state it leaves: a Conversation closed or steered out from under the
 /// session is not one to finish.
 ///
-/// No `pushed`, and no settles put back to waiting: there is nothing anywhere
-/// that could have been pushed, and a Conversation that gets here is on no pull
-/// request.
+/// No `pushed`, and **no settles put back to waiting on the way to Wrapping**,
+/// which is where this parts from a follow-up landing in one: an investigation
+/// commits nothing and pushes nothing, so it has given GitHub no new run to make
+/// up its mind about and the settle standing over the checks is still earned.
 ///
-/// One transaction, as every move is: a Conversation that says Done always has
-/// the move on its Timeline to say when it got there.
-pub async fn investigation_done(pool: &SqlitePool, id: i64) -> Result<Investigated> {
+/// One transaction, as every move is: a Conversation that says it has moved
+/// always has the move on its Timeline to say when it got there.
+pub async fn investigation_over(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+) -> Result<Investigated> {
     let mut tx = super::writing(pool, "ending an investigation").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -4345,17 +4362,17 @@ pub async fn investigation_done(pool: &SqlitePool, id: i64) -> Result<Investigat
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Done.stored())
+        .bind(landing.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
         .with_context(|| format!("moving Conversation {id} out of investigating"))?;
 
-    moved(&mut tx, id, Lifecycle::Done).await?;
+    moved(&mut tx, id, landing).await?;
 
     tx.commit().await.context("ending an investigation")?;
 
-    Ok(Investigated::Finished)
+    Ok(Investigated::Landed)
 }
 
 /// Send a Done Conversation back to wrapping up, because the human pressed

@@ -1528,6 +1528,22 @@ const GREEN_BUT_CONFLICTING: &str = r#"    printf '{"mergeable":"CONFLICTING","s
 /// conflict nor a clean merge.
 const GREEN_BUT_UNKNOWN: &str = r#"    printf '{"mergeable":"UNKNOWN","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
+/// The same, until `merges` is there — after which GitHub will merge it.
+///
+/// Which is how a test holds a wrap-up in Wrapping with everything else about it
+/// settled and nothing dispatched anywhere: *UNKNOWN* settles nothing and is
+/// nothing to act on, so the suite goes green, the review and the comments settle,
+/// and the merge is the one thing left — see
+/// [`a_merge_github_has_not_worked_out_dispatches_nothing`]. The marker is how the
+/// test lets it go.
+fn unknown_until(merges: &Path) -> String {
+    format!(
+        r#"    if [ -e {merges} ]; then how=MERGEABLE; else how=UNKNOWN; fi
+    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+        merges = quoted(merges),
+    )
+}
+
 /// One whose suite is still running until `started` is there and green once it
 /// is, which is how a test keeps the checks out of the way until the thing it is
 /// about has begun — and then lets them settle, so that what stops the wrap-up
@@ -2347,6 +2363,42 @@ async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
     assert_eq!(start, GrillingStarted::Started);
 
     bench.holding(id)
+}
+
+/// And the same workbench over a Conversation nobody has started, steered
+/// straight out of drafting into Investigating.
+///
+/// The other source a Draft has: the press that starts the work is one way in and
+/// a Steer is the other, and a draft is somewhere to steer from like any state.
+/// Nothing is written on it first — no Brief and no Process picked — because the
+/// question is the steer's own and the Pairing is the only thing the target asks
+/// for. The branch and the Worktree are cut by the steer, there being none.
+async fn a_draft_steered_into_investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_one_an_investigation_runs_under(id).await;
+
+    let fixture = bench.holding(id);
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_investigating("Where does the 429 count come from?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    fixture
 }
 
 /// An investigating session: it writes down what it was primed with, then waits
@@ -23308,14 +23360,18 @@ esac
     )
 }
 
-/// The same backlog and wrap-up, plus a session that plays an investigation: it
-/// writes down what it was primed with and then waits on the human, which is what
-/// an investigation spends its time doing.
+/// The same backlog and wrap-up, plus a session that plays an investigation:
+/// it writes down what it was primed with and then does whatever `investigating`
+/// says.
 ///
 /// The prompt goes to a file rather than to the terminal, as every other
 /// investigating stub's does: what is being read back is a whole prompt, and a
 /// terminal is eighty columns wide.
-fn a_backlog_then_an_investigation(reviews: &Path, prompts: &Path) -> String {
+fn a_backlog_then_an_investigation(reviews: &Path, prompts: &Path, investigating: &str) -> String {
+    // Written as a word in the stubs below and spelled out here, exactly as the
+    // wrap-up's own stubs write it — see [`WHILE_NOBODY_HAS_ASKED`].
+    let investigating = investigating.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+
     format!(
         r#"
 case "$2" in
@@ -23327,11 +23383,8 @@ case "$2" in
 {RESPOND_AND_FIND_NOTHING}
     ;;
 *investigating/SKILL.md*)
-    SAYING='finding it out'
     printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
-    printf '%s\n' "$SAYING"
-    {WHILE_NOBODY_HAS_ASKED}
-    sleep 300
+{investigating}
     ;;
 *)
 {A_BACKLOG_OF_ONE}
@@ -23342,6 +23395,31 @@ esac
         prompts = quoted(prompts),
     )
 }
+
+/// An investigating session that puts its round and stays there, which is what
+/// one waiting on the human looks like: it has asked, and it is holding the
+/// Worktree until they answer.
+const A_ROUND_THEN_WAITING_TO_BE_TOLD: &str = "    SAYING='finding it out'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     sleep 300";
+
+/// And one that writes a probe, puts its round, says it is done once the round
+/// has been answered, and idles — which is every investigating session at the end
+/// of its last round.
+///
+/// The probe is left exactly where it was written, because that is the whole of
+/// what an investigating session does with what it writes: the ending is taken
+/// over the scratch rather than refused on it, and the branch is where the start
+/// left it.
+const A_ROUND_OVER_SCRATCH_THEN_IDLE: &str = "    SAYING='finding it out'\n    \
+     printf 'a probe\\n' > probe.md\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'that is where it counts them\\n'\n    \
+     : > /tmp/verkstead/done\n    \
+     sleep 300";
 
 /// A follow-up session that does its round and then stays there, which is what
 /// one waiting on the human looks like: it has asked, and it is holding the
@@ -24825,7 +24903,7 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
 
     let fixture = grilling_at_pace(
         spill,
-        &a_backlog_then_an_investigation(&reviews, &written_to),
+        &a_backlog_then_an_investigation(&reviews, &written_to, A_ROUND_THEN_WAITING_TO_BE_TOLD),
         &gh_about(GREEN, "", ""),
         *SWEEPING,
         &[],
@@ -24909,6 +24987,298 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
         !prompt.contains("pull request"),
         "with nothing promising one, whatever this Conversation is on: an \
          investigation never ends on one: {prompt:?}",
+    );
+}
+
+/// A wrap-up steered into Investigating comes back to that wrap-up when the human
+/// says there is nothing else, with nothing about it changed and its watchers
+/// going again.
+///
+/// **An investigation ends where it was entered from.** A question about the work
+/// is no step of it: the pull request is still open, the review is still read and
+/// the suite is still green, so what is left when the question is answered is the
+/// wrap-up that was interrupted to ask it. A Conversation that came out of one
+/// investigation Done would be a question quietly ending the work.
+///
+/// **And the settles stand.** An investigation commits nothing and pushes nothing,
+/// so GitHub has no new run to make up its mind about and the green over the checks
+/// is still earned — which is where this parts from a follow-up landing in a
+/// wrap-up, whose commit puts them back to waiting. The review is the same wrap
+/// and the same look at the same branch.
+///
+/// **With something driving it**, which is the other half of a landing: a
+/// Conversation put back into Wrapping with nothing watching it is exactly what the
+/// stall sweep raises a stop about. What says the watchers are really going is that
+/// the merge coming in is enough to finish the work — nothing else here polls
+/// GitHub.
+#[tokio::test]
+async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let written_to = spill.path().join("investigating-prompts");
+    let merges = spill.path().join("merges");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_an_investigation(&reviews, &written_to, A_ROUND_OVER_SCRATCH_THEN_IDLE),
+        &gh_about(&unknown_until(&merges), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // The wrap-up down to the merge GitHub has not worked out, which is a wrap-up
+    // with everything it can settle settled and nothing running in it.
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    all_but_the_merge_settled(&fixture).await;
+
+    let opened = pull_requests(&fixture.view().await).len();
+    let built = commits(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_investigating("Where does the 429 count come from?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let asking = fixture.view().await;
+
+    assert_eq!(
+        asking.state,
+        Lifecycle::Investigating,
+        "the steer took the wrap-up out of its state to ask the question",
+    );
+
+    // Everything the Timeline had said about the run by the time the question was
+    // being asked, the click's own stop included: what the assertions below are
+    // about is whether the landing added to it.
+    let said = notices(&asking).len();
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !view.working,
+        "the session was ended as the investigation ended, so the Worktree is the \
+         wrap-up's again",
+    );
+    assert!(
+        view.driven,
+        "and something is driving it: a Conversation put back into Wrapping with \
+         nothing watching it is what the stall sweep stops",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "over no stop: the steer took the click's own away, and an ending is not \
+         something that writes one",
+    );
+    assert_eq!(
+        pull_requests(&view).len(),
+        opened,
+        "the pull request it was asked about is the pull request it comes back to: \
+         {:?}",
+        pull_requests(&view),
+    );
+    assert_eq!(
+        commits(&view).len(),
+        built,
+        "and the branch is where the work left it: an investigation commits none \
+         of what it writes: {:?}",
+        commits(&view),
+    );
+
+    let scratch = git(
+        Path::new(&view.worktree.clone().expect("the work is checked out").path),
+        &["status", "--porcelain"],
+    );
+
+    assert!(
+        scratch.contains("probe.md"),
+        "with the probe still where the session wrote it, uncommitted: the signal \
+         is taken over the scratch rather than refused on it: {scratch:?}",
+    );
+
+    assert!(
+        checks_settled(&fixture).await,
+        "the green over the checks is still earned: an investigation pushed \
+         nothing, so GitHub has no new run to make up its mind about",
+    );
+    assert!(
+        review_settled(&fixture).await,
+        "and the review is the same look at the same branch, still settled",
+    );
+    assert!(
+        comments_settled(&fixture).await,
+        "as is what was said on the pull request",
+    );
+    assert!(
+        !merge_settled(&fixture).await,
+        "which leaves the merge, exactly as the investigation found it",
+    );
+
+    // And the watchers really are going: the merge coming in is the whole of what
+    // the wrap-up was waiting on, and nothing else here asks GitHub about it.
+    std::fs::write(&merges, "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        said,
+        "and nothing stopped anywhere along it: an investigation that ends is not \
+         a run that stopped, and a wrap-up something is driving is not one \
+         standing still: {:?}",
+        notices(&fixture.view().await),
+    );
+}
+
+/// Wait out the wrap-up settling everything the merge is not.
+///
+/// The three that are read off the store rather than off the view, and each lands
+/// in its own time: the branch read, nothing said on the pull request, and a suite
+/// that came in green. A wrap-up held by an *UNKNOWN* merge sits there once they
+/// are in — see [`unknown_until`].
+async fn all_but_the_merge_settled(fixture: &Grilling) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !(review_settled(fixture).await
+        && checks_settled(fixture).await
+        && comments_settled(fixture).await)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up to settle everything but the merge",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// A Draft steered into Investigating ends **Done**, which is the one way out of
+/// the state that is not a way back.
+///
+/// Two states are never returned to, each having a way in of its own that nothing
+/// else may use: a Draft is started, and there is no starting a Conversation that
+/// has already been cut a branch and a Worktree. So what an investigation opened
+/// out of one leaves behind is work nobody built, which is exactly where an
+/// Investigate Conversation ends.
+#[tokio::test]
+async fn an_investigation_steered_out_of_a_draft_lands_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = a_draft_steered_into_investigating(
+        spill,
+        &an_investigating_round_over_scratch(&written_to),
+    )
+    .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Investigating,
+        "the steer took the draft straight into the state, cutting it a branch on \
+         the way",
+    );
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !view.working,
+        "with nothing left holding the Worktree it was cut",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: an investigation that ends on the human's own mark \
+         is not one that went: {:?}",
+        notices(&view),
+    );
+    assert!(
+        commits(&view).is_empty(),
+        "and the branch holds nothing: an investigation commits none of what it \
+         writes: {:?}",
+        commits(&view),
+    );
+}
+
+/// And so does one steered out of a Conversation that was closed.
+///
+/// The other state nothing returns to, and for the same shape of reason: closing
+/// is the work stopping wherever it was, and a steer is the way back into one. An
+/// investigation that ended by putting the Conversation back into Closed would be
+/// Verkstead closing it a second time on the strength of a question — so it ends
+/// where an Investigate Conversation ends, and the human has the Steer button for
+/// wherever they want it next.
+#[tokio::test]
+async fn an_investigation_steered_out_of_a_closed_conversation_lands_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("investigating-prompts");
+
+    let fixture = investigating(spill, &an_investigating_round_over_scratch(&written_to)).await;
+
+    fixture.running().await;
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    let closed = fixture
+        .until(|view| (view.state == Lifecycle::Closed).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !closed.working,
+        "the close ended the session along with everything else it ends",
+    );
+
+    let said = notices(&closed).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_investigating("Where does the 429 count come from?\n")
+            .await,
+        ConversationSteered::Steered,
+        "which is one of the two ways back into a Conversation that is closed",
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.view().await.state, Lifecycle::Investigating);
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !view.working,
+        "with nothing left holding the Worktree, as any Done Conversation's is",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        said,
+        "and nothing stopped on the way out and back: {:?}",
+        notices(&view),
     );
 }
 

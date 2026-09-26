@@ -82,6 +82,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
@@ -2380,15 +2381,15 @@ pub(crate) async fn investigating(
 
     drop(expecting);
 
-    // Held until whatever this writes is written, which is what every driver
-    // here holds it for: dropping first would leave a moment where a sweep could
-    // find the Conversation undriven and stop it with a worse sentence.
-    let _driving = driving;
-
+    // `driving` is held until whatever this writes is written, which is what
+    // every driver here holds it for: dropping first would leave a moment where a
+    // sweep could find the Conversation undriven and stop it with a worse
+    // sentence. The ending is handed it rather than letting it go, because what
+    // the Conversation lands in may be a state something has to go on driving.
     let Some(ended) = ended else {
         // The human has said there is nothing else and the session has finished
         // its round, so the investigation is over.
-        return found_out(&state, conversation_id).await;
+        return found_out(&state, conversation_id, driving).await;
     };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped
@@ -2423,7 +2424,7 @@ pub(crate) async fn investigating(
              marked, so the investigation is over rather than gone",
         );
 
-        return found_out(&state, conversation_id).await;
+        return found_out(&state, conversation_id, driving).await;
     }
 
     // And anything it left the human holding goes off as the stop is raised. The
@@ -2452,15 +2453,39 @@ pub(crate) async fn investigating(
 }
 
 /// The human has nothing else they want found out: end the session, and land the
-/// Conversation Done.
+/// Conversation back where the investigation came from.
 ///
-/// **Directly, and nothing is dispatched.** No wrap-up, no watchers, no
-/// `submitting` session and no pull request sent for: an investigation writes
-/// nothing down on the branch, so there is nothing for a wrap-up to be about and
-/// nothing to carry anywhere. The move and the line on the Timeline are the whole
-/// of it, and the Worktree stays as it does for any Done Conversation — with
-/// whatever scratch the session left in it, which every Set's Diff has already
-/// shown.
+/// **Where it came from, which is one of two things.** An Investigate
+/// Conversation — one whose Process is Investigate, which ran Draft to
+/// Investigating — ends **Done**: there is nowhere for it to go back to, the
+/// investigation being the whole of the work. One *steered* into Investigating
+/// goes back to the state the steer found it in, with nothing else about it
+/// changed — its settles and its pull request exactly as they were, because
+/// nothing here touches either. Which of the two this is, and which state, is
+/// [`crate::investigations::landing`]'s to say: it reads a fact somebody recorded
+/// beside the Steer Event rather than inferring one from the Timeline's shape.
+///
+/// A landing that cannot be read is a landing in Done, which is the safe way
+/// round: an investigation that ended is over whatever the record will say about
+/// it, and Done is the state nothing has to be driving. Reading it *before* the
+/// move, so that a store that will not answer is a Conversation left in
+/// Investigating with its session still there rather than one moved nowhere in
+/// particular.
+///
+/// **Nothing is dispatched for a landing in Done**, there being nothing to drive:
+/// no wrap-up, no watchers, no `submitting` session and no pull request sent for.
+/// An investigation writes nothing down on the branch, so there is nothing for a
+/// wrap-up to be about and nothing to carry anywhere, and the Worktree stays as it
+/// does for any Done Conversation — with whatever scratch the session left in it,
+/// which every Set's Diff has already shown.
+///
+/// **And for any other landing, whatever a pressed Resume would be driving it
+/// with.** A Conversation put back into Wrapping or Implementing with nothing
+/// driving it is exactly what the stall sweep raises a stop about, so the ending
+/// starts the drive rather than leaving it to be found — see
+/// [`crate::resume::landed`], which is the press's own recompute and already
+/// exhaustive over the states. The registration is held across it and handed on,
+/// as every driver here hands one on.
 ///
 /// **Nothing is pushed to the devices and nothing is stamped unseen either**,
 /// which is what parts this from a wrap-up settling: the human ended this
@@ -2469,17 +2494,26 @@ pub(crate) async fn investigating(
 ///
 /// The session is ended first, as a follow-up's is, so that nothing is left
 /// holding the Worktree while the move is written.
-async fn found_out(state: &AppState, conversation_id: i64) {
+async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
+    let landing = match crate::investigations::landing(&state.pool, conversation_id).await {
+        Ok(landing) => landing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where an investigation came from failed, so it is ending Done");
+            store::Lifecycle::Done
+        }
+    };
+
     tracing::info!(
         conversation_id,
+        ?landing,
         "the human has nothing else they want found out, so the investigation is over and its \
          session is being ended",
     );
 
     state.sessions.end(conversation_id).await;
 
-    match store::investigation_done(&state.pool, conversation_id).await {
-        Ok(store::Investigated::Finished) => {}
+    match store::investigation_over(&state.pool, conversation_id, landing).await {
+        Ok(store::Investigated::Landed) => {}
         Ok(outcome) => {
             tracing::info!(
                 conversation_id,
@@ -2496,7 +2530,8 @@ async fn found_out(state: &AppState, conversation_id: i64) {
 
     tracing::info!(
         conversation_id,
-        "the investigation is over and nothing was built, so the work is done",
+        ?landing,
+        "the investigation is over, so the Conversation is back where it came from",
     );
 
     // The Timeline has a move on it and the card reads differently, and an open
@@ -2504,6 +2539,37 @@ async fn found_out(state: &AppState, conversation_id: i64) {
     state.nudges.announce(Nudge::Conversation {
         conversation: conversation_id,
     });
+
+    // An Investigate Conversation, or one steered in from a Draft or from a close:
+    // Done is where the work has got to and nothing is supposed to be driving it.
+    if landing == store::Lifecycle::Done {
+        drop(driving);
+        return;
+    }
+
+    // Held across the recompute and handed to whatever it starts, which is what
+    // [`crate::resume::landed`] takes it for: dropping first would leave a moment
+    // where a sweep could find the Conversation in a driven state with nothing
+    // driving it.
+    match crate::resume::landed(state, conversation_id, driving).await {
+        Ok(Resumed::Resumed) => {}
+        // Nothing was started, and the Conversation is left in a state something
+        // is supposed to be driving. Said here rather than written down: there is
+        // nobody in front of this to answer, and the stall sweep is a minute away
+        // with a sentence that names the state — see [`crate::stalls::sweeping`].
+        Ok(refusal) => {
+            tracing::error!(
+                conversation_id,
+                ?landing,
+                ?refusal,
+                "an investigation landed where it came from and nothing could be started to \
+                 drive it",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, ?landing, "starting to drive what an investigation landed in failed");
+        }
+    }
 }
 
 /// What a stop over a gone investigating session says beyond how it went.
