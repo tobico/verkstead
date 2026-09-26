@@ -12,12 +12,12 @@
 # a command line for it, and a session runs the binary beside that script by
 # path, saying a verb of its own.
 #
-# The Linux artifact is an AppImage because the tray is drawn over system
-# libraries that have to be carried — see tools/build-appimage.sh, whose
-# `AppRun` supplies the same verb for the same reason. None of that applies
-# here: AppKit is the operating system, so the bundle holds the binary, the
-# launcher and the icon and nothing else, and what makes it an artifact is the
-# .app layout around it and the dmg around that.
+# None of which applies to the Linux artifact any more: it is the Electron app
+# with the released CLI beside it, packed by electron-builder, and its launcher
+# is the app rather than a verb of this binary. Nor does much of it apply here:
+# AppKit is the operating system, so the bundle holds the binary, the launcher
+# and the icon and nothing else, and what makes it an artifact is the .app
+# layout around it and the dmg around that.
 #
 # Run it on a Mac, in the dev shell or on a runner. It takes everything from the
 # working tree — the viewer from `web/dist`, the icon from `packaging/` — and
@@ -145,10 +145,9 @@ done
 # The launcher, which is what `CFBundleExecutable` names below and so what
 # Launch Services starts. A bundle names an executable and has nowhere to write
 # a command line for it — a double-click passes none, and neither does anything
-# else that opens an app — so the verb is supplied here, which is the same job
-# `tools/build-appimage.sh`'s `AppRun` does. And the whole of the job: the other
-# half of this binary is reached by running it directly, without passing through
-# this script at all.
+# else that opens an app — so the verb is supplied here. And the whole of the
+# job: the other half of this binary is reached by running it directly, without
+# passing through this script at all.
 #
 # `dirname "$0"` rather than a path written in: Launch Services starts this by
 # its full path, so that is the directory the binary is in wherever the app was
