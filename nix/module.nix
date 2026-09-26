@@ -149,8 +149,8 @@ in
         hostname, the word for its operating system and the port
         {option}`peerListen` named — which is the whole of what the other
         machine needs to reach this one. Turning it off passes
-        `--no-advertising`, and then nothing of this host goes out and it is
-        found only by an address somebody types.
+        `--no-advertising`, and then no other Verkstead can find this host and
+        it is linked only by an address somebody types.
 
         On, for the reason {option}`openFirewall` below is on: a discovery
         nothing can hear is a feature that silently does not work, with nothing
@@ -159,7 +159,10 @@ in
         some networks are worth telling.
 
         It is the advertising half: what it turns off is what other machines
-        hear of this one.
+        hear of this one, and not this one's own listening. Opening the Remote
+        access pane on a host with it off still puts a query for
+        `_verkstead._tcp.local` on the LAN, which says that something here is
+        looking for Verksteads and nothing about what it is.
       '';
     };
 

@@ -39,7 +39,7 @@ use verkstead_server::device::{Device, Devices};
 use verkstead_server::discovery::{Browse, Found};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
-use verkstead_server::peer::joining::Joins;
+use verkstead_server::peer::joining::{HELD_AT_ONCE, Joins};
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
@@ -423,8 +423,9 @@ async fn a_device_is_joined_at_the_next_address_where_the_first_answers_nothing(
 /// what a dial that reached nobody says anywhere else.
 ///
 /// **And the row goes with the press**, because the press is where this device
-/// learned the row was wrong. A device that is really there advertises again and
-/// is a row again; one that has gone stays gone without anybody waiting out a TTL.
+/// learned the row was wrong. One that has gone stays gone without anybody
+/// waiting out a TTL — and a device that answered keeps its row, which is the
+/// test after this one.
 #[tokio::test]
 async fn a_press_on_a_row_whose_device_has_gone_is_refused_and_the_row_goes() {
     let nowhere = nothing_there();
@@ -467,6 +468,74 @@ async fn a_press_on_a_row_whose_device_has_gone_is_refused_and_the_row_goes() {
         said.contains(GONE),
         "a device this one has not heard of is named by the one thing the press \
          carried, which is its id: {said}",
+    );
+}
+
+/// But a device that answered and said **no** keeps its row, which is the other
+/// half of that forget.
+///
+/// **Because the row was right.** A far end already holding as many join requests
+/// as it will is a machine exactly where the row said it was: the press is refused
+/// in its words, and taking the row away for it would be this device dropping a
+/// device that is there — a row somebody would press again in a minute, and one a
+/// browse does not simply re-announce, `mdns-sd` saying a thing again only when the
+/// thing has changed.
+///
+/// **The two are told apart by whether anything answered at all**, which is what
+/// `Peers::join_found` hands back rather than a bare failure: nothing at any
+/// address is about the row, and anything the far end *said* is about the far end.
+#[tokio::test]
+async fn a_press_the_far_end_refused_keeps_its_row() {
+    let asked = Verkstead::asked().await;
+    let asking = Verkstead::asking(vec![found(B, &[asked.at()])]).await;
+
+    // As many questions as B will hold, written straight into its store: what is
+    // being asked here is what this end does with a refusal, and posting sixteen
+    // real joins would be asking that same question sixteen times over a socket.
+    for held in 0..HELD_AT_ONCE {
+        verkstead_store::hold_join(
+            &asked.pool,
+            &verkstead_store::HeldJoin {
+                request: format!("{held:032x}"),
+                device: format!("{held:032x}"),
+                name: "laptop".to_owned(),
+                os: "Linux".to_owned(),
+                addresses: vec!["192.168.1.99".to_owned()],
+                fingerprint: format!("AA:BB:{held:02X}"),
+                asked_at: "2026-09-25T10:00:00Z".to_owned(),
+                expires_at: "2099-01-01T00:00:00Z".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let (status, said) = add(&asking.workbench(), B).await;
+
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "the far end is what refused rather than this server: {said}",
+    );
+    assert!(
+        said.contains("as many join requests as it will"),
+        "in the far end's own words, which is what somebody looking at it can act \
+         on: {said}",
+    );
+
+    assert_eq!(
+        discovered(&asking.workbench())
+            .await
+            .into_iter()
+            .map(|row| row.device)
+            .collect::<Vec<String>>(),
+        vec![B.to_owned()],
+        "and the row is still there, the device having answered from exactly where \
+         the row said it was — so the press can be made again",
+    );
+    assert!(
+        listing(&asking.workbench()).await.pending.is_empty(),
+        "with nothing pending, no question having been held over there",
     );
 }
 

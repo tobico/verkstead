@@ -59,7 +59,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
@@ -104,6 +104,46 @@ const REACHING: Duration = Duration::from_secs(2);
 /// Ten seconds, which is that reading and the request around it with room to
 /// spare. It is spent at most once per dial, on the one address that answered.
 const ANSWERING: Duration = Duration::from_secs(10);
+
+/// The most of an answer this device will read off a **stranger**: **64 KiB**.
+///
+/// **Because the tailnet half of a discovery dials machines nobody typed an
+/// address for** — see [`Peers::stranger`]. Every other bound on a probe is on
+/// how many nodes are asked and how long one has to answer; without this one, a
+/// node that answers slowly and endlessly is a read with no end but a deadline,
+/// and there are [`crate::discovery::AT_ONCE`] of them in flight at a time. It is
+/// the outbound half of the bound a join already has coming the other way, where
+/// what a stranger may post into this machine is capped by the listener itself.
+///
+/// Sixty-four kibibytes because an identity is nowhere near it: the longest one a
+/// device may say — see [`crate::peer::joining::too_much`] — is a name, an OS
+/// word, an id, a fingerprint and sixteen addresses, which is some four thousand
+/// characters. So this is roomy enough that no Verkstead ever meets it, and small
+/// enough that sixteen at once is nothing. Anything over it is a node that is not
+/// a Verkstead, which is what most of a tailnet is.
+pub const MOST_SAID: usize = 64 * 1024;
+
+/// What a press on a **Discovered** row came to — see [`Peers::join_found`],
+/// whose whole answer this is.
+///
+/// **The two are worth telling apart at the end of the walk as well as at each
+/// address of it**, which is why this stands beside [`Knocked`] rather than
+/// being that enum said twice: a device that answered *anything* is a device
+/// that is where the row said it was, and a row nothing answered at is a row
+/// that was wrong. The caller does different things with the two — see
+/// [`crate::device::Devices::add_found`], which stops drawing the row for the
+/// second and leaves it alone for the first.
+pub enum Reached {
+    /// A device answered at one of the row's addresses, and this is what came of
+    /// it: the address that answered with the question now held over there, or
+    /// this device's account of why it is not held. Either way that device is
+    /// there.
+    Answered(Result<(String, JoinHeld)>),
+
+    /// And nothing answered at any of them, which is a row that went stale
+    /// between being drawn and being pressed.
+    Nobody(anyhow::Error),
+}
 
 /// What one knock at one address came to — see [`Peers::knocked`], and
 /// [`Peers::join_found`], which is the one caller that cares which of the two it
@@ -594,16 +634,20 @@ impl Peers {
     /// gone off the LAN or left the tailnet between the browse finding it and
     /// somebody pressing Add, so a walk that reached nobody is refused in the
     /// words a dial that reached nobody uses, naming the device the row drew.
-    pub async fn join_found(
-        &self,
-        found: &DiscoveredDevice,
-        saying: &DeviceIdentity,
-    ) -> Result<(String, JoinHeld)> {
+    ///
+    /// **Which is why the answer is a [`Reached`] rather than a bare result.** A
+    /// walk that reached nobody and a device that answered and said no are two
+    /// findings rather than one failure — the first is about the row and the
+    /// second is about the far end — and only the first is a reason to stop
+    /// drawing the row.
+    pub async fn join_found(&self, found: &DiscoveredDevice, saying: &DeviceIdentity) -> Reached {
         let mut nothing_at = Vec::new();
 
         for address in &found.addresses {
             match self.knocked(address, saying).await {
-                Knocked::Answered(held) => return held.map(|held| (address.clone(), held)),
+                Knocked::Answered(held) => {
+                    return Reached::Answered(held.map(|held| (address.clone(), held)));
+                }
 
                 Knocked::Nobody(why) => {
                     tracing::debug!(
@@ -623,14 +667,17 @@ impl Peers {
         // it is the one [`Peers::identity`] makes of a member that advertised
         // nothing: there is nowhere to knock.
         if nothing_at.is_empty() {
-            bail!("{} was found at no address to dial it at", found.name);
+            return Reached::Nobody(anyhow!(
+                "{} was found at no address to dial it at",
+                found.name,
+            ));
         }
 
-        bail!(
+        Reached::Nobody(anyhow!(
             "{} answered at none of the addresses it was found at ({})",
             found.name,
             nothing_at.join(", "),
-        );
+        ))
     }
 
     /// One knock at one address: what came of it, or nobody there at all.
@@ -735,6 +782,12 @@ impl Peers {
     /// member: there is no row to write a finding on to, and a device that
     /// answered nothing is a row that is simply not drawn.
     ///
+    /// **And what it will read of the answer is bounded** — see [`MOST_SAID`].
+    /// Every other bound on a probe is on how many of these are made and how long
+    /// one may take; this is the bound on what one of them may *cost*, and it is
+    /// the half that has to be here rather than at the caller, a body being read
+    /// where it is read.
+    ///
     /// The one address rather than a list, because the caller is working down a
     /// list of its own — see [`crate::discovery::Probe`], which spends a deadline
     /// per peer rather than per address.
@@ -743,7 +796,7 @@ impl Peers {
         let asking = self.asking(&met)?;
         let at = reaching(address, IDENTITY);
 
-        let answered = asking
+        let mut answered = asking
             .get(&at)
             .send()
             .await
@@ -755,9 +808,27 @@ impl Peers {
             bail!("the device at {address} answered {status} for its identity");
         }
 
-        let identity: DeviceIdentity = answered
-            .json()
+        // Read in the chunks it arrives in rather than whole, which is the only
+        // way the bound is one on what is held: a `Content-Length` is the far
+        // end's own word for how much it is about to send.
+        let mut said = Vec::new();
+
+        while let Some(chunk) = answered
+            .chunk()
             .await
+            .with_context(|| format!("reading what the device at {address} says it is"))?
+        {
+            if said.len() + chunk.len() > MOST_SAID {
+                bail!(
+                    "the device at {address} said more about itself than an identity is, so it \
+                     is not one",
+                );
+            }
+
+            said.extend_from_slice(&chunk);
+        }
+
+        let identity: DeviceIdentity = serde_json::from_slice(&said)
             .with_context(|| format!("reading what the device at {address} says it is"))?;
 
         let met = met

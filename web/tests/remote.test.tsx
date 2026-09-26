@@ -42,7 +42,7 @@ import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import jsQR from "jsqr";
 import type { JSX } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   faApple,
@@ -1087,6 +1087,57 @@ and the rows drawn of it are not the browse's to move",
     ).toBe(read);
 
     listening();
+  });
+
+  /// The open pane keeps asking for the list, which is what keeps the server
+  /// browsing at all.
+  ///
+  /// **Not a poll for the rows** — those arrive on a `discovered` Nudge, and the
+  /// test above is that. What this asking is for is the server's own browse: it is
+  /// held open by the list being read and dropped once nothing has read it for
+  /// five minutes, and a browse that has heard nothing new announces nothing. So a
+  /// pane sitting open on a quiet LAN would go a whole spell without a read and the
+  /// server would stop browsing underneath it — and the second machine, started
+  /// after that, would never be heard at all.
+  ///
+  /// **And it asks for that list alone.** The membership is not re-read for it:
+  /// nothing about the cluster is in question, and the whole reason the two are
+  /// two readings is that one of them moves while somebody watches the other.
+  describe("while the pane sits open", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps saying it is still looking, and asks for nothing else", async () => {
+      const fetching = theMachine(SERVING, DEVICES, HEARD);
+      mounting(() => <RemotePane back={vi.fn()} />);
+
+      await waitFor(() =>
+        expect(askedFor(fetching, "/api/ui/devices/discovered")).toBe(1),
+      );
+
+      const cluster = askedFor(fetching, "/api/ui/devices");
+
+      // Well inside the five minutes the server holds a browse for, so that a
+      // pane nobody has touched is one the server is still browsing for.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+
+      expect(
+        askedFor(fetching, "/api/ui/devices/discovered"),
+        "the list is asked for again while nothing at all has happened, which is \
+what holds the browse open",
+      ).toBeGreaterThan(1);
+
+      expect(
+        askedFor(fetching, "/api/ui/devices"),
+        "and the cluster's own rows are left exactly as they were: this says \
+somebody is looking and asks nothing about the membership",
+      ).toBe(cluster);
+    });
   });
 
   /// Where a press on a row goes: the device the row is about, and no address.

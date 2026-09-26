@@ -74,6 +74,7 @@ const LANDED_ON: u16 = 9423;
 const HEARING: u16 = 5471;
 const GOODBYE: u16 = 5472;
 const ARRIVING: u16 = 5473;
+const TOO_MUCH: u16 = 5474;
 
 /// How long a test waits for a row it is expecting.
 ///
@@ -85,6 +86,14 @@ const PATIENCE: Duration = Duration::from_secs(20);
 
 /// And how often the list is read while waiting for one.
 const AGAIN: Duration = Duration::from_millis(100);
+
+/// How long a test reads before calling a row absent — see [`never_drawn`].
+///
+/// Shorter than [`PATIENCE`], and spent in full every time: there is no moment at
+/// which a multicast has finished saying things, so proving a row is not coming is
+/// reading for a while and not seeing it. Five seconds, the length
+/// `tests/advertising.rs` listens for the same reason.
+const QUIET: Duration = Duration::from_secs(5);
 
 /// The port the workbench is taken to be on, which nothing here asks about: the
 /// reading's Tailscale is built with it and never runs.
@@ -241,6 +250,31 @@ async fn drawn(app: &Router, device: &str) -> DiscoveredDevice {
     }
 }
 
+/// And that `devices` never turn up on it at all, which is a different kind of
+/// waiting: proving a row is not going to be drawn is reading for a while and not
+/// seeing it.
+///
+/// [`QUIET`] is spent in full every time, because there is no moment at which a
+/// multicast has finished saying things. Long enough to cover the resolution of
+/// the device advertised beside these, which is what says the browse was hearing
+/// the wire at all.
+async fn never_drawn(app: &Router, devices: &[&str]) {
+    let deadline = Instant::now() + QUIET;
+
+    while Instant::now() < deadline {
+        let drawn = discovered(app).await;
+
+        for device in devices {
+            assert!(
+                !drawn.iter().any(|row| &row.device == device),
+                "device {device} was drawn a row: {drawn:?}",
+            );
+        }
+
+        tokio::time::sleep(AGAIN).await;
+    }
+}
+
 /// And until it is off it again, which is what a goodbye leaves behind.
 async fn left(app: &Router, device: &str) {
     let deadline = Instant::now() + PATIENCE;
@@ -373,6 +407,59 @@ async fn an_open_page_is_told_when_a_device_turns_up() {
             .collect::<Vec<String>>(),
         vec![OVER_THERE],
         "and the read the word asked for is the row",
+    );
+}
+
+/// And something advertising this service that says too little or too much about
+/// itself is no row, whatever else is on the wire beside it.
+///
+/// **Which is the same judgement the tailnet half makes of what a peer answered.**
+/// A row is a stranger's words drawn on somebody's page either way, and where
+/// those words came from is no reason to read a different length of them — so
+/// `discovery::row` holds an advertisement to the bounds a join is refused over.
+///
+/// **A blank as well as a missing key**, because they arrive here as one thing:
+/// `mdns-sd` reads a TXT value that is empty — and one whose bytes are not UTF-8 —
+/// as the empty string, so a broken advertisement looks like a present one. A row
+/// with no name says nothing to the person reading it, and one with no id cannot
+/// be keyed, excluded or pressed at all.
+///
+/// **Waited out rather than read once.** There is no moment at which a multicast
+/// has finished saying things, so what says these two are not coming is reading
+/// for [`QUIET`] and not seeing them — while the proper device advertised beside
+/// them is what says the browse was hearing the wire at all.
+#[tokio::test]
+async fn an_advertisement_that_says_too_little_or_too_much_is_no_row() {
+    let nameless = Announcement {
+        name: String::new(),
+        ..announcement(BESIDE_IT)
+    };
+
+    // Past the bound an OS word is held to, and inside the 255 bytes one TXT
+    // string carries — which is what makes it something a device can really say.
+    let shouting = Announcement {
+        os: "macOS".repeat(40),
+        ..announcement(A_THIRD)
+    };
+
+    let _nameless = Advertisement::of_this_device_on(TOO_MUCH, true, &nameless);
+    let _shouting = Advertisement::of_this_device_on(TOO_MUCH, true, &shouting);
+    let _proper = Advertisement::of_this_device_on(TOO_MUCH, true, &announcement(OVER_THERE));
+
+    let (_dir, _pool, app) = workbench(Browse::of_this_device_on(TOO_MUCH, Nudges::new())).await;
+
+    drawn(&app, OVER_THERE).await;
+
+    never_drawn(&app, &[BESIDE_IT, A_THIRD]).await;
+
+    assert_eq!(
+        discovered(&app)
+            .await
+            .into_iter()
+            .map(|row| row.device)
+            .collect::<Vec<String>>(),
+        vec![OVER_THERE],
+        "so the one that said what a device says is the whole of the list",
     );
 }
 

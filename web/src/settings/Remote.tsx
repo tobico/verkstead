@@ -128,11 +128,12 @@
 //! **A reading of its own rather than a field of the one above**, and that is
 //! what keeps the two apart: a browse hears something every few seconds, and the
 //! cluster's own rows are not re-read for any of it — see [`useDiscovered`]. Its
-//! own kind of Nudge carries it, so a device turning up draws a row without a
-//! reload and without a poll; and because a browse is cold when it starts, the
-//! first answer is empty however many machines are out there. Which is why the
-//! empty list reads as one still listening rather than as a network with nothing
-//! on it.
+//! own kind of Nudge carries the rows, so a device turning up draws one without a
+//! reload; and because a browse is cold when it starts, the first answer is empty
+//! however many machines are out there. Which is why the empty list reads as one
+//! still listening rather than as a network with nothing on it. The one thing on
+//! an interval here is the *asking*, which is what tells the server somebody is
+//! still looking — see [`LOOKING`].
 //!
 //! Members are not in it, nor is this device, nor is a device a press has already
 //! been made on — the server leaves all three out, so a device moves from that
@@ -143,9 +144,11 @@
 //! machine found that device, and the server works down them in the order it
 //! found them. What it leaves is what the box below leaves — a pending row with a
 //! fingerprint on it for two people to compare — and the row it was pressed on
-//! has gone with it. A row that had gone stale is refused in the words the dial
-//! put it in, naming the device, and dropped from the list for good measure: the
-//! browse hears a device that is really there again within the minute.
+//! has gone with it. A row that had gone stale — nothing answered at any of the
+//! addresses it was found at — is refused in the words the dial put it in, naming
+//! the device, and dropped from the list: nothing is there to draw. A device that
+//! answered and merely said no keeps its row, because it is exactly where the row
+//! said it was.
 //!
 //! **And under both lists, the other control on this pane that configures rather
 //! than reads**: Add, against an address somebody types — which is what covers
@@ -227,6 +230,26 @@ const DOWNLOAD = "https://tailscale.com/download";
 const LOCKED =
   "This page was opened over the tailnet, so turning remote access off " +
   "here would disconnect it. Turn it off on the machine Verkstead runs on.";
+
+/// How often an open pane says it is still looking, in milliseconds — see
+/// [`useDiscovered`], which is the one reading on this page with an interval.
+///
+/// **Not a poll for the rows.** Those arrive as a `discovered` Nudge, the way
+/// every other list in this viewer arrives (ADR-0009). What this is for is the
+/// server's own browse, which is held open by the list being read and dropped
+/// once nothing has read it for five minutes: a browse that has heard nothing new
+/// announces nothing, so on a quiet LAN nothing would read this list at all and
+/// the browse would stop under a pane somebody is sitting in front of.
+///
+/// A minute, which is five renewals inside that spell — so a tick lost to a slow
+/// answer costs nothing — and slow enough that the tailnet probe this read also
+/// makes is a handful of dials a minute rather than a burst.
+///
+/// **And it stops whenever nobody is looking**, which is what keeps it from being
+/// the poll ADR-0009 retired: the interval goes with the pane, and a tab in the
+/// background is not ticking either. Such a browse is dropped, rightly — and the
+/// read a tab does on coming back to the front starts a fresh one.
+const LOOKING = 60 * 1000;
 
 /// The reading narrowed to one of its states, or `null` where it is in another.
 ///
@@ -320,20 +343,32 @@ function useDevices() {
 /// **And this read is what holds the browse open.** The server starts browsing
 /// when it is first asked and stops once nothing has asked for a spell — a phone
 /// that closes a tab says nothing — so the first answer is empty or short and the
-/// rows arrive over the seconds after it, each announced. Nothing polls.
+/// rows arrive over the seconds after it, each announced.
+///
+/// **Which is why this one reading is on an interval** — see [`LOOKING`]. The
+/// rows still arrive by Nudge, exactly as ADR-0009 has every other list in this
+/// viewer arrive: what the interval is for is not the data but the *saying that
+/// somebody is still looking*, which is the one thing a Nudge cannot carry. A
+/// browse that has heard nothing new announces nothing, so on a quiet LAN a pane
+/// sitting open would go a whole spell without a read and the server would stop
+/// browsing under it — and the device the human is waiting for, started a few
+/// minutes after they opened the pane, would never be heard at all.
 ///
 /// **It is also what makes the probe of the tailnet happen**, which is the other
 /// half of the list and is asked rather than heard: a tailnet has no multicast for
 /// a device to announce itself over, so the server asks its peers as this is read.
 /// Which is why the answer can take a moment where the LAN half is instant, and
-/// why the tailnet rows are in the first answer rather than arriving after it.
+/// why the tailnet rows are in the first answer rather than arriving after it —
+/// and why the interval is a minute rather than a few seconds.
 ///
 /// Merged by the device id, like the reading above and for its reason: a browse
-/// that heard one more device leaves the rows it already drew alone.
+/// that heard one more device leaves the rows it already drew alone. So an
+/// interval that answers the same rows leaves the page exactly as it stands.
 function useDiscovered() {
   return useReading(() => ({
     queryKey: ["discovered"],
     queryFn: loadDiscovered,
+    refetchInterval: LOOKING,
     freshness: { reconcile: "device" },
   }));
 }

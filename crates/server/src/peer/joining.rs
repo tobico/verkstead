@@ -700,10 +700,11 @@ fn asked(holding: &Holding, request: String) {
 /// what a dial back will later work down and what a modal and a lock screen will
 /// later draw, so the bound is taken here rather than at each of those: one
 /// reading, in front of the write, against [`LONGEST_ID`] and the four beside it.
-/// The tailnet half of a discovery asks the same question of what a probed peer
-/// answered, for the same reason with nothing written — see
-/// [`crate::discovery::Probe`], where a device that will not keep to a hostname's
-/// length is one there is no reason to draw a row for.
+/// Both halves of a discovery ask the same question of what they found, for the
+/// same reason with nothing written — see [`crate::discovery::Probe`] for the
+/// answer a probed peer gave and [`crate::discovery::row`] for an advertisement
+/// off the LAN, where a device that will not keep to a hostname's length is one
+/// there is no reason to draw a row for.
 ///
 /// Refused whole rather than trimmed, and the reason is the addresses: a list cut
 /// to sixteen would be a device quietly unreachable at the seventeenth address it
@@ -715,24 +716,40 @@ fn asked(holding: &Holding, request: String) {
 ///
 /// `None` is a join this device will keep, which is every join a Verkstead makes.
 pub(crate) fn too_much(saying: &DeviceIdentity) -> Option<&'static str> {
-    if saying.device.chars().count() > LONGEST_ID {
+    too_much_said(&saying.device, &saying.name, &saying.os, &saying.addresses)
+}
+
+/// The same bounds read off the words themselves rather than off a
+/// [`DeviceIdentity`] — which is what an **Advertising** on the LAN is, there
+/// being no fingerprint in a TXT record for it to be an identity with.
+///
+/// Apart from [`too_much`] so that one judgement covers both, rather than the
+/// two halves of a discovery holding a stranger's words to two different
+/// standards: what is at stake either way is a row on somebody's page, and where
+/// the words came from is no reason to read a different length of them.
+pub(crate) fn too_much_said(
+    device: &str,
+    name: &str,
+    os: &str,
+    addresses: &[String],
+) -> Option<&'static str> {
+    if device.chars().count() > LONGEST_ID {
         return Some("that is longer than any device id");
     }
 
-    if saying.name.chars().count() > LONGEST_NAME {
+    if name.chars().count() > LONGEST_NAME {
         return Some("that is longer than any hostname");
     }
 
-    if saying.os.chars().count() > LONGEST_OS {
+    if os.chars().count() > LONGEST_OS {
         return Some("that is longer than any word for an operating system");
     }
 
-    if saying.addresses.len() > MOST_ADDRESSES {
+    if addresses.len() > MOST_ADDRESSES {
         return Some("that is more addresses than a device is reachable at");
     }
 
-    if saying
-        .addresses
+    if addresses
         .iter()
         .any(|address| address.chars().count() > LONGEST_ADDRESS)
     {
