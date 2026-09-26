@@ -3992,7 +3992,8 @@ pub enum SteerTarget {
     /// Reachable from every state, unlike either of the other two that run: an
     /// investigation is a question about the work rather than a step of it, so
     /// there is nowhere the work can have got to that makes asking one wrong.
-    /// Where it leads back to is the state it was steered from.
+    /// Where it leads back to is the state it was steered from — or Done, for the
+    /// states nothing returns to.
     Investigating,
 
     /// Finished with. Nothing runs, so there is no Pairing to settle and no

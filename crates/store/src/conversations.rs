@@ -98,7 +98,8 @@ pub enum Lifecycle {
     /// above. Two ways in, a Start on an **Investigate** draft and a steer from
     /// anywhere, and where it leads back to is where it came from: Done for an
     /// Investigate Conversation of its own, and the state it was steered from
-    /// for one steered into it.
+    /// for one steered into it — Done again where that state is one nothing
+    /// returns to.
     ///
     /// See ADR-0020.
     Investigating,

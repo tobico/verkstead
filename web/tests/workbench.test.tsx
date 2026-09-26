@@ -11188,6 +11188,15 @@ describe("steering a conversation", () => {
     expect(targets(pane)).toContain("Investigating");
     expect(pane.querySelector("#steer-investigation")).toBeNull();
 
+    // And it says where the answer leaves the conversation, both halves of it:
+    // a Draft and a closed conversation are steered from like any other, and
+    // neither is a state anything goes back to.
+    expect(
+      screen.getByText(
+        /goes back to the state you steered it from, or to Done where there is nowhere to go back to/,
+      ),
+    ).toBeTruthy();
+
     fireEvent.click(
       await drawn(
         pane,

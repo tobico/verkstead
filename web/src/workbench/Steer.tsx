@@ -288,7 +288,7 @@ const TARGETS: {
   {
     target: "Investigating",
     label: "Investigating",
-    note: "A question about this work answered without changing it: a session that reads, writes and runs whatever it needs to find out, commits none of it, and keeps asking what else there is until you are finished. It goes back to the state you steered it from.",
+    note: "A question about this work answered without changing it: a session that reads, writes and runs whatever it needs to find out, commits none of it, and keeps asking what else there is until you are finished. It then goes back to the state you steered it from, or to Done where there is nowhere to go back to.",
     runs: true,
     role: "implementation",
   },
@@ -1400,7 +1400,8 @@ export function Steer(props: {
               A session reads, writes and runs whatever it needs to answer you,
               and commits none of it. It goes on asking what else there is until
               you are finished, and then the conversation goes back to the state
-              you steered it from.
+              you steered it from — or to Done, where there is nowhere to go back
+              to.
             </Note>
           </div>
         </Show>
