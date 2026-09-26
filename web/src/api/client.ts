@@ -1387,6 +1387,28 @@ export function addDevice(address: string): Promise<DevicesView> {
   return post<DevicesView>("/api/ui/devices/joins", { address });
 }
 
+/// And the same question asked of a device on the Discovered list, which is the
+/// press on that row: nothing typed anywhere.
+///
+/// **The device rather than an address**, because a discovery found a list of
+/// them — every address that device advertised, and the tailnet's where a probe
+/// answered too — and the server dials them in the order it found them. A page
+/// that picked one would be choosing between addresses it knows nothing about.
+///
+/// What comes back is the Devices section read again, the way the typed press
+/// answers, so the pending row arrives out of it. The Discovered list is re-read
+/// rather than answered here: the row the press was made on has left it, and one
+/// list is not the other's to redraw.
+///
+/// A refusal is the words the dial put it in, naming the device: a row can be
+/// stale by the time somebody presses it, the device having gone off the LAN or
+/// left the tailnet since it was drawn.
+export function addFound(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/discovered/${encodeURIComponent(device)}/add`,
+  );
+}
+
 /// And take that request back: Cancel on a row still waiting, Dismiss on one
 /// whose ten minutes have run out.
 ///

@@ -185,8 +185,13 @@ pub struct PendingJoin {
     /// What the far end calls this request, which is what Cancel names.
     pub request: String,
 
-    /// The address that was typed, which is the one place this device has been
-    /// told to look for the other.
+    /// The address the question went to, which is the one place this device has
+    /// been told to look for the other — and what a Cancel dials.
+    ///
+    /// The address somebody typed, where the press was a typed one; and where it
+    /// was a press on a **Discovered** row, the one that answered out of the list
+    /// that row held. Either way it is where this device really knocked rather
+    /// than where it was told to try.
     pub address: String,
 
     /// And what the device at that address said it is shown under, which is what

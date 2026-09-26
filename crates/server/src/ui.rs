@@ -608,6 +608,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // at the mercy of the LAN. Reading it is also what holds the browse open
         // — see [`crate::discovery::Browse`].
         .route("/api/ui/devices/discovered", get(discovered))
+        // And the one press on a row of that list, which is an Add with nothing
+        // typed: the row names a device, and what is dialled is every address the
+        // discovery found for it. Under the row rather than beside the typed
+        // press, because what it takes is a Device Id where that one takes an
+        // address — and a discovery found a list of addresses rather than one, so
+        // there is nothing for the browser to choose between.
+        .route("/api/ui/devices/discovered/{device}/add", post(add_found))
         // And the one thing in that section that is pressed rather than read:
         // Add, against an address somebody typed. A route of its own beside the
         // read for the serve switch's reason — it is the half of the section
@@ -5709,6 +5716,45 @@ async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> 
 
     if let Err(why) = devices.add(&new.address).await {
         tracing::info!(address = %new.address, %why, "a request to link was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/discovered/{device}/add` — **Add** on a discovered row,
+/// which is the same **Join** with nothing typed (ADR-0020, *Discovery*).
+///
+/// **The device rather than an address**, because a discovery found a list of
+/// them: the server dials every address the row holds in the order it found them
+/// and posts the join at the first that answers — see
+/// [`crate::device::Devices::add_found`]. A browser that picked one of them would
+/// be choosing between addresses it knows nothing about.
+///
+/// **It answers with the Devices section read again**, the way the typed press
+/// above does, so the pending row it leaves arrives out of this answer. And the
+/// Discovered list is announced as moved either way: a device a join is pending
+/// for is one that list leaves out, and a device that answered nowhere is one it
+/// has forgotten — so the row goes from every open pane rather than only from the
+/// one that pressed.
+///
+/// **A press on a row whose device has gone is the far end's story rather than
+/// this server's**, so it is refused as the typed press is and in the words the
+/// dial put it in, naming the device the row drew.
+async fn add_found(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    let pressed = devices.add_found(&device).await;
+
+    // Announced here rather than by either half of the press, this being the one
+    // place that knows a press was made at all.
+    state.nudges.announce(Nudge::Discovered);
+
+    if let Err(why) = pressed {
+        tracing::info!(%device, %why, "a request to link with a device this one found was not made");
 
         return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
     }

@@ -490,7 +490,12 @@ enum Heard {
     /// was the LAN the runner happened to be on. It is also what the committed
     /// fixtures of this list are written through — a golden file cannot be
     /// written off whatever is advertising on a build machine.
-    Stated(Vec<Found>),
+    ///
+    /// Behind a lock for the reason the real one's rows are: a press that reached
+    /// nobody forgets the row it was made on — see [`Browse::forgotten`] — and a
+    /// fixture whose rows were a plain list would be a forget that stuck to
+    /// whichever clone of this handle happened to make it.
+    Stated(Arc<Mutex<Vec<Found>>>),
 }
 
 impl Browse {
@@ -517,7 +522,7 @@ impl Browse {
     /// What a fixture states it heard, browsing nothing — see [`Heard::Stated`].
     pub fn stated(found: Vec<Found>) -> Browse {
         Browse {
-            heard: Heard::Stated(found),
+            heard: Heard::Stated(Arc::new(Mutex::new(found))),
         }
     }
 
@@ -534,8 +539,38 @@ impl Browse {
     /// reading, and [`SPELL`] is measured from the last of them.
     pub(crate) fn found(&self) -> Vec<Found> {
         match &self.heard {
-            Heard::Stated(found) => found.clone(),
+            Heard::Stated(found) => found
+                .lock()
+                .expect("a fixture's rows are not poisoned")
+                .clone(),
             Heard::OverTheLan(browsing) => browsing.asked(),
+        }
+    }
+
+    /// And `device` taken off what is held, which is a press on its **Add** that
+    /// reached nobody — see [`crate::device::Devices::add_found`].
+    ///
+    /// **Because the row was wrong.** A browse holds what it last heard, and a
+    /// device that has gone off the LAN says nothing on its way out unless it was
+    /// asked to stop: the press is the moment this device *learns* the row is
+    /// stale, so the row goes then rather than at the end of a TTL nobody is
+    /// watching. A device that is really there is heard again within the minute
+    /// and is a row again, which is the whole of what makes this safe to do.
+    ///
+    /// **The browse is the half a forget lands on**, because it is the half that
+    /// holds rows at all: the tailnet half is asked afresh on every read, so a
+    /// peer that has gone is off the next answer without anybody forgetting
+    /// anything.
+    pub(crate) fn forgotten(&self, device: &str) {
+        match &self.heard {
+            Heard::Stated(found) => found
+                .lock()
+                .expect("a fixture's rows are not poisoned")
+                .retain(|row| row.device != device),
+
+            Heard::OverTheLan(browsing) => {
+                browsing.forget(device);
+            }
         }
     }
 }
@@ -668,17 +703,25 @@ impl Browsing {
             return;
         };
 
-        {
-            let mut listening = self.listening();
-
-            if listening.found.remove(device).is_none() {
-                return;
-            }
-
+        if self.forget(device) {
             tracing::debug!(device, "a device stopped advertising itself on the LAN");
+        }
+    }
+
+    /// One device off the rows, and the open pages told where that moved the list.
+    /// Whether there was a row to take is handed back, a list that did not move
+    /// being nothing to announce and nothing to say.
+    ///
+    /// Two things call it: a device that said goodbye or ran out of TTL, and a
+    /// press on its **Add** that reached nobody — see [`Browse::forgotten`].
+    fn forget(&self, device: &str) -> bool {
+        if self.listening().found.remove(device).is_none() {
+            return false;
         }
 
         self.nudges.announce(Nudge::Discovered);
+
+        true
     }
 
     /// Whether nobody has asked for the reading in [`SPELL`], which is what ends

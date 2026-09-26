@@ -814,6 +814,21 @@ as the list is read.
 stop sends and at the end of its TTL where there was none, which is a machine
 whose lid shut; both arrive as one event. One that stopped answering a probe
 leaves it on the next read.
+**And the Add on a row is a Join with nothing typed.** The press names the device
+by its **Device Id** rather than by an address, a discovery having found a list of
+them: the server dials every address the row holds, in the order it found them —
+the LAN's first, that being the shorter road — and posts the join at the first
+that answers, exactly as a dial to a **Member** works down that member's
+addresses. What it leaves is what the typed box leaves, and the row goes with the
+press: a device a Join is pending for is one this list leaves out, so a press
+moves a row from this list to the rows above rather than leaving two rows about
+one device.
+**A row can be stale by the time it is pressed**, the device having gone off the
+LAN or left the tailnet since it was drawn. That press is refused in the words a
+dial that reached nobody uses, naming the device rather than failing bare — and
+the row is forgotten, so the list the refusal is drawn beside is one without it.
+A device that is really there advertises again within the minute and is a row
+again, which is what makes forgetting one safe.
 _Avoid_: found devices, nearby devices, the browse (which is how half of it is
 read), available devices
 
@@ -846,9 +861,13 @@ scanning
 **Join**:
 One **Device** asking another to let it into its cluster, and the whole of what
 follows the press on **Add**. The asking device dials the address somebody
-typed, takes whatever certificate that address presents for the one call, and
-posts what it is — its **Device Id**, that certificate's fingerprint, and its
-**Device Reading**. The device asked writes the question down, pinning the
+typed — or, from a **Discovered** row, each address that row holds until one
+answers, an address that answered *anything* ending the walk — takes whatever
+certificate that address presents for the one call, and posts what it is — its
+**Device Id**, that certificate's fingerprint, and its **Device Reading**. The
+pending row names the address that answered, which for a typed press is the one
+typed and for a discovered one is wherever that walk landed: it is what a Cancel
+dials. The device asked writes the question down, pinning the
 certificate the handshake took from the caller, and asks its human: a modal in
 every open workbench, and a push to every phone. The asking device is left a
 **pending row** reading *waiting for confirmation on* that device, with **its

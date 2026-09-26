@@ -181,14 +181,18 @@ however much Tailscale is on this machine: the tailnet half asks this machine's
 the case that reads *Tailscale*, and *LAN and Tailscale* where they share a network
 too.
 
-That press does nothing yet. Type the address into the box under the list
-instead: `127.0.0.1:8523` — the port is only needed because both are on this
-machine; a device answering on 8423 is reached by its name or address alone — and
-press Add.
+**Press that Add and nothing is typed anywhere.** The press names the device
+rather than one of its addresses, a discovery having found a list of them: the
+server dials every address on the row in the order it found them — the LAN's
+first, that being the shorter road — and posts the join at the first that answers.
+The box under the list is what is left for the devices neither half reaches, and
+it takes the one address it always did: `127.0.0.1:8523` for the second install,
+the port being needed only because both are on this machine.
 
-What happens then is the whole of the stage. The first device dials that
-address, takes whatever certificate it presents for the one call, and posts what
-it is; the second writes the question down, holds it ten minutes, and raises a
+What happens then is the whole of the stage, and the two presses are one act from
+here on. The first device dials that address, takes whatever certificate it
+presents for the one call, and posts what it is; the second writes the question
+down, holds it ten minutes, and raises a
 modal in every workbench it has open with a push to any phone subscribed to it.
 The first draws a pending row, *Waiting for confirmation on …*, with **its own**
 fingerprint under it — the same string the modal over there is drawing, for two
@@ -201,9 +205,18 @@ checks that certificate against the one it met when it asked. Both lists now
 read the same, and a third Verkstead joining through either of them lands on all
 three.
 
-Through the API rather than the pane, which is what a test does:
+The pending row and the discovered row are never both drawn: a device a join is
+pending for is one the Discovered list leaves out, so the press moves a row from
+under the list to above it. And a row that went stale between being drawn and
+being pressed — the machine switched off in between — is refused naming the device
+and dropped from the list, rather than sitting there refusing again; it is back on
+the list within the minute if that machine comes back.
+
+Through the API rather than the pane, which is what a test does — the discovered
+press first, then the typed one:
 
 ```console
+$ curl -X POST http://127.0.0.1:8422/api/ui/devices/discovered/0011…ee/add
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"address":"127.0.0.1:8523"}' http://127.0.0.1:8422/api/ui/devices/joins
 $ curl http://127.0.0.1:8522/api/ui/devices/asking
