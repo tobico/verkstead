@@ -88,12 +88,19 @@ afterEach(() => {
 });
 
 /// What was asked of the app, which is what a test about a control reads.
+///
+/// `head` is the one of them nothing on this page asks: the head's colours and
+/// height are pushed from the app's own shell whenever the colour scheme flips —
+/// see `head.ts`, and `decorations.test.tsx` for what says so. It is here because
+/// the shape is the shape, and a stub short of it is not the bridge the preload
+/// exposes.
 type Asked = {
   settings: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
   logs: ReturnType<typeof vi.fn>;
   startup: ReturnType<typeof vi.fn>;
   register: ReturnType<typeof vi.fn>;
+  head: ReturnType<typeof vi.fn>;
 };
 
 /// The app's own window, stood in for.
@@ -137,6 +144,8 @@ function standingIn(
       }
       return Promise.resolve(starts);
     }),
+
+    head: vi.fn(),
   };
 
   const bridge: Bridge = {
@@ -146,6 +155,9 @@ function standingIn(
     logs: () => asked.logs() as Promise<void>,
     startup: () => asked.startup() as Promise<Registration>,
     register: (on) => asked.register(on) as Promise<Registration>,
+    head: (worn) => {
+      asked.head(worn);
+    },
   };
 
   vi.stubGlobal(NAME, bridge);

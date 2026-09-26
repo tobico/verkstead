@@ -20,16 +20,17 @@
    such pane at all then, and the two frames that happen in are said at the end
    of this file.
 
-   Six of the names here are worn by things this file does not draw:
+   Seven of the names here are worn by things this file does not draw:
    `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
-   sticks to its bottom, `paneBack` by the way out of one, `paneScreen` by a
-   terminal that takes a pane's whole height, `paneWide` by one that takes its
-   whole width as well, and `paneComposer` by the one thing a pane holds that
-   stands in the middle of it rather than at the top. The rules that read them
-   are about what a *pane* does, and a pane is the frame's; so the frame writes
-   the names and the components that have to be recognised by it wear them —
-   `PaneHead.tsx`, `Timeline.tsx`, `Conversations.tsx`, `Attached.tsx` and the
-   two composers each import this module for the ones they need. */
+   sticks to its bottom, `paneHead` by the bar across the top of one, `paneBack`
+   by the way out of it, `paneScreen` by a terminal that takes a pane's whole
+   height, `paneWide` by one that takes its whole width as well, and
+   `paneComposer` by the one thing a pane holds that stands in the middle of it
+   rather than at the top. The rules that read them are about what a *pane* does,
+   and a pane is the frame's; so the frame writes the names and the components
+   that have to be recognised by it wear them — `PaneHead.tsx`, `Timeline.tsx`,
+   `Conversations.tsx`, `Attached.tsx` and the two composers each import this
+   module for the ones they need. */
 
 /* The frame — and the box that everything standing in it is positioned against,
    which is the half of clipping that is easy to leave off.
@@ -294,6 +295,45 @@
   margin-top: auto;
 }
 
+/* And the room the window's own controls take at the edges of it, which the head
+   standing at an edge has to keep out from under.
+
+   The app's window has no title bar (ADR-0020), so the platform draws its three
+   controls over a corner of the page itself — the controls overlay at the
+   top-right on Windows and Linux, the traffic lights at the top-left on a Mac —
+   and the band they are drawn over is exactly where a pane keeps its head. So
+   `paneHead` is the name `PaneHead.tsx` wears for this: which head is at an edge
+   of the *window* is a question about the frame's layout, and no head of any one
+   pane can answer it.
+
+   How much room they take arrives from the page, as `--controls-left` and
+   `--controls-right` on the frame — see `controls.ts` for the arithmetic and
+   `carried` in `Panes.tsx` for the handing over. Neither is written where there
+   is no overlay to measure, which is every browser and every phone, so every
+   rule below reads them with a nought behind them and the page a browser is
+   served is padded by nothing anywhere.
+
+   Physical edges rather than logical ones, which is the truth of it here and
+   nowhere else in this file: a window's controls are at a corner of the screen
+   rather than at the start or the end of a line.
+
+   One pane at a time to begin with, as everything here is: the pane the page is
+   showing is the whole window, so the head in it stands at both edges and both
+   insets are every head's. */
+.panes {
+  --head-left: var(--controls-left, 0px);
+  --head-right: var(--controls-right, 0px);
+}
+
+/* And what a head at an edge does about it, said once for all of them: the room
+   comes out of the head rather than off the pane, so what moves is the one band
+   the controls are drawn over and the record under it is read exactly where it
+   was read before. */
+.panes .paneHead {
+  padding-left: var(--head-left, 0px);
+  padding-right: var(--head-right, 0px);
+}
+
 /* From 60rem the window holds the sidebar beside the level being read: the
    conversations stay, and the second column is the middle pane or the details.
    Each pane scrolls on its own from here, because two columns of one page's
@@ -355,6 +395,47 @@
   .middlePane .paneBack {
     display: none;
   }
+
+  /* And the window's controls stop being every head's business, the frame no
+     longer being one pane: what stands at an edge of the window here is the pane
+     in the column at that edge, and every other head is inside the frame with
+     the controls nowhere near it. */
+  .panes > .pane {
+    --head-left: 0px;
+    --head-right: 0px;
+  }
+
+  /* The head at the left edge, which is the sidebar's wherever there is a list
+     to pick from — the record's in the frame that has none, and the details
+     pane's in the frame that is nothing else. Each of the three is the first
+     column of the layout it names, and the two that are not the sidebar are the
+     frames said at the end of this file. */
+  .panes > .conversationsPane {
+    --head-left: var(--controls-left, 0px);
+  }
+
+  .panes.two > .middlePane {
+    --head-left: var(--controls-left, 0px);
+  }
+
+  .panes.alone > .detailsPane {
+    --head-left: var(--controls-left, 0px);
+  }
+
+  /* And the head at the right edge, which is the details pane's in every frame
+     that shows one — and the middle pane's as well at this width, where the
+     second column is whichever of the two `data-pane` names and so both of them
+     are the far column, one at a time. Except in the frame with no list, where
+     the middle pane is the near column and the details pane is beside it: that
+     is what the `:not` says, and the 80rem block below is where the rest of it
+     stops. */
+  .panes > .detailsPane {
+    --head-right: var(--controls-right, 0px);
+  }
+
+  .panes:not(.two) > .middlePane {
+    --head-right: var(--controls-right, 0px);
+  }
 }
 
 /* And from 80rem all three stand together, which is the frame as it is meant
@@ -376,6 +457,16 @@
      otherwise make a block of it again. */
   .panes > .conversationsPane {
     display: flex;
+  }
+
+  /* And the middle pane stops being the far column: all three stand together
+     from here, so what is against the window's right edge is the details pane
+     and the middle pane is in the middle of the frame. The same selector the
+     inset was given by a breakpoint ago, said again rather than narrowed there —
+     what this width changes is the layout, and a rule about the layout belongs
+     at the width that has it. */
+  .panes:not(.two) > .middlePane {
+    --head-right: 0px;
   }
 }
 
