@@ -3222,6 +3222,18 @@ to visibility each fall back to re-reading everything — which is also the
 whole meaning of the push-relayed Nudge. A query whose rendering holds reader
 state must still reconcile its re-reads, or be `static` where its payload
 cannot change (ADR-0005).
+**And it says whose news it is, where it is not this device's own.** A page reads
+a **Member's** Conversation through the device it opened, so that member's news
+arrives on the same stream: the device holds one Nudge stream to each of its
+members and announces what comes down one under that **Device Id**, which is what
+the viewer's table keys its invalidation by — ids being each device's own and
+colliding by construction. A Nudge naming no device is this device's own and is
+the signal it has always been. One kind exists for the stream itself rather than
+for anything in the world: *everything* of one device's, which is what a stream
+that has just been taken up says, having no way to know what it missed while it
+was down. A member that is not answering is not announced about at all: the page
+keeps what it last read and goes stale, exactly as it does when its own stream is
+down.
 
 Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
 an agent's terminal. This one is a signal to a browser and never leaves the

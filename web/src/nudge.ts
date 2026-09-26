@@ -1,8 +1,9 @@
 //! Listening for the Nudge: the word that something moved, and what it was
 //! (ADR-0009).
 //!
-//! A Nudge names a kind and, where the change belongs to one, the Conversation
-//! it happened in. It carries nothing else — no payload rides an event, and
+//! A Nudge names a kind, the Conversation it happened in where the change
+//! belongs to one, and the device where the news is a member's rather than this
+//! one's (see below). It carries nothing else — no payload rides an event, and
 //! what the page does about one is an ordinary read of the server.
 //!
 //! What each kind stands for is [`standsFor`] below, and it is the client's
@@ -30,14 +31,22 @@
 //! `EventSource` and no worker, and the server being restarted — and they cover
 //! it at the moment the human looks, rather than ten seconds at a time.
 //!
-//! **And it is this device's stream.** A Conversation of a member's is read
-//! through this device (ADR-0020) and its news is the member's own, on a stream
-//! nobody here is holding yet — so a page opened on one reads fresh when it is
-//! opened and on coming back, and not yet on a Set answered over there. Holding
-//! one stream per member and re-announcing what comes down it locally is the
-//! stage after this. What follows that through is already here: every key below
-//! is built for a device, so a Nudge said to be a member's invalidates that
-//! member's queries and nothing of this device's.
+//! **And a member's news arrives on it too.** A Conversation of a member's is
+//! read through the device the browser opened (ADR-0020, *The opened device
+//! relays*), so its news comes the same way rather than over a second
+//! connection: that device holds one Nudge stream to each of its members and
+//! announces what comes down one on this stream, under the Device Id it came
+//! from — see `relaying::freshness` on the other side of the wire. So a Nudge
+//! says *whose* it is, and every key below is built for that device: a Set
+//! answered on a member invalidates that member's queries and nothing of this
+//! device's, ids colliding by construction (see `reaching.ts`). A Nudge with no
+//! device is this device's own and means exactly what it always meant.
+//!
+//! **And a member's stream that was away says `everything` of that device.** The
+//! reconnect's own reaction, aimed at one device: what the hub missed while a
+//! member was off is unknowable, so a page drawing that member reads back
+//! whatever of it is on screen — while a page drawing this device's work, or
+//! another member's, reads nothing back for it.
 //!
 //! The one gap left is a stream that died silently on a page nobody touches: no
 //! reconnect, no return to visibility, and nothing to notice it. The keep-alive
@@ -46,7 +55,7 @@
 
 import type { QueryClient, QueryKey } from "@tanstack/solid-query";
 
-import type { Nudge } from "./api/types";
+import type { Nudge, Nudged } from "./api/types";
 import { keyOf, type Device } from "./reaching";
 
 /// The server's stream — see the `nudge` module on the other side of it.
@@ -103,21 +112,26 @@ export function whenFilesMove(
   };
 }
 
-/// Tell them: one Conversation's, or — where the page cannot say what moved —
-/// all of them.
+/// Tell them: one Conversation's, every Conversation of one device's, or — where
+/// the page cannot say what moved — all of them.
 ///
 /// One Conversation is a device and an id together, ids being each device's own
 /// and colliding by construction (see `reaching.ts`): a member's Conversation 4
-/// moving is no news at all for this device's Conversation 4.
+/// moving is no news at all for this device's Conversation 4. A `conversation` of
+/// `null` is every Conversation of that one device, which is what a member's
+/// stream coming back says.
 ///
 /// Over a copy, because what a subscriber does about the news is its own and
 /// may be to stop listening.
-function tell(moved: { device: Device; conversation: number } | null): void {
+function tell(
+  moved: { device: Device; conversation: number | null } | null,
+): void {
   for (const listener of [...following]) {
     if (
       moved === null ||
       (listener.device === moved.device &&
-        listener.conversation === moved.conversation)
+        (moved.conversation === null ||
+          listener.conversation === moved.conversation))
     ) {
       listener.look();
     }
@@ -191,15 +205,15 @@ function overTheStream(queries: QueryClient): () => void {
 
     // Named, so that whatever else may one day come down this stream is not
     // mistaken for a Nudge by a page too old to know about it.
-    // This device's own, which is what `null` says: the stream is the one
-    // served here, and nothing on it is a member's news yet.
-    opened.addEventListener("nudge", (event) =>
-      lookAgainAt(
-        queries,
-        null,
-        whatMoved((event as MessageEvent<unknown>).data),
-      ),
-    );
+    opened.addEventListener("nudge", (event) => {
+      const moved = whatMoved((event as MessageEvent<unknown>).data);
+
+      // Whose news it is comes off the Nudge itself: a member's carries the
+      // Device Id this device heard it from, and this device's own carries
+      // none — which is what `null` says here, and what every local Nudge has
+      // always been.
+      lookAgainAt(queries, moved?.device ?? null, moved);
+    });
   };
 
   /// Give the connection back. `established` goes with it, so that the stream
@@ -237,23 +251,27 @@ function overTheStream(queries: QueryClient): () => void {
 /// Unreadable and unrecognised come to the same thing here and are meant to:
 /// both are a page that does not know what happened, and what a page that does
 /// not know does is read everything back.
-function whatMoved(data: unknown): Nudge | null {
+function whatMoved(data: unknown): Nudged | null {
   if (typeof data !== "string") {
     return null;
   }
 
   try {
-    return JSON.parse(data) as Nudge;
+    return JSON.parse(data) as Nudged;
   } catch {
     return null;
   }
 }
 
 /// Read back what the Nudge was about, and nothing else.
+///
+/// `device` is whose news it is — read off the Nudge by the caller, `null` for
+/// this device's own — and it is what every key the table below names is built
+/// for.
 function lookAgainAt(
   queries: QueryClient,
   device: Device,
-  moved: Nudge | null,
+  moved: Nudged | null,
 ): void {
   const reading = moved && standsFor(device, moved);
 
@@ -273,6 +291,14 @@ function lookAgainAt(
   // them is a walk no key names — see [`whenFilesMove`].
   if (moved.kind === "files") {
     tell({ device, conversation: moved.conversation });
+  }
+
+  // And every one of them on that device, where the news is that everything of
+  // it moved: a member's stream that has just been taken up cannot say which
+  // Conversation, so a pane following the disk on any of that device's reads
+  // back exactly as it does on a reconnect of this page's own stream.
+  if (moved.kind === "everything") {
+    tell({ device, conversation: null });
   }
 }
 
@@ -428,6 +454,17 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
 
     case "profiles":
       return [keyOf(device, "profiles")];
+
+    // And everything of one device's, which is what the stream to a member says
+    // the moment it is taken up again: it knows nothing about what it missed, so
+    // what is read back is whatever of that device is on screen.
+    //
+    // The device's own prefix is the whole of that reading, and is why the device
+    // leads a key at all — see `keyOf`. For this device itself the prefix is the
+    // empty one, which matches every query there is: the widest reading of the
+    // widest kind, and the same thing a page that cannot say what it missed does.
+    case "everything":
+      return [keyOf(device)];
 
     default:
       return null;

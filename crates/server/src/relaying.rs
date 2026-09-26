@@ -47,8 +47,16 @@
 //! [`bridging`], which puts the same upgrade to the member and joins the two
 //! connections. Everything about a socket that is different from a call is over
 //! there.
+//!
+//! **And the news comes the other way over the same link.** A page that reads a
+//! member through this hop would draw it once and go stale, nothing over here
+//! having heard that anything moved on that machine — so this device holds a
+//! Nudge stream to each of its members and announces what comes down one
+//! locally, under the Device Id it came from. That is [`freshness`], and it is
+//! the one dial in this module that no browser asked for.
 
 mod bridging;
+pub(crate) mod freshness;
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

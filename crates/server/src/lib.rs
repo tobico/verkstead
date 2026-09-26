@@ -1525,6 +1525,36 @@ pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
     ))
 }
 
+/// The same namespace over a Nudge stream the caller made, which is what the
+/// suite about a member's *news* stands up at the far end.
+///
+/// A constructor of its own beside [`router_over_the_link`] for the reason
+/// [`router_answering_devices_telling`] is one beside its own plain version:
+/// what this device holds to a member is that member's `/api/ui/nudges`, so a
+/// suite asking whether news crosses the link needs the handle the far end
+/// announces on — and in a running server that handle is the state's, shared by
+/// the two routers standing over it (see [`Routers`]).
+pub fn router_over_the_link_telling(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    nudges: nudge::Nudges,
+) -> Router {
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudges,
+    ))
+}
+
 /// And the same namespace with Sandboxes behind it, which is what the suite about
 /// a relayed *socket* stands up at the far end.
 ///
@@ -2059,6 +2089,24 @@ pub async fn run_on_keyed(
         let devices = devices.clone();
 
         async move { devices.announce_renewal().await }
+    });
+
+    // And the news coming the other way: one Nudge stream held to each member,
+    // with everything down it announced locally under the device it came from, so
+    // that a page drawing a member's Conversation hears about a Set answered over
+    // there without a poll and without a reload (ADR-0020, *The opened device
+    // relays*) — see [`relaying::freshness`].
+    //
+    // **In a task rather than waited on**, and before the serve, for the reasons
+    // the changeover above is both: what it does first is dial every member, some
+    // of which are laptops that are shut, and the serve below never returns. It
+    // never returns either — a stream let go of is one taken up again, which is
+    // what makes a member that was off a member that comes back.
+    tokio::spawn({
+        let devices = devices.clone();
+        let nudges = nudges.clone();
+
+        async move { devices.stay_fresh(nudges).await }
     });
 
     let Routers {

@@ -272,6 +272,40 @@ device's own — local URLs keep their shape, so nothing should ask — and a me
 that answered at none of the addresses it advertised, which is the row the pane
 is already drawing dimmed.
 
+**And the news comes back the same way.** This device holds one Nudge stream to
+each of its members — that member's own `/api/ui/nudges`, read over the peer
+listener — and announces everything down it on the stream its own pages are
+listening to, under the Device Id it came from. So a page drawn on a member's
+Conversation stays fresh without a poll and without a reload, and a phone on the
+tailnet hears about that machine at all. The streams are the server's rather than
+the browser's: one per member serves every page this device has open.
+
+```console
+$ curl -N http://127.0.0.1:8422/api/ui/nudges
+event: nudge
+data: {"kind":"set","conversation":4}
+
+event: nudge
+data: {"kind":"set","conversation":7,"device":"0011…ee"}
+
+event: nudge
+data: {"kind":"everything","device":"0011…ee"}
+```
+
+A Nudge with no device is this device's own and is the frame it always was; one
+with a device is that member's news, and the viewer's own table keys the reads it
+makes by it. The `everything` kind is the stream itself rather than anything in
+the world: a member's stream that has just been taken up knows nothing about what
+it missed, so it says *read back whatever of this device is on screen*. Nothing at
+all is announced for a member that is not answering: the page keeps what it last
+read and goes stale, exactly as it does when its own stream is down. A stream that
+ends is taken up again five seconds later, and while nothing answers at all that
+wait doubles to a minute — a laptop that is shut for a fortnight is worth a dial a
+minute rather than one every five seconds. What goes over the
+peer listener is this device's own news alone: in a cluster everybody holds a
+stream to everybody, so a device passing on what a third one told it would be
+saying that news was its own.
+
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
 account anywhere the server can read, and every path field browses the same
