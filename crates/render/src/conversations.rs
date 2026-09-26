@@ -40,6 +40,12 @@ pub enum Lifecycle {
     /// wrap-up.
     FollowUp,
 
+    /// Beside the ladder rather than on it, the way Follow-up is: a question
+    /// about the code being answered in rounds, with nothing built and nothing
+    /// committed. Reachable from a Start on an **Investigate** draft and from a
+    /// steer out of anywhere, and leading back to wherever it was entered from.
+    Investigating,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
@@ -3778,6 +3784,12 @@ pub enum Resumed {
     /// about: another record that cannot be true, a steer being the only way
     /// into Follow-up and one without a brief being refused.
     NoFollowUpBrief,
+
+    /// And it says it is investigating and nothing on its Timeline says what
+    /// about: the same record that cannot be true, read for the state beside
+    /// it. Both ways into Investigating carry the question in, and neither is
+    /// allowed in without one.
+    NoInvestigation,
 }
 
 /// What became of pressing **Resolve conflicts** on a finished Conversation's
@@ -3891,11 +3903,12 @@ pub enum SteerCancelled {
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
 /// its own, and a steer is for the states the work is *done in* — the four rungs
-/// of the ladder, and Follow-up beside them, which has no other way in at all. A
-/// target the form offers is a target something can be set going in, which is
-/// why the two that turn on a pull request are drawn out where there is none: an
-/// instruction is writable anywhere and Done needs nothing, but there is no
-/// wrapping up and no following up of work nobody can see.
+/// of the ladder, and Follow-up and Investigating beside them. A target the form
+/// offers is a target something can be set going in, which is why the two that
+/// turn on a pull request are drawn out where there is none: an instruction is
+/// writable anywhere, Done needs nothing and a question can be asked about work
+/// at any stage, but there is no wrapping up and no following up of work nobody
+/// can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -3957,6 +3970,21 @@ pub enum SteerTarget {
     /// next.
     FollowUp,
 
+    /// A question about this work answered without changing it: a session
+    /// started on the brief the human wrote, which finds out what they asked
+    /// and goes on asking until they are finished, committing nothing.
+    ///
+    /// **The brief is required**, as a follow-up's is and for the same reason:
+    /// there is nothing on the branch that could stand for the question. It
+    /// carries it in the same field and is refused by the same name — see
+    /// [`ConversationSteered::NoFollowUpBrief`].
+    ///
+    /// Reachable from every state, unlike either of the other two that run: an
+    /// investigation is a question about the work rather than a step of it, so
+    /// there is nowhere the work can have got to that makes asking one wrong.
+    /// Where it leads back to is the state it was steered from.
+    Investigating,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
@@ -3972,7 +4000,11 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Implementing | Self::Wrapping | Self::FollowUp => true,
+            Self::Grilling
+            | Self::Implementing
+            | Self::Wrapping
+            | Self::FollowUp
+            | Self::Investigating => true,
             Self::Done => false,
         }
     }

@@ -2485,7 +2485,7 @@ why: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -3853,7 +3853,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief" | "NoInvestigation";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -5093,13 +5093,14 @@ upgraded: Array<CompanionUpgrade>, };
  *
  * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the states the work is *done in* — the four rungs
- * of the ladder, and Follow-up beside them, which has no other way in at all. A
- * target the form offers is a target something can be set going in, which is
- * why the two that turn on a pull request are drawn out where there is none: an
- * instruction is writable anywhere and Done needs nothing, but there is no
- * wrapping up and no following up of work nobody can see.
+ * of the ladder, and Follow-up and Investigating beside them. A target the form
+ * offers is a target something can be set going in, which is why the two that
+ * turn on a pull request are drawn out where there is none: an instruction is
+ * writable anywhere, Done needs nothing and a question can be asked about work
+ * at any stage, but there is no wrapping up and no following up of work nobody
+ * can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done";
 
 /**
  * And one companion the steer opened up, which carries the one field an

@@ -136,6 +136,19 @@ const INSTRUCTION: &str = "instruction/SKILL.md";
 /// session's, so the skill says nothing about it.
 const FOLLOWING_UP: &str = "following-up/SKILL.md";
 
+/// And the investigating skill's, which the one session an **Investigate**
+/// Conversation runs — and the one a steer into Investigating starts — runs
+/// inside.
+///
+/// The following-up skill's shape with the commit obligation inverted: rounds
+/// of ordinary Question Sets about a question rather than about work, and
+/// nothing committed, pushed or opened at the end of any of them. The worktree
+/// is writable, because finding things out means writing probes and running
+/// them; the instruction is the whole of what keeps commits off the branch, and
+/// one that lands anyway breaks nothing — the branch is the Conversation's and
+/// goes nowhere.
+const INVESTIGATING: &str = "investigating/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -733,6 +746,49 @@ pub(crate) fn following_up(
     format!("{prompt}\n# What you have already asked, and what I said\n\n{settled}\n")
 }
 
+/// What an investigating session is started on: the question to find out about,
+/// and under it the rounds it has already been through.
+///
+/// **The Brief is the question, and it goes under the heading that says act on
+/// it** — nowhere else, exactly as a **Tinker**'s does. An investigation is
+/// started on a Brief and nothing is built from it, so there is no work for the
+/// documents to describe: *The Brief this started from* over the same words
+/// would have the session reading them twice and the second reading as news.
+///
+/// `brief` is therefore whichever of the two opened this Investigating: the
+/// Conversation's own Brief where a Start did, and the brief the human steered
+/// it with where a steer did. Which of them it is, is the caller's to know —
+/// see [`crate::investigations`] — and the session is told the same thing
+/// either way, because either way it is the question.
+///
+/// `settled` is the rounds already asked and answered inside this Investigating,
+/// which is what a session being picked up again is primed with: an
+/// investigation that lost its session lost the conversation it was having, so
+/// the relaunch is a fresh session on the same question with the one part of
+/// that conversation the Timeline kept. Empty is a session that is starting,
+/// which every launch off a Start or a steer is — a heading over an empty
+/// digest would tell it that something had already been said.
+pub(crate) fn investigating(skills: &Skills, brief: &str, settled: &str) -> String {
+    let skill = skills.named(INVESTIGATING);
+
+    let prompt = format!(
+        "{}\n# What I want found out\n\n{}\n",
+        alone(&format!(
+            "Read {skill} and find out what I have asked about at the end of this \
+             prompt, the way it says."
+        )),
+        brief.trim(),
+    );
+
+    let settled = settled.trim();
+
+    if settled.is_empty() {
+        return prompt;
+    }
+
+    format!("{prompt}\n# What you have already asked, and what I said\n\n{settled}\n")
+}
+
 /// The same prompt, with the Answers to the Conversation's Deferred Asks that
 /// no session has been told about yet.
 ///
@@ -1094,7 +1150,7 @@ mod tests {
     /// The constants are relative to the directory the skills are in, which is
     /// not one path — see [`Skills::inside`] — so this is the list of what is
     /// under it, and what holds each of them to a skill that is really there.
-    const NAMED: [&str; 12] = [
+    const NAMED: [&str; 13] = [
         GRILLING,
         BREAKING_DOWN,
         IMPLEMENTING,
@@ -1107,6 +1163,7 @@ mod tests {
         RESPONDING,
         INSTRUCTION,
         FOLLOWING_UP,
+        INVESTIGATING,
     ];
 
     /// A skill installed where a mount will put both paths says what it always
@@ -1482,6 +1539,7 @@ mod tests {
             "responding/SKILL.md",
             "submitting/SKILL.md",
             "following-up/SKILL.md",
+            "investigating/SKILL.md",
         ] {
             let skill = skill(name);
 
@@ -3362,6 +3420,187 @@ mod tests {
         assert!(
             prompt.contains("follow up on the work on this branch"),
             "what it is sent to is the branch it is standing on: {prompt:?}"
+        );
+    }
+
+    /// The investigating skill is the follow-up's shape with the commit
+    /// obligation inverted: nothing is committed, nothing is pushed, and no
+    /// pull request is opened — which is the one thing about this session that
+    /// differs from every other Verkstead runs.
+    #[test]
+    fn the_investigating_skill_forbids_commits_pushes_and_pull_requests() {
+        let investigating = skill("investigating/SKILL.md");
+        let flowed = flowed("investigating/SKILL.md");
+
+        assert!(
+            flowed.contains("Nothing you do here is committed"),
+            "said up front rather than at the end: {investigating}"
+        );
+        assert!(
+            flowed.contains("No commits, no pushes and no pull request"),
+            "and said again where a session would be about to: {investigating}"
+        );
+        for written in ["git commit", "git push", "gh pr create"] {
+            assert!(
+                investigating.contains(written),
+                "{written} is named as the thing not to run: {investigating}"
+            );
+        }
+        assert!(
+            !flowed.contains("Pick a conventional-commit type"),
+            "and nothing tells it how to write one: {investigating}"
+        );
+        assert!(
+            !investigating.contains("gh pr ready") && !investigating.contains("gh pr merge"),
+            "nor does it move the work anywhere itself: {investigating}"
+        );
+    }
+
+    /// And the worktree is writable, because finding things out means writing
+    /// probes and running them. The instruction above is the whole of what
+    /// keeps commits off the branch — the session is not asked to read-only its
+    /// way to an answer the way a review is.
+    #[test]
+    fn the_investigating_skill_writes_and_runs_whatever_answers_the_question() {
+        let flowed = flowed("investigating/SKILL.md");
+
+        assert!(
+            flowed.contains("Write the probe") && flowed.contains("Run it"),
+            "writing and running is how a question is answered: {flowed}"
+        );
+        assert!(
+            !flowed.contains("Change nothing yet"),
+            "nothing is held back for a proposal round, unlike a review: {flowed}"
+        );
+        assert!(
+            flowed.contains("fix nothing"),
+            "but what is found is reported rather than fixed: {flowed}"
+        );
+    }
+
+    /// And what it does with the human is what every other session does: an
+    /// ordinary Set, put through the CLI, with what it found leading it so that
+    /// each round reaches their phone. How an investigation *ends* is
+    /// Verkstead's rather than the session's, exactly as a follow-up's is.
+    #[test]
+    fn the_investigating_skill_runs_rounds_of_ordinary_question_sets() {
+        let investigating = skill("investigating/SKILL.md");
+        let flowed = flowed("investigating/SKILL.md");
+
+        assert!(
+            investigating.contains("verkstead guide") && investigating.contains("verkstead ask"),
+            "the Guide is where an agent learns to ask, and the CLI is how a Set \
+             goes: {investigating}"
+        );
+        assert!(
+            investigating.contains("ordinary Question Set"),
+            "nothing about this session's Sets is special: {investigating}"
+        );
+        assert!(
+            investigating.contains("The findings lead"),
+            "and what they asked, answered, is what opens each one: {investigating}"
+        );
+        assert!(
+            flowed.contains("go round again"),
+            "one Set is a round rather than the session: {investigating}"
+        );
+        assert!(
+            flowed.contains("nothing to find out and nothing to ask")
+                && flowed.contains("run `verkstead done`"),
+            "and the signal is given when there is nothing left: {investigating}"
+        );
+        for ending in ["Nothing else", "Wrapping", "Investigating"] {
+            assert!(
+                !investigating.contains(ending),
+                "{ending} is Verkstead's rather than the session's to know about: \
+                 {investigating}"
+            );
+        }
+    }
+
+    /// An investigating session is put inside the skill by its prompt, and the
+    /// Brief is the question — said once, under the heading that says act on
+    /// it, exactly as a **Tinker**'s is.
+    #[test]
+    fn an_investigating_session_is_primed_with_the_brief_as_the_question() {
+        let prompt = investigating(&mounted(), "# Rate limiting\n\nThe API has none.\n", "");
+
+        assert!(
+            prompt.contains(&at(INVESTIGATING)),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(&at(FOLLOWING_UP)) && !prompt.contains(&at(IMPLEMENTING)),
+            "and no other skill is named: an investigation is neither a \
+             follow-up nor the work — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("# The Brief this started from"),
+            "there are no documents over it, nothing having been built: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("The API has none.").count(),
+            1,
+            "the Brief is said once, and it is said here: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("# What I want found out\n\n# Rate limiting\n\nThe API has none.\n"),
+            "under the heading that says act on it: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Nothing else in this session tells you how to reach me."),
+            "with the one thing every session is told beside the skill: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("pull request"),
+            "and nothing promising a pull request the branch does not have: \
+             {prompt:?}"
+        );
+    }
+
+    /// And one picked up again is the same session over: the same skill and the
+    /// same question, with the rounds it has already been through under them,
+    /// so that it does not open by asking what was answered an hour ago.
+    #[test]
+    fn a_relaunched_investigation_is_told_what_it_has_already_asked() {
+        let prompt = investigating(
+            &mounted(),
+            "Why does the retry loop give up after four goes?\n",
+            "## About the retries\n\n**Q9** Is four deliberate?\n\nNo\n",
+        );
+
+        assert!(
+            prompt.contains(
+                "# What I want found out\n\nWhy does the retry loop give up after four goes?"
+            ),
+            "the question it was opened with is what it is still about: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with(
+                "# What you have already asked, and what I said\n\n## About the retries\n\n\
+                 **Q9** Is four deliberate?\n\nNo\n"
+            ),
+            "and the rounds already answered come last, under it: {prompt:?}"
+        );
+    }
+
+    /// And the naming instruction goes on it as it goes on every first session:
+    /// an investigation is cut on a name Verkstead invented, exactly as a
+    /// grilling is.
+    #[test]
+    fn an_investigating_session_is_told_to_name_the_branch() {
+        let prompt = naming(
+            &investigating(&mounted(), "# Rate limiting\n\nThe API has none.\n", ""),
+            true,
+        );
+
+        assert!(
+            prompt.contains("# This branch has no name yet"),
+            "the branch is still carrying the name nobody read: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`git branch -m <name>`") && prompt.contains("kebab-case"),
+            "said as the command and the shape, as it is everywhere: {prompt:?}"
         );
     }
 

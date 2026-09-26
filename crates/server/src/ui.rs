@@ -4826,6 +4826,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::FollowUp => Lifecycle::FollowUp,
+        store::Lifecycle::Investigating => Lifecycle::Investigating,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
     }

@@ -61,6 +61,9 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
 /// too, being somewhere the human puts a Conversation whose work is already
 /// pushed — and it leads back into the wrap-up it came off.
+/// [`Lifecycle::Investigating`] is beside it the same way: a question about the
+/// code being answered rather than a rung the work climbs, and it leads back to
+/// wherever it was entered from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The Brief is being written, and with it everything else about the
@@ -86,6 +89,20 @@ pub enum Lifecycle {
     /// where it leads back to is Wrapping.
     FollowUp,
 
+    /// A question about the code is being answered: one session reading,
+    /// writing and running whatever it needs to find things out, in rounds of
+    /// Question Sets, and committing none of it.
+    ///
+    /// Off the ladder the way [`Self::FollowUp`] is, and for the same reason —
+    /// nothing is being built here, so there is no rung below it and none
+    /// above. Two ways in, a Start on an **Investigate** draft and a steer from
+    /// anywhere, and where it leads back to is where it came from: Done for an
+    /// Investigate Conversation of its own, and the state it was steered from
+    /// for one steered into it.
+    ///
+    /// See ADR-0020.
+    Investigating,
+
     /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
     /// opens a second round with a Brief of its own — see
     /// [`steer_conversation`].
@@ -106,6 +123,7 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::FollowUp => "follow-up",
+            Self::Investigating => "investigating",
             Self::Done => "done",
             Self::Closed => "closed",
         }
@@ -127,6 +145,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "follow-up" => Self::FollowUp,
+            "investigating" => Self::Investigating,
             "done" => Self::Done,
             "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),

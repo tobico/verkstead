@@ -88,6 +88,7 @@ use crate::AppState;
 use crate::drivers::Driving;
 use crate::follow_ups::FollowUp;
 use crate::github;
+use crate::investigations::Investigation;
 use crate::repos::git;
 use crate::sessions::{Idle, Session};
 use crate::skills;
@@ -2273,6 +2274,73 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
     });
 }
 
+/// See out an investigating session: the one session an Investigating has, and
+/// the driver the Conversation is held up by for as long as it runs.
+///
+/// `investigation` is what the session is started on — the question this
+/// Investigating was opened with, and the rounds it has already been through
+/// where it is being picked up again. See [`crate::investigations`], which is
+/// where a press of Resume reads both back from.
+///
+/// **A driver rather than an errand beside the work**, exactly as a follow-up's
+/// session is: the registration it is handed says the Conversation is being
+/// driven for as long as this runs, so nothing sweeps it as standing still
+/// while the human is composing an answer on a phone.
+///
+/// **Nothing is watched for on the branch**, and there is nothing to watch for:
+/// an investigation commits nothing by instruction, so there is no commit to
+/// check a signal against, no artifact to read and no pull request to open. The
+/// Worktree is writable all the same, because finding things out means writing
+/// probes and running them.
+///
+/// **What ends it is the human saying there is nothing else**, which lands the
+/// Conversation where this Investigating came from — the ending is not written
+/// yet. Until it is, a session that goes is a Conversation nothing is driving,
+/// which the stall sweep raises in the words [`crate::stalls::driving`] keeps
+/// for this state.
+pub(crate) async fn investigating(
+    state: AppState,
+    conversation_id: i64,
+    investigation: Investigation,
+    driving: Driving,
+) {
+    // What the session before this one left standing, where there was one. A
+    // Blocking Ask outlives the session that asked it, and nobody is ever
+    // handed somebody else's — so a question left over from the session that
+    // died is one the human could answer for ever with nothing reading it.
+    // Locked unanswered as the fresh session starts, which is what a relaunched
+    // grilling and a relaunched follow-up both do with their own.
+    if investigation.again {
+        left_open(&state, conversation_id).await;
+    }
+
+    let Some(mut session) = launch_in_turn(
+        &state,
+        conversation_id,
+        Prompt::Investigating(investigation),
+    )
+    .await
+    else {
+        return;
+    };
+
+    let event_id = session.event_id;
+
+    // Held until the session is over, which is the whole of what this driver
+    // is: an investigation is one session having a conversation, and the
+    // Conversation is being driven for exactly as long as it is there.
+    let _driving = driving;
+
+    let ended = session.ended().await;
+
+    tracing::info!(
+        conversation_id,
+        event_id,
+        on_purpose = ended.on_purpose(),
+        "the investigating session is over",
+    );
+}
+
 /// Whether the Conversation's own work is on a pull request, or `None` where the
 /// record would not say.
 ///
@@ -3469,6 +3537,15 @@ enum Prompt {
     /// conversation rather than naming one job, so the session answers it, does
     /// what it asks and goes on asking — see [`following_up`].
     FollowingUp(FollowUp),
+
+    /// The investigating skill, carrying the question this Investigating was
+    /// opened with — and, where it is being picked up again, the rounds it has
+    /// already been through.
+    ///
+    /// The follow-up's shape with the commit obligation inverted: the session
+    /// reads, writes and runs whatever answers the question and commits none of
+    /// it — see [`investigating`].
+    Investigating(Investigation),
 }
 
 impl Prompt {
@@ -3655,6 +3732,16 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::reviewing(skills, &brief, handoff, on.as_deref(), said.as_deref())
                 }
                 Prompt::Responding(said) => skills::responding(skills, &brief, handoff, said),
+                // The question goes under *What I want found out* and nowhere
+                // else, as a Tinker's follow-up brief does: an investigation
+                // builds nothing, so there is no work for the documents to
+                // describe, and the same words under two headings would have
+                // the session reading the second as news. See
+                // [`crate::investigations`], which is where the caller reads
+                // the question and the rounds under it.
+                Prompt::Investigating(investigation) => {
+                    skills::investigating(skills, &investigation.brief, &investigation.settled)
+                }
                 // The documents, unless the follow-up *is* the Brief — which is
                 // the one a **Tinker** start opens. Nothing has been built
                 // there, so the Brief goes under *What I want to follow up on*

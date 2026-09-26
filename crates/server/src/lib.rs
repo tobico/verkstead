@@ -80,6 +80,7 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+mod investigations;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
 /// read, and the gate that answers 401 to everything which has not shown it.
 ///

@@ -225,6 +225,7 @@ async fn undriven(state: &AppState, conversation_id: i64) -> bool {
             | store::Lifecycle::Implementing
             | store::Lifecycle::Wrapping
             | store::Lifecycle::FollowUp
+            | store::Lifecycle::Investigating
     ) {
         return false;
     }

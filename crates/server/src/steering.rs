@@ -657,6 +657,34 @@ pub(crate) async fn submit(
             }
         },
 
+        // And a session on the investigating skill, started on the same brief:
+        // the question the human wants found out, which is required and so has
+        // already been made sure of above. See
+        // [`crate::runner::investigating`], which drives the Conversation while
+        // it runs.
+        SteerTarget::Investigating => match follow_up {
+            Some(brief) => {
+                tokio::spawn(crate::runner::investigating(
+                    state.clone(),
+                    conversation_id,
+                    crate::investigations::Investigation::opening(brief.to_owned()),
+                    driving,
+                ));
+            }
+
+            // Refused above, so nothing reaches here — said rather than
+            // unwrapped, exactly as the follow-up's own impossible case is.
+            None => {
+                tracing::error!(
+                    conversation_id,
+                    "a steer into Investigating got past the refusals with no brief, so \
+                     nothing was started",
+                );
+
+                drop(driving);
+            }
+        },
+
         // And nothing at all: a steer into Done is the move alone.
         SteerTarget::Done => drop(driving),
     }
@@ -709,7 +737,16 @@ async fn refusal(
     // could stand in for it — a follow-up is not a step of the run to be picked
     // up — so it is the one written payload with no quiet meaning, and the form
     // holds the submit shut without one rather than offering it.
-    if submission.target == SteerTarget::FollowUp && follow_up(submission).is_none() {
+    //
+    // An investigation is refused by the same name and for the same reason: it
+    // is a question the human wrote, and nothing on the branch could stand in
+    // for one. It carries it in the same field, that field being *the brief
+    // this session is started on* rather than anything about following up.
+    if matches!(
+        submission.target,
+        SteerTarget::FollowUp | SteerTarget::Investigating
+    ) && follow_up(submission).is_none()
+    {
         return Ok(Some(ConversationSteered::NoFollowUpBrief));
     }
 
@@ -1099,8 +1136,11 @@ pub(crate) async fn standing(
 /// work, the wrap-up's watchers dispatch the fix and comment sessions that see
 /// it through, and a follow-up session does whatever the human wants doing
 /// about it afterwards. Every one of those is the work itself, so all of them
-/// run under what builds. A grilling is its own, which is what an interview runs
-/// under whatever else has happened since.
+/// run under what builds. Investigating is under the same one for the same
+/// reason read the other way: what an investigation does is read, write and run
+/// the code, which is building in everything but what it leaves behind. A
+/// grilling is its own, which is what an interview runs under whatever else has
+/// happened since.
 ///
 /// Wrapping is the one target that names two, because a wrap-up both builds and
 /// reviews. What the human's one pick does to each of them is not the same
@@ -1111,7 +1151,9 @@ pub(crate) async fn standing(
 fn roles(target: SteerTarget) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
-        SteerTarget::Implementing | SteerTarget::FollowUp => &[Role::Implementation],
+        SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
+            &[Role::Implementation]
+        }
         SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
         SteerTarget::Done => &[],
     }
@@ -2125,6 +2167,7 @@ fn target(target: SteerTarget) -> Lifecycle {
         SteerTarget::Implementing => Lifecycle::Implementing,
         SteerTarget::Wrapping => Lifecycle::Wrapping,
         SteerTarget::FollowUp => Lifecycle::FollowUp,
+        SteerTarget::Investigating => Lifecycle::Investigating,
         SteerTarget::Done => Lifecycle::Done,
     }
 }
@@ -2142,6 +2185,7 @@ pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
         Lifecycle::Implementing => SteerTarget::Implementing,
         Lifecycle::Wrapping => SteerTarget::Wrapping,
         Lifecycle::FollowUp => SteerTarget::FollowUp,
+        Lifecycle::Investigating => SteerTarget::Investigating,
         Lifecycle::Done => SteerTarget::Done,
         Lifecycle::Draft | Lifecycle::Closed => return None,
     })

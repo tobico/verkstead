@@ -413,6 +413,35 @@ pub(crate) async fn resume(
             ));
         }
 
+        // And a fresh session on the investigating skill, on the question this
+        // Investigating was opened with and the rounds it has already been
+        // through — the follow-up's shape, and for the follow-up's reason: an
+        // investigation is a conversation, so nothing of it is written on the
+        // branch and what outlives the session having it is the Timeline. See
+        // [`crate::investigations`].
+        //
+        // There is no ending left half-made to look for here, the way a
+        // follow-up's owed pull request is: an investigation never ends on one.
+        Lifecycle::Investigating => {
+            if conversation.implementation_pairing.is_none() {
+                return Ok(Resumed::NoImplementationPairing);
+            }
+
+            let Some(investigation) = crate::investigations::opened(state, conversation_id).await?
+            else {
+                return Ok(Resumed::NoInvestigation);
+            };
+
+            starting(state, conversation_id, resuming).await?;
+
+            tokio::spawn(crate::runner::investigating(
+                state.clone(),
+                conversation_id,
+                investigation,
+                driving,
+            ));
+        }
+
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
@@ -637,6 +666,9 @@ fn why(refusal: Resumed) -> Option<&'static str> {
         Resumed::NoFollowUpBrief => {
             "nothing on the record says what the follow-up was opened about"
         }
+        Resumed::NoInvestigation => {
+            "nothing on the record says what the investigation was opened about"
+        }
     })
 }
 
@@ -728,10 +760,11 @@ pub(crate) fn ready(
 /// Whether this is a state something ought to be driving, which is the whole of
 /// what Resume is offered on.
 ///
-/// The four: a grilling has its session, an implementation its run, a wrap-up
-/// its watchers, and a follow-up the session the human is talking to. The three
-/// that are left — drafting, done and closed — were never being driven by
-/// anything, so a press on one is not a Conversation that stood still.
+/// The five: a grilling has its session, an implementation its run, a wrap-up
+/// its watchers, and a follow-up and an investigation the session the human is
+/// talking to. The three that are left — drafting, done and closed — were never
+/// being driven by anything, so a press on one is not a Conversation that stood
+/// still.
 ///
 /// Said once here because three places ask it and none of them may answer it
 /// differently: the button the page draws, the press that arrives, and the
@@ -739,7 +772,11 @@ pub(crate) fn ready(
 fn driven(lifecycle: Lifecycle) -> bool {
     matches!(
         lifecycle,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp
+        Lifecycle::Grilling
+            | Lifecycle::Implementing
+            | Lifecycle::Wrapping
+            | Lifecycle::FollowUp
+            | Lifecycle::Investigating
     )
 }
 

@@ -12,7 +12,7 @@ use verkstead_store::{
     reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
     settle_naming, show_archived, showing_archived, start_adoption, start_conversation,
     start_grilling, start_pull_request_adoption, start_tinkering, start_unnamed_conversation,
-    switch_repo, timeline, unarchive_conversation,
+    state, switch_repo, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -981,6 +981,32 @@ async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
             .unwrap(),
         Grilling::NotDrafting,
         "and it cannot be started twice, for the reason no start can",
+    );
+}
+
+/// Investigating is a state of its own, with a word of its own in the column.
+///
+/// Written here directly, because nothing in this task reaches it: what is
+/// being asked is that the column round-trips it, which is how a Conversation
+/// left in Investigating is read back after a restart.
+#[tokio::test]
+async fn a_conversation_set_investigating_reads_back_investigating() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    set_state(&pool, id, Lifecycle::Investigating)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Investigating,
+        "the word the column holds is one this Verkstead reads",
+    );
+    assert_eq!(
+        state(&pool, id).await.unwrap(),
+        Some(Lifecycle::Investigating),
+        "and the cheap reading of it says the same thing",
     );
 }
 
