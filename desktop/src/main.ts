@@ -401,9 +401,10 @@ async function run(): Promise<void> {
   }
 
   // And how this machine opens a file or a link, which on Linux is the app's own
-  // doing rather than `shell`'s — see [`opening`](./opening.js), which says why.
-  // Read here, where the platform and the environment are, and handed to the two
-  // places that open something long afterwards.
+  // doing rather than `shell`'s — see [`opening`](./opening.js), which says why,
+  // and which hands what it starts the environment above. Read here, beside the
+  // sidecar's, because it is the same answer to the same question: everything
+  // this app starts gets the mount taken out of what it was given.
   const by = opening(machine);
   if (by !== undefined) {
     say(`what opens a file or a link on this machine is ${by.program}`);
