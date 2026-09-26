@@ -13,11 +13,24 @@
   },
   {
     "addresses": [
-      "172.29.0.14:9423"
+      "100.64.0.9:8423"
+    ],
+    "device": "99887766554433221100aabbccddeeff",
+    "found": [
+      "Tailscale"
+    ],
+    "name": "kitchen-mini",
+    "os": "macOS"
+  },
+  {
+    "addresses": [
+      "172.29.0.14:9423",
+      "100.64.0.14:8423"
     ],
     "device": "ffeeddccbbaa00998877665544332211",
     "found": [
-      "Lan"
+      "Lan",
+      "Tailscale"
     ],
     "name": "workbench",
     "os": "Linux (WSL)"

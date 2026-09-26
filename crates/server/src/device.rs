@@ -78,14 +78,13 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, JoinSettled,
-    RenewedCertificate,
+    AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinSettled, RenewedCertificate,
 };
 use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
-use crate::discovery::Browse;
+use crate::discovery::{self, Browse, Probe};
 use crate::peer::Members;
 use crate::peer::dialling::Peers;
 use crate::peer::joining::Joins;
@@ -658,6 +657,19 @@ pub struct Devices {
     /// which is where a start hands over the real one.
     browse: Browse,
 
+    /// And the other half of that list, which is the tailnet: the peers
+    /// `tailscale status` names, asked what they are as the list is read — see
+    /// [`crate::discovery::Probe`].
+    ///
+    /// Beside the browse rather than inside it, the two being different kinds of
+    /// finding: one is a multicast held open while somebody is looking, and this
+    /// is a handful of dials made at the moment of asking. What they share is
+    /// where they are merged and where the three exclusions are made, which is
+    /// this handle.
+    ///
+    /// Asked nothing unless a server said otherwise — see [`Devices::probing`].
+    probe: Probe,
+
     /// And how it reaches another device, which is what the one press in this
     /// section goes out over: Add dials the address somebody typed and posts a
     /// join, and Cancel dials the same address and takes it back.
@@ -689,6 +701,7 @@ impl Devices {
             members,
             joins,
             browse: Browse::heard_nothing(),
+            probe: Probe::asked_nothing(),
             peers,
         }
     }
@@ -704,6 +717,18 @@ impl Devices {
     /// what says otherwise.
     pub fn browsing(self, browse: Browse) -> Devices {
         Devices { browse, ..self }
+    }
+
+    /// The same, asking the nodes of this machine's tailnet what they are as that
+    /// list is read — see [`crate::discovery::Probe`], which is the other half of
+    /// where the Discovered list comes from.
+    ///
+    /// **Handed over rather than made here** for the reason the browse is, and
+    /// one more besides: a probe is a handful of outbound handshakes at machines
+    /// on somebody's tailnet, and a router stood up to answer a question about a
+    /// membership has no business making them.
+    pub fn probing(self, probe: Probe) -> Devices {
+        Devices { probe, ..self }
     }
 
     /// The same, giving every dial this section makes `patience` rather than the
@@ -758,11 +783,17 @@ impl Devices {
     /// thing to press about one device. A refused or run-out row counts: it is
     /// still drawn up there, and what ends it is the Dismiss on it.
     ///
-    /// **The exclusions are made here rather than by the browse**, because this
-    /// is where a membership is known: a browse hears a LAN and has no idea which
-    /// of it is already linked. So what it holds is everything it heard — which
-    /// is also why hearing a member costs an announcement the next read draws
-    /// nothing new from.
+    /// **The exclusions are made here rather than by the browse or the probe**,
+    /// because this is where a membership is known: a browse hears a LAN and a
+    /// probe asks a tailnet, and neither has any idea which of what it found is
+    /// already linked. So what they hold is everything they heard — which is also
+    /// why hearing a member costs an announcement the next read draws nothing new
+    /// from.
+    ///
+    /// **Two halves, merged by Device Id before any of that** — see
+    /// [`crate::discovery::merged`]. A machine on the same network as this one and
+    /// on the same tailnet is found twice and is one row saying both, and it is
+    /// excluded or drawn as one thing.
     pub(crate) async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
         let members: Vec<String> = self
             .members
@@ -774,28 +805,23 @@ impl Devices {
 
         let awaiting = self.joins.awaiting().await?;
 
-        Ok(self
-            .browse
-            .found()
-            .into_iter()
-            .filter(|found| {
-                found.device != self.device.id()
-                    && !members.contains(&found.device)
-                    && !awaiting.contains(&found.device)
-            })
-            .map(|found| DiscoveredDevice {
-                device: found.device,
-                name: found.name,
-                os: found.os,
-                addresses: found.addresses,
+        // The LAN's rows are what a browse already holds and the tailnet's are a
+        // handful of dials made now — see [`crate::discovery::Probe`], which is
+        // read at the moment of asking because a tailnet has nothing to announce
+        // itself with.
+        let heard = self.browse.found();
+        let asked = self.probe.found(&self.peers).await;
 
-                // The LAN, there being one browse behind this list so far. The
-                // tailnet is the other source ADR-0020 names, and a device found
-                // both ways is one row saying both.
-                found: vec![FoundOn::Lan],
+        Ok(discovery::merged(heard, asked)
+            .into_iter()
+            .filter(|row| {
+                row.device != self.device.id()
+                    && !members.contains(&row.device)
+                    && !awaiting.contains(&row.device)
             })
             .collect())
     }
+
     /// **Add**: ask the device at `address` to let this one into its cluster.
     ///
     /// The one place on the Remote access pane where something is configured
