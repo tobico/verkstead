@@ -228,7 +228,16 @@ flowchart LR
   the work begins rather than swapped underneath it. Each repo remembers the
   set it was last started with, so the next conversation on it arrives with
   every picker filled — a prefill the human may change, kept server-side so a
-  phone and a desk share it.
+  phone and a desk share it. *Revised 2026-09-25, grilling
+  conversation-processes*: which roles a conversation fixes is its
+  **Process**'s — all three for Develop, implementation and review for Review
+  and Tinker, implementation alone for Investigate and Fix Merge Issues — and
+  **No grilling** is retired, a brief that wants no interview being the Tinker
+  Process rather than a hole in Develop; *No review* stays, on Develop and
+  Tinker. The three pickers become one **Agent** control whose shape is the
+  Process's: the flat dropdown where one role is used, a panel like the Repo's
+  holding the role pickers where several are. See
+  [ADR-0020](../adr/0020-a-conversation-has-a-process.md).
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) is one set every sandbox gets. It is configured in two places
   — `--sandbox-bind DIR`, and the same grammar in the workbench settings
@@ -319,7 +328,11 @@ flowchart LR
   2026-08-29, building optional-steps-and-auto-branch*: the button reads
   "Start work", one press covering both ways a conversation starts, and on
   **No grilling** the same press lands it Implementing with an inline session
-  on the brief alone. Question sets
+  on the brief alone. *Revised 2026-09-25, grilling conversation-processes*: the
+  one press starts whichever the conversation's **Process** is, and grilling is
+  Develop's — **No grilling** is retired, the brief that wants no interview
+  being a **Tinker** conversation, which the same press lands in Follow-up. See
+  [ADR-0020](../adr/0020-a-conversation-has-a-process.md). Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
@@ -727,13 +740,16 @@ again. A cold load of a details pane never begins it: a kept link is a request
 to be shown that one thing.
 
 What a Conversation needs settling before it runs — repo, branch, base commit,
-both Pairings, the readiness verdict — stands on the **composer**, which is the
+the Process, its Pairings, the readiness verdict — stands on the **composer**, which is the
 details pane a drafting Brief opens, drawn as the composer of a chat app: one
 box at the app's measure holding the document as the field it is written in,
 the setup as a row of borderless label-over-value dropdowns along the inside of
 its bottom edge — Repo first, whose one flat panel holds which repo the work is
 in, the branch, the base and the companions, then the three role Pairings — and
-the press that starts the work under the box, against its right edge. Switching
+the press that starts the work under the box, against its right edge. *Revised
+2026-09-25, grilling conversation-processes*: the row reads **Repo**,
+**Process**, **Agent**, the Process picked between the two and the three role
+pickers folded into the one Agent control, as ADR-0020 sets out. Switching
 a draft's repo resets its base to the new repo's default and drops a companion
 that has become its own repo, leaving the branch name and the Pairings alone;
 it is refused, and the picker reads disabled, from the moment a worktree exists —
@@ -803,6 +819,19 @@ press: a review answered into splitting work out has made the work a backlog,
 so the move back down the ladder records **task list** where the record has
 none. Without it the Conversation would be building with nothing saying how,
 which is the record a pressed Resume refuses on by name.
+
+*Revised 2026-09-25, grilling conversation-processes*: the review-only mode
+judged not worth a state above is worth a **Process** — two of them. **Wrap up
+a pull request** and the list of open pull requests behind it go; a pull
+request or a branch is named in the brief of a **Review** or **Fix Merge
+Issues** conversation instead, the first a wrap-up with its review and the
+second one narrowed to what GitHub refuses a merge for, stacks included.
+*Continue a roadmap* stays the one level of Other actions, a roadmap being the
+one thing adopted that brings a brief of its own. The take-up rules above —
+the head at take-up as the base commit, GitHub's base beside it, a head that is
+ahead or diverged refused by name — stand, run at Start rather than from a
+press of their own. See
+[ADR-0020](../adr/0020-a-conversation-has-a-process.md).
 
 **And with nothing to list, that page is the whole of the app** (*settled
 2026-09-08, onboarding stage 04*). The **zero state** is a fact about the
