@@ -3344,6 +3344,8 @@ dependencies = [
  "hostname",
  "http",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "if-addrs",
  "libc",
  "mdns-sd",
