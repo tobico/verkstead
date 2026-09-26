@@ -65,10 +65,14 @@ a follow-up lands back in the wrap-up it came off. Done is the ending of an
 Investigate Conversation, which came from a Draft; making it the ending of every
 Investigating was considered and rejected, because a Wrapping Conversation
 steered into one to ask a question would come out of it Done, its pull request
-unmerged and its watchers off it. Draft and Closed are the two states nothing
-returns to, so an Investigating steered from either ends Done as well. Which
-state to go back to is written down when the steer is made rather than read off
-the Timeline: it is a fact of the steer, not something to infer from history.
+unmerged and its watchers off it. Draft, Closed and Investigating are the three
+states nothing returns to, so an Investigating steered out of any of them ends
+Done as well: the first two have a way in of their own that nothing else may
+use, and an investigation sent back to Investigating is one the Nothing-else
+mark could never end, the move that lands it there opening a fresh window the
+tick falls outside of. Which state to go back to is written down when the steer
+is made rather than read off the Timeline: it is a fact of the steer, not
+something to infer from history.
 
 **Review** is *Wrap up a pull request* made a Process. Draft to Wrapping, the
 ordinary wrap-up with its review, on the pull request or branch it is pointed

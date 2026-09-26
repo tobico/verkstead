@@ -145,11 +145,16 @@ pub(crate) async fn opened(
 /// [`store::SteerRecord::source`], which is where it was put and why it was put
 /// anywhere at all.
 ///
-/// **Two states are never returned to**, each having a way in of its own that
-/// nothing else may use: a Draft is started and a Closed Conversation is steered
-/// back into life. So an Investigating steered out of either ends **Done**, which
-/// is where an Investigate Conversation ends. One steered out of Done lands there
-/// too, by the ordinary rule rather than as a case of its own.
+/// **Three states are never returned to.** Two of them have a way in of their
+/// own that nothing else may use: a Draft is started and a Closed Conversation is
+/// steered back into life. Investigating is the third, for a reason of its own —
+/// an investigation sent back to Investigating is one the human could never end,
+/// the move that lands it there opening a fresh Nothing-else window that the mark
+/// they have only just ticked falls outside of, so the next session asks them for
+/// the same mark over again. So an Investigating steered out of any of the three
+/// ends **Done**, which is where an Investigate Conversation ends. One steered
+/// out of Done lands there too, by the ordinary rule rather than as a case of its
+/// own.
 ///
 /// **And an Investigating with no steer above it is an Investigate Conversation**
 /// — its Process's one working state, reached by the Start that cut the branch —
@@ -180,7 +185,10 @@ fn homeward(timeline: &[store::TimelineEvent]) -> Lifecycle {
         .and_then(|record| record.source);
 
     match came_from {
-        None | Some(Lifecycle::Draft) | Some(Lifecycle::Closed) => Lifecycle::Done,
+        None
+        | Some(Lifecycle::Draft)
+        | Some(Lifecycle::Closed)
+        | Some(Lifecycle::Investigating) => Lifecycle::Done,
         Some(source) => source,
     }
 }
@@ -291,7 +299,6 @@ mod tests {
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
             Lifecycle::FollowUp,
-            Lifecycle::Investigating,
         ] {
             assert_eq!(
                 homeward(&[
@@ -306,16 +313,27 @@ mod tests {
         }
     }
 
-    /// Two states are never returned to, each having a way in of its own that
-    /// nothing else may use: a Draft is started and a Closed Conversation is
-    /// steered back into life. So an Investigating steered out of either ends where
-    /// an Investigate Conversation does.
+    /// Three states are never returned to, so an Investigating steered out of any
+    /// of them ends where an Investigate Conversation does.
+    ///
+    /// Two have a way in of their own that nothing else may use: a Draft is
+    /// started and a Closed Conversation is steered back into life. Investigating
+    /// is the third, and its reason is the human's own mark: the move that landed
+    /// it back there opens a fresh Nothing-else window, so the tick that ended the
+    /// investigation falls outside it and the fresh session asks for it again —
+    /// which is a round of rounds nothing but a Steer or a close could ever get
+    /// them out of.
     ///
     /// Done is in the list because it is the same answer read by the ordinary rule
     /// rather than as a case of its own.
     #[test]
-    fn the_two_states_nothing_returns_to_end_done_instead() {
-        for source in [Lifecycle::Draft, Lifecycle::Closed, Lifecycle::Done] {
+    fn the_states_nothing_returns_to_end_done_instead() {
+        for source in [
+            Lifecycle::Draft,
+            Lifecycle::Closed,
+            Lifecycle::Investigating,
+            Lifecycle::Done,
+        ] {
             assert_eq!(
                 homeward(&[steer(Lifecycle::Investigating, Some(source))]),
                 Lifecycle::Done,

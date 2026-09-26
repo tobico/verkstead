@@ -2292,11 +2292,14 @@ An Investigate Conversation came from its own Draft and ends **Done**, with no
 wrap-up, no watchers and nothing dispatched. One steered into Investigating
 returns to the state it was steered from, nothing else about it changed — so a
 question asked in the middle of a wrap-up leaves the wrap-up where it was rather
-than ending it, which is what a follow-up does too. Draft and Closed are the two
-states nothing returns to, so an Investigating steered from either ends Done as
-well. Which state to go back to is written down beside the **Steer** that made
-it, being a fact of the steer rather than something to read back off the
-Timeline.
+than ending it, which is what a follow-up does too. Draft, Closed and
+Investigating are the three states nothing returns to, so an Investigating
+steered out of any of them ends Done as well: the first two have a way in of
+their own, and an investigation sent back to Investigating is one the mark could
+never end — the move that lands it there opens a fresh window, and the tick that
+ended the last round falls outside it. Which state to go back to is written down
+beside the **Steer** that made it, being a fact of the steer rather than
+something to read back off the Timeline.
 _Avoid_: research, spike, exploration, read-only mode, question state
 
 **Nothing else**:
