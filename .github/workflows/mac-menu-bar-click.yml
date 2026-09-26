@@ -1,0 +1,176 @@
+# Throwaway: the menu bar icon's click on a real Mac. The human found the
+# window coming up merely because they pressed the icon to see its menu, and
+# `clicked()` is the fix; what this drives is the gesture itself, which no unit
+# test reaches. Lives only on the `macos-pack-probe` branch and merges nowhere.
+#
+# **The instrument is its own control.** Two readings are taken with the same
+# tool in the same run: pressing the icon leaves the window away, and picking
+# **Open** one row down brings it back. The second is what says the first is a
+# real absence rather than a blind instrument — a reader that could never see a
+# window appear would fail there.
+name: Mac menu bar click
+
+on:
+  push:
+    branches: [macos-pack-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  the-click:
+    name: The icon's menu, and nothing under it
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up the viewer
+        uses: ./.github/actions/setup-pnpm-project
+
+      - name: Build the viewer
+        working-directory: web
+        env:
+          NODE_OPTIONS: --max-old-space-size=5120
+        run: pnpm build
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: macos-dmg-leg
+
+      - name: Build both halves of the sidecar
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --no-default-features \
+              --package verkstead-cli --target "$target"
+          done
+
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      - name: Pack the app
+        working-directory: desktop
+        run: |
+          pnpm run pack \
+            ../target/aarch64-apple-darwin/release/verkstead \
+            ../target/x86_64-apple-darwin/release/verkstead
+
+      - name: Mount it, and install it
+        run: |
+          set -euo pipefail
+          MOUNT="$RUNNER_TEMP/mounted"
+          mkdir -p "$MOUNT"
+          hdiutil attach target/electron/out/Verkstead-universal.dmg \
+            -readonly -nobrowse -mountpoint "$MOUNT"
+          rm -rf /Applications/Verkstead.app
+          ditto "$MOUNT/Verkstead.app" /Applications/Verkstead.app
+          hdiutil detach "$MOUNT"
+
+      # Stage 04's reader: what is actually on the screen, which is the only
+      # thing that answers "did a window come up".
+      - name: Build the reader
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/windows.swift" <<'SWIFT'
+          import CoreGraphics
+          import Foundation
+
+          let want = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+          let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+
+          for window in info {
+            let owner = window[kCGWindowOwnerName as String] as? String ?? "?"
+            if !want.isEmpty && owner != want { continue }
+            let number = window[kCGWindowNumber as String] as? Int ?? -1
+            let layer = window[kCGWindowLayer as String] as? Int ?? -1
+            let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
+            let w = bounds["Width"] ?? "?", h = bounds["Height"] ?? "?"
+            print("\(owner)\tnumber=\(number)\tlayer=\(layer)\twidth=\(w)\theight=\(h)")
+          }
+          SWIFT
+          swiftc -O "$RUNNER_TEMP/windows.swift" -o "$RUNNER_TEMP/windows"
+
+      - name: Press the icon, and then pick Open
+        run: |
+          set +e
+          WINDOWS="$RUNNER_TEMP/windows"
+          FAILED=0
+
+          # A Verkstead window on the ordinary layer. The menu the icon opens is
+          # a window too, on a layer of its own, so the layer is what tells the
+          # window from the menu.
+          onscreen() {
+            "$WINDOWS" Verkstead | grep -c 'layer=0'
+          }
+
+          # Poll rather than sleep: the window follows the sidecar coming up.
+          waitfor() {
+            for _ in $(seq 1 "$2"); do
+              [ "$(onscreen)" -ge 1 ] && [ "$1" = up ] && return 0
+              [ "$(onscreen)" -eq 0 ] && [ "$1" = away ] && return 0
+              sleep 1
+            done
+            return 1
+          }
+
+          say() { echo "::group::$1"; }
+
+          open -a /Applications/Verkstead.app
+          if waitfor up 90; then
+            echo "the window came up"
+          else
+            echo "FAILED: no window at launch, so nothing below reads anything"
+            "$WINDOWS"
+            exit 1
+          fi
+
+          # Closed by its own button, which on a Mac is a hide (ADR-0020).
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to click button 1 of window 1'
+          if waitfor away 20; then
+            echo "the close left it off the screen"
+          else
+            echo "FAILED: the window is still up after the close"
+            FAILED=1
+          fi
+
+          # The gesture the human reported: press the icon to see the menu.
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to click menu bar item 1 of menu bar 2'
+          sleep 3
+
+          say "what the menu offers"
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to get name of every menu item of menu 1 of menu bar item 1 of menu bar 2'
+          echo "::endgroup::"
+
+          if [ "$(onscreen)" -eq 0 ]; then
+            echo "PASSED: pressing the icon opened the menu and left the window away"
+          else
+            echo "FAILED: pressing the icon brought the window back"
+            "$WINDOWS" Verkstead
+            FAILED=1
+          fi
+
+          # And the row that does mean it — the control on this instrument: a
+          # reader that could not see a window appear would fail here.
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to click menu item "Open" of menu 1 of menu bar item 1 of menu bar 2'
+          if waitfor up 20; then
+            echo "PASSED: Open on the menu brought the window back"
+          else
+            echo "FAILED: Open on the menu did nothing, so the reading above is blind"
+            "$WINDOWS" Verkstead
+            FAILED=1
+          fi
+
+          exit "$FAILED"
+
+      - name: What the app said
+        if: always()
+        run: |
+          set +e
+          cat ~/Library/Logs/Verkstead/verkstead.log
