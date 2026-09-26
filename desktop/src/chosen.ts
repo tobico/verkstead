@@ -57,3 +57,22 @@ export type Viewing =
 export function viewing(kept: Kept): Viewing {
   return "file" in kept ? { open: kept.file } : { note: kept.nowhere };
 }
+
+/// Whether the icon's own click is wired to **Open**, or the menu is the whole
+/// of what the icon does.
+///
+/// **A Mac's menu bar item has no click to spare.** A status item carrying a
+/// menu opens that menu on every press — that is the platform's own gesture for
+/// one, and there is no second gesture underneath it — while Electron emits its
+/// `click` alongside. So a wired click there is the window coming back merely
+/// because somebody looked at the menu, which is not what pressing it meant:
+/// **Open** is on that menu, one row down, and it is the row that means it.
+///
+/// **The other two panels are the reason the click is wired at all.** Electron
+/// emits it on the StatusNotifierItem activation and the specification does not
+/// say what causes one, so some panels send it on a left click, some on a double
+/// click and some only open the menu — and an icon that answered nothing on the
+/// panels of the first kind would be an icon that looked broken.
+export function clicked(platform: NodeJS.Platform): boolean {
+  return platform !== "darwin";
+}

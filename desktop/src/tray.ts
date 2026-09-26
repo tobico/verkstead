@@ -29,6 +29,11 @@
 //! on the menu — which is what the Rust app relied on for the same reason, and
 //! what makes the icon and its menu mean one thing rather than two.
 //!
+//! **Except on a Mac, where the menu is the gesture.** A menu bar item carrying
+//! a menu opens it on every press and emits the click as well, so wiring the
+//! click there is the window coming back because somebody looked at the menu.
+//! Whether it is wired is [`clicked`](./chosen.js)'s, with the reasoning.
+//!
 //! **And a desktop with no tray host needs no guard.** The pinned Electron
 //! constructs a tray with no StatusNotifierWatcher on the session bus, takes a
 //! context menu and is not destroyed, so nothing here has to survive a throw —
@@ -37,7 +42,7 @@
 
 import { dialog, Menu, shell, Tray } from "electron";
 
-import { type Chosen, label, MENU, viewing } from "./chosen.js";
+import { type Chosen, clicked, label, MENU, viewing } from "./chosen.js";
 import { type Kept, say } from "./log.js";
 import { hand, type Opening } from "./opening.js";
 
@@ -61,6 +66,11 @@ export interface Trayed {
 
   /// Stop the app, and the sidecar with it.
   quit: () => void;
+
+  /// Whose panel this is, which is the one thing about the icon that is not the
+  /// same everywhere: whether the click underneath the menu is wired — see
+  /// [`clicked`](./chosen.js).
+  platform: NodeJS.Platform;
 }
 
 /// The icon itself, kept for as long as there is an app to have one.
@@ -107,7 +117,11 @@ export function raise(trayed: Trayed): void {
     ),
   );
 
-  tray.on("click", trayed.open);
+  // The menu is on the icon either way; this is the gesture underneath the
+  // menu, which a Mac has not got.
+  if (clicked(trayed.platform)) {
+    tray.on("click", trayed.open);
+  }
 
   icon = tray;
   say("the icon is in the tray");
