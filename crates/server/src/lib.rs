@@ -1790,20 +1790,29 @@ pub async fn run_on_keyed(
     #[cfg(windows)]
     let reachable = reachable.piped(pipe.asked_through());
 
+    // Whatever `tailscale` this machine has, which two of the readings below run
+    // and one of them presses: where this device is on the tailnet, which nodes
+    // of that tailnet are up, and the pane's own four things. The port it is
+    // built with is the one the workbench bound — a serve is this workbench's when
+    // it proxies there — which is nothing the two readings ask about.
+    //
+    // One handle rather than three, because it is one daemon on one machine asked
+    // three questions; the pane's own is built again below, that one holding the
+    // Workbench Key and a way to escalate and being the only one of them that
+    // does anything to the machine.
+    let tailscale = remote::Tailscale::on_path(config.listen.port());
+
     // And the machine this device is on, read at each answer rather than held
     // from here: the hostname it is shown under, the word for its OS, and every
-    // address a peer could reach it on — see [`device::reading`]. Its own
-    // `tailscale` handle, because the tailnet half of those addresses is the
-    // same `status --json` the Remote access pane stands on; the port it is
-    // built with is the one the workbench bound, which is nothing this reading
-    // asks about.
+    // address a peer could reach it on — see [`device::reading`]. Through the
+    // handle above, because the tailnet half of those addresses is the same
+    // `status --json` the Remote access pane stands on.
     //
     // One handle rather than one per listener, because the two listeners
     // describe one machine: what a peer reads off the identity endpoint and
     // what the Devices section of the Remote access pane draws are the same
     // answer told to two different askers.
-    let reading =
-        device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
+    let reading = device::reading::Reading::of_this_machine(tailscale.clone());
 
     // And what this device says about itself on the LAN, so that a Verkstead on
     // the next desk can draw a row for it with nobody typing an address
@@ -1853,7 +1862,18 @@ pub async fn run_on_keyed(
     // *says* about itself on a LAN that may not be the human's; hearing the
     // devices whose operator chose to say something is the other half, and a
     // machine that has been told to keep quiet has not been told to go deaf.
-    .browsing(discovery::Browse::of_this_device(nudges.clone()));
+    .browsing(discovery::Browse::of_this_device(nudges.clone()))
+    // And the tailnet half of the same list, which is asked rather than heard:
+    // there is no multicast on a tailnet for an advertisement to go out over, so
+    // what finds a device there is the peers `tailscale status` names, each asked
+    // on the peer port what it is as the list is read (ADR-0020) — see
+    // [`discovery::Probe`]. Bounded, because how many nodes a tailnet has is
+    // somebody else's decision.
+    //
+    // Not behind the advertising switch either, and for the same reason the browse
+    // is not: what that turns off is what this machine *says* about itself, and a
+    // machine told to keep quiet has not been told to stop looking.
+    .probing(discovery::Probe::of_this_tailnet(tailscale));
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it

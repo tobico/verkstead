@@ -117,13 +117,13 @@ on the other machine to run out on its own TTL, the way a shut lid does.
 
 **And the other half of it is what the pane draws under those rows.** The same
 service browsed rather than advertised, which is the **Discovered** list: every
-device this one has heard of and is not already in a cluster with, each with the
-port it advertised on every address it was found at, and an **Add** on the row.
+device this one has found and is not already in a cluster with, each with every
+address it was found at and an **Add** on the row.
 
 ```console
 $ curl http://127.0.0.1:8422/api/ui/devices/discovered
 [{"device":"0011223344556677889900aabbccddee","name":"kitchen-mini","os":"macOS",
-  "addresses":["192.168.1.31:8423"],"found":["Lan"]}]
+  "addresses":["192.168.1.31:8423","100.64.0.9:8423"],"found":["Lan","Tailscale"]}]
 ```
 
 **The browse runs while that list is being read and not otherwise.** It starts on
@@ -134,10 +134,22 @@ out there: a browse is cold when it starts, and the rows arrive over the seconds
 after it, each as a `discovered` nudge that an open pane redraws on. Reading it
 again is what a test does and a Nudge is what the viewer does; nothing polls.
 
-Three kinds of device are left out of it — a member, this device, and one a join
-is already pending for — so what the list holds is only what there is anything to
-press. Start the second Verkstead below with a data directory of its own and this
-lists it; link the two and it is a member above instead.
+**And `found` is a list because there are two ways of being found.** A tailnet
+carries no multicast, so there is nothing to hear on one: the tailnet half asks
+instead, reading the online peers out of `tailscale status --json` and putting the
+identity endpoint's question to each of them on port 8423 as the list is read. So
+the tailnet rows are in the first answer where the LAN rows arrive after it, and a
+machine on this network *and* this tailnet is one row that says `Lan` and
+`Tailscale` both, its LAN address first. Bounded, because how many nodes a tailnet
+has is nobody here's decision: sixty-four peers at most, sixteen at a time, three
+seconds apiece. `RUST_LOG=verkstead_server::discovery=debug` says which peers were
+asked and what each of them answered — a phone or a server with nothing on that
+port is a debug line and no row.
+
+Three kinds of device are left out of the merged list — a member, this device, and
+one a join is already pending for — so what the list holds is only what there is
+anything to press. Start the second Verkstead below with a data directory of its
+own and this lists it; link the two and it is a member above instead.
 
 **Three routes stand outside the member gate and they are the whole of the
 un-gated surface**: that identity endpoint, the join post, and the cancel and
@@ -163,7 +175,11 @@ Two installs, two device ids, two certificates. Open the **Remote access** pane
 on the first one's workbench: its **Devices** section holds one row, marked *this
 device*, and under **Discovered** the second install appears within a second or
 two of the pane being opened — heard over the multicast, drawn with the port its
-listener bound, and with an **Add** on the row.
+listener bound, and with an **Add** on the row. It reads *LAN* and not *Tailscale*
+however much Tailscale is on this machine: the tailnet half asks this machine's
+*peers*, and the second install is on this machine. Two machines on one tailnet are
+the case that reads *Tailscale*, and *LAN and Tailscale* where they share a network
+too.
 
 That press does nothing yet. Type the address into the box under the list
 instead: `127.0.0.1:8523` — the port is only needed because both are on this

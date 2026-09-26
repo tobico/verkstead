@@ -207,12 +207,14 @@ pub struct LinkedDevice {
 /// that same section draws it (ADR-0020, *Discovery*).
 ///
 /// **Not a [`DeviceIdentity`], and that is the difference between the two
-/// lists.** An identity is what a device *answered*, over a handshake, with the
-/// fingerprint of the certificate it presented in it. Nothing here has been
-/// asked anything: this is drawn off an advertisement on the LAN, which says
-/// where a device is and proves nothing about it — so there is no fingerprint on
-/// this row, and the string two people compare by eye is on the pending row the
-/// press leaves rather than on this one.
+/// lists.** An identity is what a member *answered* over a handshake this device
+/// had pinned, with the fingerprint of the certificate it presented in it.
+/// Nothing on this row has been proved like that: it is drawn off an
+/// advertisement on the LAN, which says where a device is and nothing about what
+/// it is, or off a stranger's answer taken under whatever certificate it
+/// happened to show — so there is no fingerprint here, and the string two people
+/// compare by eye is on the pending row the press leaves rather than on this
+/// one.
 ///
 /// **Three kinds of device are not in this list**: a **Member**, which is in the
 /// cluster already; this device, which hears its own advertisement; and a device
@@ -221,7 +223,7 @@ pub struct LinkedDevice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct DiscoveredDevice {
-    /// The Device Id off the advertisement, which is what the row is keyed by
+    /// The Device Id this one was heard under, which is what the row is keyed by
     /// and what an **Add** on it names.
     ///
     /// Keyed by it rather than by the address, because that is the one thing
@@ -230,7 +232,8 @@ pub struct DiscoveredDevice {
     /// something was found would draw the two of them as one row.
     pub device: String,
 
-    /// The name it is shown under: the hostname it advertised.
+    /// The name it is shown under: the hostname it advertised, or the one it
+    /// answered with.
     pub name: String,
 
     /// And the word for its operating system, which draws the mark beside the
@@ -238,15 +241,20 @@ pub struct DiscoveredDevice {
     /// from the WSL on it.
     pub os: String,
 
-    /// Where it was found, the port it advertised and all, in the order to try
-    /// them.
+    /// Where it was found, the port and all, in the order to try them.
     ///
     /// **With the port on every one of them**, unlike the addresses a member
-    /// advertises: what is known here is an advertisement rather than a device's
-    /// own account of itself, and the port in it is the port that device's
-    /// listener really bound. It is also the only thing that tells two
-    /// Verksteads on one machine apart on the page, both of them answering to
-    /// one hostname at one address.
+    /// advertises: these are places this device has *heard* something rather
+    /// than a device's own account of where it is, so a row drawn from them has
+    /// to be one an **Add** can dial as it is written. The port on a LAN address
+    /// is the one that device's listener really bound; the port on a tailnet
+    /// address is the peer port assumed, a peer list naming none. It is also the
+    /// only thing that tells two Verksteads on one machine apart on the page,
+    /// both of them answering to one hostname at one address.
+    ///
+    /// **The LAN ones first where both halves found it**, that being the shorter
+    /// road: two machines on one network reach each other without a tailnet in
+    /// the middle.
     pub addresses: Vec<String>,
 
     /// And how this device came to hear of it.
@@ -265,4 +273,15 @@ pub enum FoundOn {
     /// Heard advertising `_verkstead._tcp.local` on a network this machine is
     /// on, which is what the row reads *LAN* for.
     Lan,
+
+    /// And answered for itself when this device asked a node of its tailnet what
+    /// it was, which is what the row reads *Tailscale* for.
+    ///
+    /// **Asked rather than heard**, which is the difference between the two
+    /// halves. A tailnet carries no multicast for an advertisement to go out
+    /// over, so what finds a device there is this one working down the peers
+    /// `tailscale status` names and asking each of them on the peer port. A node
+    /// that is not a Verkstead answers nothing this can read, and is no row at
+    /// all.
+    Tailscale,
 }

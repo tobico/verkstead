@@ -14,12 +14,15 @@
 //! takes: a dial presenting a certificate the far end has never acknowledged
 //! would be refused at that end's own gate.
 //!
-//! **With one exception, which is the join.** A device pressing Add has never
-//! met the machine it is asking, so there is no fingerprint to pin it on: that
-//! dial takes whatever certificate turns up, for the one call, and hands back
-//! what it turned out to be — which is the string the two humans then compare by
-//! eye and the string every dial after it is pinned on. See [`Peers::join`] and
-//! [`WhateverIsThere`].
+//! **With two exceptions, and both of them are dials to a stranger.** A device
+//! pressing Add has never met the machine it is asking, so there is no
+//! fingerprint to pin it on: that dial takes whatever certificate turns up, for
+//! the one call, and hands back what it turned out to be — which is the string
+//! the two humans then compare by eye and the string every dial after it is
+//! pinned on. The tailnet half of a discovery is the other, and for the same
+//! reason: it asks a node nothing has heard of what it is, and a probe that
+//! insisted on a fingerprint could only ever find devices already linked. See
+//! [`Peers::join`], [`Peers::stranger`] and [`WhateverIsThere`].
 //!
 //! **And the far end is proved by the fingerprint the member row holds.** There
 //! is no certificate authority anywhere in a cluster, so the pinned fingerprint
@@ -592,6 +595,73 @@ impl Peers {
         }
 
         Ok(held)
+    }
+
+    /// What the device at `address` says it is, when this one has never heard of
+    /// it — which is the tailnet half of a discovery asking a peer what it is
+    /// (ADR-0020, *Discovery*).
+    ///
+    /// **Whatever certificate that address presents is taken, for this one
+    /// call**, exactly as [`Peers::join`] takes one and for the same reason:
+    /// there is nothing yet by which to know what the far end's certificate
+    /// ought to be, and a probe that insisted on a fingerprint could only ever
+    /// find devices already linked. What is on the row this fills is a name, a
+    /// mark and an address — nothing anybody is asked to trust — and the
+    /// fingerprint two people compare by eye arrives on the pending row that the
+    /// press on **Add** leaves.
+    ///
+    /// **And what turned up is checked against what the far end says it is**, the
+    /// one judgement that can be made of a stranger: a device names the
+    /// fingerprint of the certificate it presented so that a caller can hold the
+    /// two up beside each other, and one that names another is not the device it
+    /// says it is. So is one that answers something which is not an identity at
+    /// all, which is most of what is on a tailnet — a phone, a server, anything
+    /// with something else on that port.
+    ///
+    /// **Nothing is recorded and nothing is dimmed.** The far end is not a
+    /// member: there is no row to write a finding on to, and a device that
+    /// answered nothing is a row that is simply not drawn.
+    ///
+    /// The one address rather than a list, because the caller is working down a
+    /// list of its own — see [`crate::discovery::Probe`], which spends a deadline
+    /// per peer rather than per address.
+    pub async fn stranger(&self, address: &str) -> Result<DeviceIdentity> {
+        let met = Arc::new(Mutex::new(None));
+        let asking = self.asking(&met)?;
+        let at = reaching(address, IDENTITY);
+
+        let answered = asking
+            .get(&at)
+            .send()
+            .await
+            .with_context(|| format!("asking the device at {address} what it is"))?;
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            bail!("the device at {address} answered {status} for its identity");
+        }
+
+        let identity: DeviceIdentity = answered
+            .json()
+            .await
+            .with_context(|| format!("reading what the device at {address} says it is"))?;
+
+        let met = met
+            .lock()
+            .expect("nothing panics holding this")
+            .take()
+            .with_context(|| format!("the device at {address} presented no certificate"))?;
+
+        if identity.fingerprint != met {
+            bail!(
+                "the device at {address} presented {met} and named {} as its certificate, \
+                 which is a device that is not the one it says it is",
+                identity.fingerprint,
+            );
+        }
+
+        Ok(identity)
     }
 
     /// And take that question back, which is Cancel on the pending row.

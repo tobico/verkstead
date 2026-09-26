@@ -113,10 +113,14 @@ const LINKED = devicesLinked as DevicesView;
 const WAITING = devicesWaiting as DevicesView;
 
 
-/// And two devices this one has *heard* of and is not linked to at all, which is
-/// what the Discovered list draws: a Mac on the LAN with two addresses, and a WSL
-/// with one — the mark being the only thing that would tell the second from the
-/// Windows it shares a hostname with.
+/// And three devices this one has *found* and is not linked to at all, which is
+/// what the Discovered list draws: a Mac on the LAN with two addresses, a WSL
+/// found on the LAN and over the tailnet both — the mark being the only thing
+/// that would tell it from the Windows it shares a hostname with — and a Mac
+/// found only over the tailnet.
+///
+/// One each way and one found both, because those are the three things the word
+/// beside a name can say.
 const HEARD = devicesDiscovered as DiscoveredDevice[];
 
 /// The login link the serving machine hands out, which is the address with the
@@ -949,7 +953,45 @@ is the only thing that tells two Verksteads on one machine apart",
     // for: it answers to the same hostname this device does, and the mark beside
     // the name is what tells the two apart.
     expect(screen.getByRole("img", { name: "Linux (WSL)" })).toBeTruthy();
-    expect(theRow("172.29.0.14:9423").textContent).toContain("LAN");
+  });
+
+  /// And the word beside the name says every way this device was found: *LAN*,
+  /// *Tailscale*, and both where both halves found the one machine.
+  ///
+  /// **One row rather than two**, because it is one machine: two rows offering to
+  /// link it would be two presses about one device, and the row carries both
+  /// addresses in the order an Add should try them — the LAN first, that being the
+  /// shorter road.
+  it("says every way a device was found, and draws one found twice once", async () => {
+    mountPane(SERVING, DEVICES, HEARD);
+
+    await waitFor(() => expect(screen.getByText("kitchen-mini")).toBeTruthy());
+
+    expect(
+      theRow("kitchen-mini").textContent,
+      "a device found on the tailnet alone reads Tailscale",
+    ).toContain("Tailscale");
+    expect(theRow("kitchen-mini").textContent).toContain("100.64.0.9:8423");
+
+    // Named by its addresses rather than by its name, which this device shares:
+    // the WSL answers to the same hostname, which is the case the whole of
+    // cluster mode was written for.
+    const both = theRow("172.29.0.14:9423, 100.64.0.14:8423");
+
+    expect(
+      both.textContent,
+      "and one found both ways says both rather than whichever way was found first",
+    ).toContain("LAN and Tailscale");
+    expect(
+      both.textContent,
+      "with every place either half found it, the LAN's address first, that being \
+the shorter road",
+    ).toContain("172.29.0.14:9423, 100.64.0.14:8423");
+
+    expect(
+      screen.getAllByText("Add").filter((press) => press.closest("li")).length,
+      "and one machine is one row: three devices found, three rows to press",
+    ).toBe(3);
   });
 
   /// And a press apiece, on every discovered row and on none of the cluster's
@@ -967,8 +1009,8 @@ is the only thing that tells two Verksteads on one machine apart",
 
     expect(
       screen.getAllByText("Add").filter((press) => press.closest("li")).length,
-      "one apiece for the two devices heard of; the members carry Unlink instead",
-    ).toBe(2);
+      "one apiece for the three devices found; the members carry Unlink instead",
+    ).toBe(3);
     expect(
       screen.getAllByText("Unlink").length,
       "and the two members' rows are untouched by any of it",
@@ -982,14 +1024,14 @@ is the only thing that tells two Verksteads on one machine apart",
   /// the list is first asked for, so the answer the pane is drawn from is empty
   /// however many machines are out there — a line saying none was found would be
   /// wrong for the first second of every visit to this pane.
-  it("says devices appear as they are heard rather than that none was found", async () => {
+  it("says devices appear as they are found rather than that none was found", async () => {
     mountPane(SERVING);
 
     await waitFor(() => expect(screen.getByText("Discovered")).toBeTruthy());
 
     expect(
-      screen.getByText(/appear here as they are heard/),
-      "and the typed box below is what is left for the ones a browse cannot reach",
+      screen.getByText(/appear here as they are found/),
+      "and the typed box below is what is left for the ones neither half reaches",
     ).toBeTruthy();
   });
 
@@ -1025,7 +1067,7 @@ is the only thing that tells two Verksteads on one machine apart",
     // The one device this browse had heard when the pane was drawn, and the read
     // of the membership beside it.
     await waitFor(() =>
-      expect(screen.getByText("172.29.0.14:9423")).toBeTruthy(),
+      expect(screen.getByText("100.64.0.9:8423")).toBeTruthy(),
     );
 
     const read = askedFor(fetching, "/api/ui/devices");
@@ -1035,7 +1077,7 @@ is the only thing that tells two Verksteads on one machine apart",
     await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
 
     expect(
-      screen.getByText("172.29.0.14:9423"),
+      screen.getByText("100.64.0.9:8423"),
       "and the row that was already drawn is still the same row",
     ).toBeTruthy();
     expect(

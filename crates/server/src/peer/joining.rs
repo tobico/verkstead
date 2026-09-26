@@ -692,14 +692,18 @@ fn asked(holding: &Holding, request: String) {
     });
 }
 
-/// Whether a join says more about itself than this device will keep, and what
-/// it was.
+/// Whether a device says more about itself than this one will keep, and what it
+/// was.
 ///
-/// **The one thing a stranger writes into this machine, read before any of it is
-/// written.** What the row holds is what a dial back will later work down and
-/// what a modal and a lock screen will later draw, so the bound is taken here
-/// rather than at each of those: one reading, in front of the write, against
-/// [`LONGEST_ID`] and the four beside it.
+/// **What a stranger says of itself, read before any of it is kept.** A join is
+/// the one thing a stranger *writes* into this machine — what the row holds is
+/// what a dial back will later work down and what a modal and a lock screen will
+/// later draw, so the bound is taken here rather than at each of those: one
+/// reading, in front of the write, against [`LONGEST_ID`] and the four beside it.
+/// The tailnet half of a discovery asks the same question of what a probed peer
+/// answered, for the same reason with nothing written — see
+/// [`crate::discovery::Probe`], where a device that will not keep to a hostname's
+/// length is one there is no reason to draw a row for.
 ///
 /// Refused whole rather than trimmed, and the reason is the addresses: a list cut
 /// to sixteen would be a device quietly unreachable at the seventeenth address it
@@ -710,7 +714,7 @@ fn asked(holding: &Holding, request: String) {
 /// what somebody reads: a hostname in kanji is a hostname.
 ///
 /// `None` is a join this device will keep, which is every join a Verkstead makes.
-fn too_much(saying: &DeviceIdentity) -> Option<&'static str> {
+pub(crate) fn too_much(saying: &DeviceIdentity) -> Option<&'static str> {
     if saying.device.chars().count() > LONGEST_ID {
         return Some("that is longer than any device id");
     }

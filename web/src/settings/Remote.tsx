@@ -117,11 +117,13 @@
 //! what the press is for.
 //!
 //! **And under those rows, the devices nobody has typed an address for** — see
-//! [`Discovered`], which is the list a browse of the LAN fills. A row there is
-//! what another Verkstead said about itself over mDNS: its name, the mark for its
-//! OS, the addresses it was found at with the port its listener bound, and where
-//! it was found — so two machines on one network are linked with nothing known
-//! about either one's address.
+//! [`Discovered`], which is the list a browse of the LAN and a probe of this
+//! machine's tailnet fill between them. A row there is what another Verkstead
+//! said about itself, over mDNS or when it was asked: its name, the mark for its
+//! OS, the addresses it was found at, and where it was found — *LAN*,
+//! *Tailscale*, or both words where both halves found it, one machine being one
+//! row. So two machines are linked with nothing known about either one's address,
+//! whether they share a network or only a tailnet.
 //!
 //! **A reading of its own rather than a field of the one above**, and that is
 //! what keeps the two apart: a browse hears something every few seconds, and the
@@ -309,6 +311,12 @@ function useDevices() {
 /// when it is first asked and stops once nothing has asked for a spell — a phone
 /// that closes a tab says nothing — so the first answer is empty or short and the
 /// rows arrive over the seconds after it, each announced. Nothing polls.
+///
+/// **It is also what makes the probe of the tailnet happen**, which is the other
+/// half of the list and is asked rather than heard: a tailnet has no multicast for
+/// a device to announce itself over, so the server asks its peers as this is read.
+/// Which is why the answer can take a moment where the LAN half is instant, and
+/// why the tailnet rows are in the first answer rather than arriving after it.
 ///
 /// Merged by the device id, like the reading above and for its reason: a browse
 /// that heard one more device leaves the rows it already drew alone.
@@ -986,11 +994,13 @@ function Row(props: {
 /// each with one press to link it (ADR-0020, *Discovery*).
 ///
 /// **The other half of the box under it.** A device on the same LAN says what it
-/// is over mDNS, and a row here is that said back — the name, the mark for its
-/// OS, where it was found and how — so that linking two machines needs nobody to
-/// know either one's address. What the typed box is left for is the cases a
-/// browse cannot cross: a Windows machine and the WSL on it, which is NAT rather
-/// than a bug, and whatever else is on a network of its own.
+/// is over mDNS, a node of the same tailnet says what it is when this one asks,
+/// and a row here is either of those said back — the name, the mark for its OS,
+/// where it was found and how — so that linking two machines needs nobody to know
+/// either one's address. What the typed box is left for is the cases neither half
+/// can cross: a Windows machine and the WSL on it, which is NAT rather than a bug,
+/// a device listening on a port nothing assumes, and whatever else is on a network
+/// of its own.
 ///
 /// **Its own reading rather than a field of the one above**, which is what keeps
 /// the two apart: a browse hears something every few seconds, and the cluster's
@@ -1029,8 +1039,9 @@ function Discovered(): JSX.Element {
 
         <Match when={true}>
           <Note>
-            Devices on this network appear here as they are heard, with nothing to
-            type. A machine that never appears is linked by its address below.
+            Devices on this network and on this tailnet appear here as they are
+            found, with nothing to type. A machine that never appears is linked by
+            its address below.
           </Note>
         </Match>
       </Choose>
@@ -1048,9 +1059,10 @@ function Discovered(): JSX.Element {
 /// something to press.
 ///
 /// **And the press is an Add rather than a link being made.** Nothing has been
-/// agreed with a device that has only advertised itself: what the press does is
-/// the same Join the typed box makes, and what it leaves is the same pending row
-/// with a fingerprint on it for two people to compare.
+/// agreed with a device that has only advertised itself, or only answered that it
+/// is there: what the press does is the same Join the typed box makes, and what it
+/// leaves is the same pending row with a fingerprint on it for two people to
+/// compare.
 function Heard(props: { of: DiscoveredDevice }): JSX.Element {
   return (
     <li class={styles.device}>
@@ -1081,10 +1093,11 @@ function Heard(props: { of: DiscoveredDevice }): JSX.Element {
 /// row says is both.
 const WHERE: Record<DiscoveredDevice["found"][number], string> = {
   Lan: "LAN",
+  Tailscale: "Tailscale",
 };
 
-/// Where a device was heard, as the row reads it: *LAN*, and both words where
-/// both found it.
+/// Where a device was heard, as the row reads it: *LAN*, *Tailscale*, and both
+/// words where both found it.
 function where(device: DiscoveredDevice): string {
   return device.found.map((on) => WHERE[on]).join(" and ");
 }

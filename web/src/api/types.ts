@@ -2086,12 +2086,14 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
  * that same section draws it (ADR-0020, *Discovery*).
  *
  * **Not a [`DeviceIdentity`], and that is the difference between the two
- * lists.** An identity is what a device *answered*, over a handshake, with the
- * fingerprint of the certificate it presented in it. Nothing here has been
- * asked anything: this is drawn off an advertisement on the LAN, which says
- * where a device is and proves nothing about it — so there is no fingerprint on
- * this row, and the string two people compare by eye is on the pending row the
- * press leaves rather than on this one.
+ * lists.** An identity is what a member *answered* over a handshake this device
+ * had pinned, with the fingerprint of the certificate it presented in it.
+ * Nothing on this row has been proved like that: it is drawn off an
+ * advertisement on the LAN, which says where a device is and nothing about what
+ * it is, or off a stranger's answer taken under whatever certificate it
+ * happened to show — so there is no fingerprint here, and the string two people
+ * compare by eye is on the pending row the press leaves rather than on this
+ * one.
  *
  * **Three kinds of device are not in this list**: a **Member**, which is in the
  * cluster already; this device, which hears its own advertisement; and a device
@@ -2100,7 +2102,7 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
  */
 export type DiscoveredDevice = { 
 /**
- * The Device Id off the advertisement, which is what the row is keyed by
+ * The Device Id this one was heard under, which is what the row is keyed by
  * and what an **Add** on it names.
  *
  * Keyed by it rather than by the address, because that is the one thing
@@ -2110,7 +2112,8 @@ export type DiscoveredDevice = {
  */
 device: string, 
 /**
- * The name it is shown under: the hostname it advertised.
+ * The name it is shown under: the hostname it advertised, or the one it
+ * answered with.
  */
 name: string, 
 /**
@@ -2120,15 +2123,20 @@ name: string,
  */
 os: string, 
 /**
- * Where it was found, the port it advertised and all, in the order to try
- * them.
+ * Where it was found, the port and all, in the order to try them.
  *
  * **With the port on every one of them**, unlike the addresses a member
- * advertises: what is known here is an advertisement rather than a device's
- * own account of itself, and the port in it is the port that device's
- * listener really bound. It is also the only thing that tells two
- * Verksteads on one machine apart on the page, both of them answering to
- * one hostname at one address.
+ * advertises: these are places this device has *heard* something rather
+ * than a device's own account of where it is, so a row drawn from them has
+ * to be one an **Add** can dial as it is written. The port on a LAN address
+ * is the one that device's listener really bound; the port on a tailnet
+ * address is the peer port assumed, a peer list naming none. It is also the
+ * only thing that tells two Verksteads on one machine apart on the page,
+ * both of them answering to one hostname at one address.
+ *
+ * **The LAN ones first where both halves found it**, that being the shorter
+ * road: two machines on one network reach each other without a tailnet in
+ * the middle.
  */
 addresses: Array<string>, 
 /**
@@ -2588,7 +2596,7 @@ path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootG
  * found twice: the row says every way this device was heard of rather than
  * whichever way was heard of first.
  */
-export type FoundOn = "Lan";
+export type FoundOn = "Lan" | "Tailscale";
 
 /**
  * What became of starting a Conversation grilling.
