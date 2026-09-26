@@ -19,7 +19,7 @@ Roadmap stage: [03: Discovery](docs/roadmaps/cluster-mode/03-discovery.md)
 
 ## Tasks
 
-- [ ] 01: Advertising — [details](01-advertising.md)
+- [x] 01: Advertising — [details](01-advertising.md)
 - [ ] 02: Browsing and the Discovered list — [details](02-browsing-and-the-discovered-list.md)
 - [ ] 03: The Tailscale probe — [details](03-the-tailscale-probe.md)
 - [ ] 04: One-press Add — [details](04-one-press-add.md)

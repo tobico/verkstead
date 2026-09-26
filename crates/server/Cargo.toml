@@ -44,6 +44,25 @@ hostname = { version = "0.4", default-features = false }
 # add is exactly what this must not advertise — an address no peer off this
 # machine's own link could ever reach.
 if-addrs = "0.15"
+# How two Verksteads on one LAN find each other: mDNS, advertised and browsed
+# from inside this process (ADR 0020, *Discovery*) — see `src/discovery.rs`. A
+# crate rather than a dependency on the machine, which is the whole decision: no
+# avahi to install on Linux, no Bonjour to find on Windows, and one behaviour on
+# all three platforms rather than three ways of shelling out to somebody else's
+# daemon.
+#
+# Default features, which is two. `async` is what lets the withdrawal be waited
+# on from the runtime rather than by parking a thread on a channel; `logging`
+# puts the daemon's own account of a multicast it could not speak where the rest
+# of the server's log goes, a discovery that silently does not work being the
+# only kind of failure this feature has.
+#
+# What it adds to the tree is one crate — `socket-pktinfo`, which is how a
+# reply goes back out of the interface the query arrived on — and a second
+# `flume`, its channel being a major ahead of the one `sqlx` holds.
+# Everything else under it is already here: `if-addrs`, `socket2`, `mio`, `log`
+# and `fastrand`. No cryptography and no C.
+mdns-sd = "0.21"
 # The watcher behind the `files` Nudge: the Worktrees a Code pane is drawn over,
 # followed while it is attached (ADR 0019) — see `src/watchers.rs`. Each
 # platform's own mechanism rather than a poll, which is the whole reason for a
