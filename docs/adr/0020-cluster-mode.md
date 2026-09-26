@@ -140,6 +140,22 @@ where it was found, with one press to Add; members are left out. Windows plus
 WSL is the case where discovery may not cross — WSL2 sits behind NAT unless
 mirrored networking is on — and typing the address is what is left.
 
+**Advertising can be turned off**, by a flag and a NixOS option beside
+`peerListen`, on by default for the reason `openFirewall` is: a discovery
+nothing can hear is a feature that silently does not work. What it broadcasts is
+a hostname, an OS and a Device Id on a LAN that may not be the human's alone,
+and anything saying this much about a machine to whoever is on the wire has to
+be able to be told not to. The rule that opens the peer port grows UDP 5353
+beside it, or the advertisement is one a NixOS host never hears.
+
+**And the advertisement is withdrawn on the way out**, which is the one ordered
+stop this server has: a signal it is asked to stop on sends the goodbye that
+takes the row off every other machine's list at once, and then the process ends
+as it always did. A killed server withdraws nothing and the row runs out on its
+TTL instead — the same thing that covers a machine whose lid shut — so the
+withdrawal is what makes a restart tidy rather than what makes a stale row
+impossible.
+
 ## The opened device relays
 
 The web client is same-origin: relative paths, one `HttpOnly` cookie per
