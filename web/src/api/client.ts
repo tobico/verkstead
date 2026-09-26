@@ -1413,10 +1413,12 @@ export function loadAsking(): Promise<AskingDevice[]> {
 
 /// **Allow**: let the device that asked into this one's cluster.
 ///
-/// It records that device as a member and settles the request, and nothing goes
-/// back to the device that asked — which is still drawing *waiting*. What comes
-/// back is the list read again, so a modal that has just been answered goes out
-/// of this answer rather than out of a second request.
+/// One press joins it to the whole cluster: it is recorded as a member here,
+/// dialled back with this device and every member it holds, and announced to
+/// each of those members over the link this one already has to them — so
+/// nothing is pressed anywhere else. What comes back is the list read again, so
+/// a modal that has just been answered goes out of this answer rather than out
+/// of a second request.
 ///
 /// A second press is not a second thing happening: two workbenches may both be
 /// showing the modal, and the one that presses second finds the request settled

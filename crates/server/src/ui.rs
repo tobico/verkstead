@@ -5745,11 +5745,14 @@ async fn asking(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/devices/asking/{request}/allow` — **Allow**: let the device
 /// that asked into this one's cluster.
 ///
-/// It records the asker as a member and settles the request, and that is the
-/// whole of it: nothing goes back to the device that asked, which is still
-/// drawing *waiting* until the dial back a later task adds. See
-/// [`crate::device::Devices::allow`], which is also where a second press being
-/// nothing new is settled.
+/// **One press, and the cluster is one device bigger everywhere.** It records
+/// the asker as a member, settles the request, dials the asker back with this
+/// device and every member it holds, and announces the asker to each of those
+/// members over the link it already has to them — so nobody anywhere else is
+/// asked to press anything. See [`crate::device::Devices::allow`], which is
+/// also where a second press being nothing new is settled, and where a far end
+/// that could not be reached is a line in this machine's log rather than a
+/// press that failed.
 async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
         return unavailable("this server holds no device identity to link with");
