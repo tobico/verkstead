@@ -25,7 +25,7 @@ Roadmap stage: [05: The Linux AppImage](docs/roadmaps/electron-desktop/05-linux-
 
 ## Tasks
 
-- [ ] 01: The builder configuration, and an AppImage from a checkout — [details](01-the-builder-configuration.md)
+- [x] 01: The builder configuration, and an AppImage from a checkout — [details](01-the-builder-configuration.md)
 - [ ] 02: What the server reads of an AppImage — [details](02-what-the-server-reads.md)
 - [ ] 03: The release leg, and the Rust AppImage retired — [details](03-the-release-leg.md)
 - [ ] 04: The words — [details](04-the-words.md)

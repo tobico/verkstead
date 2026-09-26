@@ -2,11 +2,14 @@
   "name": "verkstead-desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "The workbench, in the system tray",
+  "desktopName": "net.tobico.Verkstead.desktop",
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "pnpm build && node scripts/start.mjs",
+    "pack": "pnpm build && node scripts/pack.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -15,6 +18,7 @@
     "@types/node": "^24.10.1",
     "@typescript-eslint/parser": "^8.67.0",
     "electron": "^43.7.5",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.9.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
