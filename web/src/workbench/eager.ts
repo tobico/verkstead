@@ -65,6 +65,15 @@ function of(device: Device, conversation: number): string {
 /// different rows: Close says the first, Archive and Unarchive say the second,
 /// and Close and archive says both in one press.
 export type Said = {
+  /// Which device the Conversation it is about lives on, `null` for this one.
+  ///
+  /// Said on the entry as well as spelled into its key, because the two things
+  /// that read this table read it two ways: [`pressed`] is handed a device and
+  /// looks one entry up, and [`pressedRows`] walks the lot of them and has to
+  /// tell whose each is. Taking that back off the entry's `row` would be
+  /// reading an id that means something else on every other device.
+  device: Device;
+
   /// It is closed. Absent where no press here has said so, which is the only
   /// two values there are: nothing closes a Conversation back open.
   closed?: true;
@@ -200,14 +209,23 @@ export function pressedRows(
   // And the one that has to be put back rather than left alone. At the top,
   // which is where a Conversation the order says nothing about goes here and on
   // the server both.
-  const back = ids
-    .map((id) => over[id]!.row)
-    .filter(
-      (row): row is ConversationEntry =>
-        row !== undefined &&
-        over[of(null, row.id)]?.archived === false &&
-        !drawn.some((one) => one.id === row.id),
-    );
+  //
+  // Off this device's own entries, read under the very keys they were written
+  // under. A member's press is on the same list of presses and carries a row of
+  // that member's Conversation — and an entry found by an id taken back off
+  // *that* row would be this device's press of the same number, ids colliding
+  // by construction (see [`of`]). Which would put a member's row on a list it
+  // is on no account of, under an id this device's own sidebar already means
+  // something else by.
+  const back = ids.flatMap((id) => {
+    const on = over[id]!;
+
+    if (on.device !== null || on.row === undefined || on.archived !== false) {
+      return [];
+    }
+
+    return drawn.some((one) => one.id === on.row!.id) ? [] : [on.row];
+  });
 
   return back.length === 0 ? drawn : [...back, ...drawn];
 }
@@ -298,7 +316,11 @@ export type Press<Outcome> = {
   conversation: number;
 
   /// What it says is true of that Conversation, from this moment.
-  says: Said;
+  ///
+  /// Without the device, which the press already named above: an entry carries
+  /// one so that the whole table can be walked, and a press repeating it here
+  /// would be two places for the one fact to be said differently.
+  says: Omit<Said, "device">;
 
   /// The request itself, which runs behind the page.
   post: () => Promise<Outcome>;
@@ -327,7 +349,11 @@ export function eagerly<Outcome>(press: Press<Outcome>): void {
     // Whatever a press before this one said, and this press over it — but not
     // when that one landed. This one has not, and an entry that came up landed
     // would be released by the very reads it is meant to be ahead of.
-    const over: Said = { ...standing[id], ...press.says };
+    const over: Said = {
+      ...standing[id],
+      ...press.says,
+      device: press.device,
+    };
     delete over.landed;
 
     return { ...standing, [id]: over };

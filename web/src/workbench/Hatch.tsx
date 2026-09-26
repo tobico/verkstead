@@ -131,7 +131,7 @@ export function Hatch(props: {
   /// the page goes home, and the request runs behind all three. A failure puts
   /// the row back and says why in a toast — see the module's own note above.
   const leaving = <Outcome,>(press: {
-    says: Said;
+    says: Omit<Said, "device">;
     post: () => Promise<Outcome>;
     refusal: (outcome: Outcome) => string;
     fell: (error: Error) => string;
