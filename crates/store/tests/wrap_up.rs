@@ -656,6 +656,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
                 checkouts: &[],
                 said: None,
                 recorded: Recorded::default(),
+                scratch: &[],
             },
         )
         .await

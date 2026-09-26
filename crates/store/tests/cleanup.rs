@@ -815,10 +815,20 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
-    // And where that steer came from, which is the other row hung off the same
+    // And where that steer came from, which is another row hung off the same
     // Event.
     sqlx::query("INSERT INTO steer_sources (event_id, state) VALUES (?, 'grilling')")
         .bind(event)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And what its checkout was already holding uncommitted, which is the last
+    // of them: one row per path, and the NULL row a checkout that held nothing
+    // is recorded as.
+    sqlx::query("INSERT INTO steer_scratch (event_id, repo_id, path) VALUES (?, ?, 'README.md')")
+        .bind(event)
+        .bind(companion)
         .execute(pool)
         .await
         .unwrap();

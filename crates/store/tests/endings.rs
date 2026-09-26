@@ -262,6 +262,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
                 checkouts: &[],
                 said: None,
                 recorded: Recorded::default(),
+                scratch: &[],
             },
         )
         .await
@@ -671,6 +672,7 @@ async fn investigating(pool: &SqlitePool, conversation: i64) {
                 checkouts: &[],
                 said: None,
                 recorded: Recorded::default(),
+                scratch: &[],
             },
         )
         .await

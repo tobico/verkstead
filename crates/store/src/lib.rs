@@ -132,7 +132,8 @@ pub use session_names::session_id;
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use steers::{
-    PickedPairing, Recorded, RecordedPairing, SteerAddition, SteerRecord, SteerUpgrade,
+    PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
+    scratch,
 };
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,

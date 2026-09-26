@@ -2894,6 +2894,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             checkouts: &[],
             said: None,
             recorded: verkstead_store::Recorded::default(),
+            scratch: &[],
         },
     )
     .await

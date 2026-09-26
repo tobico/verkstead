@@ -93,6 +93,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         checkouts: &[],
         said: None,
         recorded: Recorded::default(),
+        scratch: &[],
     }
 }
 

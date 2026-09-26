@@ -179,3 +179,61 @@ fn untracked(worktree: &Path) -> Vec<String> {
     .map(str::to_owned)
     .collect()
 }
+
+/// One change git sees in a Worktree: the path it is about, and where that path
+/// came from where it came from anywhere.
+///
+/// Read out of `git status --porcelain=v1` rather than out of a patch, because
+/// what the two callers want is the *list* rather than the contents: the Done
+/// signal's refusal names the files a session left behind, and the ending of an
+/// investigation puts the ones it added back — see [`crate::done`] and
+/// [`crate::investigations::tidied`].
+///
+/// What *kind* of change it is does not come out with it, because neither caller
+/// asks: one is naming files to a human, and the other puts a path back without
+/// caring which way it had moved.
+pub(crate) struct Change {
+    /// Where the change is now, relative to the Worktree.
+    pub(crate) path: String,
+
+    /// And where it was, for a rename or a copy: the same change rather than
+    /// another one, which is why it rides on this rather than being a second
+    /// entry. `None` for everything else.
+    pub(crate) from: Option<String>,
+}
+
+/// Every change git sees in `worktree` — modified, staged, or untracked and not
+/// ignored — or `None` where git will not answer.
+///
+/// NUL-separated so a path with a newline in it survives the trip, and
+/// `--untracked-files=all` so an untracked directory comes back as the files in
+/// it: what asks about this asks a file at a time.
+pub(crate) fn changed(worktree: &Path) -> Option<Vec<Change>> {
+    let status = git(
+        worktree,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+
+    let mut changes = Vec::new();
+    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
+
+    while let Some(entry) = entries.next() {
+        let Some((code, path)) = entry.split_at_checked(3) else {
+            continue;
+        };
+
+        // A rename or a copy is followed by the path it came from, which is the
+        // same change rather than another one.
+        let from = code
+            .starts_with(['R', 'C'])
+            .then(|| entries.next().map(str::to_owned))
+            .flatten();
+
+        changes.push(Change {
+            path: path.to_owned(),
+            from,
+        });
+    }
+
+    Some(changes)
+}

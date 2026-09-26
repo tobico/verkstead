@@ -54,7 +54,13 @@ Pairing, shaped like a follow-up — rounds of Question Sets, the human's
 Worktree so it can write and run code to find things out, and told to commit
 none of it. The Done signal is accepted over uncommitted changes here and
 nowhere else: the scratch is the point, the Diff on every Set already shows it,
-and the Worktree goes with the close. No pull request is ever asked for. The
+and the Worktree goes with the close. Which holds for an investigation that ends
+Done and not for one that hands its checkout back to a state something runs in:
+the sessions a wrap-up or a follow-up dispatches stage everything they find, so
+the ending takes the investigation's scratch back out and leaves the checkout as
+the steer found it. What the steer found is written down beside it, because a
+path the human had already left uncommitted is theirs and only what the
+investigation added may go. No pull request is ever asked for. The
 session is still asked to rename the branch, because the branch is the
 Conversation's title and a title is worth a cheap rename.
 

@@ -23404,16 +23404,21 @@ const A_ROUND_THEN_WAITING_TO_BE_TOLD: &str = "    SAYING='finding it out'\n    
      WHILE_NOBODY_HAS_ASKED\n    \
      sleep 300";
 
-/// And one that writes a probe, puts its round, says it is done once the round
+/// And one that writes probes, puts its round, says it is done once the round
 /// has been answered, and idles — which is every investigating session at the end
 /// of its last round.
 ///
-/// The probe is left exactly where it was written, because that is the whole of
-/// what an investigating session does with what it writes: the ending is taken
-/// over the scratch rather than refused on it, and the branch is where the start
-/// left it.
+/// One of each shape the ending has to undo: a file staged, a file left
+/// untracked, and a tracked file written to that the human had *already* written
+/// to before the question was asked. The session leaves every one of them where
+/// it wrote it, because that is the whole of what an investigating session does
+/// with what it writes — the ending is taken over the scratch rather than refused
+/// on it, and the branch is where the start left it.
 const A_ROUND_OVER_SCRATCH_THEN_IDLE: &str = "    SAYING='finding it out'\n    \
      printf 'a probe\\n' > probe.md\n    \
+     git add probe.md\n    \
+     printf 'stray\\n' > scratch.md\n    \
+     printf 'a line the investigation added\\n' >> README.md\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
@@ -25038,6 +25043,26 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     let opened = pull_requests(&fixture.view().await).len();
     let built = commits(&fixture.view().await).len();
 
+    // What the human had left half done in the Worktree before they asked the
+    // question, which is the whole reason the ending reads a record rather than
+    // taking away everything it finds: one file nothing tracks, and one tracked
+    // file the investigation is about to write to as well.
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a wrap-up is checked out")
+            .path,
+    );
+
+    std::fs::write(worktree.join("half-done.md"), "a note to self\n").unwrap();
+
+    let readme = worktree.join("README.md");
+    let mut already = std::fs::read_to_string(&readme).unwrap_or_default();
+    already.push_str("a line the human had already written\n");
+    std::fs::write(&readme, &already).unwrap();
+
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
@@ -25098,15 +25123,42 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
         commits(&view),
     );
 
-    let scratch = git(
-        Path::new(&view.worktree.clone().expect("the work is checked out").path),
-        &["status", "--porcelain"],
-    );
+    // And the Worktree is what the steer found, which is what parts a landing
+    // back into live work from a landing in Done. The scratch was the point while
+    // the question was being answered and is in the way the moment it is over:
+    // the sessions the wrap-up dispatches from here open their commit step with
+    // `git add -A`, so a probe left lying about is a probe on the pull request —
+    // and one they did not commit would have their own Done signal refused over a
+    // file they never wrote.
+    let scratch = git(&worktree, &["status", "--porcelain"]);
 
     assert!(
-        scratch.contains("probe.md"),
-        "with the probe still where the session wrote it, uncommitted: the signal \
-         is taken over the scratch rather than refused on it: {scratch:?}",
+        !scratch.contains("probe.md") && !scratch.contains("scratch.md"),
+        "the probes the investigation wrote are gone, staged one and untracked one \
+         alike: {scratch:?}",
+    );
+    assert!(
+        !worktree.join("probe.md").exists() && !worktree.join("scratch.md").exists(),
+        "and gone off the disk rather than only out of the index",
+    );
+
+    // What the human had already left uncommitted stays exactly as it was, which
+    // is the half a blanket clean would get wrong.
+    assert!(
+        scratch.contains("half-done.md"),
+        "the note they had left themselves is still there: {scratch:?}",
+    );
+    assert!(
+        scratch.contains("README.md"),
+        "and so is the tracked file they were part way through — even though the \
+         investigation wrote to it as well, the record holding paths rather than \
+         contents: {scratch:?}",
+    );
+    assert!(
+        std::fs::read_to_string(&readme)
+            .unwrap()
+            .contains("a line the human had already written"),
+        "with their own line in it",
     );
 
     assert!(

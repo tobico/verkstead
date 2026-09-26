@@ -562,30 +562,17 @@ async fn uncommitted(state: &AppState, conversation_id: i64) -> Option<String> {
 
 /// Every path git sees as changed in `worktree` — modified, staged, or untracked
 /// and not ignored — or `None` where git will not answer.
+///
+/// Where a change is now rather than both ends of it: a rename is one change, and
+/// the path it went to is the one the human has to go and look at. Read through
+/// [`crate::diffs::changed`], which is the one parse of `git status` here.
 fn changed(worktree: &std::path::Path) -> Option<Vec<String>> {
-    let status = crate::repos::git(
-        worktree,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-
-    let mut paths = Vec::new();
-    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
-
-    while let Some(entry) = entries.next() {
-        let Some((code, path)) = entry.split_at_checked(3) else {
-            continue;
-        };
-
-        // A rename or a copy is followed by the path it came from, which is
-        // the same change rather than another one.
-        if code.starts_with(['R', 'C']) {
-            entries.next();
-        }
-
-        paths.push(path.to_owned());
-    }
-
-    Some(paths)
+    Some(
+        crate::diffs::changed(worktree)?
+            .into_iter()
+            .map(|change| change.path)
+            .collect(),
+    )
 }
 
 /// `paths` as a refusal names them: in backticks, cut short after [`NAMED`].

@@ -164,8 +164,22 @@ pub(crate) async fn opened(
 /// wrote one.
 ///
 /// One read of the Timeline, as picking an investigation up again takes one.
-pub(crate) async fn landing(pool: &SqlitePool, conversation_id: i64) -> Result<Lifecycle> {
+pub(crate) async fn landing(pool: &SqlitePool, conversation_id: i64) -> Result<Landing> {
     Ok(homeward(&store::timeline(pool, conversation_id).await?))
+}
+
+/// Where an Investigating goes when it ends, and the steer that sent it there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Landing {
+    /// The state the Conversation lands in.
+    pub(crate) state: Lifecycle,
+
+    /// And the Steer Event this Investigating came in through, where one did:
+    /// what the record of that press holds is what the Worktree already held
+    /// when it went in, which is what [`tidied`] puts back. `None` is an
+    /// Investigate Conversation, whose Start wrote no steer — and which lands
+    /// Done, where there is nothing to put back for.
+    pub(crate) steered: Option<i64>,
 }
 
 /// That rule over the Timeline as it stands — see [`landing`], whose whole
@@ -173,24 +187,210 @@ pub(crate) async fn landing(pool: &SqlitePool, conversation_id: i64) -> Result<L
 ///
 /// The brief is not looked at, unlike [`steered`]'s: where the work came from is
 /// the record's to say whatever was written to send it there with.
-fn homeward(timeline: &[store::TimelineEvent]) -> Lifecycle {
-    let came_from = timeline
-        .iter()
-        .rev()
-        .find_map(|event| match &event.event {
-            store::Event::Steer(Lifecycle::Investigating, _, record) => Some(record),
-            _ => None,
-        })
-        .and_then(|record| record.as_deref())
+fn homeward(timeline: &[store::TimelineEvent]) -> Landing {
+    let steer = timeline.iter().rev().find_map(|event| match &event.event {
+        store::Event::Steer(Lifecycle::Investigating, _, record) => Some((event.id, record)),
+        _ => None,
+    });
+
+    let came_from = steer
+        .and_then(|(_, record)| record.as_deref())
         .and_then(|record| record.source);
 
-    match came_from {
+    let state = match came_from {
         None
         | Some(Lifecycle::Draft)
         | Some(Lifecycle::Closed)
         | Some(Lifecycle::Investigating) => Lifecycle::Done,
         Some(source) => source,
+    };
+
+    Landing {
+        state,
+        steered: steer.map(|(at, _)| at),
     }
+}
+
+/// Put every checkout this investigation could write in back to what the steer
+/// found, because the Conversation is going back into a state that will be worked
+/// in.
+///
+/// **The scratch is the point while the investigation is running and in the way
+/// the moment it is over.** A session is told to write probes and commit none of
+/// them, and for an Investigate Conversation that is the end of it: the branch
+/// goes nowhere and the Worktree goes with the close. One *steered* out of a
+/// wrap-up or a follow-up hands the same checkout back to sessions that push, and
+/// each of those opens its commit step with `git add -A` — so a probe left lying
+/// there is a probe on a pull request. And a session that did not commit it would
+/// have its own Done signal refused over a file it never wrote; see
+/// [`crate::done`], which reads every writable checkout.
+///
+/// **What it puts back is what the steer wrote down**, one checkout at a time —
+/// see [`store::scratch`], and [`crate::steering`], which reads it as the submit
+/// lands. Everything git sees as changed now and the record does not is the
+/// investigation's, and it goes; everything the record names was already
+/// uncommitted when the question was asked, and it stays exactly as it is.
+///
+/// **A path that was already uncommitted stays even where the investigation wrote
+/// to it as well**, which is the one place this is deliberately coarse. The
+/// record holds paths rather than contents, so the two cannot be told apart —
+/// and of the two ways to be wrong, leaving a probe in a file somebody was
+/// already working on costs a line in a diff, while reverting it costs them the
+/// work.
+///
+/// **A checkout the record says nothing about is left alone**, which is ADR-0006
+/// read the safe way: a steer from before any of this was written down has no
+/// rows, and *nobody wrote one* is not *the checkout was clean*. So an
+/// investigation steered by an older Verkstead ends exactly as it used to.
+///
+/// Blocking, so it runs on a worker of its own, and after the move rather than
+/// before it: the move is what says this session's investigation is the one being
+/// ended, and between it and the driver the landing starts there is nothing
+/// working in any of these directories.
+pub(crate) async fn tidied(state: &AppState, conversation_id: i64, steered: Option<i64>) {
+    let Some(steered) = steered else {
+        return;
+    };
+
+    let already = match store::scratch(&state.pool, steered).await {
+        Ok(already) => already,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what an investigation's checkouts already held failed, so none of them was tidied");
+            return;
+        }
+    };
+
+    if already.is_empty() {
+        tracing::info!(
+            conversation_id,
+            "nothing says what this investigation's checkouts already held, so they are left as \
+             the session left them",
+        );
+        return;
+    }
+
+    let Some(conversation) = load(state, conversation_id).await else {
+        return;
+    };
+
+    let mut checkouts = Vec::new();
+
+    if let Some(worktree) = conversation.worktree.clone() {
+        checkouts.push((
+            conversation.repo.id,
+            conversation.repo.name.clone(),
+            worktree,
+        ));
+    }
+
+    for companion in &conversation.companions {
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        if let Some(worktree) = companion.worktree.clone() {
+            checkouts.push((
+                companion.repo.id,
+                companion.repo.name.clone(),
+                worktree.clone(),
+            ));
+        }
+    }
+
+    let tidied = tokio::task::spawn_blocking(move || {
+        checkouts
+            .into_iter()
+            .filter_map(|(repo_id, repo, worktree)| {
+                let already = already.get(&repo_id)?;
+
+                Some((repo, put_back(&worktree, already)))
+            })
+            .collect::<Vec<_>>()
+    })
+    .await;
+
+    match tidied {
+        Ok(tidied) => {
+            for (repo, taken) in tidied {
+                if taken.is_empty() {
+                    continue;
+                }
+
+                tracing::info!(
+                    conversation_id,
+                    repo,
+                    paths = ?taken,
+                    "the investigation's scratch was taken out of the checkout it wrote it in, \
+                     the Conversation going back to work in there",
+                );
+            }
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "tidying an investigation's checkouts failed");
+        }
+    }
+}
+
+/// The Conversation, or nothing at all where the record would not say.
+async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversation> {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(conversation) => conversation,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading a Conversation to tidy its checkouts failed");
+            None
+        }
+    }
+}
+
+/// Take out of `worktree` everything git sees as changed that `already` does not
+/// name, and say which paths went.
+///
+/// Three git calls per path rather than one over all of them, which is what keeps
+/// one awkward path from costing the rest: `git checkout -- a b` where `b` is
+/// unknown to git restores neither, and an investigation's probes are a handful
+/// of files. In order, because each one is what makes the next one's job plain:
+///
+/// 1. `reset` puts the index back to HEAD for that path, so whatever the session
+///    staged is unstaged and what is left is a worktree change or an untracked
+///    file.
+/// 2. `checkout` restores it from the index, which is now HEAD's. That is the
+///    whole of a modified or deleted file, and it fails for a path HEAD never
+///    had — a probe the session wrote and staged — which is not an error here.
+/// 3. `clean` takes away what is untracked, which is that path where the
+///    checkout found nothing to restore and nothing anywhere else.
+///
+/// An empty directory the probe was the only thing in is left behind, and git
+/// sees no change in one: nothing reads it, nothing commits it, and reaching for
+/// `clean -d` to be rid of it would be reaching past the paths this was given.
+fn put_back(worktree: &std::path::Path, already: &[String]) -> Vec<String> {
+    let Some(changed) = crate::diffs::changed(worktree) else {
+        tracing::warn!(
+            worktree = ?worktree,
+            "git would not say what an investigation left in this checkout, so nothing was taken \
+             out of it",
+        );
+        return Vec::new();
+    };
+
+    let mut taken = Vec::new();
+
+    for change in changed {
+        // Both ends of a rename, because either end of one is a path that was
+        // changed — and the record names both for the same reason.
+        for path in change.from.into_iter().chain([change.path]) {
+            if already.contains(&path) {
+                continue;
+            }
+
+            crate::repos::git(worktree, &["reset", "--quiet", "--", &path]);
+            crate::repos::git(worktree, &["checkout", "--quiet", "--", &path]);
+            crate::repos::git(worktree, &["clean", "--quiet", "--force", "--", &path]);
+
+            taken.push(path);
+        }
+    }
+
+    taken
 }
 
 /// Where on the Timeline this investigation was steered into being, and the
@@ -282,10 +482,14 @@ mod tests {
     #[test]
     fn an_investigation_no_steer_opened_ends_done() {
         assert_eq!(
-            homeward(&[moved(Lifecycle::Investigating)]),
+            homeward(&[moved(Lifecycle::Investigating)]).state,
             Lifecycle::Done,
         );
-        assert_eq!(homeward(&[]), Lifecycle::Done, "and so does an empty one");
+        assert_eq!(
+            homeward(&[]).state,
+            Lifecycle::Done,
+            "and so does an empty one"
+        );
     }
 
     /// One steered into Investigating goes back to the state the steer found it in,
@@ -305,7 +509,8 @@ mod tests {
                     moved(source),
                     steer(Lifecycle::Investigating, Some(source)),
                     moved(Lifecycle::Investigating),
-                ]),
+                ])
+                .state,
                 source,
                 "{source:?} is where the steer found it, so {source:?} is where it \
                  goes back to",
@@ -335,7 +540,7 @@ mod tests {
             Lifecycle::Done,
         ] {
             assert_eq!(
-                homeward(&[steer(Lifecycle::Investigating, Some(source))]),
+                homeward(&[steer(Lifecycle::Investigating, Some(source))]).state,
                 Lifecycle::Done,
                 "a steer out of {source:?}",
             );
@@ -357,7 +562,8 @@ mod tests {
                 steer(Lifecycle::FollowUp, Some(Lifecycle::Wrapping)),
                 steer(Lifecycle::Investigating, Some(Lifecycle::Wrapping)),
                 moved(Lifecycle::Investigating),
-            ]),
+            ])
+            .state,
             Lifecycle::Wrapping,
             "the grilling it was taken out of a year ago is not where this one \
              came from",
@@ -373,7 +579,7 @@ mod tests {
     #[test]
     fn a_steer_recorded_before_the_source_was_ends_done() {
         assert_eq!(
-            homeward(&[steer(Lifecycle::Investigating, None)]),
+            homeward(&[steer(Lifecycle::Investigating, None)]).state,
             Lifecycle::Done,
         );
     }

@@ -42,11 +42,11 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, Adding, Base, CompanionMode, Deleting, Directing, Edited, Event, Joining, Lifecycle,
-    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Settling, Steer,
-    SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile, fix_attempts,
-    load_conversation, open_database, pick_direction, record_fix_attempt, register_repo,
-    save_brief, settle_naming, settle_wrap_up, start_conversation, start_grilling,
-    start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
+    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Scratch, Settling,
+    Steer, SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile,
+    fix_attempts, load_conversation, open_database, pick_direction, record_fix_attempt,
+    register_repo, save_brief, scratch, settle_naming, settle_wrap_up, start_conversation,
+    start_grilling, start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
 };
 
 /// The plainest steer there is: the move and nothing beside it.
@@ -69,6 +69,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         checkouts: &[],
         said: None,
         recorded: Recorded::default(),
+        scratch: &[],
     }
 }
 
@@ -1230,6 +1231,158 @@ async fn a_steer_from_before_the_source_was_written_down_reads_back_without_one(
         [(Lifecycle::Investigating, None)],
         "the rest of the record is exactly where it was",
     );
+}
+
+/// What each checkout already held uncommitted when the steer went in, read back
+/// by the Repo it is of.
+///
+/// **Read and clean is not the same answer as never read**, which is the whole
+/// reason a checkout that held nothing is written down at all: the ending puts
+/// back the checkouts it has a reading of and leaves the rest exactly as it finds
+/// them, so a clean one left out of the record would be one nothing ever tidied.
+///
+/// Read again out of a second pool over the same file, because the ending that
+/// wants it may be hours and a restart away.
+#[tokio::test]
+async fn a_steer_records_what_each_checkout_already_held() {
+    let (dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+    let docs = alongside(&pool, "askance").await;
+
+    let half_done = ["probes/window.rs".to_owned(), "README.md".to_owned()];
+
+    steer_conversation(
+        &pool,
+        id,
+        Steer {
+            scratch: &[
+                Scratch {
+                    repo_id: own(&pool, id).await,
+                    paths: &half_done,
+                },
+                // Read and clean, which is a row of its own.
+                Scratch {
+                    repo_id: docs,
+                    paths: &[],
+                },
+            ],
+            ..into(Lifecycle::Investigating)
+        },
+    )
+    .await
+    .unwrap();
+
+    let event = steered(&pool, id).await;
+
+    pool.close().await;
+
+    let reopened = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let held = scratch(&reopened, event).await.unwrap();
+
+    assert_eq!(
+        held.get(&own(&reopened, id).await).map(|paths| {
+            let mut paths = paths.clone();
+            paths.sort();
+            paths
+        }),
+        Some(vec!["README.md".to_owned(), "probes/window.rs".to_owned()]),
+        "what the Worktree was part way through is what reads back: {held:?}",
+    );
+    assert_eq!(
+        held.get(&docs),
+        Some(&Vec::new()),
+        "and a checkout that held nothing reads back as one that was read: \
+         {held:?}",
+    );
+
+    reopened.close().await;
+}
+
+/// And a steer from before any of this was written down has no reading at all,
+/// which is not the same as a reading that found nothing.
+///
+/// ADR-0006's rule on the one thing the ending would be most wrong about: a
+/// checkout missing from the map is one nobody read, so the ending leaves it as it
+/// finds it and an investigation steered by an older Verkstead ends exactly as it
+/// used to. The rows are taken away by hand, which is the only way to have a
+/// record that old in a database this build made.
+#[tokio::test]
+async fn a_steer_from_before_the_scratch_was_read_has_no_reading_of_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let half_done = ["README.md".to_owned()];
+
+    steer_conversation(
+        &pool,
+        id,
+        Steer {
+            scratch: &[Scratch {
+                repo_id: own(&pool, id).await,
+                paths: &half_done,
+            }],
+            ..into(Lifecycle::Investigating)
+        },
+    )
+    .await
+    .unwrap();
+
+    let event = steered(&pool, id).await;
+
+    sqlx::query("DELETE FROM steer_scratch")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        scratch(&pool, event).await.unwrap().is_empty(),
+        "nothing there says nobody wrote one rather than saying the checkout was \
+         clean",
+    );
+}
+
+/// And the ordinary steer records no reading either, there being no ending that
+/// would want one: it is read for a steer into Investigating and for nothing else.
+#[tokio::test]
+async fn a_steer_into_anywhere_else_records_no_reading_of_the_checkouts() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert!(
+        scratch(&pool, steered(&pool, id).await)
+            .await
+            .unwrap()
+            .is_empty(),
+    );
+}
+
+/// The Repo a Conversation's own checkout is of.
+async fn own(pool: &SqlitePool, id: i64) -> i64 {
+    load_conversation(pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there")
+        .repo
+        .id
+}
+
+/// The newest Steer Event on this Conversation's Timeline, by id.
+async fn steered(pool: &SqlitePool, id: i64) -> i64 {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| matches!(event.event, Event::Steer(..)))
+        .next_back()
+        .expect("there is a steer on the Timeline")
+        .id
 }
 
 /// Where each steer on this Timeline went, and where the record says it came

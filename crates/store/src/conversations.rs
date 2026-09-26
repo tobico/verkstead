@@ -4581,6 +4581,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         checkouts,
         said,
         recorded,
+        scratch,
     } = steer;
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
@@ -4725,7 +4726,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // for the reason the Worktree above is — a Steer Event that said where the
     // work went without saying what was picked to run it would be half an
     // account of one press, and nothing could tell which half.
-    super::steers::record(&mut tx, steered, id, recorded, companions, opened).await?;
+    super::steers::record(&mut tx, steered, id, recorded, companions, opened, scratch).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -4932,6 +4933,16 @@ pub struct Steer<'a> {
     /// the same list — and a second copy on the submit would be two shapes to
     /// keep true about one press. See [`super::SteerRecord`].
     pub recorded: super::steers::Recorded<'a>,
+
+    /// And what each checkout already held uncommitted, read off the checkouts
+    /// as the submit lands rather than written by anybody.
+    ///
+    /// Empty on every steer but one into Investigating, which is the one target
+    /// whose ending has to put a Worktree back to what it found: an investigation
+    /// leaves its probes behind by instruction, and the only way to take those
+    /// away without taking away work that was already uncommitted is to have
+    /// written down which was which. See [`super::Scratch`].
+    pub scratch: &'a [super::Scratch<'a>],
 }
 
 /// A Pairing a steer settles: which of the roles, and both halves of the

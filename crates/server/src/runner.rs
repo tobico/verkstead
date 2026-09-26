@@ -2499,7 +2499,10 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
         Ok(landing) => landing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading where an investigation came from failed, so it is ending Done");
-            store::Lifecycle::Done
+            crate::investigations::Landing {
+                state: store::Lifecycle::Done,
+                steered: None,
+            }
         }
     };
 
@@ -2512,7 +2515,7 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
 
     state.sessions.end(conversation_id).await;
 
-    match store::investigation_over(&state.pool, conversation_id, landing).await {
+    match store::investigation_over(&state.pool, conversation_id, landing.state).await {
         Ok(store::Investigated::Landed) => {}
         Ok(outcome) => {
             tracing::info!(
@@ -2542,10 +2545,20 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
 
     // An Investigate Conversation, or one steered in from a Draft or from a close:
     // Done is where the work has got to and nothing is supposed to be driving it.
-    if landing == store::Lifecycle::Done {
+    // Its scratch stays where the session wrote it, as it does for any Done
+    // Conversation — the Worktree goes with the close, and nothing is going to
+    // work in there before then.
+    if landing.state == store::Lifecycle::Done {
         drop(driving);
         return;
     }
+
+    // Every other landing hands the checkouts back to sessions that commit and
+    // push, so what the investigation wrote in them comes out first — after the
+    // move, which is what says this investigation is the one that ended, and
+    // before the driver below, which is the first thing that would work in there.
+    // See [`crate::investigations::tidied`].
+    crate::investigations::tidied(state, conversation_id, landing.steered).await;
 
     // Held across the recompute and handed to whatever it starts, which is what
     // [`crate::resume::landed`] takes it for: dropping first would leave a moment

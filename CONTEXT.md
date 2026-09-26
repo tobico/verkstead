@@ -1408,8 +1408,9 @@ make, so its pull request is what it is asked for instead.
 non-zero saying what is missing, the session stays alive, and the agent puts it
 right in the same turn. Refused too over uncommitted changes, in the Worktree or
 in any companion repo the Conversation may write in, naming the files — except
-for an Investigate session, whose scratch is the point and goes with the
-Worktree — and, for
+for an Investigate session, whose scratch is the point and is Verkstead's to take
+back out where the ending hands the checkout back to work; see
+**Investigating** — and, for
 a session meant to end on a pull request, while the branch has none open, or any
 companion repo the work committed in has none, GitHub out of reach reading as
 accepted. The companions are asked about here rather than only by the wrap-up
@@ -2083,7 +2084,10 @@ state and it takes a brief the way Follow-up does; Draft and Closed are
 not among them, each having a way in of its own. **What state it was steered
 from is written down beside the Steer**, because one target reads it back:
 Investigating ends in the state it left rather than at Done — see
-**Investigating**. Sources are every state there
+**Investigating**. So is **what each checkout was already holding uncommitted**,
+for the same target and the same ending: what the investigation wrote comes out
+on the way back to work, and what the human had left half done stays.
+Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather
 than another move along it. So every refusal is about the target instead of the
@@ -2284,6 +2288,18 @@ place the **Done signal** is accepted over uncommitted changes, and the one
 working state that never ends on a pull request. The branch is still named — a
 Conversation's title is worth a cheap rename — and it outlives the checkout with
 nothing on it.
+
+**And the scratch is taken back out where the Conversation goes back to work.**
+One that ends **Done** keeps it: nothing is going to work in that checkout
+before the close takes it away. One that lands in a state something runs in
+hands the same checkout to sessions that commit and push — each of which stages
+everything it finds — so what the investigation wrote comes out on the way,
+leaving the checkout as the **Steer** found it. Which is why the steer writes
+down what each checkout was *already* holding uncommitted: a path that was half
+done before the question was asked stays half done, and only what the
+investigation added goes. A path on both lists stays, the record holding paths
+rather than contents — a probe left in a file somebody was working on costs a
+line in a diff, and reverting it would cost them the work.
 
 **What ends it is the human's mark and the session's Done signal together**,
 exactly as a follow-up: the newest answered round carries **Nothing else**, and
