@@ -41,14 +41,14 @@ use verkstead_render::{
     FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite,
     FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, Process, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -374,6 +374,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // facts about. Refused from the moment there is a checkout, like both
         // of them.
         .route("/api/ui/conversations/{id}/repo", post(switch_repo))
+        // And what kind of work it is, which the picker beside that panel asks
+        // and which is refused off the same two questions: a Process is the
+        // Draft's to change and nobody else's.
+        .route("/api/ui/conversations/{id}/process", post(pick_process))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // And the other registered Repos the work runs alongside, added and
@@ -1897,6 +1901,7 @@ pub(crate) async fn conversation_view(
             path: conversation.repo.path.to_string_lossy().into_owned(),
             default_branch: conversation.repo.default_branch,
         },
+        process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
         naming: conversation.naming,
@@ -3843,6 +3848,30 @@ async fn switch_repo(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/process` — say what kind of work a drafting
+/// Conversation is for.
+///
+/// Every refusal is the server's, as the Repo switch's are: a picker that offers
+/// only the Processes whose stage has landed is a courtesy, and this endpoint is
+/// reachable without one.
+async fn pick_process(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<ProcessChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ProcessPicked::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::pick_process(&state.pool, id, choice.process).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "picking a conversation's Process failed");
+            unavailable("the process could not be picked")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/branch` — name the branch the work will be
 /// done on.
 async fn rename_branch(
@@ -4799,6 +4828,30 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::FollowUp => Lifecycle::FollowUp,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
+    }
+}
+
+/// And the store's Process as the viewer receives it. One word either side, and
+/// this is where those two vocabularies are held to each other — the pair
+/// [`lifecycle`] above is, for the fact beside it.
+pub(crate) fn process(process: store::Process) -> Process {
+    match process {
+        store::Process::Develop => Process::Develop,
+        store::Process::Investigate => Process::Investigate,
+        store::Process::Review => Process::Review,
+        store::Process::Tinker => Process::Tinker,
+        store::Process::FixMergeIssues => Process::FixMergeIssues,
+    }
+}
+
+/// And back the other way, for the one press that writes one.
+pub(crate) fn picked_process(process: Process) -> store::Process {
+    match process {
+        Process::Develop => store::Process::Develop,
+        Process::Investigate => store::Process::Investigate,
+        Process::Review => store::Process::Review,
+        Process::Tinker => store::Process::Tinker,
+        Process::FixMergeIssues => store::Process::FixMergeIssues,
     }
 }
 

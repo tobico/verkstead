@@ -43,6 +43,8 @@ import { UNNAMED } from "../src/workbench/Brief";
 // The header a commit's pane draws itself with: the subject, the repository it
 // landed in where that is worth saying, and how much it moved.
 import commitStyles from "../src/workbench/Commit.module.css";
+// And the words a Process is said in, read rather than spelled out again here.
+import { PROCESS } from "../src/workbench/processes";
 // And the cards the record is walked by.
 import timeline from "../src/workbench/Timeline.module.css";
 import alongside from "./fixtures/set-alongside.json" with { type: "json" };
@@ -396,6 +398,32 @@ describe("a shared conversation", () => {
     }
   });
 
+  /// And what kind of work it was, which reaches the file without anything being
+  /// written for it: a share is the Conversation's own payload curated, so a
+  /// fact in the half a reader is owed travels with the three around it.
+  it("says which process the work was", async () => {
+    const brief = SHARED.conversation.timeline.find(
+      (event): event is Extract<TimelineEvent, { Brief: unknown }> =>
+        "Brief" in event,
+    );
+    expect(brief).toBeTruthy();
+
+    render(() => <Share shared={holding([brief!])} />);
+
+    const details = await screen.findByLabelText("Details");
+    const process = await waitFor(() => {
+      const found = [...details.querySelectorAll("div")].find(
+        (fact) => fact.querySelector("dt")?.textContent === "Process",
+      );
+      if (!found) throw new Error("the pane should say which Process it was");
+      return found;
+    });
+
+    expect(process.querySelector("dd")?.textContent).toBe(
+      PROCESS[SHARED.conversation.process],
+    );
+  });
+
   /// A share of work nobody has named yet says what will become of the branch
   /// rather than the name Verkstead invented for the row.
   ///
@@ -465,8 +493,10 @@ describe("a shared conversation", () => {
       [...details.querySelectorAll("dt")].map((term) => term.textContent);
 
     // What the work is against, which is the whole of what a reader is owed
-    // about how it was set up.
+    // about how it was set up — and what kind of work it was, which is a fact
+    // about the work rather than about the machine, so it is said here too.
     expect(facts()).toContain("Repo");
+    expect(facts()).toContain("Process");
     expect(facts()).toContain("Branch");
     expect(facts()).toContain("Base");
 

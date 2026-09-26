@@ -44,11 +44,23 @@ about how Develop runs changes.
 - **The picker offers a Process only once its stage has landed**, as an agent
   type is offered only once it can launch the real thing. One row for now, and
   the row list is the one place a later stage adds to.
-- **Drawn on the Brief's setup facts beside the Pairings and in the details
-  pane, nowhere else.** The sidebar row and the card keep the state word.
+- **Drawn on the Brief's setup facts, nowhere else.** The sidebar row and the
+  card keep the state word. *Amended while planning this stage*: beside the
+  Repo, the branch and the base rather than beside the Pairings — those facts
+  come in two halves and the Pairings are in the one a Share does not draw,
+  being about the machine. The setup facts and the details pane are the same
+  place: that pane is where they are summarised.
 - **Switching is a Draft's freedom**, refused from the moment a worktree
   exists, on the same rule and with the same refusal shape as switching the
-  Repo. Frozen at Start beside the Pairings, in the grill-start transaction.
+  Repo. Frozen at Start beside the Pairings — which is the refusal and nothing
+  more (*amended while planning this stage*): the Pairings freeze because every
+  field endpoint refuses once a worktree row exists, and the start transaction
+  writes no Pairing, so nothing is written for a Process either. A row means
+  somebody picked; no row means the reading stands.
+- **A Draft holding a pull-request adoption draws the control disabled, reading
+  Review** (*settled while planning this stage*), as the Repo picker reads
+  disabled once it is settled: that is what the Conversation is, and Review is
+  not pickable until stage 05.
 
 ## Proposed tasks (provisional)
 

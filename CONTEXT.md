@@ -190,8 +190,10 @@ the Implementation Pairing alone. Develop is every new draft's default and is
 never remembered, unlike the Pairings — it is the one thing about a
 Conversation likeliest to differ from the last. Conversations from before this
 read Develop, and one that adopted a pull request reads Review. Drawn on the
-Brief's setup facts beside the Pairings and in the details pane, and nowhere
-else: the state word already says where the work is. Offered on the picker
+Brief's setup facts beside the Repo, the branch and the base — a fact about the
+work rather than about the machine it was worked on, so a **Share** says it as
+those three are said — and nowhere else: the state word already says where the
+work is. Offered on the picker
 only once its stage has landed, as an agent type is offered only once it can
 launch the real thing. See ADR-0020.
 _Avoid_: mode, kind, type, workflow, flow, template, Direction (that is how

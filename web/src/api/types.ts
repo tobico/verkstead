@@ -1304,7 +1304,21 @@ export type ConversationView = { id: number,
  * shows the same three facts about it, and a second shape for the same
  * thing would be a second opinion about what a Repo is.
  */
-repo: RepoEntry, branch: string, 
+repo: RepoEntry, 
+/**
+ * What kind of work it is: the Process, picked on the composer between the
+ * Repo and the Pairings and frozen when the work starts — see [`Process`].
+ *
+ * Never `null`. Every Conversation has one, including every one started
+ * before there were any: where the record holds no pick the reading stands,
+ * and the reading is the store's.
+ *
+ * Beside the Repo rather than beside the Pairings, which is where the pane
+ * draws it: the Pairings are in the half of the Configuration that is about
+ * the machine the work was done on, and a Process is a fact about the work.
+ * So it is one of the facts a published share says.
+ */
+process: Process, branch: string, 
 /**
  * Whether that name is one somebody settled on, rather than the one
  * Verkstead prefilled the record with — see
@@ -3064,6 +3078,42 @@ token: Prefilled | null, };
  * blind.
  */
 export type Prefilled = { value: string, source: Source, };
+
+/**
+ * What kind of work a Conversation is for, and so which states it runs
+ * through.
+ *
+ * [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
+ * Set, so it is the viewer's half of a fact of the record's — the store's own
+ * enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
+ * held to each other in one function on the server.
+ *
+ * All five, though only [`Process::Develop`] can start anything yet: which of
+ * them the picker offers is a list of its own, and what a stage after this one
+ * adds is a row on that list and a start path behind it — never a variant. A
+ * wire that carried only what could be started would be one to widen every
+ * time one more could.
+ *
+ * See ADR-0020.
+ */
+export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues";
+
+/**
+ * What kind of work a drafting Conversation is for.
+ *
+ * The Process and nothing else, the way [`RepoChoice`] is an id and nothing
+ * else: which one it is is the whole of what the picker says.
+ *
+ * Any of the five may be asked for — the wire carries all of them, and whether
+ * the one asked for can be started yet is the server's list to keep rather than
+ * something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+ */
+export type ProcessChoice = { process: Process, };
+
+/**
+ * What became of picking one.
+ */
+export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded";
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps

@@ -52,6 +52,7 @@ import {
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
+  pickProcess,
   renameBranch,
   renameCompanionBranch,
   saveBrief,
@@ -64,12 +65,13 @@ import {
   startPullRequestAdoption,
   takeUpPullRequest,
 } from "../api/client";
-import type { CompanionMode, Started } from "../api/types";
+import type { CompanionMode, Process, Started } from "../api/types";
 import { forget, read, write } from "../device";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL } from "./Composer";
+import { PROCESS } from "./processes";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -78,6 +80,7 @@ import {
   COMPANION_MODE_REFUSAL,
   COMPANION_REFUSAL,
   CHOICE_REFUSAL,
+  PROCESS_REFUSAL,
   RULE,
 } from "./Setup";
 import { takeUpRefusal } from "./TakeUp";
@@ -164,11 +167,12 @@ export type AdoptingPullRequest = {
 
 /// The whole of a compose page, as it sits on the device between visits.
 ///
-/// Three of the fields are `null` where they are **untouched** rather than
+/// Four of the fields are `null` where they are **untouched** rather than
 /// empty, which is a distinction the replay lives on: a role nobody picked is
-/// left for the server's own prefill to fill in, and a role picked away is a
-/// choice like any other. The repo is `null` for the same reason and one more —
-/// nothing at all can be created without one.
+/// left for the server's own prefill to fill in, a Process nobody picked is left
+/// for the server's own reading, and a role picked away is a choice like any
+/// other. The repo is `null` for the same reason and one more — nothing at all
+/// can be created without one.
 export type Composed = {
   repo: number | null;
   brief: string;
@@ -178,6 +182,16 @@ export type Composed = {
   /// And the branch it comes off, `null` being that repo's default-branch rule.
   base: string | null;
   companions: Alongside[];
+  /// What kind of work it is, `null` being a picker nobody has touched — which
+  /// is what leaves the server's own reading standing, exactly as an untouched
+  /// role does.
+  ///
+  /// Not remembered per Repo, unlike the three roles under it: the pairings are
+  /// remembered because they are the same answer most of the time, and a
+  /// Process is the one thing about a Conversation likeliest to differ from the
+  /// last. So the control stands on Develop for every repo, and this is `null`
+  /// until somebody says otherwise.
+  process: Process | null;
   /// Who runs each of the three roles, as a picker writes it — `null` for a
   /// role nobody has touched. See `src/pairing.ts`.
   grilling: string | null;
@@ -209,6 +223,7 @@ export function blank(): Composed {
     branch: "",
     base: null,
     companions: [],
+    process: null,
     grilling: null,
     implementation: null,
     review: null,
@@ -238,6 +253,7 @@ export function empty(state: Composed): boolean {
     state.branch === "" &&
     state.base === null &&
     state.companions.length === 0 &&
+    state.process === null &&
     state.grilling === null &&
     state.implementation === null &&
     state.review === null &&
@@ -395,6 +411,22 @@ export async function create(
 
   for (const alongside of state.companions) {
     await put(id, alongside, said);
+  }
+
+  // What kind of work it is, and only where the human touched the picker: a
+  // page left on Develop sends nothing, exactly as a role left on its prefill
+  // does, and the server's own reading of a Conversation with no row of its own
+  // is what stands.
+  //
+  // Not asked of a page holding a pull request, which answers this for itself
+  // the way it answers the branch and the base: what a take-up makes is a
+  // Review, and that is the reading rather than a row anybody wrote.
+  if (pull === null && state.process !== null) {
+    const outcome = await pickProcess(id, state.process);
+    said(
+      outcome === "Picked",
+      `The process could not be picked: ${PROCESS_REFUSAL[outcome]}`,
+    );
   }
 
   if (state.grilling !== null) {
@@ -606,6 +638,7 @@ function parsed(body: string): Composed | null {
     typeof held.branch !== "string" ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
+    !kind(held.process) ||
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
@@ -640,6 +673,7 @@ function parsed(body: string): Composed | null {
     branch: held.branch,
     base: held.base,
     companions,
+    process: held.process ?? null,
     grilling: held.grilling,
     implementation: held.implementation,
     review: held.review,
@@ -699,6 +733,22 @@ function taken(value: unknown): value is AdoptingPullRequest | null | undefined 
     typeof pull.head === "string" &&
     typeof pull.base === "string" &&
     typeof pull.stowed === "string"
+  );
+}
+
+/// Whether this is a Process the wire knows, or the absence of one.
+///
+/// Checked against the words rather than merely for a string, because a Process
+/// goes straight back out on the wire: a body left by some other build holding a
+/// word this one has never heard of would be a request refused for a reason
+/// nobody could act on. A body from before this field has no `process` at all,
+/// which is untouched rather than a fault — [`loaded`]'s absence, read the same
+/// way.
+function kind(value: unknown): value is Process | null | undefined {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && Object.hasOwn(PROCESS, value))
   );
 }
 

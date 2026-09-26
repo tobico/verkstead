@@ -153,6 +153,78 @@ impl Lifecycle {
     }
 }
 
+/// What kind of work a Conversation is for, and so which states it runs
+/// through.
+///
+/// [`Lifecycle`]'s pair rather than [`Direction`]'s: a fact of the
+/// Conversation's, picked before anything runs and frozen when the work starts,
+/// where a Direction rides a Question Set as a field of `Proposal` and so lives
+/// in the schema crate the agents write against. A Process is on no Set.
+///
+/// All five from the start, though only [`Process::Develop`] can launch
+/// anything yet: the record reads and writes every one of them, and what a
+/// stage after this one adds is a start path and a row on the picker — never a
+/// variant. A store that held only what could be started would be one to
+/// migrate every time one more could.
+///
+/// See ADR-0020.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Process {
+    /// The ladder as it has always run, the interview included: Draft,
+    /// Grilling, Implementing, Wrapping, Done. Every new draft's default, and
+    /// the reading of every Conversation from before there were Processes.
+    Develop,
+
+    /// Questions about the code answered without changing it: Draft to
+    /// Investigating to Done, in a Worktree it is told to commit nothing from.
+    Investigate,
+
+    /// The wrap-up run over a pull request or a branch the Brief names: Draft
+    /// to Wrapping, reviewed. The Process a Conversation that adopted a pull
+    /// request already was, which is why that is how one reads.
+    Review,
+
+    /// Follow-up entered from a Draft: rounds on a fresh branch for as long as
+    /// the human wants, wrapping up where they left commits and finishing Done
+    /// where they left none.
+    Tinker,
+
+    /// A wrap-up narrowed to what GitHub refuses a merge for: Draft to
+    /// Wrapping with the review and the comments settled before it looks.
+    FixMergeIssues,
+}
+
+impl Process {
+    /// The word the column holds. Lowercase and spelled out, so the table reads
+    /// as something rather than as a number nobody can look up — exactly as
+    /// [`Lifecycle::stored`] is, and its own pair of functions rather than
+    /// serde for the same reason: what goes in a `TEXT` column is this module's
+    /// business.
+    pub(crate) fn stored(self) -> &'static str {
+        match self {
+            Self::Develop => "develop",
+            Self::Investigate => "investigate",
+            Self::Review => "review",
+            Self::Tinker => "tinker",
+            Self::FixMergeIssues => "fix-merge-issues",
+        }
+    }
+
+    /// The Process a stored word names. A word this does not know is a database
+    /// written by a Verkstead this one does not understand, which is worth
+    /// saying rather than guessing past — as an unknown state is.
+    pub(crate) fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "develop" => Self::Develop,
+            "investigate" => Self::Investigate,
+            "review" => Self::Review,
+            "tinker" => Self::Tinker,
+            "fix-merge-issues" => Self::FixMergeIssues,
+            other => bail!("a Conversation is running the unknown Process {other:?}"),
+        })
+    }
+}
+
 /// A Conversation as the store holds it, with the Repo it is attached to read
 /// back beside it — there is no Conversation without one, and everything done
 /// about a Conversation is done inside that repository.
@@ -262,6 +334,16 @@ pub struct Conversation {
     /// nothing to pick on. A later pick replaces an earlier one, because a later
     /// proposal supersedes the one before it.
     pub direction: Option<Direction>,
+
+    /// And what kind of work it is for, which is the other half of that pair:
+    /// picked before anything runs, where a Direction is picked inside the
+    /// grilling — see [`Process`].
+    ///
+    /// Never optional. Every Conversation has a Process, including every one
+    /// started before there were any: where no row was written the reading
+    /// stands, which is Review for a Conversation holding a pull request and
+    /// Develop for every other — see [`process`].
+    pub process: Process,
 
     /// Which roadmap this Conversation is adopting, where it is adopting one.
     ///
@@ -1114,6 +1196,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the directions table")?;
 
+    // And what kind of work the Conversation is for: its Process, picked on the
+    // composer before anything runs. A table of its own for the reason the
+    // direction is one — there is no migration machinery here and
+    // `conversations` is STRICT and left alone — and it needs none besides: a
+    // database written before this arrives with the table empty, and a
+    // Conversation with no row of its own is read rather than backfilled. See
+    // [`process`], and ADR-0020 for why a Process is beside a Direction rather
+    // than folded into it.
+    //
+    // One Process per Conversation by the primary key, and a pick replaces
+    // whatever was there — the upsert the direction is written through.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS processes (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             process         TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the processes table")?;
+
     // What a roadmap stage's branch was put on top of, where it was put on top
     // of anything. A table of its own for the reason the direction is one, and
     // one row per stage Conversation — written by [`start_stage`] and by nothing
@@ -1936,6 +2039,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
+        process: process(pool, id).await?,
         adopting: adopting(pool, id).await?,
         adopting_pull_request: adopted_pull_request(pool, id).await?,
         companions: super::companions(pool, id).await?,
@@ -2229,6 +2333,79 @@ async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
             .with_context(|| format!("reading the direction of Conversation {id}"))?;
 
     row.map(|(word,)| direction_read(&word)).transpose()
+}
+
+/// What kind of work a Conversation is for.
+///
+/// A Process rather than an optional one, because every Conversation has one:
+/// where no row was ever written the reading stands, and the reading is the
+/// whole of how Conversations from before there were Processes are covered.
+/// Nothing is backfilled — a row is written into none of them, and the same
+/// rule answers for whichever kind of row a Conversation happens to lack.
+///
+/// **Review where it is holding a pull-request adoption**, that being the
+/// Process its path already was: a Conversation started off *Wrap up a pull
+/// request* went Draft to Wrapping over somebody else's branch, which is what
+/// Review is. **Develop otherwise**, that being the one ladder there was.
+///
+/// The adoption row is the right thing to ask because it is never taken away:
+/// the take-up supersedes it by recording the pull request properly and leaves
+/// it where it is, so it goes on saying what the Conversation was started as
+/// for the whole of its life.
+pub async fn process(pool: &SqlitePool, id: i64) -> Result<Process> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT process FROM processes WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the Process of Conversation {id}"))?;
+
+    if let Some((word,)) = row {
+        return Process::read(&word);
+    }
+
+    Ok(match adopted_pull_request(pool, id).await? {
+        Some(_) => Process::Review,
+        None => Process::Develop,
+    })
+}
+
+/// Pick a drafting Conversation's Process.
+///
+/// Refused off the same two questions the branch name and the base commit are —
+/// where the Conversation has got to, and whether its branch has been made.
+/// Which is the whole of how a Process is frozen at Start: nothing is written
+/// when the work begins, and from the moment there is a worktree there is no
+/// way left to change it. A row means somebody picked; no row means the reading
+/// stands.
+///
+/// Which Processes can actually be *started* is not this function's question.
+/// The record reads and writes all five — see [`Process`] — and whether the one
+/// picked has a start path behind it yet is the server's list to keep.
+///
+/// The upsert [`pick_direction`] makes, for the same reason: one Process per
+/// Conversation by the primary key, and a second pick is the human changing
+/// their mind rather than a second Process.
+pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result<Edited> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
+    }
+
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET process = excluded.process",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .execute(pool)
+    .await
+    .with_context(|| format!("recording the Process picked on Conversation {id}"))?;
+
+    Ok(Edited::Saved)
 }
 
 /// Which roadmap a Conversation is adopting, where it is adopting one.

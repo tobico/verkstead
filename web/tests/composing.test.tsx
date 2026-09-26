@@ -38,6 +38,9 @@ import takeUp from "../src/workbench/TakeUp.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
+// The Processes the picker offers and the words they are said in, read rather
+// than spelled out again: what the row offers is that list and nothing else.
+import { OFFERED, PROCESS } from "../src/workbench/processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -751,6 +754,123 @@ describe("the compose page", () => {
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(PROFILES.length).toBeGreaterThan(0);
+  });
+});
+
+/// What kind of work the page is composing, which is the one control in the row
+/// that is *not* remembered per repo.
+///
+/// What the control looks like and what it offers are the composer's own and are
+/// asked about in `workbench.test.tsx`. What is asked here is the half a compose
+/// page owns: where it stands before anybody touches it, that a pick lands on
+/// the device, and what the create does — or does not do — with what is held.
+describe("the process a compose page is composing under", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// Where the row reads it, which is the order the row is read in: the
+  /// repository, what kind of work it is, and then who runs it.
+  it("stands between the repo and the roles, on Develop", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const row = await drawn(container, `.${setup.options}`);
+    // Waited for: the profiles are a read of their own, and the three pickers
+    // at the far end of the row are drawn once it has landed.
+    await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
+
+    const at = (selector: string) =>
+      [...row.children].findIndex((option) => option.matches(selector));
+
+    expect(at(`.${setup.repoSelect}`)).toBe(0);
+    expect(at(`.${setup.processChoice}`)).toBe(1);
+    expect(at(`.${setup.profileChoice}`)).toBe(2);
+
+    // Develop for every repo, remembered nowhere: it is the one thing about a
+    // conversation likeliest to differ from the last.
+    expect(showing("Process")).toBe("Develop");
+    await pickRepo(container, REPOS[1]!.id);
+    expect(showing("Process")).toBe("Develop");
+  });
+
+  /// One row for now. A Process is offered only once its stage has landed, as
+  /// an agent type is offered only once it can launch the real thing.
+  it("offers the processes that have landed and no others", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
+
+    expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
+    expect(OFFERED).toEqual(["Develop"]);
+  });
+
+  /// The server applies its own reading to the Conversation it creates — no row
+  /// at all is Develop — so a picker nobody touched has nothing to say. Sending
+  /// it back would be this page claiming somebody chose it.
+  it("sends nothing for a process left on Develop", async () => {
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    await waitFor(() => expect(showing("Process")).toBe("Develop"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(0);
+  });
+
+  /// And exactly one where it was touched, even where what was picked is what
+  /// the control was already showing: what the human touched is the page's to
+  /// say, and the record is what says it afterwards.
+  it("sends one request for a process the human picked", async () => {
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+
+    await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
+    pick("Process", PROCESS.Develop);
+
+    // Held on the device the moment it is picked, so a reload loses nothing.
+    expect(stored().process).toBe("Develop");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
+      ).toEqual({ process: "Develop" }),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(1);
   });
 });
 
@@ -1931,6 +2051,68 @@ describe("wrapping up a pull request from the compose page", () => {
     expect(screen.getByLabelText("Review")).toBeTruthy();
   });
 
+  /// And the Process, which is settled the way the repo is rather than taken
+  /// away the way the branch is: what a take-up makes is a Review, and a row
+  /// saying nothing about a conversation that is a Review would be the row
+  /// missing the thing that tells it apart.
+  it("reads Review on the process, disabled", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    await waitFor(() => expect(showing("Process")).toBe(PROCESS.Review));
+    expect(
+      (screen.getByLabelText("Process") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  /// And nothing is sent for it either. Review cannot be picked until its own
+  /// stage lands, and what the take-up leaves is a Conversation with no row of
+  /// its own — which is what reads as Review in the first place.
+  it("sends no process request for a pull request it takes up", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(`/api/ui/conversations/${OPEN.id}/brief`, json("Saved"), "POST"),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp"),
+        "POST",
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+    await waitFor(() => expect(showing("Process")).toBe(PROCESS.Review));
+
+    // Both roles the wrap-up runs under, which is what the press waits on.
+    for (const role of ["Implementation", "Review"]) {
+      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(0);
+  });
+
   /// The press: the Conversation started against the repo and the pull request,
   /// the edited Brief saved on it, and the touched pickers replayed. Neither the
   /// branch nor the base is sent — the pull request answers both.
@@ -2381,6 +2563,7 @@ describe("what a device holds between visits", () => {
       companions: [
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },
       ],
+      process: "Develop",
       grilling: "1:opus",
       implementation: "2:fable",
       review: null,
@@ -2391,6 +2574,36 @@ describe("what a device holds between visits", () => {
     keep(held);
 
     expect(stored()).toEqual(held);
+  });
+
+  /// A body from a build before the Process was asked for has no `process` at
+  /// all, which is a picker nobody touched rather than a fault — the one
+  /// absence a field-by-field check has to read rather than discard.
+  it("reads a body from before the process as one nobody picked", () => {
+    const { process: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// And a word this build has never heard of is discarded with the rest of the
+  /// draft, because it would go straight back out on the wire.
+  it("discards a draft holding a process the wire does not know", () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), repo: 2, process: "Ponder" }),
+    );
+
+    expect(stored()).toEqual(blank());
+  });
+
+  /// An untouched Process is no more worth coming back to than an untouched
+  /// anything else: a page holding one and nothing else is a page worth
+  /// nothing, and a page holding a picked one is worth keeping.
+  it("keeps a draft whose only touched field is the process", () => {
+    keep({ ...blank(), process: "Develop" });
+
+    expect(stored()).toEqual({ ...blank(), process: "Develop" });
   });
 
   it("holds nothing at all for a page nobody has touched", () => {

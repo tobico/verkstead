@@ -53,6 +53,8 @@ import type {
   OnboardingView,
   OpenPullRequestRepo,
   PrefillView,
+  Process,
+  ProcessPicked,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -968,6 +970,22 @@ export function switchRepo(
     repo_id: repoId,
   });
 }
+
+/// Say what kind of work a drafting Conversation is for.
+///
+/// The Process and nothing else, the way the switch above it is a repo id and
+/// nothing else. Whether that Process can be started yet is the server's list to
+/// keep — a picker offering only the landed ones is a courtesy, and this route
+/// is reachable without one — so a refusal is another outcome to read here too.
+export function pickProcess(
+  id: number,
+  process: Process,
+): Promise<ProcessPicked> {
+  return post<ProcessPicked>(`/api/ui/conversations/${id}/process`, {
+    process,
+  });
+}
+
 /// Name the branch the work will be done on. Whether git would take the name is
 /// the server's to say, so this is another outcome to read rather than a status.
 export function renameBranch(

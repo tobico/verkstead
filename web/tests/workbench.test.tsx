@@ -181,6 +181,10 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 // source to read the rules that jsdom lays nothing out for.
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
+// The words a Process is said in, read here rather than spelled out again: the
+// pane and this assertion about it would otherwise be two opinions about what
+// Develop is called.
+import { OFFERED, PROCESS } from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -296,6 +300,7 @@ import {
   COMPANION_MODE_REFUSAL,
   COMPANION_REFUSAL,
   COMPANION_REMOVAL_REFUSAL,
+  PROCESS_REFUSAL,
   REPO_SWITCH_REFUSAL,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL, STEER_SAVE_REFUSAL } from "../src/workbench/Steer";
@@ -3494,12 +3499,13 @@ describe("the composer pane", () => {
 
   /// The look: one box holding the brief and, along the inside of its bottom
   /// edge, the whole of the setup as a row of dropdowns — each a dimmed label
-  /// over its value, the repo first and then the three roles.
+  /// over its value, the repo first, what kind of work it is after it, and then
+  /// the three roles.
   ///
-  /// The label lives *inside* the handle on all four, which is what makes the
+  /// The label lives *inside* the handle on all five, which is what makes the
   /// whole two lines one thing to press and one rectangle to hover. So it is
   /// still what names the control, and says so through `aria-labelledby` on the
-  /// three that are listboxes: a name read off the contents would carry the
+  /// four that are listboxes: a name read off the contents would carry the
   /// value into it.
   it("draws every option as a label over its value, inside the box", async () => {
     theWorkbench();
@@ -3512,7 +3518,13 @@ describe("the composer pane", () => {
         [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
           (label) => label.textContent,
         ),
-      ).toEqual(["Repo", "Grilling", "Implementation", "Review"]),
+      ).toEqual([
+        "Repo",
+        "Process",
+        "Grilling",
+        "Implementation",
+        "Review",
+      ]),
     );
 
     // Over the value rather than beside it: the repo's label is the first line
@@ -3525,10 +3537,15 @@ describe("the composer pane", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
-    // And each role's is the first line of the listbox's own handle, naming it
-    // without being read as part of what it is showing.
-    for (const role of ["grilling", "implementation", "review"]) {
-      const control = document.getElementById(`${role}-pairing`)!;
+    // And each of the four listboxes' is the first line of its own handle,
+    // naming it without being read as part of what it is showing.
+    for (const id of [
+      "conversation-process",
+      "grilling-pairing",
+      "implementation-pairing",
+      "review-pairing",
+    ]) {
+      const control = document.getElementById(id)!;
       const label = control.querySelector(`.${setup.optionLabel}`)!;
 
       expect(control.getAttribute("aria-labelledby")).toBe(label.id);
@@ -3543,25 +3560,27 @@ describe("the composer pane", () => {
     expect(picker("Grilling").id).toBe("grilling-pairing");
   });
 
-  /// Every one of the four triggers is one rectangle around a label and a value:
+  /// Every one of the five triggers is one rectangle around a label and a value:
   /// the pointer takes an edge around the pair of them, and the keyboard says
   /// where it is by lighting the label rather than by drawing a ring around a
   /// control that has given up every edge it had.
   it("hovers and focuses the whole handle rather than the value in it", () => {
     // The Repo trigger, which is a menu's button and so is painted here — the
-    // three listboxes beside it take their hover from `picking.module.css`.
+    // four listboxes beside it take their hover from `picking.module.css`.
     expect(setupCss).toContain(".repoOption > button:not(:disabled):hover");
     expect(rule(setupCss, ".repoOption > button:not(:disabled):hover")).toContain(
       "border-color: var(--ink-soft)",
     );
 
-    // And the keyboard, on all four: no ring, no accent border, and the dimmed
+    // And the keyboard, on all five: no ring, no accent border, and the dimmed
     // label brought up to the ordinary ink.
     const quiet = rule(
       setupCss,
       ".repoOption > button:focus-visible,\n" +
         ".optionPick > button:focus-visible,\n" +
         '.optionPick > button[aria-expanded="true"],\n' +
+        ".processPick > button:focus-visible,\n" +
+        '.processPick > button[aria-expanded="true"],\n' +
         ".repoSelectPick > button:focus-visible,\n" +
         '.repoSelectPick > button[aria-expanded="true"]',
     );
@@ -3573,6 +3592,7 @@ describe("the composer pane", () => {
         setupCss,
         ".repoOption > button:focus-visible .optionLabel,\n" +
           ".optionPick > button:focus-visible .optionLabel,\n" +
+          ".processPick > button:focus-visible .optionLabel,\n" +
           ".repoSelectPick > button:focus-visible .optionLabel",
       ),
     ).toContain("color: var(--ink)");
@@ -3596,8 +3616,8 @@ describe("the composer pane", () => {
     ).toHaveLength(1);
     expect(row.textContent).not.toContain("▾");
 
-    for (const role of ["Grilling", "Implementation", "Review"]) {
-      expect(picker(role).querySelector("svg")).toBeTruthy();
+    for (const named of ["Process", "Grilling", "Implementation", "Review"]) {
+      expect(picker(named).querySelector("svg")).toBeTruthy();
     }
 
     // Level with the pair of lines rather than with either: it says which way
@@ -3967,7 +3987,8 @@ describe("a conversation's setup", () => {
       `.${shell.detailsPane} .${composer.box} > .${setup.options}`,
     );
 
-    // Four options, the repo first and then the three roles.
+    // Five options, the repo first, what kind of work it is after it, and
+    // then the three roles.
     expect(row.querySelector(`.${setup.repoOption}`)).toBeTruthy();
     await waitFor(() =>
       expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
@@ -4690,6 +4711,119 @@ describe("switching a draft's repo", () => {
     expect(screen.getByLabelText("Base branch")).toBeTruthy();
   });
 });
+
+/// What kind of work a draft is for, picked in the row between the Repo and the
+/// three accounts.
+///
+/// Which Processes may be recorded at all is the server's — the four whose
+/// stages have not landed are refused over there, and
+/// `crates/server/tests/conversations.rs` is what says so. What is asked here is
+/// the composer's half: where it stands, what it offers, that a pick goes out,
+/// that a refusal is said under the control, and the two states it is drawn
+/// settled in.
+describe("a conversation's process", () => {
+  /// The control, waited for — it is drawn in the row rather than behind the
+  /// Repo panel, so there is nothing to open first.
+  async function theProcess(): Promise<HTMLButtonElement> {
+    return waitFor(() => picker("Process"));
+  }
+
+  it("stands in the row between the repo and the accounts, reading the record", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() =>
+      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+    );
+
+    const at = (selector: string) =>
+      [...row.children].findIndex((option) => option.matches(selector));
+
+    expect(at(`.${setup.repoOption}`)).toBe(0);
+    expect(at(`.${setup.processChoice}`)).toBe(1);
+    expect(at(`.${setup.profileChoice}`)).toBe(2);
+
+    expect(showing("Process")).toBe(PROCESS[OPEN.process]);
+    expect(OPEN.process).toBe("Develop");
+  });
+
+  /// One row for now, and that list is the one place a later stage adds to: a
+  /// Process is offered only once its stage has landed.
+  it("offers the processes that have landed and no others", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
+    expect(OFFERED).toEqual(["Develop"]);
+  });
+
+  /// Saved the moment it is touched, the way the pairings beside it are: there
+  /// is a record to save into, so there is nothing here to press.
+  it("records the pick the moment it is made", async () => {
+    const fetching = theWorkbench(json("Picked"));
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    pick("Process", PROCESS.Develop);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
+      ).toEqual({ process: "Develop" }),
+    );
+  });
+
+  /// Every refusal is the server's — a picker offering only the landed
+  /// Processes is a courtesy, and the endpoint is reachable without one — so
+  /// what comes back is said under the control, in the shape a refused Repo
+  /// switch is said in.
+  it("says under the control why a pick was refused", async () => {
+    theWorkbench(json("NotDrafting"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    pick("Process", PROCESS.Develop);
+
+    const said = await waitFor(() =>
+      screen.getByText(PROCESS_REFUSAL.NotDrafting),
+    );
+    expect(said.closest(`.${setup.processChoice}`)).toBeTruthy();
+    expect(container.querySelector(`.${setup.processChoice}`)).toBeTruthy();
+  });
+
+  /// A later round, steered onto work that is already built: the server refuses
+  /// the press from the moment a worktree exists, exactly as it refuses the Repo
+  /// switch, and the control says so by being disabled rather than by going —
+  /// which Process the work is is still a fact worth reading.
+  it("reads settled once the branch has been cut", async () => {
+    theWorkbenchWith({
+      worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
+    });
+    mount(`/conversations/${OPEN.id}`);
+
+    expect((await theProcess()).disabled).toBe(true);
+    expect(showing("Process")).toBe(PROCESS.Develop);
+  });
+
+  /// And on a draft holding a pull request, which has no worktree at all: what a
+  /// take-up makes is a Review, Review cannot be picked until its own stage
+  /// lands, and a row saying nothing about a conversation that is a Review would
+  /// be the row missing the thing that tells it apart.
+  it("reads Review and settled on a draft holding a pull request", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${HOLDING.id}`, json(HOLDING)),
+    );
+    mount(`/conversations/${HOLDING.id}`);
+
+    expect((await theProcess()).disabled).toBe(true);
+    expect(showing("Process")).toBe(PROCESS.Review);
+    expect(HOLDING.worktree).toBeNull();
+    expect(OFFERED).not.toContain("Review");
+  });
+});
+
 /// The other repositories a conversation works alongside: added from a picker
 /// inside the Repo panel, and drawn as a row apiece under it.
 ///
@@ -17103,6 +17237,10 @@ describe("the configuration on the brief's pane", () => {
 
     expect(configuration()).toEqual({
       Repo: GRILLING.repo.name,
+      // What kind of work it is, where the composer asked for it: the picker
+      // sits between the Repo and the Pairings, and these are the same two facts
+      // in the same order.
+      Process: "Develop",
       Branch: GRILLING.branch,
       // The commit, abbreviated the way every other commit on the page is.
       Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
@@ -17142,6 +17280,20 @@ describe("the configuration on the brief's pane", () => {
       configuration().Review,
       "and the roles beside it read as they always did",
     ).toBe("Claude Code Sonnet 5 — sonnet");
+  });
+
+  /// And a Conversation that reads Review says Review: the word is the record's,
+  /// so what the pane says is what the wire carried rather than what a fresh
+  /// draft happens to default to.
+  ///
+  /// The five are worded in one place — `processes.ts` — so the thing picked on
+  /// the composer and the thing read back here cannot come to be called
+  /// different things.
+  it("says whichever process the conversation is", async () => {
+    theGrillingStanding({ process: "Review" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Process).toBe("Review");
   });
 
   /// A profile chosen before models were paired beside them is half a choice,
@@ -17242,6 +17394,43 @@ describe("the configuration on the brief's pane", () => {
     expect(summary()!.querySelector(`.${briefPane.gone}`)!.textContent).toBe(
       "gone from disk",
     );
+  });
+
+  /// And here is where the Process is said, rather than on the sidebar: a row
+  /// says where the work has got to, and what kind of work it is is a setup fact
+  /// like the Repo and the base.
+  ///
+  /// Nothing of it reaches the row at all — `ConversationEntry` carries no
+  /// Process — so the check is that the list the human finds a Conversation by
+  /// reads exactly as it always did.
+  ///
+  /// Whole words rather than substrings. A card's spoken label carries the
+  /// state word, and `Investigating` is a Lifecycle state the processes
+  /// roadmap brings in — which holds `Investigate` inside it. What is being
+  /// checked is that a card never *says* a Process, not that its letters never
+  /// turn up inside a longer word, and a sweep that could not tell the two
+  /// apart would fail here for something that has nothing to do with Processes.
+  it("is the only place the process is said", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    /// Whether this text says that word, as a word of its own.
+    const says = (text: string, word: string): boolean =>
+      new RegExp(`(^|\\W)${word}(\\W|$)`).test(text);
+
+    for (const card of await cards(container)) {
+      // Off the button rather than off the row around it: the label is the
+      // card's own, and reading it from the `<li>` would be reading an
+      // attribute nothing ever sets and passing whatever it held.
+      const spoken =
+        card.querySelector(`.${sidebar.open}`)!.getAttribute("aria-label") ?? "";
+      expect(spoken).not.toBe("");
+
+      for (const word of Object.values(PROCESS)) {
+        expect(says(card.textContent ?? "", word)).toBe(false);
+        expect(says(spoken, word)).toBe(false);
+      }
+    }
   });
 
   /// The pane reports the configuration; the setup card is still the only place
