@@ -12,7 +12,7 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { artwork, ARTWORK } from "../src/artwork.js";
+import { artwork, ARTWORK, TEMPLATE } from "../src/artwork.js";
 import type { Install } from "../src/cli.js";
 
 /// A checkout, run the way `pnpm start` runs it: the main process loaded out of
@@ -68,5 +68,38 @@ describe("in a packed app", () => {
     const packed: Install = { ...CHECKOUT, packaged: true, resources: "/opt/Verkstead/resources" };
 
     expect(artwork(packed)).toBe(join("/opt/Verkstead/resources", ARTWORK));
+  });
+});
+
+/// The platform that is given a different picture altogether: a status item is
+/// laid out at the size of the image it is handed, so the one a panel scales
+/// down came out two hundred points wide on a real Mac.
+describe("on a Mac", () => {
+  const MAC: Install = { ...CHECKOUT, platform: "darwin" };
+
+  it("is the generated menu bar template", () => {
+    expect(artwork(MAC)).toBe(`/home/you/verkstead/packaging/${TEMPLATE}`);
+  });
+
+  it("is beside the code in a packed app, as the panel's is", () => {
+    const packed: Install = { ...MAC, packaged: true, resources: "/Verkstead.app/Resources" };
+
+    expect(artwork(packed)).toBe(join("/Verkstead.app/Resources", TEMPLATE));
+  });
+
+  /// The name is the whole of how a template image is asked for — Electron reads
+  /// the suffix off the file name rather than anything in the file — so it is
+  /// pinned rather than left to read well.
+  it("names a file the platform will read as a template", () => {
+    expect(TEMPLATE.endsWith("Template.png")).toBe(true);
+  });
+
+  /// And the size, which is what makes the status item the width of its
+  /// neighbours: 22 points, with the twice-that beside it for a Retina bar.
+  it("names the 22-point file, with the @2x beside it", () => {
+    const file = artwork({ ...MAC, entry: join(REPOSITORY, "desktop", "dist") });
+
+    expect(png(file)).toMatchObject({ signature: "PNG", width: 22, height: 22 });
+    expect(png(file.replace(".png", "@2x.png"))).toMatchObject({ width: 44, height: 44 });
   });
 });

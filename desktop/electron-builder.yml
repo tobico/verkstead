@@ -82,6 +82,21 @@ extraResources:
   - from: ../assets/icons/icon-192.png
     to: icon-192.png
 
+  # And the menu bar's, which is the picture a Mac gets instead: AppKit lays a
+  # status item out at the size of the image it is handed rather than scaling it
+  # to the bar, so this pair is the drawing's silhouette at the 22 points the bar
+  # lays out and at twice that for a Retina one — see `src/artwork.ts`, and
+  # `tools/generate-packaging.sh`, which writes them. Packed on every platform,
+  # for the reason the CLI's directory is one layout everywhere: two files of a
+  # few hundred bytes are cheaper than a configuration that differs by platform.
+  #
+  # The `@2x` is named here and nowhere else: the app hands Electron the
+  # one-times path and the platform finds this beside it.
+  - from: ../packaging/menubarTemplate.png
+    to: menubarTemplate.png
+  - from: ../packaging/menubarTemplate@2x.png
+    to: menubarTemplate@2x.png
+
 linux:
   # **The launcher must not be called `verkstead`**, for the reason the CLI has a
   # directory of its own: the two are one word apart on a platform that does not

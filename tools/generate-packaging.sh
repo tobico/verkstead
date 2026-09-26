@@ -156,6 +156,50 @@ if [ "$(wc -c < "$ICNS")" -ne "$total" ]; then
   exit 1
 fi
 
+# The menu bar icon a Mac draws, which is the one piece of artwork here that is
+# not a downscale of the drawing: it is the drawing's silhouette.
+#
+# **Because a status item is given the image's own size.** AppKit lays the item
+# out at the size of the picture it is handed and clips it to the bar, so the
+# 192px icon `desktop/src/artwork.ts` hands a Linux panel came out on a real Mac
+# as two hundred points of hammer with its middle showing — measured on a
+# `macos-15` runner, stage 06. A panel scales what it is given and a menu bar
+# does not, so this platform gets a file of its own at the size the bar lays out.
+#
+# **And a menu bar wants a template image**: one colour with an alpha channel,
+# which the system draws black on a light bar and white on a dark one — which is
+# the whole of how an icon reads in both. So the colour goes and the alpha stays:
+# `-colorize` blends every pixel to black and leaves the channel that says what
+# shape the hammer is. The 3D render's own greys and browns would be a dark blob
+# on a dark bar, which is what every menu bar icon that looks wrong looks like.
+#
+# **`Template` at the end of the name is what turns it on.**
+# `nativeImage.createFromPath` reads the suffix off the file name rather than
+# anything in the file, and it picks the `@2x` up out of the same directory —
+# so the two are named for what AppKit and Electron both read rather than for
+# the app id the installed files carry.
+#
+# 18 points of drawing inside the 22-point canvas the bar lays out, which is the
+# padding every other item on that bar is drawn with.
+MENU_BAR="$OUT/menubarTemplate.png"
+
+magick "$ARTWORK" -fill black -colorize 100 -filter Lanczos -background none \
+  -resize 18x18 -gravity center -extent 22x22 -strip "$MENU_BAR"
+magick "$ARTWORK" -fill black -colorize 100 -filter Lanczos -background none \
+  -resize 36x36 -gravity center -extent 44x44 -strip "$OUT/menubarTemplate@2x.png"
+
+# Read back, as everything else here is: the size is the whole of what makes a
+# status item the right width, and a file drawn at the artwork's own size is the
+# bug this pair exists for.
+for scale in "menubarTemplate.png 22" "menubarTemplate@2x.png 44"; do
+  set -- $scale
+  written=$(magick identify -format '%wx%h' "$OUT/$1")
+  if [ "$written" != "${2}x${2}" ]; then
+    printf '%s\n' "$OUT/$1 is $written where it should be ${2}x${2}" >&2
+    exit 1
+  fi
+done
+
 # And the Windows icon, which is those same downscales again inside the one
 # container Windows reads an executable's icon out of. It is not copied into a
 # bundle the way the .icns is: `crates/desktop/build.rs` compiles it into

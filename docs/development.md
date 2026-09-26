@@ -587,7 +587,7 @@ $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
 $ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
-$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
+$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the menu bar template, the icns and the ico
 $ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
 ```
 
@@ -840,6 +840,13 @@ own `.DirIcon` are all drawn from the same hammer — and beside it
 `net.tobico.Verkstead.desktop`, which the packed app's entry takes its *fields*
 from rather than being installed itself, electron-builder writing that entry
 with an `Exec` of its own that no configuration replaces. Then
+`menubarTemplate.png` and the `@2x` beside it, which are the one thing in the
+tree that is not a downscale of the drawing: a Mac's menu bar lays a status item
+out at the size of the image it is handed rather than scaling it to the bar, and
+it draws a *template* image — one colour and an alpha channel — black on a light
+bar and white on a dark one. So that platform gets the hammer's silhouette at
+the 22 points the bar lays out, and the `Template` at the end of the name is the
+whole of how it is asked for: Electron reads the suffix off the file name. Then
 `net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
 bundle, and `net.tobico.Verkstead.ico`, which Windows wants twice:
 `crates/desktop/build.rs` compiles it into the shim as a resource, nothing
