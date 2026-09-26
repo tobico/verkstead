@@ -108,7 +108,14 @@ import styles from "./picking.module.css";
 /// another word is the composer's Repo control before a repo is picked, where
 /// the row it stands in is an invitation rather than a record — see `nothing`
 /// on [`Choosing`], which is that prop arriving.
-const NOTHING = "Not chosen";
+///
+/// Exported for the one control that says it while being neither of them: the
+/// composer's **Agent** trigger, which is a panel's handle reading off the
+/// pickers inside it — see `workbench/agent.ts`. It says this while a role the
+/// Process uses is empty, so that the trigger says what the start press will
+/// refuse on, and two spellings of *nothing is chosen* standing side by side in
+/// one row would be two things to read.
+export const NOTHING = "Not chosen";
 
 /// The room the rows keep off the window's own edge where they have to be pulled
 /// back onto it, in pixels.

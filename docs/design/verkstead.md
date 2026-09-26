@@ -776,16 +776,19 @@ or a closed tab loses nothing, and nothing reaches the server until a press.
 per-field setup endpoints and kicks the work off; **Save as draft**, quieter and
 beside it, stops after the fields. Creating needs a repo and nothing else, so the
 quieter press waits on that alone; the other carries a grilling start and waits
-on what one has always waited on — a brief and the three roles — drawing inert
-short of that and saying what is missing when it is pressed, exactly as the
-composer's own start does. Both land in the Conversation they made, and a
+on what one has always waited on — a brief, and every role the Process uses
+answered — drawing inert short of that and saying what is missing when it is
+pressed, exactly as the composer's own start does, and naming the roles as
+that Process has them. Both land in the Conversation they made, and a
 successful create clears what the device was holding. There is no batched create and no second set of validation rules: a
 field the server refuses leaves the rest of the work on a part-set draft, and the
 refusal is carried to that draft's own composer to be read where the field is.
-Its three role pickers stand on what the picked repo was last grilled with, read
-off the repo and re-read whenever it is switched, so the page shows what a draft
-created there would have arrived showing — shown and not held, so a picker left
-on it sends nothing at create and the server's own prefill answers for it.
+Its role pickers are the one **Agent** control the composer's are, in whichever
+shape the Process asks for, and each of them stands on what the picked repo was
+last grilled with, read off the repo and re-read whenever it is switched, so the
+page shows what a draft created there would have arrived showing — shown and not
+held, so a picker left on it sends nothing at create and the server's own
+prefill answers for it.
 
 **Other actions is one menu with a level per action** (*settled 2026-09-08,
 building improve-pr*). The compose page's *Adopt a roadmap* dropdown was drawn

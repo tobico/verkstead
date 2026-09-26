@@ -46,7 +46,7 @@ import timeline from "../src/workbench/Timeline.module.css";
 import tree from "../src/workbench/Tree.module.css";
 // The panes themselves, for the one an Event is opened into.
 import shell from "../src/Panes.module.css";
-import { drawn } from "./bench";
+import { drawn, openAgent } from "./bench";
 import {
   askedFor,
   json,
@@ -643,7 +643,8 @@ describe("what a Nudge is about", () => {
   });
 
   /// The Agent Profiles, asked about where one is drawn: a draft's setup, whose
-  /// two pairing pickers are the list on the page.
+  /// role pickers are the list on the page — behind the Agent trigger, which is
+  /// pressed here so that one of them really is drawing it.
   ///
   /// Its own test rather than a row of the sweep, because it is its own page.
   /// The sweep opens a conversation being grilled and nothing there picks a
@@ -658,6 +659,7 @@ describe("what a Nudge is about", () => {
       whenever(`/api/ui/repos/${DRAFTING.repo.id}/branches`, json(["main"])),
     );
     render(() => <App />);
+    await openAgent(document);
     await waitFor(() =>
       expect(
         document.querySelector("#implementation-pairing"),

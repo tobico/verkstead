@@ -57,6 +57,7 @@ import {
   mount,
   nodes,
   nudged,
+  openAgent,
   survived,
   theWorkbench,
 } from "./bench";
@@ -324,6 +325,8 @@ describe("what a Nudge leaves standing", () => {
   it("keeps an open pairing picker's rows", async () => {
     theWorkbench();
     const { container, client } = mount(`/conversations/${OPEN.id}`);
+    // Behind the Agent trigger, which is where the role pickers stand.
+    await openAgent(container);
     await drawn(container, "#grilling-pairing");
     const grilling = nodes(opened("Grilling"), '[role="option"]');
     const implementing = nodes(opened("Implementation"), '[role="option"]');
@@ -402,7 +405,8 @@ describe("what a picker shows and what it would send", () => {
     const chosen = under(OPEN.grilling_pairing)!;
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
-    const { client } = mount(`/conversations/${OPEN.id}`);
+    const { container, client } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
     await waitFor(() => picker("Grilling"));
     expect(showing("Grilling")).toBe("Fable 5 — fable");
 
@@ -421,7 +425,8 @@ describe("what a picker shows and what it would send", () => {
     const chosen = under(OPEN.grilling_pairing)!;
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
-    const { client } = mount(`/conversations/${OPEN.id}`);
+    const { container, client } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
     await waitFor(() => picker("Grilling"));
 
     standing.profiles = PROFILES.map((profile) =>

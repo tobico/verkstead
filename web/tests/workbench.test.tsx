@@ -184,7 +184,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The words a Process is said in, read here rather than spelled out again: the
 // pane and this assertion about it would otherwise be two opinions about what
 // Develop is called.
-import { OFFERED, PROCESS } from "../src/workbench/processes";
+import { away, OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -317,6 +317,7 @@ import {
   mountSidebar,
   nodes,
   nudged,
+  openAgent,
   theWorkbench,
 } from "./bench";
 import { art, marked } from "./marking";
@@ -2458,6 +2459,8 @@ describe("the adoption page", () => {
     await openComposer(container);
     await drawn(container, `.${adoption.adoption}`);
 
+    // Behind the Agent trigger, which is where every role picker stands.
+    await openAgent(container);
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
 
@@ -2716,15 +2719,24 @@ describe("the page of a draft holding a pull request", () => {
   /// The two pairings the wrap-up runs under, and nothing that the pull request
   /// has already answered: its branch is the head branch, its base is that
   /// branch's own head at take-up, and there is no round for a grilling to open.
+  ///
+  /// Two rather than three because the Process says so and not because the pane
+  /// tests for the held pull request: a Conversation holding one reads as a
+  /// Review, and Review uses Implementation and Review alone.
   it("offers the two pairings and no branch, base or grilling picker", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
     await openComposer(container);
+    await openAgent(container);
 
     await waitFor(() => screen.getByLabelText("Implementation"));
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    // Which is the record's own reading, and the table's answer to it.
+    expect(HOLDING.process).toBe("Review");
+    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
 
     await openRepo(container);
 
@@ -3499,13 +3511,17 @@ describe("the composer pane", () => {
 
   /// The look: one box holding the brief and, along the inside of its bottom
   /// edge, the whole of the setup as a row of dropdowns — each a dimmed label
-  /// over its value, the repo first, what kind of work it is after it, and then
-  /// the three roles.
+  /// over its value, the repo first, what kind of work it is after it, and who
+  /// runs it last.
   ///
-  /// The label lives *inside* the handle on all five, which is what makes the
+  /// Three, because the roles are one **Agent** control now: the row says which
+  /// code, which kind of work and which account, and the role pickers are
+  /// stacked inside the panel that control drops.
+  ///
+  /// The label lives *inside* the handle on all of them, which is what makes the
   /// whole two lines one thing to press and one rectangle to hover. So it is
   /// still what names the control, and says so through `aria-labelledby` on the
-  /// four that are listboxes: a name read off the contents would carry the
+  /// ones that are listboxes: a name read off the contents would carry the
   /// value into it.
   it("draws every option as a label over its value, inside the box", async () => {
     theWorkbench();
@@ -3518,27 +3534,27 @@ describe("the composer pane", () => {
         [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
           (label) => label.textContent,
         ),
-      ).toEqual([
-        "Repo",
-        "Process",
-        "Grilling",
-        "Implementation",
-        "Review",
-      ]),
+      ).toEqual(["Repo", "Process", "Agent"]),
     );
 
     // Over the value rather than beside it: the repo's label is the first line
-    // of its own trigger.
-    const repo = row.querySelector(`.${setup.repoOption} > button`)!;
-    expect(
-      repo
-        .querySelector(`.${setup.optionLabel}`)!
-        .compareDocumentPosition(repo.querySelector(`.${setup.optionValue}`)!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    // of its own trigger, and so is the Agent's.
+    for (const option of [setup.repoOption, setup.agentOption]) {
+      const trigger = row.querySelector(`.${option} > button`)!;
+      expect(
+        trigger
+          .querySelector(`.${setup.optionLabel}`)!
+          .compareDocumentPosition(
+            trigger.querySelector(`.${setup.optionValue}`)!,
+          ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
 
-    // And each of the four listboxes' is the first line of its own handle,
-    // naming it without being read as part of what it is showing.
+    // And each listbox's is the first line of its own handle, naming it without
+    // being read as part of what it is showing — the Process in the row, and the
+    // three role pickers inside the Agent panel.
+    await openAgent(container);
+
     for (const id of [
       "conversation-process",
       "grilling-pairing",
@@ -3560,23 +3576,30 @@ describe("the composer pane", () => {
     expect(picker("Grilling").id).toBe("grilling-pairing");
   });
 
-  /// Every one of the five triggers is one rectangle around a label and a value:
-  /// the pointer takes an edge around the pair of them, and the keyboard says
-  /// where it is by lighting the label rather than by drawing a ring around a
-  /// control that has given up every edge it had.
+  /// Every trigger in the row is one rectangle around a label and a value: the
+  /// pointer takes an edge around the pair of them, and the keyboard says where
+  /// it is by lighting the label rather than by drawing a ring around a control
+  /// that has given up every edge it had.
   it("hovers and focuses the whole handle rather than the value in it", () => {
-    // The Repo trigger, which is a menu's button and so is painted here — the
-    // four listboxes beside it take their hover from `picking.module.css`.
+    // The two panel triggers, which are a menu's button and so are painted here
+    // — the listbox between them takes its hover from `picking.module.css`.
     expect(setupCss).toContain(".repoOption > button:not(:disabled):hover");
-    expect(rule(setupCss, ".repoOption > button:not(:disabled):hover")).toContain(
-      "border-color: var(--ink-soft)",
-    );
+    // Named with the indent the second line carries, the pair of them standing
+    // inside the `hover: hover` block.
+    expect(
+      rule(
+        setupCss,
+        ".repoOption > button:not(:disabled):hover,\n" +
+          "  .agentOption > button:not(:disabled):hover",
+      ),
+    ).toContain("border-color: var(--ink-soft)");
 
-    // And the keyboard, on all five: no ring, no accent border, and the dimmed
-    // label brought up to the ordinary ink.
+    // And the keyboard, on every one of them: no ring, no accent border, and the
+    // dimmed label brought up to the ordinary ink.
     const quiet = rule(
       setupCss,
       ".repoOption > button:focus-visible,\n" +
+        ".agentOption > button:focus-visible,\n" +
         ".optionPick > button:focus-visible,\n" +
         '.optionPick > button[aria-expanded="true"],\n' +
         ".processPick > button:focus-visible,\n" +
@@ -3591,6 +3614,7 @@ describe("the composer pane", () => {
       rule(
         setupCss,
         ".repoOption > button:focus-visible .optionLabel,\n" +
+          ".agentOption > button:focus-visible .optionLabel,\n" +
           ".optionPick > button:focus-visible .optionLabel,\n" +
           ".processPick > button:focus-visible .optionLabel,\n" +
           ".repoSelectPick > button:focus-visible .optionLabel",
@@ -3607,12 +3631,18 @@ describe("the composer pane", () => {
 
     const row = await drawn(container, `.${composer.box} > .${setup.options}`);
 
-    // Waited for the profiles, which is what the three pairing triggers are
-    // drawn off.
+    // Waited for the profiles, which is what the Agent trigger is drawn off —
+    // and opened, the role pickers standing inside it.
+    await openAgent(container);
     await waitFor(() => expect(picker("Grilling")).toBeTruthy());
 
+    // One apiece on the two panel triggers: the chevron, and no second svg where
+    // the Agent trigger draws the chosen harness's mark beside its words.
     expect(
       row.querySelectorAll(`.${setup.repoOption} > button svg`),
+    ).toHaveLength(1);
+    expect(
+      row.querySelectorAll(`.${setup.agentOption} > button > svg`),
     ).toHaveLength(1);
     expect(row.textContent).not.toContain("▾");
 
@@ -3696,6 +3726,7 @@ describe("the composer pane", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    await openAgent(container);
     await waitFor(() => screen.getByLabelText("Grilling"));
 
     // The Repo option stays, because which repo the work is in is still a fact
@@ -3987,12 +4018,13 @@ describe("a conversation's setup", () => {
       `.${shell.detailsPane} .${composer.box} > .${setup.options}`,
     );
 
-    // Five options, the repo first, what kind of work it is after it, and
-    // then the three roles.
+    // Three options, the repo first, what kind of work it is after it, and who
+    // runs it last.
     expect(row.querySelector(`.${setup.repoOption}`)).toBeTruthy();
     await waitFor(() =>
-      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
     );
+    expect(row.children).toHaveLength(3);
     expect(
       [...row.children].indexOf(row.querySelector(`.${setup.repoOption}`)!),
       "the repo is what everything after it is a fact about",
@@ -4032,6 +4064,38 @@ describe("a conversation's setup", () => {
     expect(panel.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
     expect(panel.querySelector(`.${setup.addCompanion}`)).toBeTruthy();
     expect(panel.querySelector(`.${setup.companions}`)).toBeTruthy();
+  });
+
+  /// And who runs each role is one option for the same reason, drawn the same
+  /// way: the Repo option beside it is a panel, and two shapes in one row would
+  /// be two things to learn. A panel rather than a modal, which is what the
+  /// `group` says — a card of controls hung off its trigger, not a dialog over
+  /// the page.
+  it("puts the role pickers behind one Agent trigger", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openComposer(container);
+
+    // Nothing of them on the pane until it is pressed: the row is one trigger
+    // reading who runs the work.
+    await drawn(container, `.${setup.agentOption} > button`);
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(container.querySelector("dialog")).toBeNull();
+
+    const panel = await openAgent(container);
+    await waitFor(() => expect(picker("Grilling")).toBeTruthy());
+
+    // Stacked under their role names, in the order the table says the Process
+    // uses them.
+    expect(
+      [...panel.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Grilling", "Implementation", "Review"]);
+    expect(panel.getAttribute("role")).toBe("group");
   });
 
   /// A Rust repository on a server with no sccache: the work will run, and
@@ -4713,7 +4777,7 @@ describe("switching a draft's repo", () => {
 });
 
 /// What kind of work a draft is for, picked in the row between the Repo and the
-/// three accounts.
+/// Agent.
 ///
 /// Which Processes may be recorded at all is the server's — the four whose
 /// stages have not landed are refused over there, and
@@ -4728,13 +4792,13 @@ describe("a conversation's process", () => {
     return waitFor(() => picker("Process"));
   }
 
-  it("stands in the row between the repo and the accounts, reading the record", async () => {
+  it("stands in the row between the repo and the agent, reading the record", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const row = await drawn(container, `.${setup.options}`);
     await waitFor(() =>
-      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
     );
 
     const at = (selector: string) =>
@@ -4742,7 +4806,7 @@ describe("a conversation's process", () => {
 
     expect(at(`.${setup.repoOption}`)).toBe(0);
     expect(at(`.${setup.processChoice}`)).toBe(1);
-    expect(at(`.${setup.profileChoice}`)).toBe(2);
+    expect(at(`.${setup.agentOption}`)).toBe(2);
 
     expect(showing("Process")).toBe(PROCESS[OPEN.process]);
     expect(OPEN.process).toBe("Develop");
@@ -5381,9 +5445,18 @@ describe("a conversation's pairings", () => {
     );
   }
 
+  /// The page on that Conversation with its Agent panel open, which is where
+  /// every picker below stands: the trigger is pressed the way a hand presses
+  /// it, and each picker is then found by the label that names it.
+  async function theAgent(): Promise<ParentNode> {
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
+    return container;
+  }
+
   it("shows the pairings the conversation has chosen", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
@@ -5419,7 +5492,7 @@ describe("a conversation's pairings", () => {
   /// the whole of what tells two rows on one model apart.
   it("offers every profile-and-model combination as one flat list", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     expect(offers("Implementation")).toEqual(READINGS);
@@ -5434,7 +5507,7 @@ describe("a conversation's pairings", () => {
   /// the two ids it used to be.
   it("sends the profile and model of whichever row was read", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Implementation"));
 
     const wire = PROFILES.flatMap((profile) =>
@@ -5482,7 +5555,7 @@ describe("a conversation's pairings", () => {
   /// by its shape before reading a word of any of them.
   it("draws every row under the mark of the harness it runs", async () => {
     withConversation(UNCHOSEN, whenever("/api/ui/profiles", json(MIXED)));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Implementation"));
 
     expect(offers("Implementation")).toEqual([
@@ -5500,7 +5573,7 @@ describe("a conversation's pairings", () => {
   /// a control the eye has to check.
   it("draws the chosen pairing's mark on the closed control", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     expect(marked(picker("Grilling"))).toBe(art(claudeMarkFile));
@@ -5513,7 +5586,7 @@ describe("a conversation's pairings", () => {
   /// where one would have been. And so does the picker sitting on it.
   it("draws the no-session row as words alone", async () => {
     withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Review"));
 
     expect(marked(offered("Grilling")[0]!)).toBeNull();
@@ -5529,7 +5602,7 @@ describe("a conversation's pairings", () => {
       UNCHOSEN,
       whenever("/api/ui/profiles", json([PROFILES[0]])),
     );
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     expect(offers("Implementation")).toEqual(["Claude Code Fable 5"]);
@@ -5540,7 +5613,7 @@ describe("a conversation's pairings", () => {
 
   it("sends each choice on its own, to its own role", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     pick("Grilling", READINGS[0]!);
@@ -5577,13 +5650,21 @@ describe("a conversation's pairings", () => {
   /// without something building it.
   it("offers the no-session row on the grilling and review pickers alone", async () => {
     withConversation(UNCHOSEN);
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Review"));
 
     // Above the accounts, the row that says none of them will read this branch.
     expect(offers("Review")).toEqual(["No review", ...READINGS]);
     expect(offers("Grilling")).toEqual(["No grilling", ...READINGS]);
     expect(offers("Implementation")).toEqual(READINGS);
+
+    // And it is the table that put it there rather than the pane: which roles
+    // offer one, and the words it is offered in, are both `ROLES`'s — so a row
+    // the ADR retires goes from the picker when its stage takes it out of the
+    // table, rather than living on in a literal nobody thought to look at.
+    expect(offers("Grilling")[0]).toBe(away(UNCHOSEN.process, "grilling"));
+    expect(offers("Review")[0]).toBe(away(UNCHOSEN.process, "review"));
+    expect(away(UNCHOSEN.process, "implementation")).toBeUndefined();
 
     // And nothing picked yet on any of them, which the closed control says
     // rather than offering it as a row.
@@ -5596,7 +5677,7 @@ describe("a conversation's pairings", () => {
   /// the review row does: the brief goes straight to the work.
   it("sends no grilling as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     pick("Grilling", "No grilling");
@@ -5612,7 +5693,7 @@ describe("a conversation's pairings", () => {
   /// settled choice.
   it("shows no grilling as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, grilling_pairing: "Skipped" });
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     expect(showing("Grilling")).toBe("No grilling");
@@ -5623,7 +5704,7 @@ describe("a conversation's pairings", () => {
   /// one of them lets the work start.
   it("sends no review as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Review"));
 
     pick("Review", "No review");
@@ -5639,7 +5720,7 @@ describe("a conversation's pairings", () => {
   /// the same press on the same picker.
   it("sends a review pairing under the same key", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Review"));
 
     pick("Review", READINGS[0]!);
@@ -5660,7 +5741,7 @@ describe("a conversation's pairings", () => {
   /// placeholder is not drawn over it the way it is over an empty one.
   it("shows no review as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Review"));
 
     expect(showing("Review")).toBe("No review");
@@ -5674,7 +5755,7 @@ describe("a conversation's pairings", () => {
       grilling_pairing: { Under: { ...under(OPEN.grilling_pairing)!, model: null } },
       ready_to_grill: false,
     });
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
 
     await waitFor(() => picker("Grilling"));
     expect(showing("Grilling")).toBe("Not chosen");
@@ -5685,7 +5766,7 @@ describe("a conversation's pairings", () => {
   /// server's to make: the picker is drawn the same and says what came back.
   it("says a choice was refused once the grilling has started", async () => {
     withConversation(OPEN, json("NotDrafting"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     pick("Grilling", READINGS[0]!);
@@ -5702,7 +5783,7 @@ describe("a conversation's pairings", () => {
   /// the same verdict twice, so the setup says nothing about it either way.
   it("says nothing about readiness, ready or not", async () => {
     withConversation(UNCHOSEN);
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.queryByText(/Not ready to grill/)).toBeNull();
@@ -5711,25 +5792,31 @@ describe("a conversation's pairings", () => {
 
   it("says nothing about readiness when the server says it is ready", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(OPEN.ready_to_grill, "the fixture is the ready one").toBe(true);
     expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
-  /// The three stand in the option row beside the Repo, with no heading of
-  /// their own: the role is written on each one, so a word over all three would
-  /// be the row saying what its labels already say.
-  it("draws the pickers as three options of the one row", async () => {
+  /// The three stand stacked inside the panel behind the one Agent trigger, with
+  /// no heading over them: the role is written on each one, so a word above all
+  /// three would be the panel saying what its labels already say.
+  it("draws the pickers as three stacked inside the one panel", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const row = await drawn(container, `.${setup.options}`);
+    const panel = await openAgent(container);
     await waitFor(() =>
-      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+      expect(panel.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
     );
-    expect(row.querySelector("h3")).toBeNull();
+    expect(panel.querySelector("h3")).toBeNull();
+
+    // And nowhere else on the page: the row holds the trigger, and the pickers
+    // are what it drops.
+    expect(
+      container.querySelectorAll(`.${setup.options} > .${setup.profileChoice}`),
+    ).toHaveLength(0);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -5748,14 +5835,14 @@ describe("a conversation's pairings", () => {
       ready_to_grill: false,
     };
     withConversation(broken);
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
 
     await waitFor(() => screen.getByText("Its config file is gone."));
   });
 
   it("says why a choice was refused, in words", async () => {
     withConversation(UNCHOSEN, json("NoSuchProfile"));
-    mount(`/conversations/${OPEN.id}`);
+    await theAgent();
     await waitFor(() => picker("Grilling"));
 
     pick("Grilling", READINGS[0]!);
@@ -5775,6 +5862,244 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() => screen.getByText(/No agent profiles are saved yet/));
     expect(screen.getByText("add one").getAttribute("href")).toBe("/settings");
+  });
+});
+
+/// What the one **Agent** trigger reads while it is closed, which is the whole of
+/// what the row says about who runs the work: the Implementation Pairing, and how
+/// many of the other roles are on something else.
+describe("the agent trigger", () => {
+  /// What it is showing, off the value line of its own handle — the words and the
+  /// ` +N` after them, which is one reading rather than two.
+  async function shown(container: ParentNode): Promise<string> {
+    const value = await drawn(
+      container,
+      `.${setup.agentOption} > button .${setup.optionValue}`,
+    );
+
+    return value.textContent ?? "";
+  }
+
+  /// The trigger itself, for the mark beside those words.
+  function trigger(container: ParentNode): Element {
+    return container.querySelector(`.${setup.agentOption} > button`)!;
+  }
+
+  /// The fixture has all three roles on genuinely different accounts, which is
+  /// the case the counting is for: the Implementation Pairing is read out, and
+  /// the other two are counted.
+  it("reads the implementation pairing and counts the roles beside it", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () =>
+      expect(await shown(container)).toBe(
+        `${showsAs(OPEN.implementation_pairing!)} +2`,
+      ),
+    );
+
+    // Under the mark of the harness that Pairing runs, as every reading of who
+    // runs a session is drawn — and the Implementation Pairing's rather than any
+    // other role's.
+    expect(marked(trigger(container))).toBe(art(claudeMarkFile));
+  });
+
+  /// And says it once where there is nothing else to say: a role on the same
+  /// Pairing adds nothing, and neither does a role picked away — *No review* is
+  /// an answer rather than another account.
+  it("reads the pairing once where the other roles match or are skipped", async () => {
+    theWorkbenchWith({
+      grilling_pairing: { Under: OPEN.implementation_pairing! },
+      review_pairing: "Skipped",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () =>
+      expect(await shown(container)).toBe(
+        showsAs(OPEN.implementation_pairing!),
+      ),
+    );
+  });
+
+  /// One for the one role that is somewhere else, which is the Repo trigger's own
+  /// convention for the companions it counts.
+  it("counts one for a review on a different pairing", async () => {
+    theWorkbenchWith({
+      grilling_pairing: { Under: OPEN.implementation_pairing! },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () =>
+      expect(await shown(container)).toBe(
+        `${showsAs(OPEN.implementation_pairing!)} +1`,
+      ),
+    );
+  });
+
+  /// And *Not chosen* while a role the Process uses is empty, whichever role it
+  /// is: the trigger stands over a press that will refuse on exactly that, so it
+  /// says so rather than reading out an account the work cannot start under.
+  it("reads not chosen while the implementation is empty", async () => {
+    theWorkbenchWith({ implementation_pairing: null, ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
+    // And no mark either: there is no Pairing to be reading, so there is no
+    // harness for one to be of.
+    expect(marked(trigger(container))).toBeNull();
+  });
+
+  it("reads not chosen while another role the process uses is empty", async () => {
+    theWorkbenchWith({ grilling_pairing: "Nothing", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
+  });
+
+  /// A role the Process does not use is not one of them, though — a Review uses
+  /// Implementation and Review, so an empty Grilling on the record is nothing the
+  /// trigger is waiting on.
+  it("says nothing about a role the process does not use", async () => {
+    theWorkbenchWith({
+      process: "Review",
+      grilling_pairing: "Nothing",
+      review_pairing: { Under: OPEN.implementation_pairing! },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(async () =>
+      expect(await shown(container)).toBe(
+        showsAs(OPEN.implementation_pairing!),
+      ),
+    );
+  });
+});
+
+/// Which of the pickers the Agent panel holds, which is the Process's to say
+/// and `processes.ts`'s table to answer: a picker per role the Process uses,
+/// and no others.
+describe("the pickers a conversation's process draws", () => {
+  /// Develop uses all three, and with only Develop landed it is the panel every
+  /// draft gets.
+  it("draws all three under Develop", async () => {
+    theWorkbenchWith({ process: "Develop" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
+
+    await waitFor(() => picker("Grilling"));
+    expect(picker("Implementation")).toBeTruthy();
+    expect(picker("Review")).toBeTruthy();
+  });
+
+  /// And a Review draws two. Asked of a conversation holding no pull request at
+  /// all, which is the whole point of it: what takes the grilling picker away
+  /// is the Process, not the thing that happened to settle it.
+  it("draws no grilling picker under Review, pull request or no", async () => {
+    theWorkbenchWith({ process: "Review" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
+
+    await waitFor(() => picker("Implementation"));
+    expect(picker("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    expect(OPEN.adopting_pull_request).toBeNull();
+    expect(uses("Review", "grilling")).toBe(false);
+  });
+
+  /// A Process nothing offers yet, which the wire carries all the same: one
+  /// role, so one picker — and one picker is the control drawn as the picker
+  /// itself, which the describe below is about. Nothing here has landed to pick
+  /// it: the record is read as one, which is what the two lists in
+  /// `processes.ts` are for.
+  it("draws one picker under a process that uses one role", async () => {
+    theWorkbenchWith({ process: "Investigate" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => picker("Agent"));
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+
+    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+  });
+});
+
+/// The other shape the one control takes: where the table says the Process is
+/// run under one role, the **Agent** is the flat Pairing dropdown itself —
+/// standing in the row where the trigger would have stood, with no trigger over
+/// it and no panel behind it.
+///
+/// Asked over a Process nothing offers yet, which is the only way to ask it
+/// until Investigate lands: the wire carries all five, the picker draws a chosen
+/// Process it cannot offer, and the shape is read off the table rather than off
+/// what has landed.
+describe("the agent dropdown on a conversation", () => {
+  /// The record under a one-role Process, on the account the fixture implements
+  /// under.
+  const INVESTIGATING: Partial<ConversationView> = { process: "Investigate" };
+
+  it("stands in the row as the picker itself, with no panel anywhere", async () => {
+    theWorkbenchWith(INVESTIGATING);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    // The row still reads Repo, Process, Agent — the last of the three drawn as
+    // a listbox rather than as a panel's trigger.
+    expect(
+      [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Repo", "Process", "Agent"]);
+    expect(container.querySelector(`.${setup.agentOption}`)).toBeNull();
+    expect(
+      row.querySelectorAll(`.${setup.profileChoice}`),
+      "the one picker stands in the row itself",
+    ).toHaveLength(1);
+
+    expect(ROLES.Investigate.control).toBe("dropdown");
+  });
+
+  /// The Implementation role, whichever shape asks for it: the same picker on
+  /// the same rows, showing what the record chose. Which the id says as plainly
+  /// as anything can — it is the implementation picker with the row's own label
+  /// over it.
+  it("is the implementation picker, wearing the row's label", async () => {
+    theWorkbenchWith(INVESTIGATING);
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    expect(picker("Agent").id).toBe("implementation-pairing");
+    expect(showing("Agent")).toBe(showsAs(OPEN.implementation_pairing!));
+
+    // The pairings and nothing else: Implementation is the one role that cannot
+    // be picked away, there being no work without something building it.
+    expect(offers("Agent")).toEqual(READINGS);
+  });
+
+  /// And a pick through it settles that role and no other, on the route the
+  /// picker inside the panel writes to.
+  it("sends a pick to the implementation role and nothing else", async () => {
+    const fetching = theWorkbenchWith(INVESTIGATING, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+    pick("Agent", READINGS[0]!);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+      ).toEqual({ profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! }),
+    );
+
+    for (const role of ["grilling", "review"]) {
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/${role}-pairing`),
+      ).toBe(0);
+    }
   });
 });
 
@@ -6678,6 +7003,34 @@ describe("starting the work", () => {
 
     expect(start.getAttribute("title")).toBe(
       "This needs a brief, and every role picked and working.",
+    );
+  });
+
+  /// And the roles it names are the ones the Process uses, counted off the role
+  /// table rather than written into the sentence as three: a Review runs two
+  /// and says *both roles*.
+  it("names two roles where the process has two", async () => {
+    theWorkbenchWith({ process: "Review", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, and both roles picked and working.",
+    );
+  });
+
+  /// And a Process with one role says one, which is asked over a Process
+  /// nothing offers yet: the wire carries all five, and the words are counted
+  /// off the table rather than off what has landed.
+  it("names one role where the process has one", async () => {
+    theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, and one role picked and working.",
     );
   });
 
@@ -17294,6 +17647,36 @@ describe("the configuration on the brief's pane", () => {
     await openBrief(GRILLING);
 
     expect(configuration().Process).toBe("Review");
+  });
+
+  /// And a fact per role that Process is run under, off the same table the
+  /// composer draws its pickers from: a Review never grills, so a pane reading
+  /// out who would have grilled it would be naming the account of a session
+  /// that will not exist — beside a composer that has stopped asking for one.
+  it("names only the roles the process is run under", async () => {
+    theGrillingStanding({ process: "Review" });
+    await openBrief(GRILLING);
+
+    await waitFor(() =>
+      expect(configuration().Implementation).toBe("Claude Code Opus 5 — opus"),
+    );
+    expect(configuration().Review).toBe("Claude Code Sonnet 5 — sonnet");
+
+    expect(uses("Review", "grilling")).toBe(false);
+    expect(Object.keys(configuration())).not.toContain("Grilling");
+  });
+
+  /// And all three under Develop, which is the Process every draft gets while
+  /// it is the only one offered.
+  it("names all three where the process uses all three", async () => {
+    theGrillingStanding({ process: "Develop" });
+    await openBrief(GRILLING);
+
+    await waitFor(() =>
+      expect(Object.keys(configuration())).toEqual(
+        expect.arrayContaining(["Grilling", "Implementation", "Review"]),
+      ),
+    );
   });
 
   /// A profile chosen before models were paired beside them is half a choice,

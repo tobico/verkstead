@@ -7,7 +7,7 @@
 //! fixtures `cargo test` writes from the real endpoints.
 
 import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
-import { render, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { expect } from "vitest";
 
@@ -23,6 +23,7 @@ import type {
 import { Moved, Shell } from "../src/App";
 import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
+import setup from "../src/workbench/Setup.module.css";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
@@ -221,6 +222,36 @@ export function drawn<T extends Element>(
     }
     return found;
   });
+}
+
+/// The Agent panel opened, which is where the role pickers stand: the last
+/// option of the composer's setup row, and one flat card rather than a menu of
+/// levels — see `AgentOptions` in `src/workbench/Setup.tsx`.
+///
+/// Shared because three files' assertions reach through it — what a
+/// Conversation's composer draws, what a re-read leaves standing, and what a
+/// Nudge reads back where a picker is drawing it — and every one of them opens it
+/// the way a hand does: the trigger pressed, and each picker inside then found by
+/// the label that names it, as `pickers.ts` insists.
+///
+/// Idempotent, for the reason `opened` in `pickers.ts` is: a test that asks for
+/// two of the pickers is not asking to shut the panel between them.
+///
+/// The panel shape alone. Where the table says the Process is run under one role
+/// there is no trigger to press and no panel to drop — the picker stands in the
+/// row as the control itself, labelled *Agent*, and a test reaches it through
+/// `pickers.ts` by that name.
+export async function openAgent(container: ParentNode): Promise<HTMLElement> {
+  const trigger = await drawn<HTMLButtonElement>(
+    container,
+    `.${setup.agentOption} > button`,
+  );
+
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(trigger);
+  }
+
+  return drawn(container, `.${setup.agentOption} > [role="group"]`);
 }
 
 /// The page reading everything it is showing again, exactly as a Nudge makes
