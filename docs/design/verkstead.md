@@ -836,6 +836,20 @@ ahead or diverged refused by name — stand, run at Start rather than from a
 press of their own. See
 [ADR-0020](../adr/0020-a-conversation-has-a-process.md).
 
+*Revised 2026-09-27, roadmap stage processes/05*: that went in, and the level,
+the list, the `gh` read behind it, the start that loaded a pull request and the
+*Wrap up* press on the draft's pane are all gone. So **Other actions** holds one
+level and is drawn as the menu it always was — greyed while there is nothing to
+continue rather than hidden, because what the paragraph above settled is that a
+control saying what it offers beats a dropdown that comes and goes with a list,
+and one level left is no reason to go back to the dropdown. Nothing about the
+pull request is touched either: the Brief is the human's, and loading one no
+longer prefills anything, so opening the compose page asks GitHub nothing at all.
+The record of what was taken up stays and is written by the Review's own Start,
+which is what a Conversation's Process is read back off — so a **Draft** from
+before the Process, started off the retired level, reads as a Review with that
+pull request's URL in its Target field and starts through the new path.
+
 **And with nothing to list, that page is the whole of the app** (*settled
 2026-09-08, onboarding stage 04*). The **zero state** is a fact about the
 sidebar's list rather than about a first run: it holds while that list *as

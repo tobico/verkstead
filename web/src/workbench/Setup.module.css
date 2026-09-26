@@ -191,6 +191,7 @@
 
 .repoPick,
 .branchName,
+.target,
 .baseBranch,
 .addCompanion {
   margin-bottom: 0.85rem;
@@ -303,6 +304,7 @@
    unlike the row outside it, whose labels are the triggers' own first line. */
 .repoPick label,
 .branchName label,
+.target label,
 .baseBranch label,
 .addCompanion label,
 .companionBranch label {

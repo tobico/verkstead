@@ -135,9 +135,6 @@ mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
-/// The open pull requests Verkstead did not open, which is the door work
-/// already somewhere else comes into the pipeline through.
-mod pull_requests;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
@@ -203,6 +200,9 @@ mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.
 mod stops;
+/// What a **Review** Conversation is to take up, read out of the Brief: the
+/// first pull request URL or bare `#number` in it.
+mod targets;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one
 /// `script` made inside the sandbox.

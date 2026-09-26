@@ -1,6 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [
     {
@@ -115,6 +114,7 @@
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

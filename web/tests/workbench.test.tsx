@@ -57,6 +57,7 @@ import type {
   Nudge,
   PendingSteerView,
   PairingView,
+  Process,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
@@ -184,7 +185,15 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The words a Process is said in, read here rather than spelled out again: the
 // pane and this assertion about it would otherwise be two opinions about what
 // Develop is called.
-import { away, OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
+import {
+  away,
+  OFFERED,
+  PROCESS,
+  ROLES,
+  TARGETED,
+  targeted,
+  uses,
+} from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -275,10 +284,6 @@ import { STATE } from "../src/workbench/states";
 import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerForm from "../src/workbench/Steer.module.css";
-// The band naming the pull request a draft is holding, over the box it writes
-// its Brief in — and the press under it that takes the pull request up.
-import { TAKE_UP_REFUSAL } from "../src/workbench/TakeUp";
-import takeUp from "../src/workbench/TakeUp.module.css";
 // The status button at the foot of the sticky block over the Conversation pane,
 // both ways: the hashed names its line is queried by, and the source of the
 // paint that says when it is in the accent.
@@ -302,6 +307,7 @@ import {
   COMPANION_REMOVAL_REFUSAL,
   PROCESS_REFUSAL,
   REPO_SWITCH_REFUSAL,
+  TARGET,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL, STEER_SAVE_REFUSAL } from "../src/workbench/Steer";
 import {
@@ -2660,50 +2666,57 @@ describe("the adoption page", () => {
   });
 });
 
-/// And the page a conversation started from the level beside that notice opens
-/// on: the pull request named over a Brief the human still writes, the two
-/// pairings that will run the wrap-up, and none of the three things the pull
-/// request has already settled.
-describe("the page of a draft holding a pull request", () => {
-  /// What the server said the draft is holding — written down when the row was
-  /// pressed rather than read off GitHub again, a re-read being a `gh` call to
-  /// name what is already on the screen.
-  const PULL = HOLDING.adopting_pull_request!;
-
+/// And the page of a **Draft from before there were Processes** — one started off
+/// the retired *Wrap up a pull request* level, which reads as a Review pointed at
+/// the pull request it was made for.
+///
+/// Which is the whole of what retiring that level owes such a draft: it draws as
+/// the Review it is, with the pull request's own URL in the Target field, and its
+/// Start is the one press every other Review has. Nothing here is a shape of its
+/// own any more — the band over the box, the *Wrap up* press under it and the
+/// pane behind that press are gone with the level.
+describe("the page of a draft from before, holding a pull request", () => {
   /// The workbench with that draft opened instead of the ordinary one. Every
   /// conversation fixture carries the same id, which is what the sidebar row and
   /// the URL are shared through.
-  function theHolding(...answers: Parameters<typeof serving>) {
+  ///
+  /// `over` is for the one fact the fixture cannot carry and a press turns on:
+  /// nothing is chosen on it, so its Start is inert, and a test about where the
+  /// press goes has to answer the roles first.
+  function theHolding(
+    over: Partial<ConversationView> = {},
+    ...answers: Parameters<typeof serving>
+  ) {
     return theWorkbench(
-      whenever(`/api/ui/conversations/${HOLDING.id}`, json(HOLDING)),
+      whenever(
+        `/api/ui/conversations/${HOLDING.id}`,
+        json({ ...HOLDING, ...over }),
+      ),
       ...answers,
     );
   }
 
-  it("names the pull request over the box, with its branches and a way out", async () => {
+  /// The record says Review, and the Target field says which pull request — read
+  /// off the adoption where nothing else names one, so the field the human is
+  /// looking at is the field Start will read.
+  it("reads as a Review pointed at the pull request it holds", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
-    const band = await drawn(container, `.${takeUp.held}`);
-    expect(band.textContent).toContain(HOLDING.repo.name);
-    expect(band.textContent).toContain(`#${PULL.number}`);
-    expect(band.textContent).toContain(PULL.title);
-    expect(band.textContent).toContain(PULL.head);
-    expect(band.textContent).toContain(PULL.base);
+    await openRepo(container);
 
-    expect(band.querySelector("a")!.getAttribute("href")).toBe(PULL.url);
+    const target = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
 
-    // And no way to put it down: the conversation was created holding this, and
-    // the way out of one is to close it.
-    expect(
-      screen.queryByRole("button", { name: `Clear #${PULL.number}` }),
-    ).toBeNull();
+    expect(HOLDING.process).toBe("Review");
+    expect(target.value).toBe(HOLDING.target);
+    expect(target.value).toContain("/pull/41");
   });
 
-  /// The Brief is the human's here, unlike an adopting draft's: a pull request
-  /// brings words of its own, they were put in the box when the row was loaded,
-  /// and what is left there is what the wrap-up reads.
-  it("holds the brief in a field, prefilled as the compose page left it", async () => {
+  /// And the Brief is the human's, as every Review's is: nothing about the pull
+  /// request is read into it any more.
+  it("holds the brief in a field of its own", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
@@ -2713,17 +2726,14 @@ describe("the page of a draft holding a pull request", () => {
     )) as HTMLTextAreaElement;
 
     expect(field.value).toBe(briefOf(HOLDING).markdown);
-    expect(field.value).toContain(PULL.title);
   });
 
-  /// The two pairings the wrap-up runs under, and nothing that the pull request
-  /// has already answered: its branch is the head branch, its base is that
-  /// branch's own head at take-up, and there is no round for a grilling to open.
+  /// The two pairings the Process uses, and no base picker: the Target names a
+  /// pull request, so GitHub's base is the fact and the take-up records it.
   ///
-  /// Two rather than three because the Process says so and not because the pane
-  /// tests for the held pull request: a Conversation holding one reads as a
-  /// Review, and Review uses Implementation and Review alone.
-  it("offers the two pairings and no branch, base or grilling picker", async () => {
+  /// Two rather than three because the Process says so: a Review has no round for
+  /// a grilling to open, and Review uses Implementation and Review alone.
+  it("offers the two pairings and no grilling or base picker", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
@@ -2735,7 +2745,6 @@ describe("the page of a draft holding a pull request", () => {
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
     // Which is the record's own reading, and the table's answer to it.
-    expect(HOLDING.process).toBe("Review");
     expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
 
     await openRepo(container);
@@ -2745,51 +2754,30 @@ describe("the page of a draft holding a pull request", () => {
     // of repos.
     await waitFor(() => screen.getByLabelText("Works alongside"));
 
-    expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
   });
 
-  /// The repo is the pull request's own — `#41` is a number in one repository
-  /// and something else entirely in the next — so the picker reads settled, and
-  /// the refusal behind it is named for what refused it.
+  /// The repo is still the pull request's own — `#41` is a number in one
+  /// repository and something else entirely in the next — so the picker reads
+  /// settled, and the refusal behind it is named for what refused it.
   ///
   /// That the server gives that refusal is
   /// `crates/server/tests/conversations.rs`'s; what is asked here is that the
-  /// control says so and that the name has a sentence to be read as.
-  it("refuses a repo move by name", async () => {
-    theHolding();
-    const { container } = mount(`/conversations/${HOLDING.id}`);
-
-    await openRepo(container);
-
-    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
-      true,
-    );
-
+  /// name has a sentence to be read as.
+  it("has a sentence for the refusal a repo move comes back with", () => {
     const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
     expect(said.HoldingPullRequest).toContain("pull request");
   });
 
-  /// The take-up stands where `Start grilling` does on every other draft, and
-  /// never beside it. The work on a pull request is built, and what it is
-  /// waiting for is the wrap-up — so the press that opens a round would be the
-  /// wrong act offered plainly.
-  it("offers the take-up in place of a start grilling or a continue", async () => {
-    theHolding();
-    const { container } = mount(`/conversations/${HOLDING.id}`);
-
-    await drawn(container, `.${takeUp.takingUp}`);
-
-    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
-    expect(container.querySelector(`.${adoption.adoption}`)).toBeNull();
-  });
-
-  /// The press posts to the conversation's own take-up route with nothing in the
-  /// body, for the reason the adoption's own sends nothing: which conversation
-  /// is in the path, and what the branch is now is the repository's own answer —
-  /// read by the server when the button is pressed.
-  it("posts to the conversation's own take-up route, with nothing in the body", async () => {
+  /// And its Start is the Review's own: one *Start work* under the box, reaching
+  /// the take-up route with nothing in the body. There is no press of its own on
+  /// this page any more, and no pane behind one.
+  it("starts through the take-up route, like every other Review", async () => {
     const fetching = theHolding(
+      // Nothing is chosen on the fixture, so the server would say it is not
+      // ready — which is the composer's inert press rather than this test's
+      // subject. See the Review start above for what an unready one says.
+      { ready_to_grill: true },
       whenever(
         `/api/ui/conversations/${HOLDING.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
@@ -2798,9 +2786,13 @@ describe("the page of a draft holding a pull request", () => {
     );
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
-    fireEvent.click(
-      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
     );
+    expect(start.textContent).toContain("Start work");
+
+    fireEvent.click(start);
 
     await waitFor(() =>
       expect(
@@ -2808,75 +2800,10 @@ describe("the page of a draft holding a pull request", () => {
       ).toEqual({}),
     );
 
-    // And what a press leaves behind is a conversation that has moved and a
-    // level with one row fewer free in it, so both are read again.
-    await waitFor(() =>
-      expect(
-        askedFor(fetching, `/api/ui/conversations/${HOLDING.id}`),
-      ).toBeGreaterThan(1),
+    expect(writes(fetching, `/api/ui/conversations/${HOLDING.id}/grill`)).toBe(
+      0,
     );
-  });
-
-  /// A press that was refused says which refusal it was. Every one of them is
-  /// something different to go and do — a profile to choose, a branch somebody
-  /// has pushed to, a branch somebody is standing on — so a single "cannot take
-  /// up" would leave the human guessing which.
-  it("says which refusal a press came back with", async () => {
-    for (const outcome of [
-      "NoImplementationProfile",
-      "NoHeadBranch",
-      "BranchAhead",
-      "BranchDiverged",
-    ] satisfies TakenUp[]) {
-      theHolding(
-        whenever(
-          `/api/ui/conversations/${HOLDING.id}/take-up`,
-          json(outcome satisfies TakenUp),
-          "POST",
-        ),
-      );
-      const { container, unmount } = mount(`/conversations/${HOLDING.id}`);
-
-      fireEvent.click(
-        await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
-      );
-
-      await waitFor(() =>
-        expect(
-          container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
-            .textContent,
-        ).toBe(TAKE_UP_REFUSAL[outcome]),
-      );
-
-      unmount();
-    }
-  });
-
-  /// And the one refusal that carries something with it says the thing it
-  /// carries: git holds one checkout per branch, so *where* the head branch is
-  /// already checked out is the whole of what makes it actionable.
-  it("names the place where the head branch is already checked out", async () => {
-    theHolding(
-      whenever(
-        `/api/ui/conversations/${HOLDING.id}/take-up`,
-        json({
-          CheckedOutElsewhere: { at: "/home/tobi/src/verkstead" },
-        } satisfies TakenUp),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${HOLDING.id}`);
-
-    fireEvent.click(
-      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
-    );
-
-    await waitFor(() =>
-      expect(
-        container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
-          .textContent,
-      ).toContain("/home/tobi/src/verkstead"),
-    );
+    expect(container.querySelector(`.${adoption.adoption}`)).toBeNull();
   });
 });
 
@@ -4507,6 +4434,152 @@ describe("a conversation's setup", () => {
   });
 });
 
+/// What the work is pointed at: the Target field under the Branch field, drawn
+/// for the Processes that are pointed at work already somewhere else.
+///
+/// A field of its own rather than the Branch field re-read, which is the whole
+/// of ADR-0020's second half: the rename asks git whether the string is a
+/// well-formed ref, and a pull request URL is not one.
+describe("the target a review is pointed at", () => {
+  /// Drawn for a Review and for nothing else, which is `processes.ts`'s list
+  /// to keep — so the row that adds a Process adds the field with it.
+  it("is drawn under Review and under no other process", async () => {
+    for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
+      theWorkbenchWith({ process });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+      await openRepo(container);
+
+      await waitFor(() => screen.getByLabelText("Branch"));
+      expect(screen.queryByLabelText("Target")).toBeNull();
+      expect(targeted(process)).toBe(false);
+
+      unmount();
+    }
+
+    theWorkbenchWith({ process: "Review" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+    expect(TARGETED).toEqual(["Review"]);
+  });
+
+  /// And it takes the one value the Branch field beside it will not: a pull
+  /// request URL, which git refuses over its colon.
+  it("sends a pull request url the branch field would refuse", async () => {
+    const url = "https://github.com/tobico/verkstead/pull/41";
+    const fetching = theWorkbenchWith(
+      { process: "Review", target: null },
+      json("Recorded"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.value).toBe("");
+
+    fireEvent.input(field, { target: { value: url } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/target`),
+      ).toEqual({ target: url }),
+    );
+  });
+
+  /// And a bare branch just as readily, nothing here having an opinion about
+  /// which of the three was typed.
+  it("sends a bare branch name too", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "Review", target: null },
+      json("Recorded"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = await waitFor(() => screen.getByLabelText("Target"));
+    fireEvent.input(field, { target: { value: "rate-limiting" } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/target`),
+      ).toEqual({ target: "rate-limiting" }),
+    );
+  });
+
+  /// What the record holds is what the field shows, which is how a target the
+  /// Brief filled in on the server arrives under the human's eyes.
+  it("shows what the record was filled with", async () => {
+    theWorkbenchWith({ process: "Review", target: "#41" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.value).toBe("#41");
+  });
+
+  /// And it is gone past drafting, with everything else in the panel the
+  /// server refuses by then.
+  it("is not drawn once the branch has been cut", async () => {
+    theWorkbenchWith({
+      process: "Review",
+      target: "#41",
+      worktree: { path: "/var/lib/verkstead/worktrees/open", missing: false },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Repo"));
+    expect(screen.queryByLabelText("Target")).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+  });
+
+  /// The base picker follows what the field holds: a pull request brings
+  /// GitHub's own base along, so there is nothing to pick.
+  it("takes the base picker away where the target is a pull request", async () => {
+    theWorkbenchWith({
+      process: "Review",
+      target: "https://github.com/tobico/verkstead/pull/41",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  /// And keeps it where the target is a branch, that base being what the
+  /// wrap-up will open the pull request against.
+  it("keeps the base picker where the target is a branch", async () => {
+    theWorkbenchWith({ process: "Review", target: "rate-limiting" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+
+  /// And an empty one keeps it too: nothing is named yet, and a picker that
+  /// vanished on the first keystroke of a URL would be the panel guessing.
+  it("keeps the base picker where nothing is named", async () => {
+    theWorkbenchWith({ process: "Review", target: null });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+});
+
 /// Which repo the work is in at all: the first thing in the Repo panel, and the
 /// one the branch, the base and the companions under it are facts about.
 ///
@@ -4812,7 +4885,7 @@ describe("a conversation's process", () => {
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// Three rows for now, and that list is the one place a later stage adds to: a
+  /// Four rows for now, and that list is the one place a later stage adds to: a
   /// Process is offered only once its stage has landed.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
@@ -4820,7 +4893,7 @@ describe("a conversation's process", () => {
     await theProcess();
 
     expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate"]);
+    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate", "Review"]);
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there
@@ -4871,20 +4944,20 @@ describe("a conversation's process", () => {
     expect(showing("Process")).toBe(PROCESS.Develop);
   });
 
-  /// And on a draft holding a pull request, which has no worktree at all: what a
-  /// take-up makes is a Review, Review cannot be picked until its own stage
-  /// lands, and a row saying nothing about a conversation that is a Review would
-  /// be the row missing the thing that tells it apart.
-  it("reads Review and settled on a draft holding a pull request", async () => {
+  /// And a draft from before there were Processes reads Review off the pull
+  /// request it holds, with no row of its own and no worktree: the reading is
+  /// what covers every Conversation started before there was a picker, and the
+  /// control shows it like any other pick.
+  it("reads Review on a draft holding a pull request", async () => {
     theWorkbench(
       whenever(`/api/ui/conversations/${HOLDING.id}`, json(HOLDING)),
     );
     mount(`/conversations/${HOLDING.id}`);
 
-    expect((await theProcess()).disabled).toBe(true);
+    await theProcess();
     expect(showing("Process")).toBe(PROCESS.Review);
     expect(HOLDING.worktree).toBeNull();
-    expect(OFFERED).not.toContain("Review");
+    expect(OFFERED).toContain("Review");
   });
 });
 
@@ -5961,10 +6034,9 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
   });
 
-  /// And a Review draws two. Asked of a conversation holding no pull request at
-  /// all, which is the whole point of it: what takes the grilling picker away
-  /// is the Process, not the thing that happened to settle it.
-  it("draws no grilling picker under Review, pull request or no", async () => {
+  /// And a Review draws two: what takes the grilling picker away is the Process
+  /// and nothing else.
+  it("draws no grilling picker under Review", async () => {
     theWorkbenchWith({ process: "Review" });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
@@ -5973,8 +6045,37 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(OPEN.adopting_pull_request).toBeNull();
     expect(uses("Review", "grilling")).toBe(false);
+  });
+
+  /// And the Review picker it draws offers accounts and nothing else: a Review
+  /// without a review is Fix Merge Issues with the comments answered, so the row
+  /// that runs no session is offered nowhere on this Process.
+  it("offers no row that runs nothing on a Review", async () => {
+    theWorkbenchWith({ process: "Review" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openAgent(container);
+
+    await waitFor(() => picker("Review"));
+
+    expect(offers("Review")).toEqual(READINGS);
+    expect(away("Review", "review")).toBeUndefined();
+    expect(OFFERED).toContain("Review");
+  });
+
+  /// And the two that keep theirs still have it, which is what makes the row
+  /// above a fact about the Process rather than about the picker.
+  it("keeps the no-session row on Develop and on Tinker", async () => {
+    for (const process of ["Develop", "Tinker"] satisfies Process[]) {
+      theWorkbenchWith({ process });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+      await openAgent(container);
+
+      await waitFor(() => picker("Review"));
+      expect(offers("Review")).toEqual(["No review", ...READINGS]);
+
+      unmount();
+    }
   });
 
   /// And so does a Tinker, which is the one Process besides Develop a draft can
@@ -6995,15 +7096,16 @@ describe("starting the work", () => {
 
   /// And the roles it names are the ones the Process uses, counted off the role
   /// table rather than written into the sentence as three: a Review runs two
-  /// and says *both roles*.
-  it("names two roles where the process has two", async () => {
+  /// and says *both roles* — and waits on a target besides, which is the same
+  /// table's other column.
+  it("names two roles and a target where the process has them", async () => {
     theWorkbenchWith({ process: "Review", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     expect(start.getAttribute("title")).toBe(
-      "This needs a brief, and both roles picked and working.",
+      "This needs a brief, a target, and both roles picked and working.",
     );
   });
 
@@ -7018,6 +7120,100 @@ describe("starting the work", () => {
     expect(start.getAttribute("title")).toBe(
       "This needs a brief, and one role picked and working.",
     );
+  });
+
+  /// A **Review** presses the take-up instead: one press on a composer, so the
+  /// button is the same button and reads the same words — and what it reaches is
+  /// the endpoint that checks the pull request out and moves the conversation
+  /// into wrapping.
+  ///
+  /// Nothing in the body, for the grill route's reason: which conversation is in
+  /// the path, and what its brief names is read by the server at the press.
+  it("posts to the take-up route where the process is a review", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "Review" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+    expect(start.textContent).toContain("Start work");
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toEqual({}),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+
+  /// And the refusals that press comes back with are the take-up's own, each in
+  /// its own sentence: an empty target, a branch origin has nothing under, a link
+  /// into another repository, a number GitHub has nothing open under, a fork, and
+  /// a `gh` that would not answer are six different things to go and do.
+  it.each([
+    ["NoTarget", /Nothing is named in the Target field/],
+    ["NoHeadBranch", /Origin has no branch by that name/],
+    ["Fork", /in a fork/],
+    [
+      { AnotherRepository: { named: "tobico/askance" } },
+      /tobico\/askance/,
+    ],
+    [{ NoSuchPullRequest: { number: 41 } }, /nothing open under #41/],
+    [{ GitHubRefused: { why: "nobody is logged in" } }, /nobody is logged in/],
+  ] satisfies Array<[TakenUp, RegExp]>)(
+    "says in words what a refused review means",
+    async (outcome, said) => {
+      theWorkbenchWith(
+        { process: "Review" },
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/take-up`,
+          json(outcome as TakenUp),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+      );
+
+      await waitFor(() => screen.getByText(said));
+      unmount();
+    },
+  );
+
+  /// And the one that carries a conversation leads there: there is one
+  /// conversation per piece of work, so what this refusal offers is the one that
+  /// already has the pull request rather than a second wrap-up over its branch.
+  it("leads to the conversation that already holds the pull request", async () => {
+    theWorkbenchWith(
+      { process: "Review" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({ AlreadyHeld: { conversation: 77 } } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "another conversation's" }),
+    );
+    expect(way.getAttribute("href")).toBe("/conversations/77");
   });
 
   /// And a conversation that is ready says nothing at all: what the press does

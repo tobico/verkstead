@@ -94,7 +94,64 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
         return;
     };
 
-    record(state, conversation_id, repo_id, &branch, found, writing).await
+    record(
+        state,
+        conversation_id,
+        repo_id,
+        &branch,
+        found,
+        writing,
+        Door::TheMove,
+    )
+    .await
+}
+
+/// The same for a Conversation that is wrapping up already: the pull request is
+/// written beside the wrap-up rather than being what starts one.
+///
+/// **A Review taken up over a bare branch**, and nothing else. That one is moved
+/// into Wrapping by the take-up itself, there being no pull request to move it —
+/// see [`crate::conversations::take_up`] — and the session sent for one runs from
+/// inside the wrap-up it is already in. So the record is the row without the move
+/// over the top of it, exactly as a companion's pull request is recorded, and the
+/// watchers start on what was opened.
+///
+/// Which is why it is a door rather than a second reading of the state: a
+/// Conversation that is Wrapping has nothing left to wrap, so the move would be
+/// refused as a second attempt at an ending and the pull request would go
+/// unrecorded — and what the human would be looking at is a wrap-up watching
+/// nothing.
+pub(crate) async fn opened_beside(state: &AppState, conversation_id: i64, writing: Option<i64>) {
+    let Some((repo_id, branch, found)) = asked(state, conversation_id).await else {
+        return;
+    };
+
+    record(
+        state,
+        conversation_id,
+        repo_id,
+        &branch,
+        found,
+        writing,
+        Door::Beside,
+    )
+    .await
+}
+
+/// Which door a pull request a session has just opened comes through.
+///
+/// One thing to record and two ways in, and what tells them apart is where the
+/// Conversation already stands rather than anything about the pull request. See
+/// [`opened`] and [`opened_beside`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Door {
+    /// The move: the Conversation is not wrapping yet, and recording this is what
+    /// carries it there — the ending every run comes through.
+    TheMove,
+
+    /// Beside a wrap-up that is under way already, which is a take-up over a bare
+    /// branch: the row and the Event, and no move.
+    Beside,
 }
 
 /// Make of an answer `gh` has already given what [`opened`] makes of its own.
@@ -108,7 +165,8 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 ///
 /// `repo_id` is the registered Repo it was opened in, which is which of a
 /// Conversation's pull requests this one is, and `branch` is the branch that was
-/// asked about, which is what the stop is logged against.
+/// asked about, which is what the stop is logged against. `door` is whether
+/// recording this is the move — see [`Door`].
 pub(crate) async fn record(
     state: &AppState,
     conversation_id: i64,
@@ -116,6 +174,7 @@ pub(crate) async fn record(
     branch: &str,
     found: Result<store::PullRequest, github::Trouble>,
     writing: Option<i64>,
+    door: Door,
 ) {
     let opened = match found {
         Ok(opened) => opened,
@@ -132,7 +191,24 @@ pub(crate) async fn record(
         }
     };
 
-    match store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await {
+    // The row either way, and the move only through the door that is one — a
+    // Conversation that is Wrapping already has nothing left to wrap, so asking
+    // for the move there would record nothing at all.
+    let recorded = match door {
+        Door::TheMove => {
+            store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await
+        }
+        Door::Beside => {
+            store::record_another_pull_request(&state.pool, conversation_id, repo_id, &opened)
+                .await
+                .map(|there| match there {
+                    true => store::Wrapping::Started,
+                    false => store::Wrapping::NoSuchConversation,
+                })
+        }
+    };
+
+    match recorded {
         Ok(store::Wrapping::Started) => {
             tracing::info!(
                 conversation_id,

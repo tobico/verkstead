@@ -307,92 +307,6 @@ pub struct AbandonedRoadmap {
     pub base: String,
 }
 
-/// One Repo's open pull requests, as the *Wrap up a pull request* level lists
-/// them.
-///
-/// Grouped by Repo for the reason the abandoned roadmaps are — a number is a
-/// fact about a repository, and `#41` says something different in each of them,
-/// so a flat list would be one whose rows could not be told apart without
-/// carrying the repository anyway.
-///
-/// Nothing here is stored. Every field is read off GitHub through the host's
-/// `gh` at the moment the level is drawn, which is why a pull request somebody
-/// has since merged simply stops appearing rather than having to be taken off
-/// anything.
-///
-/// A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
-/// logged in, a GitHub that would not answer — contributes no group at all
-/// rather than an empty one or a failure: what Verkstead does not know is not
-/// an empty list, but it is not a broken page either.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct OpenPullRequestRepo {
-    /// Which Repo, by the id a Conversation is started against.
-    pub repo_id: i64,
-
-    /// And what it is called, which is what each row says it is in.
-    pub repo: String,
-
-    /// The open pull requests in it, in the order GitHub listed them. Never
-    /// empty: a Repo with nothing open contributes no group at all.
-    pub pull_requests: Vec<OpenPullRequest>,
-}
-
-/// One open pull request, as a row of that level draws it.
-///
-/// Any author, because whose pull request it is says nothing about whether it is
-/// worth wrapping up — what the pipeline takes up is the branch rather than the
-/// person. Forks are the one exclusion, and they are excluded for what taking
-/// one up would have to do rather than out of taste: a head branch in another
-/// repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
-/// check would have nowhere to put the fix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct OpenPullRequest {
-    /// The number GitHub gave it, which is what everybody calls it by — in
-    /// this repository and nowhere else.
-    pub number: i64,
-
-    /// Its title, which is the line a row leads with.
-    pub title: String,
-
-    /// The whole URL, so a row can lead out to GitHub without a repository
-    /// name being guessed at.
-    pub url: String,
-
-    /// The branch the work is on, which is the branch taking it up checks out.
-    pub head: String,
-
-    /// And the branch it goes into, which is what the wrap-up watches for
-    /// conflicts against.
-    pub base: String,
-
-    /// Who opened it, by their GitHub login. Empty where GitHub named nobody,
-    /// which is what a deleted account leaves behind.
-    pub author: String,
-
-    /// What it says about itself: the description as it was written, raw
-    /// markdown. Empty where nobody wrote one.
-    ///
-    /// Never drawn on the row — a row is a line, and this is a document — but
-    /// carried on it all the same, because loading a pull request prefills the
-    /// box with the title as a heading and this under it. Raw rather than
-    /// rendered, unlike every other piece of markdown crossing this wire: what
-    /// it becomes is a Brief the human edits, and a field cannot be filled from
-    /// HTML.
-    pub body: String,
-
-    /// The Conversation already holding this pull request, where one does —
-    /// any state, Done and Closed included, because a pull request stays on a
-    /// Conversation's record once it is recorded there.
-    ///
-    /// `null` is a pull request nothing has taken up. What a held row does
-    /// instead of loading is lead to the Conversation holding it: there is one
-    /// Conversation per piece of work, and a second one over the same branch
-    /// would be two wrap-ups pushing to it.
-    pub conversation_id: Option<i64>,
-}
-
 /// What a Conversation is adopting, as its own page draws it: the roadmap it
 /// was started for, and the stage adopting would start.
 ///
@@ -420,36 +334,6 @@ pub struct AdoptionView {
     /// gone, or its next stage is somebody else's already. The press says which
     /// of those it is; this is only what the page can name.
     pub stage: Option<AdoptedStage>,
-}
-
-/// The pull request a drafting Conversation is holding, as its own page names
-/// it: which one, what it is called, and the two branches it sits between.
-///
-/// Kept rather than read off GitHub every time the page is drawn, which is where
-/// this parts company with [`AdoptionView`] beside it. A roadmap is a document
-/// in the Conversation's own repository and costs a file read; a pull request is
-/// a call out to GitHub, and a page that made one every time it was opened would
-/// be a page waiting on somebody else's server to say what it is about. What is
-/// authoritative is asked again at the take-up, which is the one moment it
-/// matters.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct AdoptedPullRequestView {
-    /// The number GitHub gave it, which is what everybody calls it by — in the
-    /// Conversation's own Repo and nowhere else.
-    pub number: i64,
-
-    /// Its title, as it read when the row was listed.
-    pub title: String,
-
-    /// The whole URL, so the card can lead out to GitHub.
-    pub url: String,
-
-    /// The branch the work is on, which is the branch the take-up checks out.
-    pub head: String,
-
-    /// And the branch it goes into.
-    pub base: String,
 }
 
 /// The stage an adoption would start, named.
@@ -670,15 +554,19 @@ pub struct ConversationView {
     /// Adopt press — no Brief to write and no grilling to start.
     pub adopting: Option<AdoptionView>,
 
-    /// And the pull request it is holding, where it is holding one.
+    /// And what the work is pointed at, where the human or the Brief has named
+    /// anything: the **Target** field, as it stands.
     ///
-    /// `null` alongside [`Self::adopting`] on every ordinary Conversation, and
-    /// never both at once: a Draft adopts one thing or none. `Some` is one
-    /// started off the *Wrap up a pull request* level, and it is what puts the
-    /// page on that shape — the pull request named over a Brief the human still
-    /// writes, the two Pairings that will run the wrap-up, and no branch, base
-    /// or grilling to settle.
-    pub adopting_pull_request: Option<AdoptedPullRequestView>,
+    /// `null` is the field empty, which is every Conversation but a **Review**
+    /// somebody has named a target on. What is in it is a pull request URL, a
+    /// `#number` or a branch, kept as it was typed — which of the three it is
+    /// is decided at Start and not before, so there is nothing here saying
+    /// which the page is looking at.
+    ///
+    /// Drawn in the Repo panel under the Branch field, for the Processes that
+    /// take a target and no others — see `processes.ts`, where that list is
+    /// kept beside the role table.
+    pub target: Option<String>,
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
@@ -3168,30 +3056,6 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
-/// And starting one to wrap a pull request up with: which Repo, and the row off
-/// the *Wrap up a pull request* level that was pressed.
-///
-/// The whole row rather than a number, unlike [`NewAdoption`] beside it. A
-/// roadmap is a document in the Conversation's own repository and is read back
-/// off it wherever it is wanted; a pull request is somebody else's server, and
-/// a server that had only the number would have to make a `gh` call of its own
-/// to draw the card the human has already been looking at. So the five facts
-/// travel, and the take-up is where GitHub is asked again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewPullRequestAdoption {
-    pub repo_id: i64,
-    pub number: i64,
-    pub title: String,
-    pub url: String,
-
-    /// The branch the work is on, which is the branch the take-up checks out.
-    pub head: String,
-
-    /// And the branch it goes into.
-    pub base: String,
-}
-
 /// The order the human has just dragged the sidebar into: every Conversation
 /// they can see, by id, top first.
 ///
@@ -3285,6 +3149,19 @@ pub enum ProcessPicked {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct BranchRename {
     pub branch: String,
+}
+
+/// And what the work is pointed at: a pull request URL, a `#number` or a
+/// branch, as it was typed.
+///
+/// One string whichever of the three it is, because which it is, is not a
+/// question the field asks — it is decided when the Target is read, at Start.
+/// Blank is the field cleared, which is the target taken away rather than one
+/// called nothing, exactly as a blank [`BranchRename`] is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TargetNamed {
+    pub target: String,
 }
 
 /// The branch to come off, or `null` to go back to the default-branch rule.
@@ -3592,6 +3469,26 @@ pub enum BranchRenamed {
     /// Not a name git would take for a branch. Asked of git itself rather than
     /// guessed at from a list of forbidden characters.
     NotABranchName,
+}
+
+/// What became of naming what the work is pointed at.
+///
+/// Two refusals rather than the branch field's three, and the missing one is
+/// the point: nothing here asks git whether the string is a well-formed branch
+/// name, because a pull request URL is not one and is the commonest thing to
+/// type in. What the string names is decided at Start, where there is a GitHub
+/// and a git to ask — a branch origin has never heard of and a URL of another
+/// repository are refused there, by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TargetRecorded {
+    Recorded,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, so what it was pointed at was read
+    /// when the work started and is not a text field any more. The Branch
+    /// field's own rule, and for its reason.
+    NotDrafting,
 }
 
 /// What became of choosing the branch the work comes off.
@@ -4512,7 +4409,7 @@ pub enum Adopted {
     },
 }
 
-/// What became of pressing the take-up on a Draft holding a pull request.
+/// What became of pressing Start on a **Review** Draft.
 ///
 /// [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
 /// named the same way for the same reason: a human is at the workbench pressing
@@ -4523,6 +4420,11 @@ pub enum Adopted {
 /// refuses an adoption is a name being *taken*; a pull request's head branch is
 /// the whole point, so what refuses a take-up is that branch holding something
 /// origin does not, or somebody else standing on it.
+///
+/// And the ones in front of all of those, which an adoption has no equivalent
+/// of: a stage is named by the row that was pressed, where a Review's target is
+/// named in the Brief and resolved through `gh` at the press. So this list
+/// begins with what the Brief said and what GitHub made of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum TakenUp {
@@ -4535,9 +4437,55 @@ pub enum TakenUp {
     /// It is past drafting, so it has been taken up once already — or closed.
     NotDrafting,
 
-    /// It is holding no pull request, which is every Conversation that began
-    /// with a Brief and a grilling. There is nothing here to wrap up.
+    /// It is neither a Review nor one of the Drafts that were started holding a
+    /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
+
+    /// The **Target** field is empty, so there is nothing for this Review to take
+    /// up. Anything in it at all is a pull request or a branch — see
+    /// [`Self::NoHeadBranch`], which is what a name origin has nothing under
+    /// comes back as.
+    ///
+    /// The press is inert on the page while the field is empty, so this is
+    /// what a page whose copy of the world has gone stale gets back.
+    NoTarget,
+
+    /// The Target's URL names a pull request of another repository, and `gh`
+    /// answers for this Repo's origin. Which repository it named is the whole
+    /// of what the human needs: either the URL is the wrong one, or this
+    /// Conversation is on the wrong Repo.
+    AnotherRepository {
+        /// The `owner/repo` the URL said, as it was written.
+        named: String,
+    },
+
+    /// GitHub has nothing open under that number in this Repo — never opened,
+    /// or merged or closed since the Brief was written.
+    NoSuchPullRequest {
+        /// The number that was asked about.
+        number: i64,
+    },
+
+    /// GitHub could not be asked at all: no `gh` on the PATH, nobody logged in,
+    /// no GitHub remote, a GitHub that would not answer. In `gh`'s own words,
+    /// because which of those it is, is the whole of what to go and fix.
+    GitHubRefused {
+        /// Why, in the sentence the server put it in.
+        why: String,
+    },
+
+    /// The pull request's head branch is in a fork, so nothing a wrap-up did
+    /// could be pushed to it — the fixes would have nowhere to go.
+    Fork,
+
+    /// Another Conversation is already on that pull request, and there is one
+    /// Conversation per piece of work. Which one is the whole of what the
+    /// human needs: the way on is that Conversation rather than a second one
+    /// over the same branch.
+    AlreadyHeld {
+        /// The Conversation that has it, for the way there.
+        conversation: i64,
+    },
 
     /// No Agent Profile is chosen for the implementation, which is what a red
     /// check and a conflict are fixed under.
@@ -4560,8 +4508,10 @@ pub enum TakenUp {
     /// that may be a week old.
     FetchFailed,
 
-    /// Origin has no branch by the name GitHub gave as the pull request's head
-    /// — deleted since it was listed, or never pushed to this remote.
+    /// Origin has no branch by the name being taken up — the head GitHub gave for
+    /// a pull request, deleted since or never pushed to this remote, or a
+    /// **Target** naming a branch that is not on origin at all. Which is nothing
+    /// to wrap up either way: there is nowhere for a review to happen.
     NoHeadBranch,
 
     /// There is a local branch by that name, and it holds commits origin does

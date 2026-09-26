@@ -1921,16 +1921,22 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And what pressing a free row of the *Wrap up a pull request* level makes:
-    // a Draft against that Repo holding the pull request, which is the page that
-    // names one over a Brief the human still writes. Put in through the store
-    // for the reason the adoption above is, and with a Brief saved on it —
-    // loading a pull request prefills the box with the title and the description,
-    // and the create's replay is what puts that on the record.
-    let wrapping_up = store::start_pull_request_adoption(
+    // And a **Draft** from before there were Processes: one started off the
+    // retired *Wrap up a pull request* level, which reads as a Review pointed at
+    // the pull request it was made for. Put in through the store for the reason
+    // the adoption above is, and because that level's own start is gone — what it
+    // left behind is the adoption row, and this is it.
+    //
+    // Its Brief is the human's, as every Review's is: nothing about the pull
+    // request is read into it.
+    let wrapping_up = store::start_unnamed_conversation(&pool, registered.id, "quiet-heron")
+        .await
+        .unwrap()
+        .unwrap();
+
+    store::hold_pull_request(
         &pool,
-        registered.id,
-        "quiet-heron",
+        wrapping_up,
         &store::AdoptedPullRequest {
             number: 41,
             title: "Rate limiting for the public API".to_owned(),
@@ -1940,7 +1946,6 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         },
     )
     .await
-    .unwrap()
     .unwrap();
 
     store::save_brief(

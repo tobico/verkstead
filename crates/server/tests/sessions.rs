@@ -68,14 +68,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, AnswerAttached, Attached, BriefSaved, Capture, CommitEvent,
-    CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
+    Adopted, AgentOutputEvent, AnswerAttached, Attached, BaseRecorded, BriefSaved, Capture,
+    CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
     ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, SetReading, SetView, Shown,
-    Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
-    TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent, TranscriptView,
-    Turn, Watching,
+    Size, StageListReached, Started, SteerOpened, Submitted, TargetRecorded, TaskListEvent,
+    TaskListReached, TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent,
+    TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -1221,7 +1221,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
     ;;
 esac
 "#;
@@ -1247,7 +1247,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1279,7 +1279,7 @@ case "$5" in
     printf '{{"comments":[{said}],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1309,7 +1309,7 @@ case "$5" in
     printf '{{"comments":[{said}],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -1340,7 +1340,7 @@ case "$5" in
     printf '{{"comments":[%s],"reviews":[]}}' "$said"
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1384,7 +1384,7 @@ mergeable,state)
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1457,7 +1457,7 @@ mergeable,state)
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1667,7 +1667,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1692,7 +1692,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
     ;;
 esac
 "#;
@@ -1729,7 +1729,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -1778,7 +1778,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -19653,18 +19653,18 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
     bench.holding(id)
 }
 
-/// The Brief a taken-up Conversation carries: the pull request's title and
-/// description as the compose box prefilled them, with the line the human added
-/// before they pressed.
+/// The Brief a taken-up Conversation carries: the human's own words about the
+/// work, with the pull request named among them.
 ///
-/// Nothing about it comes from a grilling — a take-up has none — so this is the
-/// whole of what every session over such a Conversation is told the work is,
-/// and the added line is what makes *edited* a fact a test can read back.
+/// Nothing about it comes from a grilling — a Review has none — and nothing about
+/// it comes from the pull request either: the Brief is the human's. So this is
+/// the whole of what every session over such a Conversation is told the work is,
+/// and the `#41` in it is what fills the Target the press reads.
 const A_TAKEN_UP_BRIEF: &str = "# Rate limiting for the public API\n\nA token bucket per key.\n\n\
-                                Wrap this up: I want the window tests looked at.\n";
+                                Wrap #41 up: I want the window tests looked at.\n";
 
 /// Stand a workbench up with a pull request already open on the upstream, and
-/// press the take-up on a Draft holding it.
+/// press Start on a **Review** pointed at it.
 ///
 /// The third way into the pipeline, and the one that starts inside it: the work
 /// is built and pushed by somebody else, so there is nothing to grill and
@@ -19723,15 +19723,8 @@ async fn taking_up_however_reviewed(
 
     let started: Started = post(
         &bench.app,
-        "/api/ui/pull-request-adoptions",
-        &serde_json::json!({
-            "repo_id": bench.repo_id,
-            "number": 41,
-            "title": "Rate limiting for the public API",
-            "url": "https://github.com/tobico/verkstead/pull/41",
-            "head": "rate-limiting",
-            "base": "main",
-        }),
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
     )
     .await;
     let Started::Started { id } = started else {
@@ -19744,8 +19737,17 @@ async fn taking_up_however_reviewed(
         bench.unreviewed(id).await;
     }
 
+    let picked: ProcessPicked = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Review }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
     // What the human left in the compose box, which is the Brief and the whole
-    // of what any session over this Conversation is told the work is.
+    // of what any session over this Conversation is told the work is — and, since
+    // it names the pull request, what fills the Target the press reads.
     let saved: BriefSaved = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/brief"),
@@ -19764,6 +19766,412 @@ async fn taking_up_however_reviewed(
 
     bench.holding(id)
 }
+
+/// Stand a workbench up with somebody's branch on the upstream and no pull
+/// request anywhere, and press Start on a **Review** pointed at it.
+///
+/// The fourth way into the pipeline and the shape this one is about: the work is
+/// built and pushed and nobody opened a pull request, so the press takes the
+/// branch up, lands the Conversation in Wrapping, and sends one session for the
+/// one thing missing. `base` is the branch the picker is left holding, or `None`
+/// for the rule — the Repo's default branch — which is what the pull request is
+/// to be opened against either way.
+async fn reviewing_a_branch(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    base: Option<&str>,
+) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
+
+    cloned(&bench);
+    somebody_elses_branch(&bench.repo, "rate-limiting");
+
+    // A branch of the repository's own for the base to be picked out of, so that
+    // what the session is told is provably the picker's choice rather than the
+    // default branch the rule falls to.
+    if let Some(base) = base {
+        git(&bench.repo, &["branch", "--quiet", base]);
+    }
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_two_a_wrap_up_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Review }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    // The Target after the Brief, which is the order a composer sends them in and
+    // the order that matters: a Brief fills an empty field and never writes over
+    // one, so a branch typed in stands whatever the prose says.
+    let recorded: TargetRecorded = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/target"),
+        &serde_json::json!({ "target": "rate-limiting" }),
+    )
+    .await;
+    assert_eq!(recorded, TargetRecorded::Recorded);
+
+    if let Some(base) = base {
+        let chosen: BaseRecorded = post(
+            &bench.app,
+            &format!("/api/ui/conversations/{id}/base"),
+            &serde_json::json!({ "branch": base }),
+        )
+        .await;
+        assert_eq!(chosen, BaseRecorded::Recorded);
+    }
+
+    let taken: verkstead_render::TakenUp = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/take-up"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(taken, verkstead_render::TakenUp::TakenUp);
+
+    bench.holding(id)
+}
+
+/// A stub that opens the pull request the branch is owed, and writes down what it
+/// was told to open it against.
+///
+/// The prompt goes into a file of its own because that is the thing under test:
+/// the session is *told* which branch to open against, the skill's own fallback
+/// being the repository's default branch.
+fn a_submit_that_opens_against_what_it_was_told(opened: &Path, prompts: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf '=====\n%s\n' "$2" >> {prompts}
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    printf 'the branch is pushed and the pull request is open\n'
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    printf 'nothing else should be started over a taken-up branch\n'
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        prompts = quoted(prompts),
+    )
+}
+
+/// A **Review** over a bare branch lands Wrapping at the press, sends one session
+/// for the pull request nobody opened, and wraps up what that session opens.
+///
+/// The whole of the ending a branch has. Recording a pull request is the door
+/// every other wrap-up comes through and there is none here, so the take-up makes
+/// the move itself and the pull request arrives beside a wrap-up that is already
+/// under way — which is why nothing writes a second move on the Timeline.
+///
+/// The base is the picker's, and the session is told it: the skill opens against
+/// the repository's default branch where nothing says otherwise, and `release/2.1`
+/// is what the human chose.
+#[tokio::test]
+async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_opened_by_hand(&opened),
+        Some("release/2.1"),
+    )
+    .await;
+
+    // Wrapping at the press, before anything has opened anything: the move is the
+    // take-up's own.
+    let view = fixture.view().await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "and on no pull request yet: {:?}",
+        view.pinned,
+    );
+
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the pull request the session opened is the one it wraps up",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which it was already: the record arrived beside the wrap-up rather than starting one",
+    );
+    assert_eq!(
+        view.timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Moved(moved) => Some(moved.state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [Lifecycle::Wrapping],
+        "so there is one move on the Timeline and not two",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull request and nothing else",
+    );
+
+    // What it was told to open it against, which is the base the picker held.
+    let told = std::fs::read_to_string(&told_to).expect("the one session wrote its prompt down");
+
+    assert_eq!(prompts(&told).len(), 1, "one prompt, once: {told}");
+    assert!(
+        told.contains("The branch to open it against") && told.contains("release/2.1"),
+        "the session is told the base rather than left to the repository's default: {told}",
+    );
+
+    // And the wrap-up is running over it, which the review is the visible half of.
+    let deadline = Instant::now() + *PATIENCE;
+    while sessions_on(&fixture, "reviewing/SKILL.md").await == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up the pull request started never read the branch",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "and nothing stopped anywhere along it: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// And one whose session opens none stops the run with what that session last
+/// said — with Resume another go at the one thing still owed.
+///
+/// A branch's ending has the run's own *no pull request* situation in it, so it
+/// keeps the run's own promise about one: the stop names what stopped it, and the
+/// press asks for the missing thing again rather than starting anything else.
+#[tokio::test]
+async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_another_go() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let asked_twice = spill.path().join("asked-once-already");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
+        &gh_opened_by_hand(&opened),
+        None,
+    )
+    .await;
+
+    // The session is sent, leaves no pull request, and the run stops where it
+    // stands — which is Wrapping, a stop leaving the Conversation where it is.
+    // Read past the line the take-up wrote about itself, which is on the Timeline
+    // before anything runs.
+    let view = fixture
+        .until(|view| (!notices_since_the_take_up(view).is_empty()).then(|| view.clone()))
+        .await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(pull_request(&view), None);
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session asked for so far, and it got nowhere",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the press asked for the one thing that was missing, and got it",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        2,
+        "which is a second go at the pull request rather than anything else",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "next-task/SKILL.md").await,
+        0,
+        "and nothing was sent to work a backlog over a branch that is built",
+    );
+}
+
+/// A **Review** naming a pull request lands Wrapping at the press with the pull
+/// request recorded and no session sent for one: there is nothing owed.
+///
+/// The half of the branch's ending that is a branch's alone. What tells them apart
+/// is what GitHub already has, and the press is where that is decided — so a
+/// Review of a pull request is the take-up it always was, with the wrap-up over
+/// the top of it and nothing in between.
+#[tokio::test]
+async fn a_review_of_a_pull_request_sends_no_session_for_one() {
+    let spill = tempfile::tempdir().unwrap();
+
+    let fixture = reviewing_a_pull_request(
+        spill,
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    printf 'prompt was: %s\n' "$2"
+    sleep 300
+    ;;
+esac
+"#,
+    )
+    .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        pull_request(&view)
+            .expect("a Review of a pull request pins it at the press")
+            .number,
+        41,
+    );
+
+    // The review is what says the wrap-up is running, and it is the one session a
+    // Review of a pull request starts.
+    let deadline = Instant::now() + *PATIENCE;
+    while sessions_on(&fixture, "reviewing/SKILL.md").await == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up the take-up started never read the branch",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "nothing was sent for a pull request that is already open",
+    );
+}
+
+/// The same workbench with the Target naming the open pull request rather than the
+/// branch, for the one test that is about the other half of the press.
+async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench(spill, stub, THE_PULL_REQUEST_NUMBERED).await;
+
+    cloned(&bench);
+    somebody_elses_branch(&bench.repo, "rate-limiting");
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_two_a_wrap_up_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Review }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    // The Brief names it, which is what fills the Target while it is empty — one
+    // fewer press, and the ordinary way a Review is pointed at a pull request.
+    let saved: BriefSaved = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": "# Rate limiting\n\nWrap #41 up.\n" }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let taken: verkstead_render::TakenUp = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/take-up"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(taken, verkstead_render::TakenUp::TakenUp);
+
+    bench.holding(id)
+}
+
+/// A `gh` that answers about a pull request by *number*, which is what a Review's
+/// press asks — and about the branch afterwards, which is what the wrap-up's
+/// watchers ask.
+const THE_PULL_REQUEST_NUMBERED: &str = r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$5" in
+*headRefName*)
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
+    ;;
+*statusCheckRollup*)
+    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[]}'
+    ;;
+*commits*)
+    printf '{"commits":[],"comments":[]}'
+    ;;
+*comments*)
+    printf '{"comments":[],"reviews":[]}'
+    ;;
+*)
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    ;;
+esac
+"#;
 
 /// Put a pull request's head branch on the upstream and take it off here, which
 /// is what a branch somebody else opened a pull request from looks like from
@@ -20232,7 +20640,7 @@ async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_sa
         "under the Review Pairing, which is the fresh set of eyes: {sent}",
     );
     assert!(
-        sent.contains("Wrap this up: I want the window tests looked at."),
+        sent.contains("Wrap #41 up: I want the window tests looked at."),
         "started on the Brief the human edited on the compose page: {sent}",
     );
     assert!(
@@ -20279,7 +20687,7 @@ async fn a_taken_up_pull_request_with_no_review_answers_what_was_said_on_it() {
         "the batch session was sent what was written on the pull request: {said}",
     );
     assert!(
-        said.contains("Wrap this up: I want the window tests looked at."),
+        said.contains("Wrap #41 up: I want the window tests looked at."),
         "under the same edited Brief every session over this Conversation gets: {said}",
     );
     assert!(
@@ -24728,7 +25136,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#,
@@ -30964,7 +31372,7 @@ case "$5" in
     printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#
@@ -31661,7 +32069,7 @@ case "$5" in
 {own}
     ;;
 *)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
     ;;
 esac
 "#

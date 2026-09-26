@@ -762,7 +762,7 @@ async fn nothing_left(
                  session is being sent to open one",
             );
 
-            asked_for_a_pull_request(&state, conversation_id).await
+            asked_for_a_pull_request(&state, conversation_id, Owed::AFinish).await
         }
         Err(github::Trouble::NoPullRequest) => {
             tracing::info!(
@@ -1142,8 +1142,16 @@ async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Opti
     };
 
     if !matches!(found, Err(github::Trouble::NoPullRequest)) {
-        return crate::wrapping::record(state, conversation_id, repo_id, &branch, found, writing)
-            .await;
+        return crate::wrapping::record(
+            state,
+            conversation_id,
+            repo_id,
+            &branch,
+            found,
+            writing,
+            crate::wrapping::Door::TheMove,
+        )
+        .await;
     }
 
     tracing::warn!(
@@ -1152,7 +1160,80 @@ async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Opti
         "the work is committed and on no pull request, so a session is being sent to open one",
     );
 
-    asked_for_a_pull_request(state, conversation_id).await
+    asked_for_a_pull_request(state, conversation_id, Owed::AFinish).await
+}
+
+/// What the one session sent for a pull request is being sent over.
+///
+/// Two things differ between the ways of wanting one, and they differ together,
+/// which is why this is one value rather than two arguments: which branch it is
+/// told to open against, and which door what it opens is recorded through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Owed {
+    /// A run that stopped short of its push, or a **Tinker**'s ending. Nothing
+    /// says which branch to open against — the repository's own finish sequence
+    /// says it, and the base this branch came off is in its history — and what is
+    /// opened is the move into Wrapping.
+    AFinish,
+
+    /// A **Review** taken up over a bare branch, carrying the base the picker
+    /// held. Said outright because the skill's own fallback opens against the
+    /// repository's default branch, and the base here is the one the human chose;
+    /// and the Conversation is Wrapping already, so what is opened is written
+    /// beside that wrap-up rather than being what starts one. See
+    /// [`crate::conversations::take_up`].
+    ABranch(String),
+}
+
+impl Owed {
+    /// The branch the session is told to open the pull request against, where
+    /// anything says one.
+    fn against(&self) -> Option<&str> {
+        match self {
+            Owed::AFinish => None,
+            Owed::ABranch(base) => Some(base),
+        }
+    }
+
+    /// And which door what it opens comes through — see [`crate::wrapping::Door`].
+    fn door(&self) -> crate::wrapping::Door {
+        match self {
+            Owed::AFinish => crate::wrapping::Door::TheMove,
+            Owed::ABranch(_) => crate::wrapping::Door::Beside,
+        }
+    }
+}
+
+/// Send the one session a **Review** taken up over a bare branch is owed, and
+/// make of what it leaves what every other ending makes of it.
+///
+/// The press's own way into [`asked_for_a_pull_request`], and the whole of what a
+/// branch take-up has left to do: the work is built and pushed and nobody opened
+/// a pull request, so what is missing is a push and a `gh pr create` — against
+/// `against`, which is the base the picker held. The Conversation is Wrapping
+/// before this runs, so what the session opens is recorded beside that wrap-up
+/// and the watchers start on it; a session that opens none stops the run over what
+/// it last said, and Resume is another go.
+///
+/// `driving` is held to the end, as a Tinker's ending holds its across the same
+/// call: dropping it first would leave a moment where a sweep could find the
+/// Conversation undriven and stop it with a worse sentence.
+pub(crate) async fn owed_for_a_branch(
+    state: AppState,
+    conversation_id: i64,
+    against: String,
+    driving: Driving,
+) {
+    let _driving = driving;
+
+    tracing::info!(
+        conversation_id,
+        against,
+        "a branch was taken up for wrapping and is on no pull request, so a session is being \
+         sent to open one",
+    );
+
+    asked_for_a_pull_request(&state, conversation_id, Owed::ABranch(against)).await
 }
 
 /// Send one session for the pull request the work should already be on, and make
@@ -1175,12 +1256,19 @@ async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Opti
 /// something for the human to look at. What they have then is Resume, and a press
 /// is another go through here: the work is still built, so there is still exactly
 /// one thing to ask for.
-async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
-    let Some(writing) = submitted(state, conversation_id).await else {
+async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64, owed: Owed) {
+    let Some(writing) = submitted(state, conversation_id, owed.against()).await else {
         return;
     };
 
-    crate::wrapping::opened(state, conversation_id, Some(writing)).await
+    match owed.door() {
+        crate::wrapping::Door::TheMove => {
+            crate::wrapping::opened(state, conversation_id, Some(writing)).await
+        }
+        crate::wrapping::Door::Beside => {
+            crate::wrapping::opened_beside(state, conversation_id, Some(writing)).await
+        }
+    }
 }
 
 /// Run the one session sent to open a pull request the finish step did not, and
@@ -1202,8 +1290,12 @@ async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
 /// The Timeline Event it printed into, or `None` where nothing ran: no session
 /// could be started, or the run was stopped from outside while this one did. Both
 /// of those have already said whatever there was to say.
-async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
-    let mut session = launch_in_turn(state, conversation_id, Prompt::Submitting).await?;
+async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>) -> Option<i64> {
+    let inside = Prompt::Submitting {
+        against: against.map(str::to_owned),
+    };
+
+    let mut session = launch_in_turn(state, conversation_id, inside).await?;
 
     let event_id = session.event_id;
     let idle = session.idle.clone();
@@ -2040,7 +2132,7 @@ pub(crate) async fn follow_up_again(
         // [`over`] holds it across the same call.
         let _driving = driving;
 
-        return asked_for_a_pull_request(&state, conversation_id).await;
+        return asked_for_a_pull_request(&state, conversation_id, Owed::AFinish).await;
     }
 
     following_up(state, conversation_id, follow_up, driving).await
@@ -2151,7 +2243,7 @@ async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Dri
         // leave a moment where a sweep could find the Conversation undriven.
         let _driving = driving;
 
-        return asked_for_a_pull_request(state, conversation_id).await;
+        return asked_for_a_pull_request(state, conversation_id, Owed::AFinish).await;
     }
 
     finished(state, conversation_id, driving).await
@@ -3748,13 +3840,22 @@ enum Prompt {
     /// The submitting skill, which the session sent after a finish that left no
     /// pull request runs inside.
     ///
-    /// Carries nothing, like every other prompt that carries nothing: what it is
-    /// about is the branch, which the session reads for itself. A prompt of its
-    /// own rather than the finish step's again, because the work is built — a
-    /// session told to work the next task would find no backlog and nothing to
-    /// do, and the one thing left is the one thing that skill says last. See
-    /// [`to_a_pull_request`].
-    Submitting,
+    /// A prompt of its own rather than the finish step's again, because the work
+    /// is built — a session told to work the next task would find no backlog and
+    /// nothing to do, and the one thing left is the one thing that skill says
+    /// last. See [`to_a_pull_request`].
+    Submitting {
+        /// The branch to open the pull request against, where anything knows one
+        /// — which is a **Review** taken up over a bare branch and nothing else.
+        ///
+        /// `None` is the ordinary case and not a value missing: a finish that
+        /// stopped short of its push is on a branch whose base is in its own
+        /// history, so the repository's finish sequence says what to open it
+        /// against and this has nothing to add. What a Review's branch has that
+        /// one has not is a base the human picked on the panel, which the skill's
+        /// own fallback would open past. See [`Owed`].
+        against: Option<String>,
+    },
 
     /// The instruction skill, carrying the hand-written work a steer into
     /// Implementing sent the session off with.
@@ -3983,7 +4084,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Staging => skills::staging(skills, &brief),
                 Prompt::NextTask => skills::next_task(skills, &brief, handoff),
                 Prompt::Implementing => skills::implementing(skills, &brief, handoff),
-                Prompt::Submitting => skills::submitting(skills, &brief, handoff),
+                Prompt::Submitting { against } => {
+                    skills::submitting(skills, &brief, handoff, against.as_deref())
+                }
                 Prompt::Instruction(instruction) => {
                     skills::instruction(skills, &brief, handoff, instruction)
                 }

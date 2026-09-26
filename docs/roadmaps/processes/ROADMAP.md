@@ -35,6 +35,6 @@ stage has landed, so the picker grows a row per stage — Fix Merge Issues from
 - [x] 02: The Agent control — [brief](02-the-agent-control.md)
 - [x] 03: Tinker, and No grilling retires — [brief](03-tinker.md)
 - [x] 04: Investigate — [brief](04-investigate.md)
-- [ ] 05: Review — [brief](05-review.md)
+- [x] 05: Review — [brief](05-review.md)
 - [ ] 06: Fix Merge Issues — [brief](06-fix-merge-issues.md)
 - [ ] 07: A stack of pull requests — [brief](07-a-stack-of-pull-requests.md)

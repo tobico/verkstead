@@ -176,6 +176,7 @@ const CONVERSATION_KEYED: &[&str] = &[
     "worktrees",
     "directions",
     "processes",
+    "targets",
     "stage_branches",
     "stage_roadmaps",
     "pairing_models",

@@ -1,6 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [],
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
@@ -114,6 +113,7 @@
   "state": "Implementing",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

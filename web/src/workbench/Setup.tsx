@@ -1,11 +1,12 @@
 //! A Conversation's setup: what has to be settled before anything will run it,
 //! drawn along the bottom edge of the box the Brief is written in.
 //!
-//! The branch the work will be done on, the branch it will come off, the other
-//! repos it works alongside, what kind of work it is, and the pairings its
-//! sessions run under. Every one of them is a fact about the Conversation
-//! rather than about any one Event, and every one of them is the human's to
-//! change for as long as it is still drafting.
+//! The branch the work will be done on, what the work is pointed at where the
+//! Process is pointed at anything, the branch it will come off, the other repos
+//! it works alongside, what kind of work it is, and the pairings its sessions
+//! run under. Every one of them is a fact about the Conversation rather than
+//! about any one Event, and every one of them is the human's to change for as
+//! long as it is still drafting.
 //!
 //! **A row of options rather than a form under the Brief.** Setting a
 //! Conversation up and kicking it off are one act, and the act is written in
@@ -80,6 +81,7 @@ import {
   setBaseBranch,
   setCompanionBase,
   setCompanionMode,
+  nameTarget,
   switchRepo,
 } from "../api/client";
 import type {
@@ -100,6 +102,7 @@ import type {
   ProfileEntry,
   RepoEntry,
   RepoSwitched,
+  TargetRecorded,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -109,7 +112,16 @@ import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
-import { away, label, OFFERED, PROCESS, ROLES, uses } from "./processes";
+import {
+  away,
+  label,
+  OFFERED,
+  PROCESS,
+  ROLES,
+  targeted,
+  uses,
+} from "./processes";
+import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -148,6 +160,19 @@ export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
   NotDrafting:
     "The branch exists by now, so what kind of work this is has been settled.",
   NotLanded: "Verkstead cannot run that process yet.",
+};
+
+/// And naming what the work is pointed at.
+///
+/// Two rather than the branch field's three, and the missing one is the point:
+/// nothing asks git whether what was typed is a well-formed branch name,
+/// because a pull request URL is not one. What the string turns out to name is
+/// settled at Start, and refused there by name.
+export const TARGET_REFUSAL: Record<TargetRecorded, string> = {
+  Recorded: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The work has started, so what it is pointed at was read when it did.",
 };
 
 /// And a base branch.
@@ -316,12 +341,6 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// offer.
   const adopting = () => props.conversation.adopting !== null;
 
-  /// And whether it was settled by the pull request the conversation is holding,
-  /// which is the same fact about the other thing a draft adopts: `#41` is a
-  /// number in one repository, and the same number over there is a different
-  /// pull request or none at all.
-  const holding = () => props.conversation.adopting_pull_request !== null;
-
   return (
     <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
       {() => (
@@ -330,21 +349,31 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
               one this picks. */}
           <RepoPicker
             conversation={props.conversation}
-            disabled={branched() || adopting() || holding()}
+            disabled={branched() || adopting()}
           />
 
           <Show when={!branched()}>
             {/* No branch field where the conversation is adopting a roadmap: a
                 stage is worked on its own slug, so the name invented when the
                 row was made is discarded when the stage is adopted, and naming
-                it here would be a field with nothing behind it. The same is
-                true of a pull request, whose branch is the head branch GitHub
-                names — and of the base under it, which is recorded at the
-                take-up as the head commit rather than picked here. */}
-            <Show when={!adopting() && !holding()}>
+                it here would be a field with nothing behind it. */}
+            <Show when={!adopting()}>
               <BranchName conversation={props.conversation} />
             </Show>
-            <Show when={!holding()}>
+
+            {/* And what the work is pointed at, under the branch it will be
+                done on — drawn for the Processes that are pointed at work
+                already somewhere else and for no other, which is
+                `processes.ts`'s list to keep. */}
+            <Show when={targeted(props.conversation.process)}>
+              <TargetName conversation={props.conversation} />
+            </Show>
+
+            {/* The base, unless the target is a pull request — GitHub's base
+                is the fact then, and the take-up records it. A branch keeps
+                the picker, because what its pull request is opened against is
+                what is picked here. */}
+            <Show when={!onAPullRequest(props.conversation)}>
               <BaseBranch conversation={props.conversation} />
             </Show>
             <AddCompanion conversation={props.conversation} />
@@ -358,6 +387,21 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
         </>
       )}
     </RepoOptions>
+  );
+}
+
+/// Whether this Conversation's Target names a pull request, which is the whole
+/// of what takes the base picker off the panel.
+///
+/// Asked of the Process too, because a target is only read on a Process that
+/// takes one: a Develop Conversation with something left in the field from
+/// before the picker was moved is not pointed at anything, and its base is its
+/// own to pick.
+export function onAPullRequest(conversation: ConversationView): boolean {
+  return (
+    targeted(conversation.process) &&
+    conversation.target !== null &&
+    namesPullRequest(conversation.target)
   );
 }
 
@@ -728,14 +772,10 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
   /// closing.
   const branched = () => props.conversation.worktree !== null;
 
-  /// And whether the Process was settled by the pull request this Conversation
-  /// is holding rather than by anybody's pick.
-  const holding = () => props.conversation.adopting_pull_request !== null;
-
   return (
     <ProcessPicker
       chosen={props.conversation.process}
-      disabled={branched() || holding() || say.isPending}
+      disabled={branched() || say.isPending}
       pick={(picked) => say.mutate(picked)}
     >
       <Show when={refused()}>
@@ -1354,13 +1394,119 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// A branch name being typed: the field, the label over it, and whatever the
-/// caller has to say underneath.
+/// What the field asks for, which is any of the three things a Review can be
+/// pointed at.
 ///
-/// The conversation's own name and a read-write companion's are the same field
-/// asked twice, and the compose page asks both again against nothing saved — so
-/// what is here is the field and the form around it, and what a name *does*
-/// stays with whoever owns it.
+/// Said as the placeholder rather than in a note under it: the label is
+/// *Target* and what may go in it is the placeholder's job, exactly as the
+/// branch field's *Verkstead chooses* is.
+export const TARGET = "Pull request or branch";
+
+/// What the work is pointed at: a pull request URL, a `#number` or a branch,
+/// and empty until the human or the Brief names one.
+///
+/// **Not the Branch field re-read.** That one is a rename — it asks git
+/// whether the name is a well-formed ref, and git refuses a pull request URL
+/// over its colon — and underneath they are not the same fact: the branch
+/// field says what this Conversation's branch is called, and take-up decides
+/// that from the pull request's head. See ADR-0020.
+///
+/// **Filled from the Brief while it is empty**, which the server does as the
+/// Brief is saved: a URL or a `#number` in the prose is unambiguous, so the
+/// human writes about the work and the field comes along with it — and never
+/// over what they typed here. So the field follows the record between
+/// keystrokes the way the branch field does, and a URL arriving in the box
+/// shows up in it.
+///
+/// It keeps itself on a pause in the typing and on the way out of the field,
+/// for the reason everything else in this panel does: there is one button on
+/// the composer and it is the one that starts the work.
+function TargetName(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  // What has been typed, or nothing if nothing has been on this device: the
+  // field follows the record until the first keystroke and follows itself
+  // after it, so a read landing mid-URL cannot take the URL with it.
+  const [named, setNamed] = createSignal<string | null>(null);
+  const [refused, setRefused] = createSignal<TargetRecorded | null>(null);
+
+  const target = () => named() ?? props.conversation.target ?? "";
+
+  // The last value a save asked for, whatever became of it — [`BranchName`]'s
+  // own reading, and for its reason: asking again for the same string would
+  // only get the same answer back.
+  const [asked, setAsked] = createSignal<string | null>(null);
+  const recorded = () => asked() ?? props.conversation.target ?? "";
+
+  const unsaved = () => target() !== recorded();
+
+  /// Both refusals are permanent — a Conversation that is gone does not come
+  /// back, and a target that froze does not thaw — so either one stops the
+  /// field. There is no third: nothing here is refused for what was typed.
+  const settled = () => refused() !== null;
+
+  const name = useMutation(() => ({
+    mutationFn: (target: string) => nameTarget(props.conversation.id, target),
+    onSuccess: (outcome: TargetRecorded) => {
+      if (outcome !== "Recorded") {
+        setRefused(outcome);
+        return;
+      }
+
+      setRefused(null);
+      // The readiness verdict under the box waits on this field, and so does
+      // the base picker beside it: both are read again every time it moves.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+    onSettled: () => keeper.done(),
+  }));
+
+  const keeper = keeping({
+    unsaved,
+    settled,
+    save: () => {
+      const named = target();
+      setAsked(named);
+      name.mutate(named);
+    },
+  });
+
+  return (
+    <BranchField
+      id="target"
+      label="Target"
+      class={styles.target!}
+      placeholder={TARGET}
+      value={target()}
+      set={(named) => {
+        setNamed(named);
+        keeper.settle();
+      }}
+      leave={() => keeper.keep()}
+    >
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {TARGET_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={name.isError}>
+        <ErrorLine class={styles.failure}>
+          The target could not be named: {name.error?.message}
+        </ErrorLine>
+      </Show>
+    </BranchField>
+  );
+}
+
+/// A name being typed into the Repo panel: the field, the label over it, and
+/// whatever the caller has to say underneath.
+///
+/// The conversation's own branch name and a read-write companion's are the same
+/// field asked twice, the Target under them is a third, and the compose page
+/// asks all of them again against nothing saved — so what is here is the field
+/// and the form around it, and what a name *does* stays with whoever owns it.
 ///
 /// A `<form>` because there is nothing in it to press: Enter in a field with no
 /// button beside it is a save on the panels that save as they go, and nothing at

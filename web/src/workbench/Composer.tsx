@@ -1,9 +1,10 @@
 //! The composer: where a Conversation is drafted, and the press that starts it.
 //!
 //! A details pane of its own rather than a card on the Timeline. What is
-//! written here — the Brief, the branch, the base, the companions, the three
-//! pairings — is one act of setting a piece of work up, and the record is a
-//! record of what has happened rather than the desk it is arranged on. So the
+//! written here — the Brief, the branch, the target, the base, the companions,
+//! the three pairings — is one act of setting a piece of work up, and the
+//! record is a record of what has happened rather than the desk it is arranged
+//! on. So the
 //! Timeline's Brief card is the five-line rendering of the document at all
 //! times, drafting or frozen, and pressing it opens this.
 //!
@@ -63,6 +64,7 @@ import {
   removeAttachment,
   saveBrief,
   startGrilling,
+  takeUpPullRequest,
 } from "../api/client";
 import type {
   Attached,
@@ -73,6 +75,7 @@ import type {
   ConversationView,
   GrillingStarted,
   Process,
+  TakenUp,
 } from "../api/types";
 import app from "../App.module.css";
 import { attaching, type Attaching, type Shown } from "../Attaching";
@@ -85,8 +88,8 @@ import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
-import { HeldPullRequest, TakingUp } from "./TakeUp";
-import { roles } from "./processes";
+import { TakeUpRefusal } from "./TakeUp";
+import { needed } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -172,25 +175,6 @@ export function Composer(props: {
           classList={{ [styles.over!]: files.over() }}
           {...files.dropping}
         >
-          {/* And the pull request this draft is holding, where it is holding
-              one: a band across the top of the box naming what the wrap-up
-              would be over. Over the box rather than in place of it — the
-              Brief under it is the human's to write, prefilled with the pull
-              request's own title and description when the row was loaded. See
-              `TakeUp.tsx`. */}
-          <Show when={props.conversation.adopting_pull_request}>
-            {(held) => (
-              <HeldPullRequest
-                repo={props.conversation.repo.name}
-                number={held().number}
-                title={held().title}
-                url={held().url}
-                head={held().head}
-                base={held().base}
-              />
-            )}
-          </Show>
-
           <Written conversation={props.conversation} brief={props.brief} />
 
           {/* And the files handed over with it, as a row of pills between the
@@ -230,34 +214,16 @@ export function Composer(props: {
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
-        {/* And the press the whole pane is arranged for. Only one of the three
-            is ever drawn — each is for a different kind of draft — so they read
-            as the one thing there is to do from here.
-
-            A draft holding a pull request draws the take-up rather than a
-            grilling start: the work on a pull request is built already, and
-            what it is waiting for is the wrap-up, so the press that opens a
-            round would be the wrong act offered plainly. */}
+        {/* And the press the whole pane is arranged for. Only one of the two is
+            ever drawn — an adopting draft's Brief is the stage's and its press is
+            the adoption — so they read as the one thing there is to do from
+            here. */}
         <Show
-          when={props.conversation.adopting_pull_request}
-          fallback={
-            <Show
-              when={props.conversation.adopting}
-              fallback={
-                <StartGrilling conversation={props.conversation} files={files} />
-              }
-            >
-              {(adopting) => (
-                <Adoption
-                  conversation={props.conversation}
-                  adopting={adopting()}
-                />
-              )}
-            </Show>
-          }
+          when={props.conversation.adopting}
+          fallback={<Start conversation={props.conversation} files={files} />}
         >
-          {(held) => (
-            <TakingUp conversation={props.conversation} held={held()} />
+          {(adopting) => (
+            <Adoption conversation={props.conversation} adopting={adopting()} />
           )}
         </Show>
       </div>
@@ -401,13 +367,39 @@ function Written(props: {
   );
 }
 
-/// What an unready start is waiting on, said in its tooltip — the roles named
-/// as the Process has them, which is [`roles`]'s to count rather than a three
-/// written into the sentence.
+/// What an unready start is waiting on, said in its tooltip — the clauses and
+/// the roles counted off the Process's own table rather than written into the
+/// sentence, so a Review says it waits on a target and a Develop does not.
 const missing = (process: Process): string =>
-  `This needs a brief, and ${roles(process)} picked and working.`;
+  `This needs ${needed(process, { brief: true, target: true })}.`;
 
-/// The button that gives a Conversation somewhere to work.
+/// The press the whole pane is arranged for, in whichever of its two shapes
+/// this Conversation's Process gives it.
+///
+/// One press on a composer, so both shapes read *Start work* and both stand in
+/// the same row beside the paperclip. What differs is the endpoint behind it and
+/// the words a refusal comes back in: a **Review** is the wrap-up over whatever
+/// the Target names, so its press is the take-up — and every refusal the
+/// take-up already had keeps its name and its sentence. See [`Starting`], which
+/// is the row both draw.
+function Start(props: {
+  conversation: ConversationView;
+  files: Attaching;
+}): JSX.Element {
+  return (
+    <Show
+      when={props.conversation.process === "Review"}
+      fallback={
+        <StartGrilling conversation={props.conversation} files={props.files} />
+      }
+    >
+      <StartReview conversation={props.conversation} files={props.files} />
+    </Show>
+  );
+}
+
+/// The button that gives a Conversation somewhere to work, and the lines under
+/// it.
 ///
 /// Drawn whenever there is something to start, ready or not. `ready_to_grill`
 /// decides how it *behaves* rather than whether it is there: an unready button
@@ -423,6 +415,71 @@ const missing = (process: Process): string =>
 ///
 /// The server checks every one of the conditions again regardless — the page's
 /// copy is only as fresh as its last read.
+///
+/// The markup rather than the press, which is each Process's own: what a start
+/// *is* is the same row whichever endpoint it reaches, and two copies of it
+/// would be the one that stopped being corrected.
+function Starting(props: {
+  conversation: ConversationView;
+  files: Attaching;
+
+  /// Whether a press is already in flight, which is the one thing the button is
+  /// truly disabled for.
+  pending: boolean;
+
+  /// What the press does, where the Conversation is ready for one.
+  press: () => void;
+
+  /// What came back refused, drawn under the row — a node rather than a string,
+  /// because one refusal has a way out of itself in it.
+  refused?: JSX.Element;
+
+  /// And what the request itself could not do.
+  failed?: string;
+}): JSX.Element {
+  const ready = () => props.conversation.ready_to_grill;
+
+  return (
+    <div class={styles.startGrilling}>
+      {/* The paperclip at the near edge and the start at the far one, in the
+          row the compose page's two presses stand in — pushed apart by the
+          paperclip's own margin, the way the roadmap dropdown is. */}
+      <div class={styles.presses}>
+        <props.files.Clip class={styles.attach} />
+        <button
+          type="button"
+          class={styles.start}
+          classList={{ [styles.inert!]: !ready() }}
+          // Only ever `disabled` for a press already in flight. Not being
+          // ready is the other thing entirely: the button is still hoverable,
+          // which is what carries the explanation.
+          disabled={props.pending}
+          aria-disabled={!ready()}
+          title={ready() ? undefined : missing(props.conversation.process)}
+          onClick={() => ready() && props.press()}
+        >
+          {props.pending ? "Starting…" : "Start work"}
+        </button>
+      </div>
+
+      <Show when={props.refused}>
+        {(refused) => (
+          <ErrorLine class={styles.failure}>{refused()}</ErrorLine>
+        )}
+      </Show>
+      <Show when={props.failed}>
+        {(failed) => (
+          <ErrorLine class={styles.failure}>
+            The work could not be started: {failed()}
+          </ErrorLine>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/// The press on every Process that opens a round of its own: the grill start,
+/// which cuts the branch and launches the first session in it.
 function StartGrilling(props: {
   conversation: ConversationView;
   files: Attaching;
@@ -430,8 +487,6 @@ function StartGrilling(props: {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
-
-  const ready = () => props.conversation.ready_to_grill;
 
   const start = useMutation(() => ({
     mutationFn: () => startGrilling(props.conversation.id),
@@ -452,39 +507,65 @@ function StartGrilling(props: {
   }));
 
   return (
-    <div class={styles.startGrilling}>
-      {/* The paperclip at the near edge and the start at the far one, in the
-          row the compose page's two presses stand in — pushed apart by the
-          paperclip's own margin, the way the roadmap dropdown is. */}
-      <div class={styles.presses}>
-        <props.files.Clip class={styles.attach} />
-        <button
-          type="button"
-          class={styles.start}
-          classList={{ [styles.inert!]: !ready() }}
-          // Only ever `disabled` for a press already in flight. Not being
-          // ready is the other thing entirely: the button is still hoverable,
-          // which is what carries the explanation.
-          disabled={start.isPending}
-          aria-disabled={!ready()}
-          title={ready() ? undefined : missing(props.conversation.process)}
-          onClick={() => ready() && start.mutate()}
-        >
-          {start.isPending ? "Starting…" : "Start work"}
-        </button>
-      </div>
+    <Starting
+      conversation={props.conversation}
+      files={props.files}
+      pending={start.isPending}
+      press={() => start.mutate()}
+      refused={
+        refused() === null ? undefined : grillRefusal(refused() as GrillingStarted)
+      }
+      failed={start.isError ? start.error?.message : undefined}
+    />
+  );
+}
 
-      <Show when={refused()}>
-        {(outcome) => (
-          <ErrorLine class={styles.failure}>{grillRefusal(outcome())}</ErrorLine>
-        )}
-      </Show>
-      <Show when={start.isError}>
-        <ErrorLine class={styles.failure}>
-          The work could not be started: {start.error?.message}
-        </ErrorLine>
-      </Show>
-    </div>
+/// And the press on a **Review**, which opens no round at all: what the Target
+/// names is taken up, and the Conversation lands in Wrapping with the ordinary
+/// wrap-up running over it.
+///
+/// Everything it turns on is the server's — the field read for a pull request or
+/// a branch, GitHub asked about the one and origin about the other, and the branch
+/// settled against origin either way — so what this does with an answer that is
+/// not *TakenUp* is say it and read the page again. A branch has one more step
+/// behind the press and it is the server's too: the pull request nobody opened is
+/// sent for, and the wrap-up runs over what comes back.
+function StartReview(props: {
+  conversation: ConversationView;
+  files: Attaching;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<TakenUp | null>(null);
+
+  const start = useMutation(() => ({
+    mutationFn: () => takeUpPullRequest(props.conversation.id),
+    onSuccess: (outcome: TakenUp) => {
+      // Whatever it came back with, the page is read again: what the take-up
+      // did is a conversation that has moved, and what refused it is a
+      // repository — or a GitHub — that has moved, and reading it again is the
+      // correction either way.
+      setRefused(outcome === "TakenUp" ? null : outcome);
+
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      void queries.invalidateQueries({ queryKey: ["profiles"] });
+    },
+  }));
+
+  return (
+    <Starting
+      conversation={props.conversation}
+      files={props.files}
+      pending={start.isPending}
+      press={() => start.mutate()}
+      refused={
+        refused() === null ? undefined : (
+          <TakeUpRefusal outcome={refused() as TakenUp} />
+        )
+      }
+      failed={start.isError ? start.error?.message : undefined}
+    />
   );
 }
 

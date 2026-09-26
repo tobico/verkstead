@@ -17,7 +17,7 @@ import type { Process } from "../api/types";
 
 /// What each Process is called on the page.
 ///
-/// All five, including the two nothing offers yet: the wire carries every one
+/// All five, including the one nothing offers yet: the wire carries every one
 /// of them, so a record naming one this viewer refused to word would be a pane
 /// with a hole in it.
 export const PROCESS: Record<Process, string> = {
@@ -37,9 +37,36 @@ export const PROCESS: Record<Process, string> = {
 /// is offered in the first place. A stage that brings a Process to life adds to
 /// both, and each of them is written knowing the other is there.
 ///
-/// Three rows for now. A Process is offered only once its stage has landed, as an
+/// Four rows for now. A Process is offered only once its stage has landed, as an
 /// agent type is offered only once it can launch the real thing.
-export const OFFERED: Process[] = ["Develop", "Tinker", "Investigate"];
+export const OFFERED: Process[] = [
+  "Develop",
+  "Tinker",
+  "Investigate",
+  "Review",
+];
+
+/// And which of them are pointed at work that is already somewhere else, and
+/// so draw the **Target** field in the Repo panel.
+///
+/// **The viewer's list, and the server keeps the other** — `takes_a_target` in
+/// `crates/server/src/conversations.rs`, which is what the record's readiness
+/// waits on. Two lists for `OFFERED`'s reason: one says what the panel draws
+/// and the other says what Start waits for, and a stage that gives a Process a
+/// target adds to both.
+///
+/// Beside the role table because it is the same kind of fact about a Process,
+/// written in the same place: **Fix Merge Issues** adds itself here when its
+/// stage lands, and the field appears under its Branch field without a line
+/// changing in either composer.
+export const TARGETED: Process[] = ["Review"];
+
+/// Whether this Process is pointed at a target — the question each composer
+/// asks before drawing the field, as [`uses`] is the one it asks before drawing
+/// a role's picker.
+export function targeted(process: Process): boolean {
+  return TARGETED.includes(process);
+}
 
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside
@@ -55,11 +82,9 @@ export type Roles = {
   /// Those of them that may be picked away — the picker's row that is no
   /// account at all. A role not named here has to be answered with one.
   ///
-  /// **What the picker draws today**, which is what makes it worth reading
-  /// rather than a claim nothing checks: the row the ADR still retires — *No
-  /// review* on a Review, when that stage lands — comes out of this table in
-  /// the stage that takes it out of the app, so the row and the control never
-  /// say different things in the meantime.
+  /// **What the picker draws**, which is what makes it worth reading rather
+  /// than a claim nothing checks: a row comes out of the app by coming out of
+  /// this table, so the row and the control cannot say different things.
   away: Role[];
   /// And which shape the one **Agent** control takes: a panel where there are
   /// several roles to stack under their labels, and the flat Pairing dropdown
@@ -94,13 +119,11 @@ export const ROLES: Record<Process, Roles> = {
     control: "dropdown",
   },
   Review: {
-    // A Review without a review is Fix Merge Issues with the comments
-    // answered, so the ADR gives this row no *No review*. The picker on a
-    // Conversation holding a pull request still offers one, and the stage that
-    // makes Review a Process of its own is what takes it away — this says what
-    // is drawn until then.
+    // No row that is no account: a Review without a review is Fix Merge Issues
+    // with the comments answered, so the review here is answered with a Pairing
+    // or the press waits. The one Process of the four that offers none.
     uses: ["implementation", "review"],
-    away: ["review"],
+    away: [],
     control: "panel",
   },
   Tinker: {
@@ -155,6 +178,30 @@ export function away(process: Process, role: Role): string | undefined {
 export function roles(process: Process): string {
   const count = ROLES[process].uses.length;
   return count === 1 ? "one role" : count === 2 ? "both roles" : "every role";
+}
+
+/// And the whole of what an inert Start is waiting on, as the middle of that
+/// sentence: a brief, a target, and the roles counted off the table.
+///
+/// In one place because both composers say it — a draft's own press and the
+/// compose page's — and each of them asks for a different subset: a page
+/// holding a roadmap has its brief answered for it, and one holding a pull
+/// request off the retired menu has its target answered the same way. So the
+/// caller says which clauses it is asking for, and the wording is here.
+export function needed(
+  process: Process,
+  asked: { brief: boolean; target: boolean },
+): string {
+  const wanted = [
+    ...(asked.brief ? ["a brief"] : []),
+    ...(asked.target && targeted(process) ? ["a target"] : []),
+    `${roles(process)} picked and working`,
+  ];
+
+  // The comma before the *and* is what the sentence has always had, and it is
+  // what keeps a three-part list readable: *a brief, a target, and both roles*.
+  const last = wanted.pop()!;
+  return wanted.length === 0 ? last : `${wanted.join(", ")}, and ${last}`;
 }
 
 /// What each role's picker is called, which is the role's own name: the tests,

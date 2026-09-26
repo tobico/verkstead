@@ -35,9 +35,10 @@ use verkstead_store::{
     record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
     record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
     record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
-    session_id, set_grilling_pairing, set_process, settle_wrap_up, skip_review, stamp_unseen,
-    start_capture, start_conversation, start_grilling, start_implementing, stop, submit_response,
-    timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
+    session_id, set_grilling_pairing, set_process, set_target, settle_wrap_up, skip_review,
+    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
+    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -523,8 +524,8 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
 
     // While it is still a draft, which is the only time these are settled: the
-    // other repository it is worked in, the Process it runs, the model one role
-    // runs on, and the role that runs no session at all.
+    // other repository it is worked in, the Process it runs, what it is pointed
+    // at, the model one role runs on, and the role that runs no session at all.
     assert_eq!(
         add_companion(pool, id, companion).await.unwrap(),
         Adding::Added
@@ -532,6 +533,11 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
 
     assert_eq!(
         set_process(pool, id, Process::Develop).await.unwrap(),
+        Edited::Saved,
+    );
+
+    assert_eq!(
+        set_target(pool, id, Some("#41")).await.unwrap(),
         Edited::Saved,
     );
 

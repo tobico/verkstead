@@ -480,17 +480,44 @@ pub(crate) fn next_task(skills: &Skills, brief: &str, handoff: Option<&str>) -> 
 /// the work it carries, and what that work was for is written in the Brief and
 /// the handoff rather than anywhere the branch could say it. The commits say
 /// what was built; these two say what it was meant to be.
-pub(crate) fn submitting(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
+///
+/// `against` is the branch to open the pull request against, where the caller
+/// knows one — a **Review** taken up over a bare branch, carrying the base the
+/// human picked on the panel. Said outright rather than left to the skill, which
+/// falls back on the repository's default branch: a branch cut for a run has its
+/// base in its own history and needs nothing said, and this one was taken up off
+/// a base that is the picker's choice and nothing else.
+///
+/// `None` says nothing at all rather than saying the default branch, for the
+/// reason [`next_stage`] says which of its two cases a stage is: what the
+/// repository's finish sequence does about a base is the repository's, and a
+/// sentence naming one would be Verkstead overruling it.
+pub(crate) fn submitting(
+    skills: &Skills,
+    brief: &str,
+    handoff: Option<&str>,
+    against: Option<&str>,
+) -> String {
     let skill = skills.named(SUBMITTING);
 
-    on_the_documents(
+    let prompt = on_the_documents(
         &format!(
             "Read {skill} and get the work already committed on this branch onto a \
              pull request, the way it says."
         ),
         brief,
         handoff,
-    )
+    );
+
+    match against {
+        Some(base) => format!(
+            "{prompt}\n# The branch to open it against\n\nOpen the pull request against \
+             `{base}`, which is the branch this work is meant to merge into — \
+             `gh pr create --base {base} …`. Not the repository's default branch, unless \
+             `{base}` is it.\n",
+        ),
+        None => prompt,
+    }
 }
 
 /// What the review session is started on: the same two documents again, under
@@ -2340,6 +2367,7 @@ mod tests {
             &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# Handoff\n\nA fixed window.\n"),
+            None,
         );
 
         assert!(
@@ -2354,6 +2382,38 @@ mod tests {
             !prompt.contains(&at(NEXT_TASK)) && !prompt.contains(&at(IMPLEMENTING)),
             "and nothing sends this session to work a task or build the feature again: \
              {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("open it against"),
+            "and a branch cut for a run has its base in its own history, so nothing overrules \
+             the repository's rule about one: {prompt:?}"
+        );
+    }
+
+    /// A **Review** taken up over a bare branch says which branch to open the
+    /// pull request against, because the skill's own fallback would open against
+    /// the repository's default branch and the base here is the one the human
+    /// picked on the panel.
+    #[test]
+    fn a_submitting_session_over_a_taken_up_branch_is_told_which_base_to_open_against() {
+        let prompt = submitting(
+            &mounted(),
+            "# Rate limiting\n\nWrap the limiter branch up.\n",
+            None,
+            Some("release/2.1"),
+        );
+
+        assert!(
+            prompt.contains("# The branch to open it against"),
+            "the base is a heading of its own, under the documents: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`release/2.1`") && prompt.contains("--base release/2.1"),
+            "named, and named in the flag that opens it there: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Not the repository's default branch"),
+            "and said against the thing it would otherwise fall to: {prompt:?}"
         );
     }
 
