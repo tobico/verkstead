@@ -43,17 +43,19 @@
 //! on it — the same sum answers both — so what the bridge does here is name the
 //! machine the shape under test belongs to.
 //!
-//! And the third part is the one that goes the other way: the head's two colours
-//! and how tall its band stands, pushed over that same bridge so that the strip
-//! the platform draws its controls on is the same paper as the head beneath it.
-//! Which makes the stub bridge the app being told rather than the app answering,
-//! and the list it keeps is the record of what it was told. Three stand-ins buy
-//! the whole of it: the body painted, because jsdom resolves no `var()` and a
-//! paper is read off what the page is actually drawn in; the root font size set,
-//! because the band is rules written in rem and the rem is the one thing in it no
-//! stylesheet can be told in advance; and a `matchMedia` that can change its
-//! mind, jsdom's being unable to and a flip of the scheme being the whole of
-//! what moves either colour.
+//! And the third part is the one that goes the other way: the head's two colours,
+//! how tall its band stands and where the row inside it is, pushed over that same
+//! bridge so that the strip the platform draws its controls on is the same paper
+//! as the head beneath it — and so that a Mac's traffic lights stand in that row
+//! rather than over the chrome's padding. That push makes the stub bridge the app
+//! being told rather than the app answering, and the list it keeps is the record
+//! of what it was told. Three stand-ins buy the whole of it: the body painted,
+//! because jsdom resolves no `var()` and a paper is read off what the page is
+//! actually drawn in; the root font size set, because the band and the row are
+//! rules written in rem and the rem is the one thing in them no stylesheet can be
+//! told in advance; and a `matchMedia` that can change its mind, jsdom's being
+//! unable to and a flip of the scheme being the whole of what moves either
+//! colour.
 
 import { faGear } from "@fortawesome/free-solid-svg-icons";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
@@ -68,7 +70,7 @@ import bare from "../src/DragBar.module.css";
 // none of it.
 import barely from "../src/DragBar.module.css?raw";
 import { CLEAR, insets, reserved, type Area } from "../src/controls";
-import { band, dress, worn } from "../src/head";
+import { band, dress, middle, worn } from "../src/head";
 import { IconButton } from "../src/IconButton";
 import { Menu } from "../src/Menu";
 import { Panes } from "../src/Panes";
@@ -409,7 +411,14 @@ const OVERLAID: Area = { x: 0, width: 909 };
 
 /// And the strip a Mac leaves, the traffic lights being at the other corner: it
 /// starts after them and runs to the window's far edge.
-const TRAFFIC: Area = { x: 78, width: ACROSS - 78 };
+///
+/// Measured this time rather than supposed — driven on macOS 15 under Electron 43
+/// against the packed app, where the overlay is there, says it is `visible`, and
+/// answered `x: 81` with the lights inset twenty points and ending at seventy-five.
+/// Said here against the same window the other rectangle was measured in, there
+/// being no width in the sum: what a left inset is is where the page's own strip
+/// begins.
+const TRAFFIC: Area = { x: 81, width: ACROSS - 81 };
 
 describe("the room the window's controls take", () => {
   /// The arithmetic, and the one thing to keep hold of about it: what the page is
@@ -423,7 +432,7 @@ describe("the room the window's controls take", () => {
   /// other end: what the page is left starts after the traffic lights, so `x` is
   /// the inset and there is nothing at the right-hand edge.
   it("is whatever lies in front of it where a Mac put them there", () => {
-    expect(insets(TRAFFIC, ACROSS)).toEqual({ left: 78, right: 0 });
+    expect(insets(TRAFFIC, ACROSS)).toEqual({ left: 81, right: 0 });
   });
 
   /// And nothing at all where there is no overlay to ask, which is every browser
@@ -449,7 +458,7 @@ describe("the room the window's controls take", () => {
       "--controls-right": "97px",
     });
     expect(reserved(insets(TRAFFIC, ACROSS))).toEqual({
-      "--controls-left": "78px",
+      "--controls-left": "81px",
     });
     expect(reserved(CLEAR)).toEqual({});
   });
@@ -533,7 +542,7 @@ describe("the frame", () => {
 
     const frame = theFrame();
 
-    expect(frame.style.getPropertyValue("--controls-left")).toBe("78px");
+    expect(frame.style.getPropertyValue("--controls-left")).toBe("81px");
     expect(frame.style.getPropertyValue("--controls-right")).toBe("");
   });
 
@@ -682,6 +691,53 @@ describe("how tall the head's band stands", () => {
   });
 });
 
+describe("where the middle of the head's first row sits", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("font-size");
+  });
+
+  /// The thirty-nine the window opens at — `MIDDLE` in
+  /// `desktop/src/decorations.ts`, which that package's suite pins as a number and
+  /// works the traffic lights' point out of. Both sides, for the reason the band is
+  /// pinned on both: the moment before the page loads and the moment after it are
+  /// the same answer, so a Mac's lights do not jump when the workbench arrives.
+  it("is the row's middle at a sixteen-pixel root", () => {
+    expect(middle()).toBe(39);
+  });
+
+  /// Inside the band and below the middle of it, which is the whole reason it is a
+  /// measurement of its own rather than the band halved: the band carries the rem
+  /// the head keeps *below* its row and a quarter rem of chrome above it, so the
+  /// row's middle sits lower than the strip's.
+  it("is past the middle of the band and inside it", () => {
+    expect(middle()).toBeGreaterThan(band() / 2);
+    expect(middle()).toBeLessThan(band());
+  });
+
+  /// And it follows the rem, for the reason the band does: the rules that put the
+  /// row where it is are written in rem, and a human who has told their browser to
+  /// draw text larger has a head whose row stands further down the window. Which is
+  /// what keeps the lights out of the app's arithmetic — there is none to do there
+  /// but half of a button.
+  it("follows the rem the page is actually drawn at", () => {
+    document.documentElement.style.fontSize = "20px";
+
+    expect(middle()).toBe(49);
+
+    document.documentElement.style.fontSize = "12px";
+
+    expect(middle()).toBe(30);
+  });
+
+  /// Whole pixels, a point being whole pixels — and the rounding is the page's to
+  /// do for the same reason the band's is.
+  it("is a whole number of them", () => {
+    document.documentElement.style.fontSize = "17px";
+
+    expect(Number.isInteger(middle())).toBe(true);
+  });
+});
+
 describe("what the head is drawn in", () => {
   afterEach(() => {
     document.body.style.removeProperty("background-color");
@@ -695,7 +751,7 @@ describe("what the head is drawn in", () => {
     document.body.style.backgroundColor = "rgb(250, 248, 245)";
     document.body.style.color = "rgb(28, 26, 23)";
 
-    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75 });
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 });
   });
 
   /// And the other scheme, which is the same read a moment later: the page says
@@ -745,7 +801,7 @@ describe("what the head is drawn in", () => {
       fontSize: "16px",
     }));
 
-    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75 });
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 });
   });
 });
 
@@ -793,13 +849,13 @@ describe("telling the app", () => {
 
     const stop = dress();
 
-    expect(pushed).toEqual([{ paper: "#faf8f5", ink: "#1c1a17", band: 75 }]);
+    expect(pushed).toEqual([{ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 }]);
 
     watching.flip("rgb(23, 22, 20)", "rgb(236, 231, 224)");
 
     expect(pushed).toEqual([
-      { paper: "#faf8f5", ink: "#1c1a17", band: 75 },
-      { paper: "#171614", ink: "#ece7e0", band: 75 },
+      { paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 },
+      { paper: "#171614", ink: "#ece7e0", band: 75, middle: 39 },
     ]);
 
     stop();

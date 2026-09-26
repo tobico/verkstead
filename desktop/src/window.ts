@@ -45,9 +45,10 @@
 //!
 //! **And it has no title bar.** What stands where one would have been is the
 //! platform's own — the controls overlay at the top-right on Windows and Linux,
-//! the traffic lights at the top-left on a Mac — and the options that ask for
-//! that are [`decorations.ts`](./decorations.js)'s, for the reason every other
-//! value here is somewhere else.
+//! the traffic lights at the top-left on a Mac, inset to the row a head's title
+//! stands in — and the options that ask for that are
+//! [`decorations.ts`](./decorations.js)'s, for the reason every other value here
+//! is somewhere else. Where they go afterwards is the page's, over the bridge.
 
 import { BrowserWindow, dialog, screen, shell } from "electron";
 
@@ -157,10 +158,10 @@ export function open(workbench: Workbench): BrowserWindow {
     // neither does anything: its menu is the strip at the top of the screen.
     autoHideMenuBar: true,
 
-    // No title bar, and the platform's own controls where it was — the style
-    // and the overlay together, out of [`decorations.ts`](./decorations.js).
-    // The colours and the height in them are where the overlay starts; the page
-    // is what it ends up wearing.
+    // No title bar, and the platform's own controls where it was — the style,
+    // the overlay and the traffic lights' opening point together, out of
+    // [`decorations.ts`](./decorations.js). All of it is where the window
+    // starts; the page is what it ends up wearing.
     ...DECORATIONS,
 
     webPreferences: {

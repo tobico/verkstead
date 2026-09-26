@@ -81,14 +81,19 @@ export const REGISTER = "verkstead:register";
 /// the app's to paint — and what colour to paint it is something only the page
 /// knows, the viewer having a light scheme and a dark one and the head being
 /// drawn on the paper of whichever is in force. Two fixed colours here were
-/// rejected. The height is the page's for the same kind of reason: the band is
-/// written in rem, and what a rem is on that machine is the browser's answer
-/// rather than this file's.
+/// rejected. The two measurements are the page's for the same kind of reason: the
+/// band and the row inside it are written in rem, and what a rem is on that
+/// machine is the browser's answer rather than this file's.
+///
+/// **And on a Mac it is where the lights go rather than what the strip is
+/// painted** (Set 889 Q4a): there is no overlay there, and the row the page says
+/// it drew is what the traffic lights are moved into the middle of. One push, and
+/// the platform decides which of the two it means.
 ///
 /// **A push rather than a question.** There is nothing for the app to answer —
-/// the overlay is recoloured, or there is no overlay to recolour — and a page that
-/// awaited an acknowledgement would be awaiting one at every flip of the scheme.
-/// What crosses is [`Head`](./decorations.js).
+/// the overlay is recoloured, or the lights are moved — and a page that awaited an
+/// acknowledgement would be awaiting one at every flip of the scheme. What crosses
+/// is [`Head`](./decorations.js).
 export const HEAD = "verkstead:head";
 
 /// What `window.verkstead` is, where there is one.
@@ -136,12 +141,13 @@ export interface Bridge {
   /// why — see [`Registration`](./startup.js).
   register(on: boolean): Promise<Registration>;
 
-  /// Say what the head is drawn in and how tall its band stands, so that the
-  /// controls overlay is the same strip of paper the head beneath it is.
+  /// Say what the head is drawn in, how tall its band stands and where the row
+  /// inside it is, so that the controls overlay is the same strip of paper the
+  /// head beneath it is — and so that a Mac's traffic lights stand in that row.
   ///
   /// Pushed when the page loads and again at every flip of the colour scheme,
   /// which is the whole of what moves either colour. Nothing comes back: a
-  /// platform with an overlay recolours it, a Mac has traffic lights and does
-  /// nothing at all, and neither is news the page can act on — see [`HEAD`].
+  /// platform with an overlay recolours it, a Mac moves its buttons, and neither
+  /// is news the page can act on — see [`HEAD`].
   head(worn: Head): void;
 }

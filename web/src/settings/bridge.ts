@@ -106,9 +106,10 @@ export interface Registration {
 /// drawn on a strip of its top corner, and that strip is the app's to paint — but
 /// what to paint it is the page's to know, there being a light scheme and a dark
 /// one and the head being drawn on the paper of whichever the machine is in. Two
-/// fixed colours in the app were rejected. The height is the page's for a
-/// neighbouring reason: the band is written in rem, and what a rem is is the
-/// browser's answer. See `head.ts`, which reads all three and pushes them.
+/// fixed colours in the app were rejected. The measurements are the page's for a
+/// neighbouring reason: the band and the row inside it are written in rem, and what
+/// a rem is is the browser's answer. See `head.ts`, which reads all four and pushes
+/// them.
 export interface Head {
   /// The paper the head is drawn on, as the `#rrggbb` Electron parses.
   readonly paper: string;
@@ -118,6 +119,11 @@ export interface Head {
 
   /// How tall the band stands, in whole pixels.
   readonly band: number;
+
+  /// And how far down the window the middle of the head's first row sits, the same
+  /// way — which is what a Mac centres its traffic lights on (Set 889 Q4a), there
+  /// being no overlay on that platform to paint.
+  readonly middle: number;
 }
 
 /// What `window.verkstead` is, where there is one.

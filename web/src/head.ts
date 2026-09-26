@@ -10,14 +10,22 @@
 //! window. So the page reads what it is actually drawn in and says so, and the
 //! app has no opinion about either value.
 //!
-//! **And the height is the page's for a neighbouring reason.** The band is
-//! written in rem — a rem and a quarter of chrome padding, the head's own rem
-//! above its row and below it, and a row as tall as the icon buttons standing in
-//! it — while what the overlay is sized in is whole pixels. A constant compiled
+//! **And the two measurements are the page's for a neighbouring reason.** The
+//! band is written in rem — a rem and a quarter of chrome padding, the head's own
+//! rem above its row and below it, and a row as tall as the icon buttons standing
+//! in it — while what the overlay is sized in is whole pixels. A constant compiled
 //! into the app would be right on one machine and wrong on the next: a human who
 //! has told their browser to draw text larger has a taller head. So [`band`] is
 //! those same rules added up where the rem can be asked for, and the page pushes
 //! what comes out.
+//!
+//! **And [`middle`] is the shorter sum beside it, which a Mac is what needs.**
+//! The lights there are moved into the head's *first row* rather than painted
+//! over the whole band (Set 889 Q4a), and the row is not the band: the band
+//! carries the chrome's quarter-rem above the row and the head's rem below it as
+//! well. So the app is told where the row's middle sits and centres the buttons on
+//! it — and the arithmetic stays here, where the rules that draw the head are
+//! already added up once, rather than being written into the app a second time.
 //!
 //! **A flip of the scheme is `prefers-color-scheme` and nothing else.** There is
 //! no theme switch in this app — the scheme is the machine's — so the media query
@@ -56,8 +64,15 @@ const BELOW = 1;
 /// tallest thing a head carries, and so the thing the row is the height of.
 const ROW = 2.3;
 
+/// How far down the band the row itself starts, in rem: the chrome's padding less
+/// the rem the head hangs back up into it, and the head's own rem above the row.
+///
+/// The front of the same sum the band is, and the half of it that says where the
+/// row is rather than how tall the whole strip stands.
+const DOWN = CHROME - HANG + ABOVE;
+
 /// What all of that comes to, in rem.
-const REMS = CHROME - HANG + ABOVE + BELOW + ROW;
+const REMS = DOWN + BELOW + ROW;
 
 /// And the two pixels of the band that are not a rem: the icon button reserves an
 /// edge it does not draw — a pixel at the top of the row and a pixel at the
@@ -83,16 +98,35 @@ export function band(): number {
   return Math.round(REMS * root() + EDGES);
 }
 
-/// What the head is drawn in and how tall it stands, as the app wears it — or
-/// nothing at all where the page cannot say what it is drawn in.
+/// And how far down the window the middle of the head's *first row* sits, in whole
+/// pixels — what a Mac's traffic lights are centred on.
 ///
-/// All three or none of them, there being one push: an overlay given a height and
+/// The row rather than the band, which is the whole of why this is a second
+/// measurement: the band is the strip of paper the controls are drawn over, and
+/// the row is the line inside it that a head's title and its buttons stand in.
+/// Half a rem and change separates the two middles, which is enough to see in
+/// three circles beside a wordmark.
+///
+/// Measured from the top of the window because that is where the band starts: the
+/// app has no title bar, so the first pixel of the page is the first pixel of the
+/// window, and a point handed to `setWindowButtonPosition` is measured from the
+/// same corner.
+export function middle(): number {
+  const rem = root();
+
+  return Math.round(DOWN * rem + (ROW * rem + EDGES) / 2);
+}
+
+/// What the head is drawn in, how tall it stands and where its row is, as the app
+/// wears it — or nothing at all where the page cannot say what it is drawn in.
+///
+/// All four or none of them, there being one push: an overlay given a height and
 /// left the colour it opened at is a strip of the light scheme's paper on a dark
 /// desktop, which is worse than the strip that is merely the wrong height.
 export function worn(): Head | undefined {
   const colours = drawn();
 
-  return colours === undefined ? undefined : { ...colours, band: band() };
+  return colours === undefined ? undefined : { ...colours, band: band(), middle: middle() };
 }
 
 /// Tell the app what its head is drawn in, and again at every flip of the colour

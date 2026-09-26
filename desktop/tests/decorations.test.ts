@@ -1,27 +1,33 @@
 //! What the window is made with in place of a title bar.
 //!
-//! Three things worth pinning, and none of them can be asked of a window: the
+//! Four things worth pinning, and none of them can be asked of a window: the
 //! module that holds one cannot be run here at all, so what it is handed is what
 //! there is to check. The style, because the option beside it — `frame: false` —
 //! looks like the same thing and gives a window with no overlay at all on Linux;
 //! the height, because it is the one value a reader will want to know the
-//! arithmetic behind; and the colours, because an overlay is a strip of solid
-//! paint welded to the corner of the window and a wrong one is the first thing
-//! anybody sees.
+//! arithmetic behind; the colours, because an overlay is a strip of solid paint
+//! welded to the corner of the window and a wrong one is the first thing anybody
+//! sees; and the point a Mac's traffic lights are moved to, which is the one of
+//! the four that is arithmetic rather than a value copied across.
 //!
-//! And then the push the page makes of all three, which is the same three values
+//! And then the push the page makes of all four, which is the same four values
 //! arriving from the other direction: the shape checked rather than trusted, the
-//! translation into Electron's own words, and the platform that has no overlay for
-//! any of it to reach. The call that wears it is `main.ts`'s, a window being the
-//! one thing that cannot be handed in here.
+//! translation into Electron's own words, and which of the two things a platform
+//! has for any of it to reach. The calls that wear it are `main.ts`'s, a window
+//! being the one thing that cannot be handed in here.
 
 import { describe, expect, it } from "vitest";
 
 import {
   BAND,
+  buttoned,
   DECORATIONS,
   type Head,
   INK,
+  INSET,
+  LIGHTS,
+  lights,
+  MIDDLE,
   OPENS,
   overlaid,
   overlay,
@@ -29,9 +35,9 @@ import {
   worn,
 } from "../src/decorations.js";
 
-/// A head the page might push: the dark scheme's paper and ink, at a band no
-/// constant in this package would have guessed.
-const PUSHED: Head = { paper: "#171614", ink: "#ece7e0", band: 93 };
+/// A head the page might push: the dark scheme's paper and ink, at a band and a
+/// row no constant in this package would have guessed.
+const PUSHED: Head = { paper: "#171614", ink: "#ece7e0", band: 93, middle: 48 };
 
 describe("the title bar", () => {
   /// The whole of the choice this task was about. `frame: false` gives a window
@@ -58,6 +64,14 @@ describe("the title bar", () => {
       height: BAND,
     });
   });
+
+  /// And the point a Mac's lights open at, which is the same value said for the
+  /// platform that has no overlay: a window made without it is three buttons over
+  /// the pane chrome's padding for as long as the page takes to load, and one made
+  /// with a constant of its own is the arithmetic in [`lights`] written twice.
+  it("carries where a Mac's traffic lights open, worked out the one way", () => {
+    expect(DECORATIONS.trafficLightPosition).toEqual(lights(OPENS));
+  });
 });
 
 describe("the overlay's band", () => {
@@ -74,6 +88,73 @@ describe("the overlay's band", () => {
   it("is a whole number of pixels", () => {
     expect(Number.isInteger(BAND)).toBe(true);
     expect(BAND).toBeGreaterThan(0);
+  });
+});
+
+describe("the row the head's title stands in", () => {
+  /// The front of the band's own sum, at a sixteen-pixel root: a rem and a quarter
+  /// of chrome padding less the rem the head hangs back up into it, the head's rem
+  /// above its row, and half of the row itself.
+  it("has its middle about forty pixels down the window", () => {
+    expect(MIDDLE).toBe(39);
+  });
+
+  /// Whole pixels and above nothing, the same as the band: this is half of a point
+  /// a window is handed, and the page's own push is held to it too.
+  it("is a whole number of pixels", () => {
+    expect(Number.isInteger(MIDDLE)).toBe(true);
+    expect(MIDDLE).toBeGreaterThan(0);
+  });
+
+  /// And it is not the middle of the band, which is the whole reason it crosses the
+  /// bridge at all: the band carries the head's rem *below* the row and a quarter
+  /// rem of chrome above it, so its middle sits a couple of pixels higher than the
+  /// row's. Lights centred on the band would be lights centred on nothing a head
+  /// draws.
+  it("sits below the middle of the band, rather than at it", () => {
+    expect(MIDDLE).toBeGreaterThan(BAND / 2);
+    expect(MIDDLE).toBeLessThan(BAND);
+  });
+});
+
+describe("where a Mac's traffic lights go", () => {
+  /// Measured on macOS 15 under Electron 43 rather than reasoned about: each button
+  /// reports a sixteen-by-sixteen frame, and the point is their top-left corner —
+  /// a `y` of thirty put a button's top thirty pixels down the window.
+  it("is worked out against the size the platform draws them", () => {
+    expect(LIGHTS).toBe(16);
+    expect(INSET).toBe(20);
+  });
+
+  /// The head's own row, centred: half a light above the middle the page pushed, at
+  /// the inset the platform draws its corner at.
+  it("centres them on the row the page said it drew", () => {
+    expect(lights(PUSHED)).toEqual({ x: INSET, y: PUSHED.middle - LIGHTS / 2 });
+    expect(lights(OPENS)).toEqual({ x: 20, y: 31 });
+  });
+
+  /// And it follows the head rather than a constant: a page drawn at a larger text
+  /// size has a taller head, and a taller head is lights further down the window.
+  it("moves down with a head that stands taller", () => {
+    const larger = { ...PUSHED, band: 116, middle: 49 };
+
+    expect(lights(larger).y).toBeGreaterThan(lights(OPENS).y);
+    expect(lights(larger).y).toBe(41);
+  });
+
+  /// Never above the window's own top edge. A band the page says is a few pixels
+  /// tall is a row whose middle is above half a light, and a negative offset is
+  /// three controls hanging off the top of the window.
+  it("never puts them above the top of the window", () => {
+    expect(lights({ ...PUSHED, middle: 4 })).toEqual({ x: INSET, y: 0 });
+    expect(lights({ ...PUSHED, middle: 1 }).y).toBe(0);
+  });
+
+  /// Said as an absence, the way the overlay's translation is: a point Electron
+  /// does not know is a point it ignores, so an extra key here would be the lights
+  /// quietly staying where they were.
+  it("says nothing but a point", () => {
+    expect(Object.keys(lights(PUSHED)).sort()).toEqual(["x", "y"]);
   });
 });
 
@@ -103,19 +184,21 @@ describe("the overlay's colours", () => {
 });
 
 describe("what the window opens wearing", () => {
-  /// The same three values a push carries, which is what makes the overlay the
+  /// The same four values a push carries, which is what makes the overlay the
   /// window is made with and the overlay a push leaves behind one thing rather
   /// than two — and what keeps the moment before the page loads from being a
   /// different shape of answer to the moment after it.
   it("is a head like any the page pushes", () => {
-    expect(OPENS).toEqual({ paper: PAPER, ink: INK, band: BAND });
+    expect(OPENS).toEqual({ paper: PAPER, ink: INK, band: BAND, middle: MIDDLE });
     expect(worn(OPENS)).toEqual(OPENS);
   });
 
   /// Which is also the arithmetic the page redoes for itself against its own rem —
-  /// see `band` in `web/src/head.ts`, and that suite for the other half of this.
-  it("is what the head's band comes to at a sixteen-pixel root", () => {
+  /// see `band` and `middle` in `web/src/head.ts`, and that suite for the other
+  /// half of this.
+  it("is what the head's band and row come to at a sixteen-pixel root", () => {
     expect(OPENS.band).toBe(75);
+    expect(OPENS.middle).toBe(39);
   });
 });
 
@@ -158,12 +241,21 @@ describe("a head pushed over the bridge", () => {
     expect(worn({ ...PUSHED, band: 0.5 })?.band).toBe(1);
   });
 
+  /// And the row's middle the same way, for the same reason: a point is whole
+  /// pixels, and the page's arithmetic against its own rem lands where it lands —
+  /// the row's middle at a sixteen-pixel root is thirty-nine and two fifths.
+  it("has its row's middle rounded the same way", () => {
+    expect(worn({ ...PUSHED, middle: 39.4 })?.middle).toBe(39);
+    expect(worn({ ...PUSHED, middle: 48.5 })?.middle).toBe(49);
+  });
+
   /// And the rounding happens before the refusing rather than after it, which is
   /// the one place the two could have disagreed: a band of `0.4` is more than
   /// nothing and rounds to nothing, so rounded second it would have become the
   /// strip of no height a band of `0` is refused for.
-  it("is nothing where the band rounds away to no height at all", () => {
+  it("is nothing where either measurement rounds away to nothing at all", () => {
     expect(worn({ ...PUSHED, band: 0.4 })).toBeUndefined();
+    expect(worn({ ...PUSHED, middle: 0.4 })).toBeUndefined();
   });
 
   /// And what is not a head changes nothing, the same reading `changed` makes of
@@ -179,8 +271,10 @@ describe("a head pushed over the bridge", () => {
       [],
       {},
       { paper: "#171614", ink: "#ece7e0" },
-      { paper: "#171614", band: 93 },
-      { ink: "#ece7e0", band: 93 },
+      { paper: "#171614", band: 93, middle: 48 },
+      { ink: "#ece7e0", band: 93, middle: 48 },
+      { paper: "#171614", ink: "#ece7e0", band: 93 },
+      { paper: "#171614", ink: "#ece7e0", middle: 48 },
     ]) {
       expect(worn(pushed), JSON.stringify(pushed) ?? "undefined").toBeUndefined();
     }
@@ -204,9 +298,12 @@ describe("a head pushed over the bridge", () => {
 
   /// And a band that is not a positive number of pixels is a strip of no height or
   /// of nonsense, either of which is worse than the overlay the window opened at.
-  it("is nothing where the band is not a number of pixels", () => {
-    for (const band of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "75", null]) {
-      expect(worn({ ...PUSHED, band }), String(band)).toBeUndefined();
+  /// The row's middle is held to the same thing: a point worked out of nonsense is
+  /// three buttons somewhere nobody asked for.
+  it("is nothing where either measurement is not a number of pixels", () => {
+    for (const measured of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "75", null]) {
+      expect(worn({ ...PUSHED, band: measured }), String(measured)).toBeUndefined();
+      expect(worn({ ...PUSHED, middle: measured }), String(measured)).toBeUndefined();
     }
   });
 });
@@ -222,10 +319,33 @@ describe("the platforms an overlay is drawn on", () => {
 
   /// And a Mac is not one of them. It has traffic lights rather than an overlay,
   /// and `setTitleBarOverlay` answers *"Titlebar overlay is not enabled"* with a
-  /// throw there — so a push from a Mac's page is answered by doing nothing rather
-  /// than by an error crossing back over the bridge. The page pushes all the same,
-  /// having no platform branch in it.
+  /// throw there — so a push from a Mac's page is answered by moving the buttons
+  /// rather than by an error crossing back over the bridge. The page pushes all the
+  /// same, having no platform branch in it.
   it("do not include a Mac, which has traffic lights instead", () => {
     expect(overlaid("darwin")).toBe(false);
+  });
+});
+
+describe("the platforms whose buttons are moved instead", () => {
+  /// A Mac, which is where `setWindowButtonPosition` means anything.
+  it("are the one the traffic lights are", () => {
+    expect(buttoned("darwin")).toBe(true);
+  });
+
+  /// And not the two that have an overlay: there the controls are drawn at the
+  /// corner the platform chose and the call is not there to be made.
+  it("do not include the two an overlay is drawn on", () => {
+    expect(buttoned("linux")).toBe(false);
+    expect(buttoned("win32")).toBe(false);
+  });
+
+  /// And no platform is both, which is what makes the two arms of a push an answer
+  /// rather than a pair of them: an overlay recoloured *and* buttons moved would be
+  /// one of the two calls throwing.
+  it("are never a platform that has an overlay too", () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
+      expect(buttoned(platform) && overlaid(platform), platform).toBe(false);
+    }
   });
 });

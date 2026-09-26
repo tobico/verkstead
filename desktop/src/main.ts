@@ -11,8 +11,9 @@
 //! **And it is what answers the page**, over the six channels
 //! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
 //! run it arrives in, the log file opened, the startup registration read and
-//! written, and the window's overlay recoloured to whatever the head turned out
-//! to be drawn in. Each of them is something only this process can do — a file
+//! written, and the window dressed to whatever head the page turned out to have
+//! drawn — its controls overlay recoloured, or a Mac's traffic lights moved into
+//! the row that head stands in. Each of them is something only this process can do — a file
 //! under Electron's user data, an icon on somebody's panel, a file handed to
 //! whatever the desktop reads text with, a login item registered, a window
 //! redressed — while what a set *means* is [`changed`](./settings.js)'s, what a
@@ -45,7 +46,7 @@ import { FILE } from "./bounds.js";
 import { ASKED, HEAD, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
-import { overlaid, overlay, worn } from "./decorations.js";
+import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
@@ -233,8 +234,9 @@ function ticked(starts: Startup, asked: unknown): Registration {
   return starts.set(asked);
 }
 
-/// Wear what the page says its head is drawn in: the window's controls overlay
-/// recoloured and resized to the band beneath it, while the window is open.
+/// Wear what the page says its head is: the window's controls overlay recoloured
+/// and resized to the band beneath it, or a Mac's traffic lights moved into the
+/// row that head stands in, while the window is open.
 ///
 /// **The one thing on this bridge the page says rather than asks** (Set 847
 /// Q11b). The strip the platform draws its controls on belongs to a window with
@@ -245,10 +247,14 @@ function ticked(starts: Startup, asked: unknown): Registration {
 /// answers the push by doing as it is told, and has no opinion about any of the
 /// three values.
 ///
-/// **And on a Mac it does nothing.** The traffic lights are not an overlay, and
-/// `setTitleBarOverlay` throws *"Titlebar overlay is not enabled"* wherever there
-/// is none — see [`overlaid`](./decorations.js). The page pushes all the same,
-/// there being no platform branch in it, and this is where the answer is silence.
+/// **And on a Mac it moves the traffic lights instead** (Set 889 Q4a). There is no
+/// overlay there — `setTitleBarOverlay` throws *"Titlebar overlay is not
+/// enabled"*, see [`overlaid`](./decorations.js) — and what that platform has in
+/// its place is three buttons the app can be told where to put. So the same push
+/// is answered by `setWindowButtonPosition`, at the point
+/// [`lights`](./decorations.js) works out of the row the page said it drew: the
+/// lights follow a larger text size exactly as the overlay's height does, neither
+/// of them a constant compiled into the app.
 ///
 /// **And a push that is not a head changes nothing**, the same reading [`enact`]
 /// and [`ticked`] make of what arrives: what an unchecked one reaches is a call
@@ -257,19 +263,29 @@ function wearing(window: BrowserWindow | null, platform: NodeJS.Platform, pushed
   const head = worn(pushed);
 
   if (head === undefined) {
-    say("a head came over the bridge that is not one, so the overlay is left as it was");
-    return;
-  }
-
-  if (!overlaid(platform)) {
-    // Not said: this is every push on a Mac rather than anything gone wrong, and
-    // a line per flip of the scheme in a file somebody is asked to send is noise.
+    say("a head came over the bridge that is not one, so the window is left as it was");
     return;
   }
 
   if (window === null) {
-    // A push from a window that has since gone. Nothing to recolour and nothing
-    // the matter either — the page said it on its way out.
+    // A push from a window that has since gone. Nothing to move and nothing to
+    // recolour, and nothing the matter either — the page said it on its way out.
+    return;
+  }
+
+  if (buttoned(platform)) {
+    const point = lights(head);
+
+    say(
+      `the page's head has its row ${head.middle}px down, ` +
+        `so the traffic lights sit at ${point.x},${point.y}`,
+    );
+    window.setWindowButtonPosition(point);
+    return;
+  }
+
+  if (!overlaid(platform)) {
+    // A platform with neither, which is none of the three this runs on.
     return;
   }
 
@@ -543,8 +559,8 @@ async function run(): Promise<void> {
   // The bridge's six acts, enacted here because here is the process that can
   // — the file is read and written, the icon is raised and lowered, the log
   // file is handed to whatever the desktop reads text with, the platform is
-  // asked about its startup registration, and the window's overlay is
-  // recoloured. Registered before the window is opened, because the page is
+  // asked about its startup registration, and the window is dressed to the
+  // page's own head. Registered before the window is opened, because the page is
   // loaded the moment there is one and a page that asked before this would be
   // asking nobody.
   ipcMain.handle(ASKED, () => settings(desk));
@@ -556,8 +572,8 @@ async function run(): Promise<void> {
   // And the one that is a statement rather than a question, so `on` rather than
   // `handle`. The window is the one the push came *from* rather than `onscreen`:
   // this is registered before there is a window at all, and the page that says
-  // what it is drawn in is by definition inside the window whose overlay is to
-  // be recoloured.
+  // what it is drawn in is by definition inside the window that is to be dressed
+  // to it.
   ipcMain.on(HEAD, (event, pushed: unknown) => {
     wearing(BrowserWindow.fromWebContents(event.sender), machine.platform, pushed);
   });
