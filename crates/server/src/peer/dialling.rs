@@ -593,6 +593,14 @@ impl Peers {
     /// **No deadline on the answer**, unlike every other dial here — see
     /// [`Peers::relaying`]. The address still has [`REACHING`] to answer the
     /// connection, so a member that has moved costs what it always did.
+    ///
+    /// **And a socket is one of the answers.** Three of the endpoints in that
+    /// namespace answer `101` rather than a body, and this is the dial that asks
+    /// them: what comes back is handed to [`crate::relaying::bridging`], which
+    /// takes the connection out of it and joins it to the browser's. Nothing here
+    /// is different for one — it is the same request under the same certificate,
+    /// and the deadline this dial does without is what lets the connection live
+    /// as long as the pane does.
     pub(crate) async fn relay(
         &self,
         member: &Member,

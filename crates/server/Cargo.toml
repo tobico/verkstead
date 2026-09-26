@@ -75,6 +75,19 @@ notify = "8"
 # crate that type comes from — shared with reqwest and axum, so it is the same
 # request all the way out.
 http = "1"
+# The upgraded connection a relayed socket is bridged over (ADR 0020) — see
+# `src/relaying/bridging.rs`. Named here for one type —
+# `hyper::upgrade::OnUpgrade` — which is how the browser's half of an upgrade is
+# taken out of the request, the way axum's own WebSocket extractor takes it.
+# Already in the tree under axum and reqwest both, so what this line adds to a
+# build is nothing, and no feature is asked for: `hyper::upgrade` is ungated.
+hyper = { version = "1", default-features = false }
+# And what makes that half readable: hyper's own IO traits are not tokio's, and
+# `TokioIo` is the wrapper between them — the same one reqwest hands its own
+# upgraded connection back through, so the two ends of a bridge are the one kind
+# of stream. Here already under reqwest, with `tokio` named because that is the
+# module it lives in.
+hyper-util = { version = "0.1", features = ["tokio"] }
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }

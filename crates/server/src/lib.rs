@@ -1525,6 +1525,40 @@ pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
     ))
 }
 
+/// And the same namespace with Sandboxes behind it, which is what the suite about
+/// a relayed *socket* stands up at the far end.
+///
+/// A constructor of its own beside [`router_over_the_link`] for one reason: a
+/// Conversation terminal is a human's shell inside the far Sandbox, so a device
+/// whose sessions are nobody's cannot open one, and a socket relayed onto a
+/// refusal would be a hop proved against nothing. Everything else is that
+/// function's — the Member Gate is [`peer::router`]'s to put on, and `data_dir`
+/// is what this end keeps in.
+pub fn router_over_the_link_running_sessions(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+) -> Router {
+    // Taken off the agents rather than asked for again, for the reason
+    // [`router_running_sessions`] takes them off there.
+    let binds = agents.binds().clone();
+
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudge::Nudges::new(),
+    ))
+}
+
 /// And the same with a site behind it, which is what the workbench's own pages
 /// are asked for through: the gate's second attachment is over the fallback, so
 /// a suite asking whether a page is gated needs a router that has one.

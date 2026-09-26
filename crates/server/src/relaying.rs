@@ -38,6 +38,17 @@
 //! carries this device's Workbench Key, and a hop that passed it on would hand
 //! the key to every machine this one is linked to. *A device's Workbench Key
 //! never leaves it* is a fact about both ends of the hop or about neither.
+//!
+//! **And a socket is carried too, on the same route.** Three of the endpoints in
+//! that namespace answer an upgrade rather than a request — a Conversation
+//! terminal, a session's Screen and a Code pane's watcher — and what a browser
+//! opens on one of them has to reach the member that holds the Conversation. So
+//! this module tells the two apart by the headers and hands a socket to
+//! [`bridging`], which puts the same upgrade to the member and joins the two
+//! connections. Everything about a socket that is different from a call is over
+//! there.
+
+mod bridging;
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -77,6 +88,11 @@ const NAMESPACE: &str = "/api/ui/";
 ///
 /// And `Cookie`, which is this device's Workbench Key — see this module's own
 /// documentation.
+///
+/// **Two of these travel after all where the call is a socket**: `Connection`
+/// and `Upgrade` are what say it is one, so on that route they are the request
+/// rather than a description of this hop's own — see [`bridging::asking`], which
+/// puts exactly those two back over what this list leaves.
 const KEPT_BACK: [&str; 11] = [
     "connection",
     "content-length",
@@ -94,6 +110,11 @@ const KEPT_BACK: [&str; 11] = [
 /// And the ones the answer's are stripped of on the way back, for the first
 /// half of the same reason: the far end's framing is between it and this
 /// device, and what goes to the browser is framed again here.
+///
+/// **A `101` is stripped of neither**, for the mirror of the reason above: an
+/// upgrade's answer has no framing to redo and its `Connection` is what the
+/// browser's own client reads — see [`bridging::bridged`], which is where such
+/// an answer is handed back instead.
 const NOT_HANDED_BACK: [&str; 2] = ["connection", "transfer-encoding"];
 
 /// The relay's one route: anything at all, under a member's Device Id.
@@ -103,12 +124,16 @@ const NOT_HANDED_BACK: [&str; 2] = ["connection", "transfer-encoding"];
 /// route apiece would be this device holding an opinion about which of its
 /// members' endpoints exist. Every method for the same reason — the namespace
 /// has reads and presses in it, and nothing here reads either.
+///
+/// The three attach endpoints are on this route too rather than beside it: what
+/// tells a socket from a call is the headers the browser sent, so a route of
+/// their own would be a second list of endpoints to keep — see [`bridging`].
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(&format!("{UNDER}{{device}}/{{*rest}}"), any(relay))
 }
 
 /// `ANY /api/ui/members/{device}/…` — put this call to `device` and hand back
-/// what it answered.
+/// what it answered, or, where it is a socket, hold the two ends of it together.
 async fn relay(State(state): State<AppState>, request: Request) -> Response {
     let Some(devices) = state.devices.clone() else {
         return unavailable("this server holds no device identity to relay through");
@@ -124,17 +149,35 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         );
     };
 
-    let (parts, body) = request.into_parts();
+    let (mut parts, body) = request.into_parts();
+
+    // Whether this is a socket rather than a call, and the browser's own half of
+    // it where it is — taken out of the connection before anything is dialled,
+    // for the reason [`bridging::taken`] gives.
+    let mut taking = None;
+
+    if bridging::upgrading(&parts.headers) {
+        match bridging::taken(&mut parts.extensions) {
+            Some(half) => taking = Some(half),
+            None => return bridging::not_upgradable(),
+        }
+    }
 
     let call = Call {
         method: parts.method,
         onwards,
-        headers: forwarded(&parts.headers),
+        headers: match taking.is_some() {
+            true => bridging::asking(&parts.headers),
+            false => forwarded(&parts.headers),
+        },
         body: Streamed::of(&parts.headers, body),
     };
 
     match devices.relay(&device, call).await {
-        Ok(answered) => handed_back(answered),
+        Ok(answered) => match taking {
+            Some(taking) => bridging::bridged(taking, answered),
+            None => handed_back(answered),
+        },
 
         Err(Unrelayed::ThisDevice) => refused(
             StatusCode::BAD_REQUEST,
