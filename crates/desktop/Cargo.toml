@@ -148,13 +148,16 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 [target.'cfg(windows)'.dependencies]
 # The message loop the tray lives on and the two ways it ends
 # (`Win32_UI_WindowsAndMessaging` and the thread id in `Win32_System_Threading`
-# — see `toolkit`), `MessageBoxW`, which is what the two dialogs are here — see
-# `dialog` — and the window station this process is on, which is how a Verkstead
-# started where there is no desktop finds that out before it draws — see
-# `screen`. One feature per header, which is how the macOS table above is cut up.
+# — see `toolkit`), and `MessageBoxW`, which is what the two dialogs are here —
+# see `dialog`. One feature per header, which is how the macOS table above is cut
+# up.
+#
+# `Win32_System_StationsAndDesktops` is no longer among them: the window station
+# this process is on — which is how a Verkstead started where nobody is looking
+# finds that out before it draws — is asked in the server crate now, and asked of
+# that crate's own binding of Win32. See `verkstead_server::display`.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
-  "Win32_System_StationsAndDesktops",
   "Win32_System_Threading",
   "Win32_UI_WindowsAndMessaging",
 ] }

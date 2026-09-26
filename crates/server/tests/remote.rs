@@ -359,8 +359,9 @@ async fn app_asking(
 /// The platform's own password dialog, as a suite has one: what it was asked to
 /// run, and whether anybody answered it.
 ///
-/// The real one is `pkexec`, `osascript` or a UAC prompt, and which of those is
-/// the desktop crate's business — see `verkstead_desktop::elevate`. What this
+/// The real one is `pkexec`, `osascript` or a UAC prompt, and which of those it
+/// is is `verkstead_server::elevate`'s business — its own unit tests are what
+/// assert the three commands. What this
 /// side of the seam has to get right is the two answers: one that runs the
 /// command, which is somebody typing their password, and one that runs nothing,
 /// which is somebody pressing Cancel.

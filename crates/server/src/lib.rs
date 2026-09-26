@@ -56,8 +56,28 @@ mod conversations;
 mod deferrals;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+/// Whether this process has a display to draw on — a window station somebody is
+/// looking at, or a Linux session that names one.
+///
+/// Not the **Screen** — `crate::screen`, the terminal grid a session's Capture is
+/// held as. That is the word this crate and CONTEXT.md's glossary already spend
+/// on the other sense, so this one is a display.
+///
+/// Public because what asks it is whatever started this server and means to draw
+/// on that display: the tray app's icon and its dialogs, and the graphical grant
+/// below, which is installed only where the answer is yes.
+pub mod display;
 mod done;
 mod drivers;
+/// The one implementation of [`remote::Elevate`]: the platform's own password
+/// dialog, put in front of the one command Verkstead ever asks for a privilege
+/// for.
+///
+/// Public for the reason [`display`] is — it is what a starting binary hands the
+/// server as it starts it, and the three arms are spawned commands with no
+/// toolkit behind them, so they live with the server rather than with the tray
+/// app that was the first to hand one over.
+pub mod elevate;
 mod exchanges;
 /// The Worktrees Code reads: the roots its tree stands on, and one folder of
 /// one of them at a time.
@@ -228,8 +248,8 @@ mod ui;
 ///
 /// Public because the tray app spawns too, and it is the tray app that has no
 /// console for a child to inherit — see [`crate::remote::Elevate`], whose one
-/// graphical implementation lives in the desktop crate and runs the platform's
-/// own asking.
+/// graphical implementation is [`crate::elevate`] and runs the platform's own
+/// asking.
 pub mod unseen;
 mod updates;
 mod viewer;
@@ -1188,6 +1208,97 @@ fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
     gate.guarding(Router::new().fallback(viewer::serve::<V>))
 }
 
+/// Who started this server, which is the whole of what a command line can say
+/// about it.
+///
+/// The desktop app starts the very same binary an operator does, with
+/// `--desktop` on the serve verb, and what that flag names is the caller rather
+/// than a setting: everything it changes, the server does differently because
+/// there is somebody at the machine rather than a journal on it
+/// ([ADR-0020](../../../docs/adr/0020-electron-desktop.md)). So it crosses in
+/// here as a value of its own rather than as a field of [`Config`] — that struct
+/// is what points *any* caller at a Data Directory and an address, the desktop
+/// verb's own flags included, and a caller that hands the link over in-process
+/// has no flag to have said.
+///
+/// **Nothing about it reaches the wire.** It is behaviour on this side of the
+/// socket: nothing serialisable carries it and no viewer can read it, which is
+/// what ADR-0020 leaves to the preload bridge instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartedBy {
+    /// A shell, or a unit file: the line hands the link over, and there is
+    /// nobody at the machine to put a password dialog in front of.
+    AnOperator,
+    /// The desktop app, which started this as its sidecar: it opens its own
+    /// window on the link, so the line names the address alone.
+    TheDesktopApp,
+}
+
+impl StartedBy {
+    /// Who hands the login link over on this install, which is what the startup
+    /// line carries and what it leaves off — see [`key::HandsOverTheLink`].
+    ///
+    /// The whole of the difference is who is holding a browser. The desktop app
+    /// reads the key out of the Data Directory and opens its window on the link
+    /// itself, so the line names the address alone and the secret stays out of
+    /// the log file the app's own menu opens. A machine started from a unit file
+    /// has no window and nobody to press anything in, and what somebody reading
+    /// the journal pastes is the whole link (ADR-0015, as amended).
+    ///
+    /// **And `display`, for the sidecar that turns out to have none.** A
+    /// `--desktop` run over SSH or in a container is a sidecar whose app cannot
+    /// be there: Electron will not start without somewhere to draw any more
+    /// than a tray will, so the caller this line is trusting to have opened a
+    /// window on the link has opened nothing. Leaving the link off *there* is
+    /// the redacting-everywhere ADR-0015 turned down — it would leave a machine
+    /// serving a workbench whose only way in is a file nobody has been told to
+    /// go and read. So this is the daemon's line exactly where the sidecar has
+    /// become the daemon, and the one case it fires in is the one case where
+    /// there is no app log for the secret to sit in, the app not being there.
+    ///
+    /// The tray app reaches the same end from the other side, which is why it
+    /// says [`key::HandsOverTheLink::TheCaller`] whatever this machine has on
+    /// it: a tray that cannot be raised is not known about until it has been
+    /// tried, so what that install falls back to is a second line written after
+    /// this one rather than a different first line — see
+    /// `verkstead_desktop::Desktop::run`.
+    pub fn hands_over_the_link(self, display: bool) -> key::HandsOverTheLink {
+        match self {
+            StartedBy::AnOperator => key::HandsOverTheLink::TheStartupLine,
+            StartedBy::TheDesktopApp if display => key::HandsOverTheLink::TheCaller,
+            StartedBy::TheDesktopApp => key::HandsOverTheLink::TheStartupLine,
+        }
+    }
+
+    /// And how this server asks the machine for a privilege it has not got,
+    /// where there is anybody to ask — see [`remote::Elevate`], and
+    /// [`elevate::Graphical`], which is what the asking comes to.
+    ///
+    /// **The flag and a display, both.** The operator grant the Remote access
+    /// pane wants, and the one elevated command the onboarding wizard's install
+    /// run raises, are commands this process has no privilege to run — and what
+    /// an app can do about that is put the platform's own password dialog in
+    /// front of one, having somebody at the machine where a daemon has nobody.
+    /// So the flag is half the answer, and it is the half that is said rather
+    /// than guessed: a plain `verkstead serve` hands the `sudo` line back the
+    /// way it always has, whatever else is true of the machine.
+    ///
+    /// `display` is the other half — [`display::there_is_one`], asked by the
+    /// caller rather than read here, so that both answers are answers a test can
+    /// ask for. A sidecar started over SSH or in a container is the app with
+    /// nowhere to draw, and a dialog nobody can see is a press waiting on a
+    /// dismissal that cannot arrive: there nothing is installed and the line is
+    /// shown, which is what a machine with nobody at it wanted said anyway.
+    pub fn escalation(self, display: bool) -> Option<Arc<dyn remote::Elevate>> {
+        match self {
+            StartedBy::AnOperator => None,
+            StartedBy::TheDesktopApp => {
+                display.then(|| Arc::new(elevate::Graphical::here()) as Arc<_>)
+            }
+        }
+    }
+}
+
 /// Take the address, open the database, and serve until the process is stopped.
 ///
 /// **The socket is taken before anything is made.** Everything below makes
@@ -1201,11 +1312,11 @@ fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
 /// desktop binary starts: a taken address is the one failure it draws a dialog
 /// for, and a dialog wants the failure before the side effects rather than after
 /// them.
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let listener = std::net::TcpListener::bind(config.listen)
         .with_context(|| format!("binding {}", config.listen))?;
 
-    run_on(listener, config).await
+    run_on(listener, config, started_by).await
 }
 
 /// The same, on a socket that is already bound.
@@ -1217,23 +1328,40 @@ pub async fn run(config: Config) -> Result<()> {
 /// A bare `verkstead serve` is configured by nobody and comes up all the same:
 /// there is nothing here that has to be said before the server can be reached,
 /// and everything that *was* said is resolved before it is served over.
-pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
+pub async fn run_on(
+    listener: std::net::TcpListener,
+    config: Config,
+    started_by: StartedBy,
+) -> Result<()> {
     // The Data Directory resolved and made, and the key in it read or written,
     // before anything else this start does — see [`Config::workbench_key`], and
     // [`run_on_keyed`] for the caller that arrives having already made this call.
     let key = config.workbench_key()?;
 
-    // And nothing to escalate with: a server started this way was started from a
-    // shell or a unit file, where there is nobody at the machine to put a
-    // password dialog in front of — see [`remote::Elevate`]. Which is the same
-    // machine that has no tray to press **Open** in, so the startup line below
-    // is where this install hands the login link over.
+    // Asked once, because both answers below turn on it: whether there is
+    // anywhere on this machine to draw a window. A sidecar with nowhere is a
+    // sidecar whose app is not there to have started it — see [`display`].
+    let display = display::there_is_one();
+
+    // And the two things `started_by` decides, both of them behaviour on this
+    // side of the socket. The startup line: whether it is this install's handing
+    // over of the login link, or the address alone because the caller has opened
+    // a window on one already — and the link again where the flag said a caller
+    // would and this machine says none can, which is the sidecar becoming the
+    // daemon. See [`StartedBy::hands_over_the_link`].
+    //
+    // And how a privilege this process has not got is asked for: the operator
+    // grant the Remote access pane wants and the onboarding wizard's one
+    // elevated command go through the platform's own password dialog where the
+    // sidecar has a display to draw one on, and hand the `sudo` line back where
+    // a plain `serve` is the daemon it has always been — see
+    // [`StartedBy::escalation`] and [`remote::Elevate`].
     run_on_keyed(
         listener,
         config,
         key,
-        None,
-        key::HandsOverTheLink::TheStartupLine,
+        started_by.escalation(display),
+        started_by.hands_over_the_link(display),
     )
     .await
 }
@@ -1514,5 +1642,58 @@ pub async fn run_on_keyed(
         axum::serve(listener, app)
             .await
             .context("serving Verkstead")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sidecar asks this machine where there is somewhere to draw the asking
+    /// — and shows the line where there is not, a dialog nobody can see being a
+    /// press waiting on a dismissal that cannot arrive.
+    #[test]
+    fn the_flag_installs_the_grant_only_where_there_is_a_display() {
+        assert!(StartedBy::TheDesktopApp.escalation(true).is_some());
+        assert!(StartedBy::TheDesktopApp.escalation(false).is_none());
+    }
+
+    /// And a `serve` with no flag on it is the daemon it has always been,
+    /// whatever the machine it is running on happens to have: the flag is what
+    /// says somebody is at it, and a display is not who started this.
+    #[test]
+    fn a_serve_without_the_flag_asks_nobody_whatever_the_display_says() {
+        assert!(StartedBy::AnOperator.escalation(true).is_none());
+        assert!(StartedBy::AnOperator.escalation(false).is_none());
+    }
+
+    /// And the line names the address alone only where the app the flag speaks
+    /// for could be there to have opened a window: the same display the grant
+    /// above is installed on, because Electron will not start without one any
+    /// more than a tray will.
+    #[test]
+    fn the_flag_leaves_the_link_off_the_line_only_where_there_is_a_display() {
+        assert_eq!(
+            StartedBy::TheDesktopApp.hands_over_the_link(true),
+            key::HandsOverTheLink::TheCaller,
+        );
+        assert_eq!(
+            StartedBy::TheDesktopApp.hands_over_the_link(false),
+            key::HandsOverTheLink::TheStartupLine,
+        );
+    }
+
+    /// And a `serve` with no flag on it hands the link over in its line
+    /// whatever this machine has on it, which is the daemon's way and the thing
+    /// ADR-0015 refused to take away: a journal is where a headless machine
+    /// hands one over at all.
+    #[test]
+    fn a_serve_without_the_flag_says_the_link_whatever_the_display_says() {
+        for display in [true, false] {
+            assert_eq!(
+                StartedBy::AnOperator.hands_over_the_link(display),
+                key::HandsOverTheLink::TheStartupLine,
+            );
+        }
     }
 }

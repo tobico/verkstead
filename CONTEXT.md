@@ -462,6 +462,28 @@ handing over is the browser and **Open**, so a run with neither says the link
 itself rather than serving a workbench nobody can get into. And a browser that
 would not open is reported by the address, at startup and at a press alike — a
 line about a failure is that file on that desk, and is nobody's only way in.
+**And the sidecar's line redacts for the same reason, on the flag's word.**
+`verkstead serve --desktop` is the server the desktop app starts beside itself
+(ADR-0020), and the flag is the whole of what it knows about who started it: the
+app reads the key out of the **Data Directory** before there is a server to ask
+one of and opens its own window on the link, so the line names the address alone
+and the log file the app's own **View Logs** opens carries no login. Three
+installs, therefore, and two answers: the daemon's line hands the link over
+because nobody is at the machine, and both installs with somebody at it have
+handed it over already. Nothing about the key itself changes under the flag —
+`workbench.key` in the Data Directory at the mode it always had, which is the one
+place the app reads it from and where a human who started that sidecar by hand
+reads it too. A `serve` with no flag on it is the daemon's line whatever else is
+true of the machine: the flag is said rather than guessed, because a display is
+not who started this.
+**And the sidecar with no display says the link after all**, which is the same
+fallback the app makes where no tray came up: the app that flag speaks for could
+not have started — nothing draws a window where there is nowhere to put one — so
+a `--desktop` run over SSH or in a container is a caller that handed the link to
+nobody, and the address alone would leave it serving a workbench whose only way
+in is a file nobody has been told to read. The daemon's line exactly where the
+sidecar has become the daemon, and the case it fires in is the one case where
+the app is not there to have a log file for the secret to sit in.
 A session cannot read the file whatever is in it, the log living in the human's
 own local application data and a session running as a local account of
 Verkstead's own.
@@ -509,8 +531,16 @@ privilege to raise, so a refused press hands back `sudo tailscale set
 --operator=<user>` for this machine's own user and the next press is the
 re-try. The desktop app has somebody at the machine to ask and a daemon has
 not, so where the app started the server that press goes through the platform's
-own password dialog first; the NixOS module makes the grant itself, so nobody
-on a host is shown a command they are also the one to run.
+own password dialog first — the app in-process, and the sidecar
+`verkstead serve --desktop` starts as on its own word, which is the only thing
+either of them is told about who is at the machine. **And only where there is
+somewhere to draw one**: a run over SSH or in a container is the app with no
+display, and a dialog nobody can see is a press waiting on a dismissal that
+cannot arrive, so there the line is shown as a daemon's is. A `serve` with no
+flag on it never asks, whatever the machine has on it — the flag is said rather
+than guessed, a display being no answer to who started this. The NixOS module
+makes the grant itself, so nobody on a host is shown a command they are also the
+one to run.
 **And the address by itself lets nobody in**, which is why the pane draws the
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
@@ -593,12 +623,13 @@ The last Next clears the mode and lands on the compose page.
 
 **The first step installs what it names** (2026-09-11). An absent row carries
 a checkbox where its tick would be, the gating rows ticked by default, and Next
-installs what is ticked: one elevated package-manager run through the platform
-dialog the desktop app hands the server — a server with no way to ask sends
-every ticked row to the hint screen without asking — then the vendor installers
-as the user. A directory Verkstead installs into is written to `session_path`
-in `config.yaml` and composed ahead of the server's own `PATH`, the one thing
-added that the `PATH` did not name. Three screens: the checkboxes, an install
+installs what is ticked: one elevated package-manager run through the same
+platform dialog the operator grant goes through, which an app install has and a
+daemon has not — a server with no way to ask sends every ticked row to the hint
+screen without asking — then the vendor installers as the user. A directory
+Verkstead installs into is written to `session_path` in `config.yaml` and
+composed ahead of the server's own `PATH`, the one thing added that the `PATH`
+did not name. Three screens: the checkboxes, an install
 screen with a progress bar and a status line that moves on by itself, and a
 **hint screen** drawing only the ticked rows still absent with their
 instructions, its Next held with an *n/m detected* counter until every one is
@@ -1227,8 +1258,16 @@ badge, no Event, and nothing held off. Somebody who means to take the work on by
 hand presses **Stop** first, and the Conversation being **Stopped** is what
 holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
+
+**Never the other sense of the word**, which is somewhere for a window to
+appear: that is a **display** throughout — `$DISPLAY` or `$WAYLAND_DISPLAY` on
+Linux, the window server on a Mac, a visible window station on Windows — and it
+is what says whether a tray icon, a dialog or the platform's own password box
+has anywhere to be drawn. This word is the terminal grid and nothing else, so a
+Verkstead running where nobody is looking has no display rather than no screen.
+See `verkstead_server::display`.
 _Avoid_: terminal (that is the human's own shell — see **Terminal**), console,
-attach view, pane
+attach view, pane, screen (for a display — see above)
 
 **Terminal**:
 A shell of the human's own wherever a session's agent runs, with the Worktree as
