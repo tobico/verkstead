@@ -155,7 +155,15 @@ describe("a head pushed over the bridge", () => {
   /// thrown away: what has to be true of a band is that it is a number of pixels.
   it("has its band rounded to the pixel Electron measures in", () => {
     expect(worn({ ...PUSHED, band: 74.8 })?.band).toBe(75);
-    expect(worn({ ...PUSHED, band: 0.4 })?.band).toBe(0);
+    expect(worn({ ...PUSHED, band: 0.5 })?.band).toBe(1);
+  });
+
+  /// And the rounding happens before the refusing rather than after it, which is
+  /// the one place the two could have disagreed: a band of `0.4` is more than
+  /// nothing and rounds to nothing, so rounded second it would have become the
+  /// strip of no height a band of `0` is refused for.
+  it("is nothing where the band rounds away to no height at all", () => {
+    expect(worn({ ...PUSHED, band: 0.4 })).toBeUndefined();
   });
 
   /// And what is not a head changes nothing, the same reading `changed` makes of

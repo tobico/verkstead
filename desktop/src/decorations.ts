@@ -132,6 +132,13 @@ export const DECORATIONS = {
 /// against whatever a rem is on that machine — lands on a fraction as readily as
 /// on an integer. Being a number of pixels at all is what has to be true of it;
 /// being a round one is this function's to make.
+///
+/// **Which is why the rounding comes before the refusing rather than after it.**
+/// What the band has to be is a strip with some height to it, and a fraction of a
+/// pixel is not one: rounded afterwards, a band of `0.4` would have passed the
+/// test for being more than nothing and then become nothing, which is the strip
+/// of no height this refuses a `0` for in the first place. So the whole pixels
+/// are worked out first and it is those that have to be more than none.
 export function worn(pushed: unknown): Head | undefined {
   if (typeof pushed !== "object" || pushed === null) {
     return undefined;
@@ -147,11 +154,17 @@ export function worn(pushed: unknown): Head | undefined {
     return undefined;
   }
 
-  if (typeof band !== "number" || !Number.isFinite(band) || band <= 0) {
+  if (typeof band !== "number" || !Number.isFinite(band)) {
     return undefined;
   }
 
-  return { paper, ink, band: Math.round(band) };
+  const pixels = Math.round(band);
+
+  if (pixels <= 0) {
+    return undefined;
+  }
+
+  return { paper, ink, band: pixels };
 }
 
 /// Whether this platform has an overlay for a push to reach at all.
