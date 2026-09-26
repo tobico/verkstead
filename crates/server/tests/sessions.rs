@@ -1161,6 +1161,26 @@ static CLEANING: LazyLock<Pace> = LazyLock::new(|| Pace {
     ..*BRISKLY
 });
 
+/// And the same at a pace that never speaks to a session at all, for the tests
+/// about a session nobody spoke to.
+///
+/// [`BRISKLY`]'s `waking` is the ceiling on a stir, chosen long enough for the
+/// tests that watch a rescue being held off to assert nothing happened inside
+/// it. Every other test here it is a trap: a session that takes longer than that
+/// to do anything at all is typed into, and a terminal echoes what is typed —
+/// so a session that printed nothing of its own ends up with Verkstead's line in
+/// its Capture and reads as one that spoke. Which is a thing about how long the
+/// machine took to get a sandbox going, and nothing about the code.
+///
+/// Longer than any of these run for, so that the rescue is one more thing that
+/// never fires by itself here — the reason `stalls`, `merges` and `cleanup` are
+/// what they are above. A server's own is five minutes, which is what a real
+/// session has to say its first word inside.
+static UNSPOKEN: LazyLock<Pace> = LazyLock::new(|| Pace {
+    waking: paced(Duration::from_secs(600)),
+    ..*BRISKLY
+});
+
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
 /// and nothing said on it yet.
 ///
@@ -2194,6 +2214,19 @@ async fn grilling_swept(stub: &str) -> Grilling {
 /// enough to watch it do so — see [`LANDING`].
 async fn grilling_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
     grilling_at_pace(spill, stub, gh, *LANDING, &[]).await
+}
+
+/// The same, on a server that never speaks to a session however long it says
+/// nothing — for the tests about a session nobody spoke to. See [`UNSPOKEN`].
+async fn grilling_unspoken(stub: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *UNSPOKEN,
+        &[],
+    )
+    .await
 }
 
 /// The same, over a directory the caller already has the name of — which is
@@ -15716,9 +15749,19 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
 /// that one itself once its handoff had landed, which is not a session that
 /// went wrong, so nothing was written down about how it exited and a stop over
 /// one would say what it always said.
+///
+/// **Nobody speaks to this session**, which is [`UNSPOKEN`]'s whole reason: a
+/// rescue's line is echoed by the terminal it is typed into, so a session
+/// Verkstead spoke to is one that printed something — and what decides whether
+/// it was spoken to at all is how long the machine took to get a sandbox going,
+/// which is nothing this is asking about.
+///
+/// And the lifetime is read off the record rather than written in here, for the
+/// same reason the other way round: what the sentence has to say is what `{:.1}`
+/// made of the span, and the span itself is the machine's.
 #[tokio::test]
 async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
-    let fixture = grilling(
+    let fixture = grilling_unspoken(
         r#"
         case "$1" in
         claude-grilling-5)
@@ -15754,18 +15797,35 @@ async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
         "and the evidence block is no longer the sentence that pointed nowhere: {:?}",
         stopped.html,
     );
-    assert!(
-        stopped.html.contains("It exited with code 1 after 0."),
-        "it is the exit code and a lifetime in tenths of a second: {:?}",
-        stopped.html,
-    );
-    assert!(
-        stopped.html.contains("s, having printed nothing."),
-        "and that there was nothing else to show: {:?}",
-        stopped.html,
-    );
 
     let pool = open_database(&fixture.database).await.unwrap();
+
+    // The session the Notice was written over: the last to have printed into the
+    // Timeline, the grilling session's Event being the one before it.
+    let implementing = outputs(&fixture.view().await)
+        .last()
+        .map(|output| output.id)
+        .expect("the session that stopped has an Event of its own");
+
+    let ended = verkstead_store::session_ending(&pool, fixture.id, implementing)
+        .await
+        .unwrap()
+        .expect("a session that stopped without being asked to has its ending on the record");
+
+    assert!(
+        !ended.printed,
+        "the relay read no bytes of the session's own, nobody having spoken to it \
+         either: {ended:?}",
+    );
+    assert!(
+        stopped.html.contains(&format!(
+            "It exited with code 1 after {:.1} s, having printed nothing.",
+            ended.lived.as_secs_f64(),
+        )),
+        "it is the exit code, the lifetime the record holds in tenths of a second, \
+         and that there was nothing else to show: {:?}",
+        stopped.html,
+    );
 
     assert!(
         verkstead_store::session_ending(&pool, fixture.id, grilled)
