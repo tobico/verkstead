@@ -28,7 +28,7 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 
 - [x] 01: Device identity and the peer listener — [brief](01-device-identity-and-the-peer-listener.md)
 - [x] 02: Linking — [brief](02-linking.md)
-- [ ] 03: Discovery — [brief](03-discovery.md)
+- [ ] 03: Discovery — [brief](03-discovery.md) *(in progress: `roadmaps/cluster-mode/03-discovery`)*
 - [ ] 04: The relay — [brief](04-the-relay.md)
 - [ ] 05: Ranks — [brief](05-ranks.md)
 - [ ] 06: The merged list — [brief](06-the-merged-list.md)
