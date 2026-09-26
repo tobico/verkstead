@@ -14,6 +14,12 @@
 //! it. There is no Close: a details pane is left by opening something else or by
 //! the "← Timeline" a narrow window draws, and a header carrying both read as
 //! one row asking the same question twice.
+//!
+//! And it wears one of the frame's own names, as the way back out does: the head
+//! is the band the window's controls are drawn over in the app, and which head is
+//! under them is a fact about the layout rather than about any pane. So the frame
+//! is what pads a head clear of them — see `paneHead` in `Panes.module.css` —
+//! and this says no more about it than that it is a head.
 
 import { Show, type JSX } from "solid-js";
 
@@ -36,7 +42,7 @@ export function PaneHead(props: {
   children?: JSX.Element;
 }): JSX.Element {
   return (
-    <div class={styles.head}>
+    <div class={`${styles.head} ${shell.paneHead}`}>
       <Show when={props.back}>
         {(back) => (
           <button

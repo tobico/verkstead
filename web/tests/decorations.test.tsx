@@ -1,4 +1,5 @@
-//! The window's own drag region, which is every pane's head.
+//! The window's own drag region and the room its controls take: the two halves
+//! of a page drawn in a window with no title bar.
 //!
 //! The app's window has no title bar (ADR-0020), so what moves it is the bar at
 //! the top of whatever page is open — and every one of those bars is
@@ -18,15 +19,41 @@
 //! **And the whole of what a browser sees of it is nothing.** The property is
 //! inert outside a frameless Electron window, and there is no branch anywhere
 //! near it: the head is the same markup with the app's bridge on the window and
-//! without one, which is what the last case pins.
+//! without one, which is what that half's last case pins.
+//!
+//! The second half is the other thing a window with no title bar does to a page:
+//! the platform draws its own controls over a corner of it, so the head at that
+//! corner has to keep out from under them. Three questions, and they are asked
+//! apart because they are separable — the arithmetic in `src/controls.ts`, which
+//! turns the strip the page was left into an inset at each edge and knows nothing
+//! about a page; the frame in `src/Panes.tsx`, which carries those insets as
+//! variables and reads the rectangle again whenever it moves; and the rules in
+//! `src/Panes.module.css` that hand each inset to the head standing at that edge,
+//! which are read as text for the reason the drag region's are — jsdom lays out
+//! no grid and holds no breakpoint, so what says which head is padded in which
+//! layout is the rule.
+//!
+//! **The stub bridge is what says which platform this is**, which is the one
+//! thing a rectangle cannot say for itself: a right-hand inset is Windows' and
+//! Linux's controls overlay and a left-hand one is a Mac's traffic lights,
+//! because that is where each platform draws them. Nothing in the page branches
+//! on it — the same sum answers both — so what the bridge does here is name the
+//! machine the shape under test belongs to.
 
 import { faGear } from "@fortawesome/free-solid-svg-icons";
-import { fireEvent, render } from "@solidjs/testing-library";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CLEAR, insets, reserved, type Area } from "../src/controls";
 import { IconButton } from "../src/IconButton";
 import { Menu } from "../src/Menu";
+import { Panes } from "../src/Panes";
+import shell from "../src/Panes.module.css";
+// And the frame's stylesheet as text, for the rules that say which head stands
+// at an edge of the window: jsdom holds no breakpoint and lays out no grid.
+import stylesheet from "../src/Panes.module.css?raw";
 import { Switch } from "../src/Switch";
+import { ALL_THREE, BESIDE } from "../src/widths";
 import { NAME, type Bridge } from "../src/settings/bridge";
 import { PaneHead } from "../src/workbench/PaneHead";
 import styles from "../src/workbench/PaneHead.module.css";
@@ -37,6 +64,7 @@ import sheet from "../src/workbench/PaneHead.module.css?raw";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, "windowControlsOverlay");
 });
 
 /// Every rule in the sheet with its comments taken out: the selector as written,
@@ -152,6 +180,25 @@ function headOf(container: ParentNode): HTMLElement {
 /// exception were written.
 function drags(element: Element): boolean {
   return element.closest(DRAGS) !== null && !element.matches(EXCEPTED);
+}
+
+/// The app's bridge on the window, saying which machine this is.
+///
+/// Which is the whole of what the bridge is for here: a page inside the app draws
+/// what a browser's does, and what the platform decides is where it put the
+/// window's controls — see the note at the top of this file.
+function theApp(platform: string): void {
+  const settings = { whenClosed: "tray", trayIcon: true } as const;
+  const registered = { possible: true, on: false };
+
+  vi.stubGlobal(NAME, {
+    platform,
+    settings: () => Promise.resolve(settings),
+    set: () => Promise.resolve(settings),
+    logs: () => Promise.resolve(),
+    startup: () => Promise.resolve(registered),
+    register: () => Promise.resolve(registered),
+  } satisfies Bridge);
 }
 
 describe("the head", () => {
@@ -273,17 +320,257 @@ describe("a browser", () => {
     const drawn = headOf(browser.container).outerHTML;
     browser.unmount();
 
-    vi.stubGlobal(NAME, {
-      platform: "linux",
-      settings: () => Promise.resolve({ whenClosed: "tray", trayIcon: true }),
-      set: () => Promise.resolve({ whenClosed: "tray", trayIcon: true }),
-      logs: () => Promise.resolve(),
-      startup: () => Promise.resolve({ possible: true, on: false }),
-      register: () => Promise.resolve({ possible: true, on: false }),
-    } satisfies Bridge);
+    theApp("linux");
 
     const app = aHead();
 
     expect(headOf(app.container).outerHTML).toBe(drawn);
+  });
+});
+
+/// How wide the window the rectangles below were measured in stood, in the CSS
+/// pixels `getTitlebarAreaRect()` answers in.
+const ACROSS = 1006;
+
+/// The strip the page is left under the controls overlay: the whole top of the
+/// window but the last ninety-seven pixels of it. Measured in the app on Linux
+/// while this stage was planned, which is the reading task 03 was written from.
+const OVERLAID: Area = { x: 0, width: 909 };
+
+/// And the strip a Mac leaves, the traffic lights being at the other corner: it
+/// starts after them and runs to the window's far edge.
+const TRAFFIC: Area = { x: 78, width: ACROSS - 78 };
+
+describe("the room the window's controls take", () => {
+  /// The arithmetic, and the one thing to keep hold of about it: what the page is
+  /// handed is the rectangle *it* was left, so what the controls took is the
+  /// sliver beyond the far edge of it.
+  it("is whatever lies beyond the strip the page was left", () => {
+    expect(insets(OVERLAID, ACROSS)).toEqual({ left: 0, right: 97 });
+  });
+
+  /// The same sum with no branch in it, on the platform that puts them at the
+  /// other end: what the page is left starts after the traffic lights, so `x` is
+  /// the inset and there is nothing at the right-hand edge.
+  it("is whatever lies in front of it where a Mac put them there", () => {
+    expect(insets(TRAFFIC, ACROSS)).toEqual({ left: 78, right: 0 });
+  });
+
+  /// And nothing at all where there is no overlay to ask, which is every browser
+  /// and every phone.
+  it("is nothing where there is no overlay", () => {
+    expect(insets(undefined, ACROSS)).toEqual(CLEAR);
+  });
+
+  /// Nor anything negative, which is a head padded backwards. A titlebar area
+  /// wider than the window it is in is COSMIC's first answer — the
+  /// `geometrychange` a moment later is the true one — and a window nobody has
+  /// measured yet is nought across.
+  it("is nothing where the strip does not fit the window it is in", () => {
+    expect(insets({ x: 0, width: 1200 }, ACROSS)).toEqual(CLEAR);
+    expect(insets(OVERLAID, 0)).toEqual(CLEAR);
+  });
+
+  /// And the edge nothing was taken from is left unsaid rather than written as
+  /// nought: the stylesheet has the nought behind each name, so a frame that
+  /// names neither is a frame nothing was taken from.
+  it("is written on the frame for the edge it was taken from, and no other", () => {
+    expect(reserved(insets(OVERLAID, ACROSS))).toEqual({
+      "--controls-right": "97px",
+    });
+    expect(reserved(insets(TRAFFIC, ACROSS))).toEqual({
+      "--controls-left": "78px",
+    });
+    expect(reserved(CLEAR)).toEqual({});
+  });
+});
+
+/// The overlay as the frame finds it, on `navigator`: the strip the page is left,
+/// and the `geometrychange` that says it has moved.
+///
+/// Answers with a way to move it, because the rectangle at load is not always the
+/// true one — which is a thing about this API rather than a nicety, and so one of
+/// the cases.
+function overlaid(area: Area | null): (moved: Area) => void {
+  let left = area;
+  const heard = new Set<() => void>();
+
+  Object.defineProperty(navigator, "windowControlsOverlay", {
+    configurable: true,
+    value: {
+      get visible() {
+        return left !== null;
+      },
+      getTitlebarAreaRect: () => left ?? { x: 0, y: 0, width: 0, height: 0 },
+      addEventListener: (_kind: string, listener: () => void) =>
+        heard.add(listener),
+      removeEventListener: (_kind: string, listener: () => void) =>
+        heard.delete(listener),
+    },
+  });
+
+  return (moved) => {
+    left = moved;
+    heard.forEach((listener) => listener());
+  };
+}
+
+/// The frame with a head in each of its three panes, which is how the workbench
+/// hands it over.
+function theFrame(): HTMLElement {
+  const { container } = render(() => (
+    <Panes
+      pane="details"
+      middleLabel="Timeline"
+      conversations={<PaneHead title="Conversations" />}
+      middle={<PaneHead title="Timeline" />}
+      details={<PaneHead title="Details" />}
+    />
+  ));
+
+  const frame = container.querySelector<HTMLElement>(`.${shell.panes}`);
+
+  if (!frame) {
+    throw new Error("no frame was drawn");
+  }
+
+  return frame;
+}
+
+describe("the frame", () => {
+  /// Which is all the frame does with them: what the controls took is a pair of
+  /// variables on it, as its column widths are, and the stylesheet is what hands
+  /// each of them to the head standing at that edge.
+  it("carries the room the controls took, as variables of its own", () => {
+    theApp("linux");
+    overlaid(OVERLAID);
+    vi.stubGlobal("innerWidth", ACROSS);
+
+    const frame = theFrame();
+
+    expect(frame.style.getPropertyValue("--controls-right")).toBe("97px");
+    expect(frame.style.getPropertyValue("--controls-left")).toBe("");
+  });
+
+  /// And the other platform through the same code: a Mac's traffic lights are at
+  /// the top-left, which is where the Wordmark is, so the inset that does the
+  /// work there is the left one. There is no Mac here to see it on — stage 06 is
+  /// where that is looked at — so what is owed is the arithmetic.
+  it("carries a left inset where the platform is a Mac", () => {
+    theApp("darwin");
+    overlaid(TRAFFIC);
+    vi.stubGlobal("innerWidth", ACROSS);
+
+    const frame = theFrame();
+
+    expect(frame.style.getPropertyValue("--controls-left")).toBe("78px");
+    expect(frame.style.getPropertyValue("--controls-right")).toBe("");
+  });
+
+  /// The rectangle read again, which is not an optimisation: the first reading on
+  /// COSMIC gave a titlebar area wider than the window, and the page that read it
+  /// once would pad by that on every launch. The same event carries a maximise, an
+  /// unmaximise and a resize, which is the overlay going away and coming back.
+  it("reads the rectangle again whenever the controls move", async () => {
+    theApp("linux");
+    vi.stubGlobal("innerWidth", ACROSS);
+    const moved = overlaid({ x: 0, width: 1200 });
+
+    const frame = theFrame();
+    expect(frame.style.getPropertyValue("--controls-right")).toBe("");
+
+    moved(OVERLAID);
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--controls-right")).toBe("97px"),
+    );
+
+    moved({ x: 0, width: ACROSS });
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--controls-right")).toBe(""),
+    );
+  });
+
+  /// And in a browser the frame carries nothing at all: there is no overlay to
+  /// measure, so neither variable is written and the element is as bare as it was
+  /// before any of this existed.
+  it("carries neither of them in a browser", () => {
+    expect(theFrame().getAttribute("style")).toBeNull();
+  });
+});
+
+/// One of the frame's two breakpoints as text — the same way `sizing.test.tsx`
+/// reads them, and for the same reason: which side of a breakpoint a rule is on
+/// is the whole of what it says, and jsdom holds no breakpoint at all.
+function atWidth(breakpoint: string): string {
+  const opened = stylesheet.indexOf(`@media ${breakpoint} {`);
+
+  expect(opened, `the frame should have a ${breakpoint} layout`).not.toBe(-1);
+
+  return stylesheet.slice(opened, stylesheet.indexOf("\n}\n", opened));
+}
+
+describe("which head the frame keeps clear", () => {
+  /// Out of the head rather than off the pane, which is what keeps the record
+  /// under it where it was: the only thing that moves is the band the controls
+  /// are drawn over.
+  it("pays the insets out of the head", () => {
+    expect(stylesheet).toContain(
+      ".panes .paneHead {\n" +
+        "  padding-left: var(--head-left, 0px);\n" +
+        "  padding-right: var(--head-right, 0px);\n}",
+    );
+  });
+
+  /// The narrow window first, as everything in that sheet is: one pane is the
+  /// whole window, so the head in it stands at both edges and both insets are
+  /// every head's.
+  it("hands both edges to every head while one pane is the window", () => {
+    expect(stylesheet).toContain(
+      ".panes {\n" +
+        "  --head-left: var(--controls-left, 0px);\n" +
+        "  --head-right: var(--controls-right, 0px);\n}",
+    );
+  });
+
+  /// And once the panes stand side by side, the head at each edge is the pane in
+  /// the column at that edge: the sidebar where there is a list to pick from, the
+  /// record in the frame that has none, and the details pane in the frame that is
+  /// nothing else.
+  it("hands the left edge to whichever pane is the first column", () => {
+    const beside = atWidth(BESIDE);
+
+    expect(beside).toContain(
+      "  .panes > .pane {\n    --head-left: 0px;\n    --head-right: 0px;\n  }",
+    );
+    expect(beside).toContain(
+      "  .panes > .conversationsPane {\n" +
+        "    --head-left: var(--controls-left, 0px);\n  }",
+    );
+    expect(beside).toContain(
+      "  .panes.two > .middlePane {\n" +
+        "    --head-left: var(--controls-left, 0px);\n  }",
+    );
+    expect(beside).toContain(
+      "  .panes.alone > .detailsPane {\n" +
+        "    --head-left: var(--controls-left, 0px);\n  }",
+    );
+  });
+
+  /// The right edge is the details pane's in every frame that shows one — and the
+  /// middle pane's as well while it is standing in the details pane's own column,
+  /// which is what the two-panes-of-three width does. With all three up it stops,
+  /// which is the one thing here that two breakpoints have to agree about.
+  it("hands the right edge to the far column, whichever pane that is", () => {
+    expect(atWidth(BESIDE)).toContain(
+      "  .panes > .detailsPane {\n" +
+        "    --head-right: var(--controls-right, 0px);\n  }",
+    );
+    expect(atWidth(BESIDE)).toContain(
+      "  .panes:not(.two) > .middlePane {\n" +
+        "    --head-right: var(--controls-right, 0px);\n  }",
+    );
+    expect(atWidth(ALL_THREE)).toContain(
+      "  .panes:not(.two) > .middlePane {\n    --head-right: 0px;\n  }",
+    );
   });
 });

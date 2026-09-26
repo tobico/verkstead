@@ -24,7 +24,7 @@ Roadmap stage: [04: Client-side decorations](docs/roadmaps/electron-desktop/04-d
 
 - [x] 01: Frameless, with the overlay on — [details](01-frameless-with-the-overlay.md)
 - [x] 02: Every pane head drags the window — [details](02-the-heads-drag-the-window.md)
-- [ ] 03: The frame keeps the outermost heads clear — [details](03-insets-from-the-frame.md)
+- [x] 03: The frame keeps the outermost heads clear — [details](03-insets-from-the-frame.md)
 - [ ] 04: The head's colours and height over the bridge — [details](04-colours-over-the-bridge.md)
 - [ ] 05: The bare drag bar — [details](05-the-bare-drag-bar.md)
 - [ ] 06: COSMIC, and a window a compositor would rather decorate — [details](06-cosmic-and-the-overlay.md)
