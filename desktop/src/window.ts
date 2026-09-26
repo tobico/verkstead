@@ -67,6 +67,7 @@ import { where } from "./elsewhere.js";
 import { link } from "./key.js";
 import { why } from "./loading.js";
 import { say } from "./log.js";
+import { hand, type Opening } from "./opening.js";
 
 /// What the window opens at on a machine that has not told it otherwise — a
 /// desktop-sized workbench rather than a phone-sized one. Once it has been moved
@@ -123,6 +124,12 @@ export interface Workbench {
   /// reach this window as a close on their way out, and neither of them is the
   /// close button.
   closing: () => Closing;
+
+  /// How this machine hands a url to a browser — [`opening`](./opening.js)'s
+  /// answer, and `undefined` on the two platforms where that is `shell`'s own
+  /// job. A link that leaves the workbench is the other of the two things this
+  /// app opens, and it is opened the same way the log file is.
+  by: Opening | undefined;
 }
 
 /// Open the window on the workbench, logged in and where it was left.
@@ -181,7 +188,7 @@ export function open(workbench: Workbench): BrowserWindow {
 
   keeping(window, workbench.state, place);
   policy(window, workbench.closing);
-  bound(window, workbench.origin);
+  bound(window, workbench.origin, workbench.by);
 
   // Whether the load now on its way is already an answer to a refusal. Set when
   // one is made and cleared by any navigation that was not refused, so a
@@ -372,9 +379,9 @@ function policy(window: BrowserWindow, closing: () => Closing): void {
 /// in this frame, and asking for a window to follow it in. The answer is the
 /// same for both — the workbench stays on the screen and the browser gets the
 /// page — and a new window is never made either way.
-function bound(window: BrowserWindow, origin: string): void {
+function bound(window: BrowserWindow, origin: string, by: Opening | undefined): void {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    away(url, origin);
+    away(url, origin, by);
     return { action: "deny" };
   });
 
@@ -386,7 +393,7 @@ function bound(window: BrowserWindow, origin: string): void {
     // Stopped before it starts: the window is still showing the workbench when
     // the browser comes up in front of it.
     event.preventDefault();
-    away(url, origin);
+    away(url, origin, by);
   });
 }
 
@@ -395,13 +402,21 @@ function bound(window: BrowserWindow, origin: string): void {
 /// Not awaited: what starts is somebody else's program, and a browser that
 /// takes ten seconds to come up is not something the app should be waiting on —
 /// the same reading `crates/desktop/src/opener.rs` made of it.
-function away(url: string, origin: string): void {
+function away(url: string, origin: string, by: Opening | undefined): void {
   if (where(url, origin) !== "browser") {
     say(`the window was asked to open ${url}, which is nothing a browser is for, so it does not`);
     return;
   }
 
   say(`${url} is not this Verkstead, so it goes to the browser`);
+
+  // Ours to open where this machine has said so, for the reason **View Logs** is
+  // — see [`opening`](./opening.js): a browser started off this process's own
+  // environment is a browser loading the bundle's libraries.
+  if (by !== undefined) {
+    hand(by, url, say);
+    return;
+  }
 
   shell.openExternal(url).catch((trouble: unknown) => {
     say(`the browser could not be given ${url} — ${String(trouble)}`);

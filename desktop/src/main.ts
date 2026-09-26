@@ -62,6 +62,7 @@ import {
   type Startup,
 } from "./startup.js";
 import { taken } from "./taken.js";
+import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
 import { forward, open } from "./window.js";
@@ -399,6 +400,15 @@ async function run(): Promise<void> {
     );
   }
 
+  // And how this machine opens a file or a link, which on Linux is the app's own
+  // doing rather than `shell`'s — see [`opening`](./opening.js), which says why.
+  // Read here, where the platform and the environment are, and handed to the two
+  // places that open something long afterwards.
+  const by = opening(machine);
+  if (by !== undefined) {
+    say(`what opens a file or a link on this machine is ${by.program}`);
+  }
+
   const sidecar = start(path, ADDRESS, heard, passed);
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
@@ -479,6 +489,7 @@ async function run(): Promise<void> {
   const trayed: Trayed = {
     icon: artwork(install),
     kept,
+    by,
     open: () => {
       if (onscreen !== undefined) {
         forward(onscreen);
@@ -531,7 +542,7 @@ async function run(): Promise<void> {
   // asking nobody.
   ipcMain.handle(ASKED, () => settings(desk));
   ipcMain.handle(SET, (_event, sent: unknown) => enact(desk, trayed, sent));
-  ipcMain.handle(LOGS, () => logs(kept));
+  ipcMain.handle(LOGS, () => logs(kept, by));
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
 
@@ -576,6 +587,11 @@ async function run(): Promise<void> {
     // whatever the human is doing — see [`hidden`](./startup.js), which is what
     // `--no-open` meant for the tray app.
     hidden: unseen,
+
+    // The same answer the tray's **View Logs** is given: a link out of the
+    // workbench and the log file are the two things this app hands to somebody
+    // else's program, and one machine opens both.
+    by,
   });
   onscreen = window;
 
