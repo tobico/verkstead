@@ -46,10 +46,10 @@ npmRebuild: false
 
 directories:
   # Under the directory cargo already writes to, so that one `.gitignore` line
-  # covers both of them and `cargo clean` takes them away — the same reason
-  # `tools/build-appimage.sh` kept its AppDir there. `out/` is electron-builder's
-  # own output, `staged/` beside it is what `scripts/pack.mjs` writes for the two
-  # paths below to read.
+  # covers both of them and `cargo clean` takes them away — which is where the
+  # Rust AppImage kept its AppDir too. `out/` is electron-builder's own output,
+  # `staged/` beside it is what `scripts/pack.mjs` writes for the two paths
+  # below to read.
   output: ../target/electron/out
   buildResources: build
 
@@ -132,9 +132,10 @@ appImage:
 # builds against `appimage-12.0.1`, whose runtime wants libfuse2 — which Ubuntu
 # 24.04, Debian 13 and current Fedora do not install, so the file would refuse to
 # mount on a current desktop with *"Cannot mount AppImage, please check your FUSE
-# setup"*. This runtime links its own squashfuse and wants only a `/dev/fuse` to
-# open, which is what the Sandbox needs of the host anyway. It compresses with
-# zstd rather than xz, and it does not put `--no-sandbox` on the desktop entry
-# the way the legacy path does.
+# setup"*. This runtime links its own squashfuse, so what it asks of a machine is
+# a `/dev/fuse` to open and a `fusermount3` to open it with — the helper any
+# FUSE mount goes through, and nothing a distribution has to be told to install
+# a library for. It compresses with zstd rather than xz, and it does not put
+# `--no-sandbox` on the desktop entry the way the legacy path does.
 toolsets:
   appimage: "1.0.3"
