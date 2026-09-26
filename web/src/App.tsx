@@ -8,6 +8,7 @@ import styles from "./App.module.css";
 import { Toasts } from "./Toasts";
 import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
+import { dress } from "./head";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
@@ -48,6 +49,15 @@ export function App(): JSX.Element {
   // about: the stream outlives every navigation between the lists and a Set,
   // and a page that opened its own would drop it on the way to the next.
   onMount(() => onCleanup(listenForNudges(queries)));
+
+  // And what the app's own window wears across the top of it, which is the page's
+  // to say: the head's two colours and how tall its band stands, pushed now and
+  // again at every flip of the colour scheme — see `head.ts`. Held here for the
+  // reason the stream is, and for one more: the window is the whole app's rather
+  // than any page's, and the pages with no pane head in them are drawn in a
+  // window with an overlay on it all the same. Nothing at all in a browser, there
+  // being no bridge to say it over.
+  onMount(() => onCleanup(dress()));
 
   return (
     <QueryClientProvider client={queries}>

@@ -1,5 +1,6 @@
-//! The window's own drag region and the room its controls take: the two halves
-//! of a page drawn in a window with no title bar.
+//! The window's own drag region, the room its controls take, and what the strip
+//! they are drawn on is painted and sized from: the three things a page drawn in
+//! a window with no title bar has to answer for.
 //!
 //! The app's window has no title bar (ADR-0020), so what moves it is the bar at
 //! the top of whatever page is open — and every one of those bars is
@@ -39,12 +40,25 @@
 //! because that is where each platform draws them. Nothing in the page branches
 //! on it — the same sum answers both — so what the bridge does here is name the
 //! machine the shape under test belongs to.
+//!
+//! And the third part is the one that goes the other way: the head's two colours
+//! and how tall its band stands, pushed over that same bridge so that the strip
+//! the platform draws its controls on is the same paper as the head beneath it.
+//! Which makes the stub bridge the app being told rather than the app answering,
+//! and the list it keeps is the record of what it was told. Three stand-ins buy
+//! the whole of it: the body painted, because jsdom resolves no `var()` and a
+//! paper is read off what the page is actually drawn in; the root font size set,
+//! because the band is rules written in rem and the rem is the one thing in it no
+//! stylesheet can be told in advance; and a `matchMedia` that can change its
+//! mind, jsdom's being unable to and a flip of the scheme being the whole of
+//! what moves either colour.
 
 import { faGear } from "@fortawesome/free-solid-svg-icons";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CLEAR, insets, reserved, type Area } from "../src/controls";
+import { band, dress, worn } from "../src/head";
 import { IconButton } from "../src/IconButton";
 import { Menu } from "../src/Menu";
 import { Panes } from "../src/Panes";
@@ -54,7 +68,7 @@ import shell from "../src/Panes.module.css";
 import stylesheet from "../src/Panes.module.css?raw";
 import { Switch } from "../src/Switch";
 import { ALL_THREE, BESIDE } from "../src/widths";
-import { NAME, type Bridge } from "../src/settings/bridge";
+import { NAME, type Bridge, type Head } from "../src/settings/bridge";
 import { PaneHead } from "../src/workbench/PaneHead";
 import styles from "../src/workbench/PaneHead.module.css";
 // The same sheet as text. The two declarations under test are Chromium's own
@@ -182,14 +196,21 @@ function drags(element: Element): boolean {
   return element.closest(DRAGS) !== null && !element.matches(EXCEPTED);
 }
 
-/// The app's bridge on the window, saying which machine this is.
+/// The app's bridge on the window, saying which machine this is — and holding on
+/// to every head the page pushed over it.
 ///
-/// Which is the whole of what the bridge is for here: a page inside the app draws
-/// what a browser's does, and what the platform decides is where it put the
-/// window's controls — see the note at the top of this file.
-function theApp(platform: string): void {
+/// Two things the bridge is for here. A page inside the app draws what a
+/// browser's does, and what the platform decides is where it put the window's
+/// controls — see the note at the top of this file. And it is what the page says
+/// its head's colours and height *to*, so the list that comes back is the record
+/// of the telling.
+function theApp(platform: string): Head[] {
   const settings = { whenClosed: "tray", trayIcon: true } as const;
   const registered = { possible: true, on: false };
+
+  // Every head the page has pushed, in the order it pushed them — which is the
+  // whole of what the app can be asked about here.
+  const pushed: Head[] = [];
 
   vi.stubGlobal(NAME, {
     platform,
@@ -198,7 +219,12 @@ function theApp(platform: string): void {
     logs: () => Promise.resolve(),
     startup: () => Promise.resolve(registered),
     register: () => Promise.resolve(registered),
+    head: (worn: Head) => {
+      pushed.push(worn);
+    },
   } satisfies Bridge);
+
+  return pushed;
 }
 
 describe("the head", () => {
@@ -572,5 +598,191 @@ describe("which head the frame keeps clear", () => {
     expect(atWidth(ALL_THREE)).toContain(
       "  .panes:not(.two) > .middlePane {\n    --head-right: 0px;\n  }",
     );
+  });
+});
+
+describe("how tall the head's band stands", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("font-size");
+  });
+
+  /// The same seventy-five the window opens at — `BAND` in
+  /// `desktop/src/decorations.ts`, which that package's suite pins as a number.
+  /// Both sides, because the app and the page have to agree about it: one is what
+  /// the overlay is until the page loads and the other is what it is afterwards,
+  /// and a window that changed height at the moment its page arrived would be the
+  /// visible form of them disagreeing.
+  it("is the head's band at a sixteen-pixel root", () => {
+    expect(band()).toBe(75);
+  });
+
+  /// The whole reason it is measured on the page rather than compiled into the
+  /// app: a human who has told their browser to draw text larger has a taller
+  /// head, and the overlay has to be as tall as the head it is drawn over.
+  it("follows the rem the page is actually drawn at", () => {
+    document.documentElement.style.fontSize = "20px";
+
+    expect(band()).toBe(93);
+
+    document.documentElement.style.fontSize = "12px";
+
+    expect(band()).toBe(57);
+  });
+
+  /// Electron measures the overlay in whole pixels, so a fraction is a rectangle
+  /// the page would read back rounded — which makes the rounding the page's to do.
+  it("is a whole number of them", () => {
+    document.documentElement.style.fontSize = "17px";
+
+    expect(Number.isInteger(band())).toBe(true);
+  });
+});
+
+describe("what the head is drawn in", () => {
+  afterEach(() => {
+    document.body.style.removeProperty("background-color");
+    document.body.style.removeProperty("color");
+  });
+
+  /// Read off the page rather than named in the app (Set 847 Q11b), which is what
+  /// lets the one overlay be right in both schemes. `#rrggbb` because that is what
+  /// Electron parses, whatever notation the browser answered in.
+  it("is the paper and the ink the page has resolved", () => {
+    document.body.style.backgroundColor = "rgb(250, 248, 245)";
+    document.body.style.color = "rgb(28, 26, 23)";
+
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75 });
+  });
+
+  /// And the other scheme, which is the same read a moment later: the page says
+  /// what it is drawn in now rather than which of the two it is in.
+  it("is the dark scheme's where that is what the page is in", () => {
+    document.body.style.backgroundColor = "rgb(23, 22, 20)";
+    document.body.style.color = "rgb(236, 231, 224)";
+
+    expect(worn()).toMatchObject({ paper: "#171614", ink: "#ece7e0" });
+  });
+
+  /// A page with nothing behind it reports a background nobody set as fully
+  /// transparent black, and an overlay painted from that is a black strip welded
+  /// to the corner of the window. So it is not a colour and there is nothing to
+  /// say.
+  it("is nothing at all where the page is drawn on nothing", () => {
+    expect(worn()).toBeUndefined();
+  });
+});
+
+describe("telling the app", () => {
+  /// The colour scheme as something a test can flip. jsdom answers the media query
+  /// and has no way of changing its mind, and following a change is the whole of
+  /// what this watches for — the same stand-in `diagrams.test.ts` builds, for the
+  /// same reason.
+  function scheme() {
+    const listeners = new Set<() => void>();
+    const query = {
+      matches: false,
+      addEventListener: (_: string, listen: () => void) => listeners.add(listen),
+      removeEventListener: (_: string, listen: () => void) =>
+        listeners.delete(listen),
+    };
+
+    vi.stubGlobal("matchMedia", () => query);
+
+    return {
+      flip(paper: string, ink: string) {
+        query.matches = !query.matches;
+        document.body.style.backgroundColor = paper;
+        document.body.style.color = ink;
+        for (const listen of [...listeners]) listen();
+      },
+      watched: () => listeners.size,
+    };
+  }
+
+  afterEach(() => {
+    document.body.style.removeProperty("background-color");
+    document.body.style.removeProperty("color");
+  });
+
+  /// The whole of the channel in one case: the page says what it is drawn in the
+  /// moment it is up, and says it again when the machine changes its mind. No
+  /// restart, because the overlay is recoloured on a window that is already open.
+  it("says what the head is drawn in, and again when the scheme flips", () => {
+    document.body.style.backgroundColor = "rgb(250, 248, 245)";
+    document.body.style.color = "rgb(28, 26, 23)";
+
+    const pushed = theApp("linux");
+    const watching = scheme();
+
+    const stop = dress();
+
+    expect(pushed).toEqual([{ paper: "#faf8f5", ink: "#1c1a17", band: 75 }]);
+
+    watching.flip("rgb(23, 22, 20)", "rgb(236, 231, 224)");
+
+    expect(pushed).toEqual([
+      { paper: "#faf8f5", ink: "#1c1a17", band: 75 },
+      { paper: "#171614", ink: "#ece7e0", band: 75 },
+    ]);
+
+    stop();
+  });
+
+  /// And it stops watching when the page goes, which is what the app holds the
+  /// returned function for: a listener left on the query would be one per page.
+  it("stops watching when the page has gone", () => {
+    document.body.style.backgroundColor = "rgb(250, 248, 245)";
+    document.body.style.color = "rgb(28, 26, 23)";
+
+    theApp("linux");
+    const watching = scheme();
+
+    const stop = dress();
+    expect(watching.watched()).toBe(1);
+
+    stop();
+    expect(watching.watched()).toBe(0);
+  });
+
+  /// A Mac is pushed to exactly as the other two are — the page has no platform
+  /// branch in it, and what a platform with traffic lights rather than an overlay
+  /// does about a push is the app's business. See `overlaid` in
+  /// `desktop/src/decorations.ts`.
+  it("says it on a Mac too, there being no branch on the platform", () => {
+    document.body.style.backgroundColor = "rgb(250, 248, 245)";
+    document.body.style.color = "rgb(28, 26, 23)";
+
+    const pushed = theApp("darwin");
+    scheme();
+
+    dress()();
+
+    expect(pushed).toHaveLength(1);
+  });
+
+  /// And the half that matters: a browser on this machine and a phone on the
+  /// tailnet have no bridge, so there is nobody to say it to and nothing is
+  /// watched for either. The same document, drawn the same way, telling nobody.
+  it("says nothing at all in a browser", () => {
+    document.body.style.backgroundColor = "rgb(250, 248, 245)";
+    document.body.style.color = "rgb(28, 26, 23)";
+
+    const watching = scheme();
+
+    expect(() => dress()()).not.toThrow();
+    expect(watching.watched()).toBe(0);
+  });
+
+  /// A page that cannot say what it is drawn in says nothing rather than pushing
+  /// two of the three values: an overlay given a height and left the colour it
+  /// opened at is the light scheme's paper on a dark desktop, which is worse than
+  /// one that is merely the wrong height.
+  it("says nothing where the page cannot say what it is drawn in", () => {
+    const pushed = theApp("linux");
+    scheme();
+
+    dress()();
+
+    expect(pushed).toEqual([]);
   });
 });
