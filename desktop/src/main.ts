@@ -8,6 +8,15 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
+//! **And it is what answers the page**, over the five channels
+//! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
+//! run it arrives in, the log file opened, and the startup registration read and
+//! written. Each of them is something only this process can do — a file under
+//! Electron's user data, an icon on somebody's panel, a file handed to whatever
+//! the desktop reads text with, a login item registered — while what a set
+//! *means* is [`changed`](./settings.js)'s and what a registration *is* is
+//! [`startup.ts`](./startup.js)'s, both of which vitest runs.
+//!
 //! **The order at the top of [`run`] is the lifecycle**, and it is an order
 //! rather than a sequence of conveniences: the log file, so that every line
 //! below it is in the file somebody will be asked to send; then the lock, so
@@ -15,21 +24,42 @@
 //! sidecar; then the address, which the lock is what makes an unambiguous
 //! question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
+//!
+//! **And a launch may be a login's rather than a human's.** The flag
+//! [`HIDDEN`](./startup.js) is what says so where the registration is a command
+//! line, and the platform itself is what says so on a Mac, whose login item
+//! carries no arguments; either way what it comes to is a window that stays off
+//! the screen while there is an icon to reach the app by —
+//! [`hidden`](./startup.js) is that whole reading, and the registration it was
+//! read out of is rewritten here at every launch while there is one.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, dialog, type BrowserWindow } from "electron";
+import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 
+import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
-import { cli, OVERRIDE } from "./cli.js";
+import { ASKED, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import { cli, type Install, OVERRIDE } from "./cli.js";
+import { closing } from "./closing.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
+import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
+import {
+  hidden,
+  type LoginItem,
+  type Registering,
+  type Registration,
+  startup,
+  type Startup,
+} from "./startup.js";
 import { taken } from "./taken.js";
+import { logs, lower, raise, type Trayed } from "./tray.js";
 import { forward, open } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
 
@@ -95,6 +125,17 @@ let child: Sidecar | undefined;
 /// going is the expected end of a quit rather than news about the server.
 let leaving = false;
 
+/// Whether a quit is already under way, which is what a close arriving during
+/// one means.
+///
+/// **Because a quit closes the window on its way out.** The tray's Quit, Cmd+Q
+/// and the sidecar's ending all reach `app.quit`, and every one of them ends up
+/// at the same `close` event the close button raises — so an app that read the
+/// policy there would hide its window instead of quitting, or put the warning
+/// up in front of somebody who had just chosen Quit. The warning is the close
+/// button's alone (ADR-0020), and this is what makes that true.
+let quitting = false;
+
 /// Stop the sidecar and end this launch with `code`.
 ///
 /// **The stop is the point**, because nothing else here does it. `app.exit` runs
@@ -112,6 +153,81 @@ function give(code: number): void {
   app.exit(code);
 }
 
+/// Enact a set that arrived over the bridge, and answer with the settings in
+/// force once it has been.
+///
+/// **In this run rather than at the next launch**, which is what makes the
+/// Desktop page a control rather than a form: the icon goes or comes back as
+/// the switch is moved, and what a close means changes with it — the policy is
+/// read out of the file at the moment of the press, so there is nothing to
+/// re-read it here.
+///
+/// **What is refused writes nothing.** [`changed`](./settings.js) is what says
+/// so, and what comes back then is the settings as they stand — which is a
+/// control on the page that goes back where it was rather than one left showing
+/// something the app never agreed to.
+///
+/// **And the answer is read back off the file rather than handed back.** A
+/// write that failed is a set that did not happen, and the app goes on behaving
+/// the way it was behaving; the page is told what is true, and the icon follows
+/// the same reading.
+function enact(desk: string, trayed: Trayed, sent: unknown): Settings {
+  const wanted = changed(sent);
+
+  if (wanted === undefined) {
+    say("a set came over the bridge that is not one of this app's settings, so nothing is written");
+    return settings(desk);
+  }
+
+  // Said before it is done, so that a write which then failed reads as what it
+  // is: this line, and the settings module's own saying it could not keep them.
+  say(
+    `the Desktop page set ${Object.entries(wanted)
+      .map(([which, value]) => `${which} to ${String(value)}`)
+      .join(" and ")}`,
+  );
+
+  set(desk, { ...settings(desk), ...wanted });
+
+  const now = settings(desk);
+
+  // Where the icon should now be, said as a statement rather than as a change:
+  // both of these leave an icon that is already as asked exactly where it is.
+  if (now.trayIcon) {
+    raise(trayed);
+  } else {
+    lower();
+  }
+
+  return now;
+}
+
+/// Enact a tick of **Launch on Startup** that arrived over the bridge, and
+/// answer with how it stands once it has been.
+///
+/// **The registration is the state** (Set 846 Q9a), so there is nothing to write
+/// anywhere else and nothing to keep in step: what comes back is read off the
+/// platform again, which is a box that says what is true rather than what was
+/// pressed. A platform that refused the registration says so in the answer — see
+/// [`Registration`](./startup.js) — rather than throwing at a renderer.
+///
+/// **And what is not a yes or a no is nothing at all.** The same reading
+/// [`enact`] makes of a set: a bridge is not to be trusted with the shape just
+/// because the window is the app's own.
+function ticked(starts: Startup, asked: unknown): Registration {
+  if (typeof asked !== "boolean") {
+    say(
+      "a tick came over the bridge for Launch on Startup that is neither yes nor no, " +
+        "so nothing is registered",
+    );
+    return starts.standing();
+  }
+
+  say(`the Desktop page asked for Launch on Startup ${asked ? "on" : "off"}`);
+
+  return starts.set(asked);
+}
+
 async function run(): Promise<void> {
   // The one read of the process's own platform and environment, made first
   // because everything below is a function of these two values — and the
@@ -124,7 +240,7 @@ async function run(): Promise<void> {
   // on its way out. Where it went it says for itself, on the terminal as well
   // as in the file; a machine with nowhere to put one says that instead, and
   // goes on running.
-  keep(logDir(machine));
+  const kept = keep(logDir(machine));
 
   // First of the app's own steps, and before anything is started: a second
   // launch of the app is this one's window brought forward, and the launch
@@ -151,11 +267,31 @@ async function run(): Promise<void> {
     forward(onscreen);
   });
 
-  // Closing the window quits, on every platform including the Mac. Stage 03 is
-  // what makes it a choice, with a tray to keep running in and the Dock
-  // behaviour that goes with it; until there is one, a window closed with the
-  // app still running would be a Verkstead with no way back to itself.
+  // Every window gone is the app going, and the close policy is what decides
+  // whether a close ever reaches this: where closing means keep running, the
+  // window is hidden rather than closed and nothing here fires; where it means
+  // quit, the window really was the last of the app. A Mac reaches it only on
+  // its way out under Cmd+Q, its close always being a hide.
   app.on("window-all-closed", () => app.quit());
+
+  // And a Dock activation is the window coming back, which is the other half of
+  // what closing means on a Mac (ADR-0020): the app is a regular Dock app now,
+  // so pressing its icon there is the same act as Open on the tray. Registered
+  // everywhere, being a Mac's event to emit.
+  app.on("activate", () => {
+    if (onscreen === undefined) {
+      wanted = true;
+      return;
+    }
+    forward(onscreen);
+  });
+
+  // `before-quit` rather than `will-quit`: this one comes before the windows
+  // are closed, and what it is here for is the close that a quit is about to
+  // cause.
+  app.on("before-quit", () => {
+    quitting = true;
+  });
 
   if (await taken(HOST, PORT)) {
     say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
@@ -164,12 +300,17 @@ async function run(): Promise<void> {
     return;
   }
 
-  const path = cli({
+  // Where this app is running from, which is what both of the files it ships
+  // beside itself are a function of: the CLI it starts, and the artwork the
+  // tray draws.
+  const install: Install = {
     packaged: app.isPackaged,
     entry: import.meta.dirname,
     resources: process.resourcesPath,
     ...machine,
-  });
+  };
+
+  const path = cli(install);
 
   // The directory the server is about to resolve for itself, and so the one the
   // **Workbench Key** is in.
@@ -200,11 +341,13 @@ async function run(): Promise<void> {
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 
-  // The app quitting is the sidecar stopping. `will-quit` rather than
-  // `before-quit` so that a quit which something else has since cancelled does
-  // not take the server with it.
+  // The app quitting is the sidecar stopping, and the icon leaving the panel
+  // — the two things this app has outside its own process. `will-quit` rather
+  // than `before-quit` so that a quit which something else has since cancelled
+  // takes neither with it.
   app.on("will-quit", () => {
     leaving = true;
+    lower();
     sidecar.stop();
   });
 
@@ -259,24 +402,127 @@ async function run(): Promise<void> {
     say("there is nowhere on this machine for a Data Directory, so there is no key to read");
   }
 
+  // Electron's own user data, which is this machine's and never the server's:
+  // where the window sits and what closing it means are facts about the desk in
+  // front of the human, so both are kept beside what Electron keeps here rather
+  // than in `config.yaml` (ADR-0020).
+  const userData = app.getPath("userData");
+  const desk = join(userData, DESKTOP);
+
+  // What the icon is made of, made before there is a window for it to open:
+  // **Show tray icon** can ask for it back at any moment the app is running, so
+  // the raise below and the one [`enact`] makes are the same value. `onscreen`
+  // rather than the window itself, for the reason `second-instance` reads it —
+  // this is built before there is one.
+  const trayed: Trayed = {
+    icon: artwork(install),
+    kept,
+    open: () => {
+      if (onscreen !== undefined) {
+        forward(onscreen);
+      }
+    },
+    quit: () => app.quit(),
+  };
+
+  // **Launch on Startup**, which is the one setting on the Desktop page that is
+  // not in that file at all: the platform's own registration is the state (Set
+  // 846 Q9a), and what is read off this process for it is whether this is a
+  // packed app, where its executable is and what `$APPIMAGE` says. The
+  // login-item API is handed in rather than reached for, so that the two arms
+  // this machine will never take are still arms vitest runs.
+  const registering: Registering = {
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    ...machine,
+  };
+
+  // The arguments go into the read as well as the write, and they have to: on
+  // Windows a registration is a command line, and Electron answers
+  // `openAtLogin` by comparing it against the arguments it was asked about — so
+  // a bare read would say Verkstead does not start with the session while it
+  // does. Which ones they are is `startup.ts`'s, in [`ARGS`](./startup.js).
+  const login: LoginItem = {
+    registered: (args) => app.getLoginItemSettings({ args }).openAtLogin,
+
+    // The Mac's own account of this launch, which is what it has instead of the
+    // flag the other two carry on their command lines.
+    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
+
+    register: (asked) => app.setLoginItemSettings(asked),
+  };
+
+  const starts = startup(registering, login);
+
+  // And the registration rewritten while there is one, which is what heals an
+  // app that was moved: the entry a login reads names where the app used to be,
+  // and a launch by hand is the moment that can be put right. A machine nobody
+  // asked to be started on is left exactly as it is.
+  starts.refresh();
+
+  // The bridge's five acts, enacted here because here is the process that can
+  // — the file is read and written, the icon is raised and lowered, the log
+  // file is handed to whatever the desktop reads text with, and the platform is
+  // asked about its startup registration. Registered before the window is
+  // opened, because the page is loaded the moment there is one and a page that
+  // asked before this would be asking nobody.
+  ipcMain.handle(ASKED, () => settings(desk));
+  ipcMain.handle(SET, (_event, sent: unknown) => enact(desk, trayed, sent));
+  ipcMain.handle(LOGS, () => logs(kept));
+  ipcMain.handle(STARTUP, () => starts.standing());
+  ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
+
+  // Whether this launch is a login's — the flag the registration writes, or a
+  // Mac saying its login item started this — read against the tray, because the
+  // icon is the whole of what makes a hidden app reachable (ADR-0020). Read
+  // before the window is opened, that being the one thing it decides.
+  const unseen = hidden(process.argv, settings(desk), starts.atLogin());
+  if (unseen) {
+    say("this launch is a login's and there is an icon in the tray, so no window comes up");
+  }
+
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  onscreen = open({
+  const window = open({
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
+    state: join(userData, FILE),
 
-    // Electron's own user data, which is this machine's and never the server's:
-    // where the window sits is a fact about the desk in front of the human, so
-    // it is kept beside what Electron keeps here rather than in `config.yaml`.
-    state: join(app.getPath("userData"), FILE),
+    // The bridge, beside the compiled main process rather than anywhere the
+    // page could name: this directory is what `pnpm build` emits into, and the
+    // file is the `.mjs` an ESM preload has to be — see `bridge.ts`.
+    preload: join(import.meta.dirname, PRELOAD),
+
+    // Read at the moment of the press, for the reason the key is: the settings
+    // file is what the Desktop page writes, and a policy read once at startup
+    // would be a radio nobody could see the effect of without a restart. A quit
+    // already under way is not a press at all.
+    closing: () => (quitting ? "quit" : closing(settings(desk), machine.platform)),
+
+    // A login start with an icon to come back from opens no window over
+    // whatever the human is doing — see [`hidden`](./startup.js), which is what
+    // `--no-open` meant for the tray app.
+    hidden: unseen,
   });
+  onscreen = window;
+
+  // And then the icon, which is the other way to this window and the only one
+  // while it is off the screen — which is why the close policy falls to Quit
+  // without it. Shown unless this machine has said otherwise, which is where
+  // the last run left the switch — moving it while the app is running is
+  // [`enact`]'s, and it raises and lowers this same icon.
+  if (settings(desk).trayIcon) {
+    raise(trayed);
+  } else {
+    say("the desktop settings say no tray icon, so there is none — and closing the window quits");
+  }
 
   // And the launch that asked for the window while there was not one yet, which
   // is a press of the icon over a Verkstead still coming up.
   if (wanted) {
     say("the launch that asked while this one was starting gets the window now");
-    forward(onscreen);
+    forward(window);
   }
 }
 

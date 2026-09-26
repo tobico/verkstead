@@ -9,7 +9,11 @@
 //!
 //! **Loaded exactly as it is served.** Nothing about the viewer changes to draw
 //! inside the app and nothing on the wire changes: this is the same document a
-//! browser on this machine gets, over the same loopback origin.
+//! browser on this machine gets, over the same loopback origin. What is
+//! different is the window rather than the document — it carries the preload in
+//! [`bridge.ts`](./bridge.js), and the page reads that being there as *this is
+//! the app*. A browser gets no preload and so no Desktop page, which is the
+//! whole mechanism by which a phone never sees one.
 //!
 //! **A 401 on the window's own frame is the key having been reset from the
 //! phone.** **Reset key** at the foot of Remote Access re-issues the secret, and
@@ -26,10 +30,23 @@
 //! Where the window opens is [`bounds.ts`](./bounds.js)'s, out of a file of the
 //! app's own, and the menu whose bar this hides is [`menu.ts`](./menu.js)'s.
 //!
+//! **And closing it is a choice rather than a quit.** What a press of the close
+//! button comes to is [`closing.ts`](./closing.js)'s answer, out of the app's
+//! own settings and the platform — hide the window, ask first, or let the close
+//! happen — and what is here is the three of them enacted: the cancel that
+//! makes hiding possible at all, the native warning, and the bounds still being
+//! written down by a close that never completes.
+//!
+//! **And a login start comes up with it off the screen.** The one thing
+//! [`Workbench.hidden`] decides: the window is made, loads and remembers where
+//! it is exactly as ever, and what it does not do is arrive in front of whatever
+//! the human is doing at the moment they log in — the reading `--no-open` made
+//! of a login for the tray app, and [`hidden`](./startup.js)'s to make.
+//!
 //! The decorated window is this stage's; the frameless one with the controls
 //! overlay is the stage after it.
 
-import { BrowserWindow, screen, shell } from "electron";
+import { BrowserWindow, dialog, screen, shell } from "electron";
 
 import {
   asGiven,
@@ -41,6 +58,7 @@ import {
   remembered,
   STILL,
 } from "./bounds.js";
+import { CANCEL, type Closing, QUIT, WARNING } from "./closing.js";
 import { where } from "./elsewhere.js";
 import { link } from "./key.js";
 import { why } from "./loading.js";
@@ -74,6 +92,33 @@ export interface Workbench {
   /// The file this window's size and position are kept in, under the app's own
   /// user data — a fact about this machine rather than about this Verkstead.
   state: string;
+
+  /// The preload script this window is given, which is the whole of what makes
+  /// the page inside the app different from the same page in a browser — see
+  /// [`bridge.ts`](./bridge.js). An absolute path, because this is a file the
+  /// app ships beside itself rather than anything the page names.
+  preload: string;
+
+  /// Whether this launch comes up with no window on the screen — a login start
+  /// while there is an icon in the tray, which is [`hidden`](./startup.js)'s
+  /// answer.
+  ///
+  /// The window is made either way, and everything about it is as it always is:
+  /// it loads, it remembers where it is, and Open on the tray is what brings it
+  /// on. What is different is only that nothing arrives over whatever the human
+  /// is doing at the moment they log in.
+  hidden: boolean;
+
+  /// What this press of the close button means — [`closing`](./closing.js)'s
+  /// answer, asked at the moment of the press rather than once at startup.
+  ///
+  /// A function rather than a value because what is behind it moves while the
+  /// window is open: the settings file is read then, so a position set on the
+  /// Desktop page is in force without a restart. It is also where the app says
+  /// *this close is a quit I am already performing* — the tray's Quit and Cmd+Q
+  /// reach this window as a close on their way out, and neither of them is the
+  /// close button.
+  closing: () => Closing;
 }
 
 /// Open the window on the workbench, logged in and where it was left.
@@ -88,16 +133,44 @@ export function open(workbench: Workbench): BrowserWindow {
     // rather than the package this is built from.
     title: "Verkstead",
 
+    // Off the screen where this is a login start with a tray to be reached by,
+    // and on it every other time. A hidden window rather than no window: it is
+    // loading the workbench behind the icon, so Open is a window that is already
+    // there — which is exactly what a close that hides leaves behind.
+    show: !workbench.hidden,
+
     // The menu itself is set — it is what registers copy, paste, zoom, reload
     // and the developer tools — and what is hidden is the bar it would be drawn
     // in. Both, because the option alone leaves the bar drawn until something
     // hides it and the call alone leaves Alt showing it permanently. On a Mac
     // neither does anything: its menu is the strip at the top of the screen.
     autoHideMenuBar: true,
+
+    webPreferences: {
+      // The bridge, and the whole of what the app adds to the document the
+      // browser gets. A file inside the app rather than a path from anywhere
+      // else.
+      preload: workbench.preload,
+
+      // **And Chromium's own sandbox off, which the preload above is what
+      // decides.** An ESM preload is loaded only in a window that has it off —
+      // and a sandboxed preload, which is the alternative, may require nothing
+      // but `electron` itself, so it could not import the shape it exposes in a
+      // project that compiles rather than bundles (ADR-0020).
+      //
+      // What is not given up is the pair that matters to a page: node
+      // integration stays off, so nothing in the document has a `require`, and
+      // `contextIsolation` stays on, so the preload's own world is not the
+      // page's. Which leaves a renderer that loads one document — this
+      // machine's own Verkstead, on loopback, with every navigation off it
+      // handed to the browser by `bound` below.
+      sandbox: false,
+    },
   });
   window.setMenuBarVisibility(false);
 
   keeping(window, workbench.state, place);
+  policy(window, workbench.closing);
   bound(window, workbench.origin);
 
   // Whether the load now on its way is already an answer to a refusal. Set when
@@ -173,14 +246,27 @@ function keeping(window: BrowserWindow, state: string, place: Placement): void {
   // what fills it in, once the window has been framed.
   let drift: Drift = STILL;
 
-  // Measured a moment after opening rather than at once: what is being measured
-  // is the desktop's answer, and the answer is what it has done to the window
-  // by the time it has finished drawing it. The same moment a drag is given to
-  // settle in, for the same reason.
-  const framed = setTimeout(() => {
-    drift = drifted(place, window.getNormalBounds());
-  }, SETTLED);
-  framed.unref();
+  // Measured a moment after the window is on the screen rather than at once:
+  // what is being measured is the desktop's answer, and the answer is what it
+  // has done to the window by the time it has finished drawing it. The same
+  // moment a drag is given to settle in, for the same reason.
+  //
+  // **After it is shown, which a login start is not.** A window that has not
+  // been drawn has not been framed either, so a hidden start measured at once
+  // would read a drift of nothing and write that down — and the next run would
+  // open a window a frame's worth larger than the one the human left.
+  const measure = (): void => {
+    const framed = setTimeout(() => {
+      drift = drifted(place, window.getNormalBounds());
+    }, SETTLED);
+    framed.unref();
+  };
+
+  if (window.isVisible()) {
+    measure();
+  } else {
+    window.once("show", measure);
+  }
 
   const now = (): void => {
     settling = undefined;
@@ -208,6 +294,65 @@ function keeping(window: BrowserWindow, state: string, place: Placement): void {
       clearTimeout(settling);
     }
     now();
+  });
+}
+
+/// Do what the close policy says about a press of the close button.
+///
+/// **Registered after [`keeping`] on purpose.** A close that hides has to leave
+/// the window's place written down — an app that always keeps running would
+/// otherwise be an app that never remembers its window again — and both
+/// handlers run whether or not this one cancels the close, so which of them
+/// ran first is the whole of what decides it.
+///
+/// **And cancelling is how hiding is done at all.** `close` is the window on
+/// its way out, and the only way to stop it is to say so before the handler
+/// returns — which is why the warning is a synchronous dialog rather than an
+/// awaited one: a `preventDefault` arriving a tick later would arrive at a
+/// window that had already gone.
+function policy(window: BrowserWindow, closing: () => Closing): void {
+  window.on("close", (event) => {
+    const act = closing();
+
+    if (act === "quit") {
+      // Which is also every quit the app performs for itself: the tray's Quit
+      // and Cmd+Q reach the window as a close, and neither is asked about.
+      return;
+    }
+
+    if (act === "hide") {
+      event.preventDefault();
+      window.hide();
+      say("the window is closed, and Verkstead goes on running — the tray is the way back");
+      return;
+    }
+
+    const answered = dialog.showMessageBoxSync(window, {
+      type: "warning",
+      title: "Verkstead",
+      message: WARNING.message,
+      detail: WARNING.detail,
+      buttons: [...WARNING.buttons],
+
+      // The way on is what the dialog opens on, and the way out is what Escape
+      // and the dialog's own close button come to. Both said, because a
+      // platform that draws no default still has to answer a dismissal.
+      defaultId: QUIT,
+      cancelId: CANCEL,
+
+      // Buttons side by side rather than drawn as links, which is what a
+      // question with an action and a way out is on every platform this runs
+      // on.
+      noLink: true,
+    });
+
+    if (answered === CANCEL) {
+      event.preventDefault();
+      say("the warning was answered with Cancel, so the window stays");
+      return;
+    }
+
+    say("the warning was answered with Quit, so Verkstead goes");
   });
 }
 

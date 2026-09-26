@@ -29,7 +29,7 @@ platform takes its release leg, and 08 retires it only once none is left.
 
 - [x] 01: The sidecar flag — [brief](01-sidecar-flag.md)
 - [x] 02: The Electron shell — [brief](02-electron-shell.md)
-- [ ] 03: Tray, close policy and the Desktop page — [brief](03-tray-and-desktop-page.md)
+- [x] 03: Tray, close policy and the Desktop page — [brief](03-tray-and-desktop-page.md)
 - [ ] 04: Client-side decorations — [brief](04-decorations.md)
 - [ ] 05: The Linux AppImage — [brief](05-linux-appimage.md)
 - [ ] 06: The Mac — [brief](06-macos.md)

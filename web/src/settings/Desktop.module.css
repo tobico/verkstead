@@ -1,0 +1,133 @@
+/* The desktop app's own settings — see `Desktop.tsx`.
+
+   Two halves in two panes like every other section of this page: the card
+   carries how the window and the tray stand, and the controls that change them
+   stand in the details pane beside it.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What is here is
+   only what stands on it. */
+
+.desktopCard {
+  margin-bottom: 1.5rem;
+}
+
+.desktopCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How the window and the tray stand, a line apiece: the same quiet the Cleanup
+   above says how it stands in. */
+.standing {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.standing:last-of-type {
+  margin-bottom: 0;
+}
+
+/* And the details pane: the close policy, the tray, and the way to the log
+   file. */
+.desktop {
+  padding-top: 0.85rem;
+}
+
+/* The three positions of one question. A `fieldset` is drawn with a border, a
+   margin and a padding of its own; what is wanted here is the legend, which is
+   the question the three of them answer. */
+.whenClosed {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.whenClosed legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.position + .position {
+  margin-top: 0.55rem;
+}
+
+.position label {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  font-size: 0.95rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.position input {
+  flex: none;
+  margin: 0;
+  /* The dot's fill, which is the one thing about the browser's own control
+     worth saying: an accent that is the page's rather than the platform's — as
+     the checkbox beside it takes one. */
+  accent-color: var(--accent);
+  cursor: inherit;
+}
+
+/* The position the tray being off has taken away, greyed by the browser's own
+   disabling and followed here by the words beside it — which is what
+   `Check.module.css` does for a box that will not take a tick. */
+.position:has(input:disabled) label,
+.position label:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.position input:disabled {
+  cursor: default;
+}
+
+/* Why it is greyed, under the group rather than beside the box: what it is
+   about is the choice rather than the one position. */
+.fallen {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* The registration that is **Launch on Startup**, under the tray box it stands
+   beside — its own block, because the reason a greyed one will not take a tick
+   belongs to it rather than to the checkbox above. */
+.startup {
+  margin-top: 0.85rem;
+}
+
+/* Why the box will not take one, under it the way the close policy's note sits
+   under its group. */
+.why {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* The way to this run's log file, drawn whatever the switch above says. The
+   press and the line under it, the way a duration on the Cleanup pane is its
+   field and its label. */
+.logs {
+  margin-top: 1.5rem;
+}
+
+.logs p {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.failure {
+  margin: 0.85rem 0 0;
+  font-size: 0.9rem;
+}
+
+@media (hover: hover) {
+  .position:not(:has(input:disabled)) label:hover input {
+    accent-color: var(--accent-deep);
+  }
+}

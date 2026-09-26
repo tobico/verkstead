@@ -43,6 +43,32 @@ Rust launcher script and dmg script are gone.
 - **Sessions on `sandbox-exec` are untouched**: what the app bundles is the
   same CLI, and the policy is the server's.
 
+## What stage 03 found about the hidden login start
+
+The login-item arm was written in stage 03 and reviewed there, and the review
+answered this brief's own re-verify question about `openAsHidden` — so it is
+written down here rather than asked again.
+
+- **`openAsHidden` is deprecated and does nothing on macOS 13 and up**, which
+  Electron's own documentation says of both the option and the
+  `wasOpenedAsHidden` that used to be read back beside it. So nothing asks for
+  it any more: what stage 03 registers is `openAtLogin` and the arguments, and
+  the window is kept off the screen by the app rather than by the platform —
+  which is what it already was on Linux and Windows.
+- **And the arguments never reach a Mac.** `args` on a login item is Windows'
+  alone, so the `--hidden` the Linux entry's `Exec` line and the Windows Run
+  key both carry is not a thing this platform can be told. What answers instead
+  is `getLoginItemSettings().wasOpenedAtLogin`, which is not deprecated: the
+  platform saying the login item is what started this run, read through
+  `Startup.atLogin` and handed to `hidden` exactly as the flag is on the other
+  two. That is the arm this stage has to prove on a real Mac.
+- **Which leaves one thing to watch**, and it is the reason a hidden start is
+  worth driving rather than reasoning about: `app.on("activate")` fires when the
+  application is activated, *including* at a first launch, and `main.ts` answers
+  one that arrives before the window exists by bringing the window forward once
+  there is one. A login start macOS does not activate never raises it — but a
+  login start that shows its window anyway is that handler, not `hidden`.
+
 ## Proposed tasks (provisional)
 
 1. **Dock behaviour** — regular activation policy, close hides, activate
@@ -53,10 +79,13 @@ Rust launcher script and dmg script are gone.
    positioned in the head row and the inset proven. Accepts: no control under
    the lights in any pane count; View Logs is reachable with the icon off.
 3. **Login item** — the API arm enacted, hidden start when the icon is shown,
-   and the one-shot take-over of the tray app's launch agent. Accepts: the box
-   reads the registration; a login start shows no window while the icon is on;
-   a home carrying the tray app's plist comes up registered through the API
-   with the plist gone, and one carrying none is untouched.
+   and the one-shot take-over of the tray app's launch agent. The hidden start
+   is `wasOpenedAtLogin` rather than the flag or `openAsHidden`, for the reasons
+   above, and the `activate` handler is part of what a real login start has to
+   be driven against. Accepts: the box reads the registration; a login start
+   shows no window while the icon is on; a home carrying the tray app's plist
+   comes up registered through the API with the plist gone, and one carrying
+   none is untouched.
 4. **The dmg and the leg** — electron-builder's universal dmg with the two
    CLI artifacts lipo'd as an extra resource; the leg downloads both, packs,
    mounts and asserts. The Rust dmg and launcher scripts retired. Accepts: the
@@ -71,7 +100,7 @@ Rust launcher script and dmg script are gone.
 
 - Stage 05 landed: the builder configuration and the release plumbing exist.
 - Which login-item mechanism Electron's pinned major uses on the runner's
-  macOS, and what `openAsHidden` still means there.
+  macOS. What `openAsHidden` means there is settled above and is nothing.
 - The CLI matrix still builds `verkstead-macos-x64` and `-arm64`.
 - What `crates/desktop/src/startup/launchd.rs` writes today — the file's name
   and the keys `says_on` reads — which is what the take-over has to find, and

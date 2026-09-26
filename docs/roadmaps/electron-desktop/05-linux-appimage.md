@@ -31,6 +31,49 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
 - **The trunk stays releasable**: after this stage a Release carries the
   Electron AppImage beside the Rust dmg and msi, and that is accepted.
 
+## What stage 03 found on COSMIC
+
+The run ADR-0020 asked for, and the one that discharges the Linux tray risk:
+COSMIC 1.2.0 — `cosmic-comp`, `cosmic-panel` and its status-area applet —
+with the app on Electron 43.1.0 beside a stand-in sidecar. Every gesture below
+was a real pointer click into the compositor, and what the panel and the app
+said to each other was read off the session bus. The session was a nested one
+on software rendering rather than a machine booted into COSMIC, so what it
+proves is the protocol between the app and COSMIC's own tray host rather than
+anything about the graphics stack.
+
+- **The icon, its menu and all three items are good.** The packaging artwork
+  appears in the status area beside COSMIC's own applets; a right click draws
+  **Open**, **View Logs** and **Quit** in that order, from the app's menu
+  rather than a copy of it. **Open** brought a closed-to-tray window back,
+  **View Logs** opened this run's log file, and **Quit** took the app and its
+  sidecar without asking — including with **When the window is closed** set to
+  *ask before quitting*, which is Q7b proven rather than assumed.
+- **A left click on the icon is an `Activate`**, after a
+  `ProvideXdgActivationToken`, which is the gesture Electron raises `click`
+  on — so on COSMIC the icon opens the window. **Open** being first on the
+  menu was not needed here; it stays for the desktops that answer a left click
+  with the menu instead.
+- **An app that starts before the panel never gets its icon.** With no
+  `StatusNotifierWatcher` on the bus the app comes up and says the icon is in
+  the tray, and when `cosmic-panel` arrives afterwards Chromium does not
+  register: the watcher's `RegisteredStatusNotifierItems` stays empty for as
+  long as that run lasts, though the applet's own `RegisterStatusNotifierHost`
+  and the `NameOwnerChanged` for the watcher's name both go past on the bus.
+  This is the accepted risk landing, and it is the Linux words' to describe.
+- **The repair is already in the product**: **Show tray icon** off and then on
+  again destroys that tray and raises another, which registers with the
+  watcher that is there now and puts the icon on the panel. So the switch is a
+  way back as well as a way out, and that is what the Linux section should say
+  — a run that lost its icon loses nothing else, the window being untouched and
+  **View Logs** being on the Desktop page.
+- **The log file is `text/x-log`**, which is what `shell.openPath` hands to
+  `xdg-open`. A desktop with an association for that type opens it. A desktop
+  with one only for `text/plain` does not: `xdg-open` does not follow the
+  subclass the way `gio open` does, and it exits 0 having done nothing, so the
+  app reports success and the human sees no log. Worth settling when the
+  packaged app's desktop entry is written.
+
 ## Proposed tasks (provisional)
 
 1. **The builder configuration** — electron-builder's AppImage target, the
@@ -54,8 +97,10 @@ section of the adoption docs and the CONTEXT.md terms describe the app.
    now is that item *or* the Desktop page's button, which is why losing the
    icon loses nothing but the icon. development's build list drops
    `tools/build-appimage.sh` and its AppImage paragraph describes the packed
-   app. Accepts: nothing in the Linux section names `verkstead desktop` or
-   `AppRun`.
+   app. The late-panel case above belongs here too: the icon is lost to a
+   panel that arrived after the app, and **Show tray icon** off and on again
+   is what brings it back. Accepts: nothing in the Linux section names
+   `verkstead desktop` or `AppRun`.
 
 ## Re-verify at start
 
