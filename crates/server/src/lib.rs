@@ -1137,6 +1137,44 @@ fn routed_telling(
     devices: Option<device::Devices>,
     nudges: nudge::Nudges,
 ) -> Router {
+    serving(
+        standing(
+            pool, updates, binds, data_dir, sessions, github, remote, &gate, machine, escalation,
+            devices, nudges,
+        ),
+        &gate,
+    )
+}
+
+/// The state every router here is built over, and the sweeps a start makes
+/// before it answers anything.
+///
+/// **Made once and shared, which is what a second listener costs.** A relayed
+/// call has to land on the state this device's own browser lands on — the same
+/// held waits, the same terminals, the same watchers — so the workbench's
+/// router and the slice of it the Peer Listener answers are two routers over
+/// one of these rather than two of these. See [`serving`] and
+/// [`peer::workbench::served`], which are the two of them, and [`Routers`],
+/// which is a start taking both.
+///
+/// `gate` is read rather than held: what the state wants of it is the key
+/// behind it, for the one press that re-issues one — see [`key::Gate::held`] —
+/// and what stands it in front of a namespace is [`serving`].
+#[allow(clippy::too_many_arguments)]
+fn standing(
+    pool: SqlitePool,
+    updates: updates::Updates,
+    binds: sandbox::SandboxConfig,
+    data_dir: PathBuf,
+    sessions: sessions::Sessions,
+    github: Gh,
+    remote: remote::Tailscale,
+    gate: &key::Gate,
+    machine: onboarding::Machine,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: Option<device::Devices>,
+    nudges: nudge::Nudges,
+) -> AppState {
     let state = AppState {
         pool,
 
@@ -1251,6 +1289,17 @@ fn routed_telling(
     // and held for the length of the run — see [`onboarding::at_startup`].
     onboarding::at_startup(&state);
 
+    state
+}
+
+/// The workbench listener's own router over that state: the agents' contract,
+/// the health check, and the viewer's namespace behind `gate`.
+///
+/// **This is the listener a session and a browser share**, which is why the
+/// gate is in the middle of it rather than over the lot: the two routes a
+/// session dials are open, and everything the human's browser asks is behind
+/// the key. See [`key`].
+fn serving(state: AppState, gate: &key::Gate) -> Router {
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.
@@ -1285,7 +1334,7 @@ fn routed_telling(
         // session reaching the loopback must not be able to ask any of it. The
         // first of the gate's two attachments — the other is over the fallback
         // that answers every page of the workbench, which is put on in
-        // [`router_with_ui`]. See [`key`].
+        // [`routers_with_ui`]. See [`key`].
         .merge(gate.guarding(ui::routes()))
         .with_state(state)
 }
@@ -1294,12 +1343,40 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// The two routers the one binary serves, over the one state — see
+/// [`standing`], which makes it.
+///
+/// **Two listeners rather than two servers.** The workbench's own is the human's
+/// browser and its sessions; the other is what a member reaches over the Peer
+/// Listener, which is the viewer's namespace and nothing else (ADR-0020, *The
+/// opened device relays*). They are built together because they answer out of
+/// one state: a Set answered through a relay has to end a wait this device is
+/// genuinely holding, and two states over one database would be two servers
+/// disagreeing about their own work.
+pub struct Routers {
+    /// Everything this device serves its own browser: the agents' contract, the
+    /// viewer's namespace behind the Workbench Key, and the workbench's pages
+    /// on the fallback.
+    pub workbench: Router,
+
+    /// And what a member reaches over the link it already holds: the same
+    /// namespace, minus the prefixes this device keeps to itself, with the
+    /// Member Gate in front of it instead of the key — handed to
+    /// [`peer::router`], which is what puts that gate there. See
+    /// [`peer::workbench`].
+    pub over_the_link: Router,
+}
+
 /// Everything the one binary serves: the API above, plus the viewer built into
-/// it on every other path.
+/// it on every other path — and the same API again for the Peer Listener, as
+/// [`Routers`] says.
 ///
 /// The viewer takes the fallback, so `/api/v1/` and `/api/ui/` keep their exact
 /// paths and everything else — the document, the bundles, the app shell's own
-/// files — is [`viewer`]'s to answer.
+/// files — is [`viewer`]'s to answer. None of that is on the other router:
+/// `/api/v1/` is a session's and answers the loopback and the named pipe, the
+/// health check is nobody's Conversation, and a page is something a browser
+/// asks its own device for.
 ///
 /// This is also the only router that checks for updates, because it is the only
 /// one with a viewer to draw the Notice in — see [`router_checking_updates`] for
@@ -1333,7 +1410,7 @@ async fn health() -> &'static str {
 /// because the peer listener beside this router announces on it too: a join
 /// arriving there raises a modal on a page served from here — see [`nudge`].
 #[allow(clippy::too_many_arguments)]
-pub fn router_with_ui(
+pub fn routers_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     data_dir: PathBuf,
@@ -1344,13 +1421,13 @@ pub fn router_with_ui(
     escalation: Option<Arc<dyn remote::Elevate>>,
     devices: device::Devices,
     nudges: nudge::Nudges,
-) -> Router {
+) -> Routers {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
     let binds = agents.binds().clone();
     let gate = key::Gate::keyed(key);
 
-    routed_telling(
+    let state = standing(
         pool,
         updates::watching(releases),
         binds,
@@ -1358,13 +1435,22 @@ pub fn router_with_ui(
         sessions::Sessions::under(agents),
         gh,
         remote,
-        gate.clone(),
+        &gate,
         onboarding::Machine::here(),
         escalation,
         Some(devices),
         nudges,
-    )
-    .fallback_service(guarded_viewer::<viewer::Built>(&gate))
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate)
+            .fallback_service(guarded_viewer::<viewer::Built>(&gate)),
+
+        // The same state, and no gate of this kind at all: what admits a caller
+        // over there is the handshake, and a member's own Workbench Key is no
+        // more use on this device than a stranger's would be.
+        over_the_link: peer::workbench::served(state),
+    }
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
@@ -1392,6 +1478,33 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         None,
         no_device(),
     )
+}
+
+/// [`router`] as a member reaches it over the Peer Listener: the viewer's own
+/// namespace, minus the prefixes this device keeps to itself, and nothing else
+/// — see [`peer::workbench`].
+///
+/// A constructor of its own for the reason [`router_keyed`] is one: what the
+/// suite about that listener stands up is the far end of a relay hop, and every
+/// other constructor here answers the whole of `/api/`. It is handed to
+/// [`peer::router`], which is what puts the Member Gate in front of it — a
+/// router asked in process is a namespace with no gate at all, which is why the
+/// suite dials a real socket instead.
+pub fn router_over_the_link(pool: SqlitePool) -> Router {
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudge::Nudges::new(),
+    ))
 }
 
 /// And the same with a site behind it, which is what the workbench's own pages
@@ -1896,7 +2009,10 @@ pub async fn run_on_keyed(
         async move { devices.announce_renewal().await }
     });
 
-    let app = router_with_ui(
+    let Routers {
+        workbench: app,
+        over_the_link,
+    } = routers_with_ui(
         pool,
         config.releases(),
         data_dir,
@@ -1941,16 +2057,18 @@ pub async fn run_on_keyed(
 
     // And what the peer listener answers, which is a router of its own rather
     // than the one above: this port is other devices' and the workbench's is
-    // the human's browser and its sessions, and the one thing they share so far
-    // is the device they are both about — see [`peer`]. The member list it is
+    // the human's browser and its sessions — see [`peer`]. The member list it is
     // gated on is the rows above: a caller presenting a recorded certificate
     // reaches what a membership admits, and everything else is refused for not
     // being a member's. Inside the gate is one membership said three ways — a
     // device put on this one's list, one taken off it, and the certificate one of
-    // them stands under changed; outside it are the identity endpoint and the two
+    // them stands under changed — and, beside them, the viewer's own namespace
+    // over the state the workbench answers out of, which is what makes this
+    // device's whole workbench reachable through a member (ADR-0020, *The opened
+    // device relays*). Outside the gate are the identity endpoint and the two
     // routes a join is made of, which stand there because a join comes from a
     // non-member.
-    let peers = peer::router(device, reading, members, joins, nudges);
+    let peers = peer::router(device, reading, members, joins, nudges, over_the_link);
 
     // The workbench and the peer listener together, and on Windows the named
     // pipe beside them: everything a request can ask for over the socket it can

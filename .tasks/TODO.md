@@ -19,7 +19,7 @@ Roadmap stage: [04: The relay](docs/roadmaps/cluster-mode/04-the-relay.md)
 
 ## Tasks
 
-- [ ] 01: The peer-side API — [details](01-the-peer-side-api.md)
+- [x] 01: The peer-side API — [details](01-the-peer-side-api.md)
 - [ ] 02: The plain relay — [details](02-the-plain-relay.md)
 - [ ] 03: The device in the client — [details](03-the-device-in-the-client.md)
 - [ ] 04: The sockets — [details](04-the-sockets.md)
