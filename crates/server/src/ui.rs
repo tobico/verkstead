@@ -47,8 +47,9 @@ use verkstead_render::{
     RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved,
     SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -379,6 +380,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Draft's to change and nobody else's.
         .route("/api/ui/conversations/{id}/process", post(pick_process))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
+        // And what the work is pointed at, for the Processes that are pointed
+        // at work already somewhere else. A route of its own rather than the
+        // branch rename re-used: that one asks `git check-ref-format`, which
+        // refuses a pull request URL over its colon — see ADR-0020.
+        .route("/api/ui/conversations/{id}/target", post(name_target))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // And the other registered Repos the work runs alongside, added and
         // taken away on the same card and for as long as the same card is
@@ -1566,6 +1572,7 @@ pub(crate) async fn conversation_view(
         implementation_pairing.as_ref(),
         &review_pairing,
         brief,
+        conversation.target.as_deref(),
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
@@ -1922,6 +1929,7 @@ pub(crate) async fn conversation_view(
         ready_to_continue,
         adopting,
         adopting_pull_request,
+        target: conversation.target,
         grilling_pairing,
         implementation_pairing,
         review_pairing,
@@ -3894,6 +3902,26 @@ async fn rename_branch(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "renaming a branch failed");
             unavailable("the branch could not be named")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/target` — name the pull request or branch
+/// the work is pointed at, or take the name away.
+async fn name_target(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(named): Json<TargetNamed>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TargetRecorded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_target(&state.pool, id, &named.target).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "naming a conversation's target failed");
+            unavailable("the target could not be named")
         }
     }
 }

@@ -147,6 +147,7 @@ import {
   RepoOptions,
   RepoSelect,
   RolePicker,
+  TARGET,
 } from "./Setup";
 import setup from "./Setup.module.css";
 import { HeldPullRequest } from "./TakeUp";
@@ -159,13 +160,23 @@ import {
   leaveRefusals,
   on,
   stored,
+  written,
   type Adopting,
   type AdoptingPullRequest,
   type Alongside,
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
-import { away, label, ROLES, roles, uses, type Role } from "./processes";
+import {
+  away,
+  label,
+  needed,
+  ROLES,
+  targeted,
+  uses,
+  type Role,
+} from "./processes";
+import { namesPullRequest } from "./targets";
 import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
@@ -435,9 +446,19 @@ function Compose(props: {
   /// waiting on one. Its Brief is a question like any other's — it arrives
   /// prefilled with the pull request's own words, but the box is a box and what
   /// is left in it is what the wrap-up reads.
+  /// And whether what is in the Target field names a pull request, which is
+  /// what takes the base picker off the panel: a pull request brings GitHub's
+  /// own base along, and a branch's base is what its pull request will be
+  /// opened against.
+  const onAPullRequest = () =>
+    targeted(process()) && namesPullRequest(state().target);
+
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
+    (pull() !== null ||
+      !targeted(process()) ||
+      state().target.trim() !== "") &&
     ROLES[process()].uses.every((role) => showing(role) !== "");
 
   /// What starting is waiting on, in the words the composer's own start says
@@ -449,9 +470,13 @@ function Compose(props: {
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
   const waiting = () =>
-    adopting() !== null
-      ? `Starting needs ${roles(process())} picked and working.`
-      : `Starting needs a brief, and ${roles(process())} picked and working.`;
+    `Starting needs ${needed(process(), {
+      brief: adopting() === null,
+      // A page holding a pull request off the retired menu is pointed
+      // already: the row that loaded it is the target, and there is no field
+      // for it to wait on.
+      target: pull() === null,
+    })}.`;
 
   const [gone, setGone] = createSignal(false);
 
@@ -673,7 +698,12 @@ function Compose(props: {
                   aria-label="Brief"
                   placeholder="What is this piece of work?"
                   value={state().brief}
-                  onInput={(ev) => change({ brief: ev.currentTarget.value })}
+                  onInput={(ev) =>
+                    // The box, and the Target filled out of it while it is
+                    // empty: the same rule the server keeps when a Brief is
+                    // saved, kept here because nothing is saved yet.
+                    setState((was) => written(was, ev.currentTarget.value))
+                  }
                 />
               </div>
             }
@@ -796,13 +826,38 @@ function Compose(props: {
                               set={(branch) => change({ branch })}
                             />
 
-                            <BasePicker
-                              id="base-branch"
-                              label="Base branch"
-                              repo={chosen()}
-                              chosen={state().base ?? RULE}
-                              pick={(branch) => change({ base: branch })}
-                            />
+                            {/* And what the work is pointed at, for the
+                                Processes that are pointed at work already
+                                somewhere else — `processes.ts`'s list, so a
+                                Process that gains a target gains the field
+                                here without a line changing. Held on the
+                                device like everything else in this panel, and
+                                filled from the box while it is empty. */}
+                            <Show when={targeted(process())}>
+                              <BranchField
+                                id="target"
+                                label="Target"
+                                class={setup.target!}
+                                placeholder={TARGET}
+                                value={state().target}
+                                set={(target) => change({ target })}
+                              />
+                            </Show>
+
+                            {/* The base, unless what is in that field is a
+                                pull request: GitHub's base is the fact then,
+                                and the take-up records it. A branch keeps the
+                                picker, its pull request being opened against
+                                what is picked here. */}
+                            <Show when={!onAPullRequest()}>
+                              <BasePicker
+                                id="base-branch"
+                                label="Base branch"
+                                repo={chosen()}
+                                chosen={state().base ?? RULE}
+                                pick={(branch) => change({ base: branch })}
+                              />
+                            </Show>
                           </Show>
 
                           {/* The invitation goes back to being the

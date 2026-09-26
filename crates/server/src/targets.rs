@@ -1,11 +1,19 @@
-//! What a **Review** Conversation is to take up, read out of the Brief.
+//! What a **Review** Conversation is to take up: the **Target** field read at
+//! the press, and the Brief read to fill that field.
 //!
 //! A pull request is the one target that can be read out of prose: a
 //! `github.com/<owner>/<repo>/pull/<n>` URL and a bare `#<n>` are both
 //! unambiguous wherever they fall in a sentence, so the human writes about the
-//! work and the target comes along with it. Nothing else is read here — a bare
-//! branch name is a word like any other, and is named in the **Target** field
-//! instead.
+//! work and the target comes along with it. Nothing else is read out of prose —
+//! a bare branch name is a word like any other, and goes in the field by hand.
+//!
+//! **Two readings of the one pair of shapes**, and they are not the same
+//! question. [`pull_request_in`] scans prose for the first name in it, which is
+//! what a saved Brief fills an empty Target with; [`pull_request_named`] asks
+//! what a Target *is*, which is the whole of the field or nothing — a field
+//! reading `fix #41 first` is a branch nobody has, rather than a pull request
+//! with words around it, because what the human typed there is the name of one
+//! thing.
 //!
 //! **The first of either, wherever it falls**, which is why one expression
 //! covers both alternatives rather than two being scanned and compared: a URL
@@ -68,6 +76,39 @@ pub(crate) fn pull_request_in(brief: &str) -> Option<NamedPullRequest> {
     })
 }
 
+/// And the pull request a **Target** field names, or `None` where what it holds
+/// is a branch.
+///
+/// Anchored, where [`pull_request_in`] scans: the field holds the name of one
+/// thing, so what is in it is a pull request only if the whole of it is one.
+/// Anything else is a branch — including prose, which is a branch origin will
+/// not have and is refused by name at the press rather than read as the number
+/// somewhere inside it.
+///
+/// **A URL's trailing fragment and query come off**, because they are what a
+/// human copies out of the address bar: `…/pull/41#issuecomment-9` and
+/// `…/pull/41/files` are that pull request, written the way GitHub handed them
+/// out. A trailing slash likewise.
+pub(crate) fn pull_request_named(target: &str) -> Option<NamedPullRequest> {
+    let found = FIELD.captures(target.trim())?;
+
+    if let (Some(owner), Some(repo), Some(number)) = (
+        found.name("owner"),
+        found.name("repo"),
+        found.name("number"),
+    ) {
+        return Some(NamedPullRequest {
+            number: number.as_str().parse().ok()?,
+            repository: Some(format!("{}/{}", owner.as_str(), repo.as_str())),
+        });
+    }
+
+    Some(NamedPullRequest {
+        number: found.name("hash")?.as_str().parse().ok()?,
+        repository: None,
+    })
+}
+
 /// And the `owner/repo` a pull request's own URL says it is in, or `None` where
 /// the URL is not one of GitHub's.
 ///
@@ -93,6 +134,20 @@ static NAMED: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)(?:https?://)?(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/pull/(?P<number>\d+)|(?:^|[^\w/])#(?P<hash>\d+)",
     )
     .expect("the pull-request expression is written here and compiles")
+});
+
+/// And the same two shapes as the whole of a **Target** field, which is what
+/// anchoring them says: a field holds the name of one thing, and prose with a
+/// number in it is not that.
+///
+/// The URL keeps whatever GitHub hung off the end of it — a fragment, a query,
+/// the `/files` tab, a trailing slash — because those are what is in the
+/// address bar when somebody copies one.
+static FIELD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(?:(?:https?://)?(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/pull/(?P<number>\d+)(?:[/?#].*)?|#(?P<hash>\d+))$",
+    )
+    .expect("the target expression is written here and compiles")
 });
 
 #[cfg(test)]
@@ -175,6 +230,58 @@ mod tests {
                 .number,
             41,
         );
+    }
+
+    /// A Target field holding a URL names that pull request, whichever of the
+    /// addresses GitHub hands out was copied into it.
+    #[test]
+    fn a_target_holding_a_url_names_its_pull_request() {
+        for field in [
+            "https://github.com/tobico/verkstead/pull/41",
+            "http://www.github.com/tobico/verkstead/pull/41",
+            "github.com/tobico/verkstead/pull/41",
+            "https://github.com/tobico/verkstead/pull/41/files",
+            "https://github.com/tobico/verkstead/pull/41#issuecomment-9",
+            "  https://github.com/tobico/verkstead/pull/41  ",
+        ] {
+            let named = pull_request_named(field).unwrap_or_else(|| panic!("{field} names one"));
+
+            assert_eq!(named.number, 41);
+            assert_eq!(named.repository.as_deref(), Some("tobico/verkstead"));
+        }
+    }
+
+    /// And one holding a bare number names a number, in whichever repository
+    /// the Conversation is on.
+    #[test]
+    fn a_target_holding_a_number_names_no_repository() {
+        let named = pull_request_named("#41").expect("that names one");
+
+        assert_eq!(named.number, 41);
+        assert_eq!(named.repository, None);
+    }
+
+    /// Everything else in that field is a branch — a branch name, and prose
+    /// with a number in it just the same. The field holds the name of one
+    /// thing, so a number inside a sentence is not the thing it names.
+    #[test]
+    fn a_target_holding_anything_else_names_no_pull_request() {
+        for field in [
+            "rate-limiting",
+            "feature/rate-limiting",
+            "",
+            "   ",
+            "fix #41 first",
+            "#41 — the rate limiter",
+            "41",
+            "tobico/askance#41",
+        ] {
+            assert_eq!(
+                pull_request_named(field),
+                None,
+                "{field} is a branch, not a pull request",
+            );
+        }
     }
 
     /// And what `gh`'s own answer says about which repository it answered for.

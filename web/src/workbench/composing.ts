@@ -41,8 +41,13 @@
 //! the title as a heading and the description under it, and what is left there
 //! is the Brief. So the text that was being written is stowed on the record that
 //! displaced it and given back when it is cleared, and the replay saves the box
-//! as it would for any brief the human wrote — the two the pull request answers
-//! for itself being the branch and the base, both recorded at the take-up.
+//! as it would for any brief the human wrote — the three the pull request
+//! answers for itself being the branch, the base and the target, all settled by
+//! the row that loaded it and by the take-up.
+//!
+//! **And the Target field is filled from the box as it is typed**, while it is
+//! empty — see [`written`], which is the rule the server keeps for a saved
+//! Brief kept here, this page having no record to keep it for.
 
 import { createSignal } from "solid-js";
 
@@ -52,6 +57,7 @@ import {
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
+  nameTarget,
   pickProcess,
   renameBranch,
   renameCompanionBranch,
@@ -82,8 +88,10 @@ import {
   CHOICE_REFUSAL,
   PROCESS_REFUSAL,
   RULE,
+  TARGET_REFUSAL,
 } from "./Setup";
 import { takeUpRefusal } from "./TakeUp";
+import { pullRequestIn } from "./targets";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
 /// One repo the work would run alongside, as the compose page holds it: which
@@ -179,6 +187,14 @@ export type Composed = {
   /// The branch the work will be done on, empty being the name the server
   /// invents when the Conversation is started.
   branch: string;
+  /// And what the work is pointed at, empty being nothing named: a pull
+  /// request URL, a `#number` or a branch, for the Processes that take one.
+  ///
+  /// Filled from the box while it is empty, by the same reading the server
+  /// does when a Brief is saved — see [`written`], where the fill happens.
+  /// Never over what was typed here, which is why what was typed is what this
+  /// holds rather than a flag beside it.
+  target: string;
   /// And the branch it comes off, `null` being that repo's default-branch rule.
   base: string | null;
   companions: Alongside[];
@@ -215,12 +231,30 @@ export type Composed = {
   pull: AdoptingPullRequest | null;
 };
 
+/// The box written into, with the Target filled out of it where it is empty.
+///
+/// The same rule the server keeps for a Conversation's Brief, kept here
+/// because this page has no Conversation to keep it for: a pull request URL or
+/// a `#number` in the prose names the work, so the field shows what a press
+/// would take up rather than standing empty over it — and never over what
+/// somebody typed into the field itself.
+///
+/// The reading is `targets.ts`'s, which is the server's own expression written
+/// again on this side. What it decides is what is *drawn*; what the target
+/// turns out to be is the server's at Start.
+export function written(state: Composed, brief: string): Composed {
+  const named = state.target === "" ? pullRequestIn(brief) : null;
+
+  return { ...state, brief, target: named ?? state.target };
+}
+
 /// A compose page nobody has touched.
 export function blank(): Composed {
   return {
     repo: null,
     brief: "",
     branch: "",
+    target: "",
     base: null,
     companions: [],
     process: null,
@@ -251,6 +285,7 @@ export function empty(state: Composed): boolean {
     state.repo === null &&
     state.brief.trim() === "" &&
     state.branch === "" &&
+    state.target === "" &&
     state.base === null &&
     state.companions.length === 0 &&
     state.process === null &&
@@ -386,17 +421,29 @@ export async function create(
     }
   }
 
-  // And the two the pull request answers as well, which are the same two the
-  // roadmap does: its branch is the head branch and its base is what GitHub
-  // names, both recorded by the take-up rather than settled here. The Brief is
-  // *not* one of them — a pull request prefills the box rather than locking a
-  // card over it, so what is in the box is the human's and goes up above.
+  // And the three the pull request answers as well, two of which the roadmap
+  // answers too: its branch is the head branch and its base is what GitHub
+  // names, both recorded by the take-up rather than settled here, and what it
+  // is pointed at is the row that loaded it. The Brief is *not* one of them —
+  // a pull request prefills the box rather than locking a card over it, so
+  // what is in the box is the human's and goes up above.
   if (held === null && pull === null) {
     if (state.branch !== "") {
       const outcome = await renameBranch(id, state.branch);
       said(
         outcome === "Renamed",
         `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+      );
+    }
+
+    // Whatever the Process: the field and the picker are settled
+    // independently and the server takes the target off either, and which
+    // Processes *wait* on one is decided over there.
+    if (state.target !== "") {
+      const outcome = await nameTarget(id, state.target);
+      said(
+        outcome === "Recorded",
+        `The target could not be named: ${TARGET_REFUSAL[outcome]}`,
       );
     }
 
@@ -641,6 +688,10 @@ function parsed(body: string): Composed | null {
     !whole(held.repo) ||
     typeof held.brief !== "string" ||
     typeof held.branch !== "string" ||
+    // A body from a build before this field has no `target` at all, which is
+    // nothing named rather than a fault — [`loaded`]'s absence, read the same
+    // way.
+    !(held.target === undefined || typeof held.target === "string") ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
     !kind(held.process) ||
@@ -676,6 +727,7 @@ function parsed(body: string): Composed | null {
     repo: held.repo,
     brief: held.brief,
     branch: held.branch,
+    target: held.target ?? "",
     base: held.base,
     companions,
     process: held.process ?? null,

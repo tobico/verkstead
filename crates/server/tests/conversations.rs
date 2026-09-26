@@ -29,7 +29,7 @@ use verkstead_render::{
     PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
     RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
     SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
-    TimelineEvent,
+    TargetRecorded, TimelineEvent,
 };
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -321,6 +321,15 @@ async fn rename(app: &Router, id: i64, branch: &str) -> BranchRenamed {
         app,
         &format!("/api/ui/conversations/{id}/branch"),
         &serde_json::json!({ "branch": branch }),
+    )
+    .await
+}
+
+async fn name_target(app: &Router, id: i64, target: &str) -> TargetRecorded {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/target"),
+        &serde_json::json!({ "target": target }),
     )
     .await
 }
@@ -9853,7 +9862,8 @@ async fn ready_to_review_under(
 /// and the Conversation wrapping it up.
 ///
 /// The whole of the press in one test, because the whole of it is one act —
-/// the Brief read, GitHub asked, and today's take-up run on the answer.
+/// the Brief filling the Target as it is saved, the field read, GitHub asked,
+/// and today's take-up run on the answer.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_review_takes_up_the_pull_request_its_brief_names() {
@@ -9948,9 +9958,9 @@ async fn a_review_takes_up_a_pull_request_its_brief_names_by_number() {
     assert_eq!(view.branch, "rate-limiting");
 }
 
-/// A Review whose Brief names no pull request at all is refused by its own name.
-/// The press is inert on the page while the Brief is empty; a Brief with prose
-/// in it and no target is the other thing, and this is what says so.
+/// A Review whose Brief names no pull request leaves the Target empty, and the
+/// press is refused by its own name. Inert on the page while the field is
+/// empty; this is the answer a page whose copy of the world went stale gets.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_review_whose_brief_names_nothing_is_refused_by_name() {
@@ -10097,6 +10107,180 @@ async fn a_review_over_a_pull_request_another_conversation_holds_leads_there() {
     );
     assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
     assert_eq!(opened(&app, second).await.worktree, None);
+}
+
+/// The Target field takes a pull request URL — which is the one value the
+/// Branch field beside it will not have — and takes a bare branch just as
+/// readily.
+///
+/// The two asserted together because the pair is the whole reason the field
+/// exists: git refuses the URL over its colon, and a target that went through
+/// the rename would be a Review that could never name what it is for.
+#[tokio::test]
+async fn a_target_takes_a_url_the_branch_field_refuses_and_a_branch_besides() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    let url = "https://github.com/tobico/verkstead/pull/41";
+
+    assert_eq!(
+        rename(&app, id, url).await,
+        BranchRenamed::NotABranchName,
+        "which is why the target is a field of its own",
+    );
+
+    assert_eq!(name_target(&app, id, url).await, TargetRecorded::Recorded);
+    assert_eq!(opened(&app, id).await.target.as_deref(), Some(url));
+
+    // And a branch, which is the other thing a Review is pointed at: the same
+    // field, and nothing here asks git whether either is well formed.
+    assert_eq!(
+        name_target(&app, id, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+    assert_eq!(
+        opened(&app, id).await.target.as_deref(),
+        Some("rate-limiting"),
+    );
+
+    // And blank is the field cleared, which is the target taken away rather
+    // than one called nothing.
+    assert_eq!(name_target(&app, id, "  ").await, TargetRecorded::Recorded);
+    assert_eq!(opened(&app, id).await.target, None);
+}
+
+/// And it is a Draft's to change and nobody else's: the Branch field's own
+/// rule, because it is the same kind of fact — read once, when the work starts.
+#[tokio::test]
+async fn a_target_is_settled_once_the_work_has_started() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        name_target(&app, id, "#41").await,
+        TargetRecorded::NotDrafting,
+    );
+    assert_eq!(opened(&app, id).await.target, None);
+}
+
+/// A Brief naming a pull request fills an empty Target with it, so the field
+/// holds what Start will read rather than standing empty over it.
+#[tokio::test]
+async fn a_brief_naming_a_pull_request_fills_an_empty_target() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        write_brief(
+            &app,
+            id,
+            "Wrap up https://github.com/tobico/verkstead/pull/41 — the limiter.\n",
+        )
+        .await,
+        BriefSaved::Saved,
+    );
+
+    assert_eq!(
+        opened(&app, id).await.target.as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
+    );
+
+    // A bare number goes in as a bare number: what is written back is the name
+    // the human used, theirs to read and to correct.
+    let second = started(&app, repo_id).await;
+    assert_eq!(
+        write_brief(&app, second, "# Rate limiting\n\nPlease wrap #41 up.\n").await,
+        BriefSaved::Saved,
+    );
+    assert_eq!(opened(&app, second).await.target.as_deref(), Some("#41"));
+
+    // And a Brief that names none leaves the field alone.
+    let third = started(&app, repo_id).await;
+    assert_eq!(
+        write_brief(&app, third, "The public API wants a ceiling.\n").await,
+        BriefSaved::Saved,
+    );
+    assert_eq!(opened(&app, third).await.target, None);
+}
+
+/// And it never writes over what the human typed: a branch somebody named
+/// survives a URL arriving in the Brief afterwards.
+#[tokio::test]
+async fn a_brief_leaves_a_target_somebody_typed_exactly_as_it_was() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        name_target(&app, id, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+
+    assert_eq!(
+        write_brief(
+            &app,
+            id,
+            "Like https://github.com/tobico/verkstead/pull/41, but on the branch.\n",
+        )
+        .await,
+        BriefSaved::Saved,
+    );
+
+    assert_eq!(
+        opened(&app, id).await.target.as_deref(),
+        Some("rate-limiting"),
+        "the human's own typing is what Start reads",
+    );
+}
+
+/// A Review's Start waits on the Target as well as on the Brief and the two
+/// Pairings, and the press takes up what the *field* names — not what the Brief
+/// happens to say.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_review_waits_on_its_target_and_takes_up_what_it_names() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let id = started(&app, repo_id).await;
+    assert_eq!(
+        pick_process(&app, id, Process::Review).await,
+        ProcessPicked::Picked
+    );
+
+    // A Brief naming nothing, so nothing fills the field: everything else is
+    // settled and the press is still inert.
+    assert_eq!(
+        write_brief(&app, id, "The limiter wants a read.\n").await,
+        BriefSaved::Saved,
+    );
+    choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "review", review).await;
+
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "a brief and both roles, and nothing to take up",
+    );
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::NoTarget,
+        "and a page whose copy of the world went stale is told so",
+    );
+    nothing_taken_up(&app, id, &repo).await;
+
+    assert_eq!(name_target(&app, id, "#41").await, TargetRecorded::Recorded);
+    assert!(opened(&app, id).await.ready_to_grill);
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
 }
 
 /// What a Review's Start waits on: a Brief, and both Pairings — the two a

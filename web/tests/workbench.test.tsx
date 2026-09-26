@@ -185,7 +185,15 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The words a Process is said in, read here rather than spelled out again: the
 // pane and this assertion about it would otherwise be two opinions about what
 // Develop is called.
-import { away, OFFERED, PROCESS, ROLES, uses } from "../src/workbench/processes";
+import {
+  away,
+  OFFERED,
+  PROCESS,
+  ROLES,
+  TARGETED,
+  targeted,
+  uses,
+} from "../src/workbench/processes";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -303,6 +311,7 @@ import {
   COMPANION_REMOVAL_REFUSAL,
   PROCESS_REFUSAL,
   REPO_SWITCH_REFUSAL,
+  TARGET,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL, STEER_SAVE_REFUSAL } from "../src/workbench/Steer";
 import {
@@ -4508,6 +4517,152 @@ describe("a conversation's setup", () => {
   });
 });
 
+/// What the work is pointed at: the Target field under the Branch field, drawn
+/// for the Processes that are pointed at work already somewhere else.
+///
+/// A field of its own rather than the Branch field re-read, which is the whole
+/// of ADR-0020's second half: the rename asks git whether the string is a
+/// well-formed ref, and a pull request URL is not one.
+describe("the target a review is pointed at", () => {
+  /// Drawn for a Review and for nothing else, which is `processes.ts`'s list
+  /// to keep — so the row that adds a Process adds the field with it.
+  it("is drawn under Review and under no other process", async () => {
+    for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
+      theWorkbenchWith({ process });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+      await openRepo(container);
+
+      await waitFor(() => screen.getByLabelText("Branch"));
+      expect(screen.queryByLabelText("Target")).toBeNull();
+      expect(targeted(process)).toBe(false);
+
+      unmount();
+    }
+
+    theWorkbenchWith({ process: "Review" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+    expect(TARGETED).toEqual(["Review"]);
+  });
+
+  /// And it takes the one value the Branch field beside it will not: a pull
+  /// request URL, which git refuses over its colon.
+  it("sends a pull request url the branch field would refuse", async () => {
+    const url = "https://github.com/tobico/verkstead/pull/41";
+    const fetching = theWorkbenchWith(
+      { process: "Review", target: null },
+      json("Recorded"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.value).toBe("");
+
+    fireEvent.input(field, { target: { value: url } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/target`),
+      ).toEqual({ target: url }),
+    );
+  });
+
+  /// And a bare branch just as readily, nothing here having an opinion about
+  /// which of the three was typed.
+  it("sends a bare branch name too", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "Review", target: null },
+      json("Recorded"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = await waitFor(() => screen.getByLabelText("Target"));
+    fireEvent.input(field, { target: { value: "rate-limiting" } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/target`),
+      ).toEqual({ target: "rate-limiting" }),
+    );
+  });
+
+  /// What the record holds is what the field shows, which is how a target the
+  /// Brief filled in on the server arrives under the human's eyes.
+  it("shows what the record was filled with", async () => {
+    theWorkbenchWith({ process: "Review", target: "#41" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.value).toBe("#41");
+  });
+
+  /// And it is gone past drafting, with everything else in the panel the
+  /// server refuses by then.
+  it("is not drawn once the branch has been cut", async () => {
+    theWorkbenchWith({
+      process: "Review",
+      target: "#41",
+      worktree: { path: "/var/lib/verkstead/worktrees/open", missing: false },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Repo"));
+    expect(screen.queryByLabelText("Target")).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+  });
+
+  /// The base picker follows what the field holds: a pull request brings
+  /// GitHub's own base along, so there is nothing to pick.
+  it("takes the base picker away where the target is a pull request", async () => {
+    theWorkbenchWith({
+      process: "Review",
+      target: "https://github.com/tobico/verkstead/pull/41",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  /// And keeps it where the target is a branch, that base being what the
+  /// wrap-up will open the pull request against.
+  it("keeps the base picker where the target is a branch", async () => {
+    theWorkbenchWith({ process: "Review", target: "rate-limiting" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+
+  /// And an empty one keeps it too: nothing is named yet, and a picker that
+  /// vanished on the first keystroke of a URL would be the panel guessing.
+  it("keeps the base picker where nothing is named", async () => {
+    theWorkbenchWith({ process: "Review", target: null });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+});
+
 /// Which repo the work is in at all: the first thing in the Repo panel, and the
 /// one the branch, the base and the companions under it are facts about.
 ///
@@ -7026,15 +7181,16 @@ describe("starting the work", () => {
 
   /// And the roles it names are the ones the Process uses, counted off the role
   /// table rather than written into the sentence as three: a Review runs two
-  /// and says *both roles*.
-  it("names two roles where the process has two", async () => {
+  /// and says *both roles* — and waits on a target besides, which is the same
+  /// table's other column.
+  it("names two roles and a target where the process has them", async () => {
     theWorkbenchWith({ process: "Review", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     expect(start.getAttribute("title")).toBe(
-      "This needs a brief, and both roles picked and working.",
+      "This needs a brief, a target, and both roles picked and working.",
     );
   });
 

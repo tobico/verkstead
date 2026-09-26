@@ -44,7 +44,7 @@ use verkstead_render::{
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
     PairingView, PickedView, Process, ProcessPicked, RepoPairingsView, RepoSwitched, Started,
-    TakenUp, Worktree,
+    TakenUp, TargetRecorded, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -729,11 +729,67 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 }
 
 /// Save what the human has written into the Brief.
+///
+/// **And fill an empty Target out of it.** A pull request URL or a `#number` is
+/// unambiguous anywhere in prose, so a Brief that names one names the work this
+/// Conversation is about — and the field is where Start looks, so a page
+/// showing it empty over a name the press would have found would be the field
+/// lying about what is going to happen.
+///
+/// Never over what is already there. The human's own typing wins: a branch
+/// somebody named survives a URL arriving in the Brief afterwards, which is
+/// [`store::fill_target`]'s whole job. And only where the save landed — a Brief
+/// refused for being frozen is one whose Target froze with it.
 pub(crate) async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<BriefSaved> {
-    Ok(match store::save_brief(pool, id, markdown).await? {
+    let saved = match store::save_brief(pool, id, markdown).await? {
         store::Edited::Saved => BriefSaved::Saved,
         store::Edited::NoSuchConversation => BriefSaved::NoSuchConversation,
         store::Edited::NotDrafting => BriefSaved::NotDrafting,
+    };
+
+    if saved == BriefSaved::Saved
+        && let Some(named) = crate::targets::pull_request_in(markdown)
+    {
+        store::fill_target(pool, id, &written(&named)).await?;
+    }
+
+    Ok(saved)
+}
+
+/// A pull request the Brief named, written back into the Target field the way
+/// somebody typing it there would have written it.
+///
+/// The URL where the Brief carried one and `#<n>` where it carried a bare
+/// number, which is what the human wrote either way — the field is theirs to
+/// read and to correct, so what stands in it is their own name for the thing
+/// rather than a rendering of what was parsed out of it.
+fn written(named: &crate::targets::NamedPullRequest) -> String {
+    match &named.repository {
+        Some(repository) => format!("https://github.com/{repository}/pull/{}", named.number),
+        None => format!("#{}", named.number),
+    }
+}
+
+/// Name what a drafting Conversation is pointed at, or take the name away.
+///
+/// The **Target**: a pull request URL, a `#number` or a branch, in one field
+/// because which of the three it is, is decided at Start and not while it is
+/// being typed. Blank is the field cleared — what the human means by emptying
+/// it is *nothing yet*, and there is no target called nothing.
+///
+/// **Nothing is asked of git or of GitHub here.** The Branch field beside it
+/// runs `git check-ref-format`, which is exactly why this is not that field: a
+/// pull request URL is not a well-formed ref and is the commonest thing to put
+/// here. What the string names is settled at the press, where there is a GitHub
+/// to ask about a number and an origin to ask about a branch.
+pub(crate) async fn set_target(pool: &SqlitePool, id: i64, target: &str) -> Result<TargetRecorded> {
+    let target = target.trim();
+    let named = (!target.is_empty()).then_some(target);
+
+    Ok(match store::set_target(pool, id, named).await? {
+        store::Edited::Saved => TargetRecorded::Recorded,
+        store::Edited::NoSuchConversation => TargetRecorded::NoSuchConversation,
+        store::Edited::NotDrafting => TargetRecorded::NotDrafting,
     })
 }
 
@@ -2436,12 +2492,15 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 ///
 /// **Which is what Start does on a Review**, there being one press on a
 /// composer. The button reads *Start work* like every other Process's, and what
-/// it reaches is this â so every refusal below keeps the name and the sentence
+/// it reaches is this — so every refusal below keeps the name and the sentence
 /// it already had.
 ///
-/// **And the target is the Brief's.** A Review names a pull request in its
-/// prose, and the press reads it and asks GitHub about it â see [`resolve`],
-/// which is that whole half. A Draft from before there were Processes was
+/// **And the target is the Target field's.** A Review is pointed at a pull
+/// request there — typed in, or filled out of the Brief when it was saved — and
+/// the press reads that field and asks GitHub about what is in it; see
+/// [`resolve`], which is that whole half. One place to look, so the field the
+/// human is reading and the name the press acts on cannot come apart. A Draft
+/// from before there were Processes was
 /// started holding one instead, off the retired *Wrap up a pull request* level,
 /// and that one is taken as it stands: it is on the record already, and nothing
 /// about the pull request has been touched since.
@@ -2700,18 +2759,21 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     Ok(TakenUp::TakenUp)
 }
 
-/// What a **Review** is to take up, resolved at the press: the Brief read for a
-/// pull request, and GitHub asked about it.
+/// What a **Review** is to take up, resolved at the press: the **Target** field
+/// read for a pull request, and GitHub asked about it.
 ///
 /// **Server-side, and not a session.** The refusals below and the ones after
 /// them are careful and already written, and a session doing the resolving
 /// would move them into a prompt.
 ///
-/// **The Brief names it and `gh` answers for it.** What is in the prose is a
-/// number, with a repository beside it where the name came as a URL — see
-/// [`crate::targets`]. What comes back is everything git cannot say: what the
-/// pull request is called, where it is, the branch the work is on, the branch it
-/// merges into, and whether its head is in a fork.
+/// **The field names it and `gh` answers for it.** One place to look: the Brief
+/// fills that field while it is empty — see [`save_brief`] — so by the time the
+/// press happens what the human is looking at is what is read. What is in the
+/// field is a number, with a repository beside it where the name came as a URL
+/// — see [`crate::targets::pull_request_named`]. What comes back from `gh` is
+/// everything git cannot say: what the pull request is called, where it is, the
+/// branch the work is on, the branch it merges into, and whether its head is in
+/// a fork.
 ///
 /// **A URL naming another repository is refused by name.** `gh` answers for the
 /// Conversation's Repo and its origin, so a URL whose owner and repository are
@@ -2732,9 +2794,14 @@ async fn resolve(
     state: &AppState,
     conversation: &store::Conversation,
 ) -> Result<std::result::Result<store::AdoptedPullRequest, TakenUp>> {
-    let brief = brief(&state.pool, conversation.id).await?;
-
-    let Some(named) = crate::targets::pull_request_in(&brief) else {
+    // The field, whatever put it there, and read once. A target that is not a
+    // pull request is a branch, which is the stage after this one — until then
+    // there is nothing here to take up, which is what the refusal says.
+    let Some(named) = conversation
+        .target
+        .as_deref()
+        .and_then(crate::targets::pull_request_named)
+    else {
         return Ok(Err(TakenUp::NoTarget));
     };
 
@@ -3400,7 +3467,8 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 }
 
 /// Whether everything needed before the work starts is settled, as the pane
-/// reads it: the roles the Process uses, and a Brief with something in it.
+/// reads it: the roles the Process uses, a Brief with something in it, and a
+/// target where the Process takes one.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
@@ -3409,10 +3477,16 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// **The same reading the press takes**, one Process at a time: a **Tinker** is
 /// never interviewed, so the Grilling picker is drawn for it nowhere and the
 /// button waits on the two roles a wrap-up waits on; a **Review** is the wrap-up
-/// itself and waits on exactly those two; and an **Investigate** is run under
-/// the Implementation role alone, so it waits on that one. The press asks
-/// exactly this again when it is pressed — see [`start_grilling`] and
-/// [`take_up`], where the readings stand beside their refusals.
+/// itself and waits on exactly those two, and on something in the Target field
+/// besides; and an **Investigate** is run under the Implementation role alone,
+/// so it waits on that one. The press asks exactly this again when it is
+/// pressed — see [`start_grilling`] and [`take_up`], where the readings stand
+/// beside their refusals.
+///
+/// **A target and not a *good* target.** Whether what is in the field is a pull
+/// request GitHub has, or a branch origin has, is decided at the press, where
+/// there is somewhere to ask; an empty field is the one thing a page can see for
+/// itself, and it is the one thing this waits on.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
     process: store::Process,
@@ -3420,6 +3494,7 @@ pub(crate) fn ready_to_grill(
     implementation: Option<&PairingView>,
     review: &PickedView,
     brief: &str,
+    target: Option<&str>,
 ) -> bool {
     let roles = match process {
         store::Process::Review | store::Process::Tinker => {
@@ -3429,7 +3504,24 @@ pub(crate) fn ready_to_grill(
         _ => crate::profiles::ready_to_grill(grilling, implementation, review),
     };
 
-    state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles
+    let pointed =
+        !takes_a_target(process) || target.is_some_and(|target| !target.trim().is_empty());
+
+    state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles && pointed
+}
+
+/// Which Processes are pointed at work that is already somewhere else, and so
+/// take a **Target**.
+///
+/// The server's half of a fact the viewer keeps too — `TARGETED` in
+/// `processes.ts`, beside the role table — for the reason the landed list is
+/// kept in both: one says what the record waits on, the other says what the
+/// panel draws, and a stage that gives a Process a target adds to both.
+///
+/// **Review** for now. Fix Merge Issues joins it when its stage lands: it is
+/// pointed at a pull request the same way, and walks the stack from there.
+pub(crate) fn takes_a_target(process: store::Process) -> bool {
+    matches!(process, store::Process::Review)
 }
 
 /// Whether git would take this as a branch name.

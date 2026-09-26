@@ -46,6 +46,28 @@ export const OFFERED: Process[] = [
   "Review",
 ];
 
+/// And which of them are pointed at work that is already somewhere else, and
+/// so draw the **Target** field in the Repo panel.
+///
+/// **The viewer's list, and the server keeps the other** — `takes_a_target` in
+/// `crates/server/src/conversations.rs`, which is what the record's readiness
+/// waits on. Two lists for `OFFERED`'s reason: one says what the panel draws
+/// and the other says what Start waits for, and a stage that gives a Process a
+/// target adds to both.
+///
+/// Beside the role table because it is the same kind of fact about a Process,
+/// written in the same place: **Fix Merge Issues** adds itself here when its
+/// stage lands, and the field appears under its Branch field without a line
+/// changing in either composer.
+export const TARGETED: Process[] = ["Review"];
+
+/// Whether this Process is pointed at a target — the question each composer
+/// asks before drawing the field, as [`uses`] is the one it asks before drawing
+/// a role's picker.
+export function targeted(process: Process): boolean {
+  return TARGETED.includes(process);
+}
+
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside
 /// it.
@@ -156,6 +178,30 @@ export function away(process: Process, role: Role): string | undefined {
 export function roles(process: Process): string {
   const count = ROLES[process].uses.length;
   return count === 1 ? "one role" : count === 2 ? "both roles" : "every role";
+}
+
+/// And the whole of what an inert Start is waiting on, as the middle of that
+/// sentence: a brief, a target, and the roles counted off the table.
+///
+/// In one place because both composers say it — a draft's own press and the
+/// compose page's — and each of them asks for a different subset: a page
+/// holding a roadmap has its brief answered for it, and one holding a pull
+/// request off the retired menu has its target answered the same way. So the
+/// caller says which clauses it is asking for, and the wording is here.
+export function needed(
+  process: Process,
+  asked: { brief: boolean; target: boolean },
+): string {
+  const wanted = [
+    ...(asked.brief ? ["a brief"] : []),
+    ...(asked.target && targeted(process) ? ["a target"] : []),
+    `${roles(process)} picked and working`,
+  ];
+
+  // The comma before the *and* is what the sentence has always had, and it is
+  // what keeps a three-part list readable: *a brief, a target, and both roles*.
+  const last = wanted.pop()!;
+  return wanted.length === 0 ? last : `${wanted.join(", ")}, and ${last}`;
 }
 
 /// What each role's picker is called, which is the role's own name: the tests,

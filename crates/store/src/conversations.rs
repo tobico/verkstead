@@ -383,6 +383,15 @@ pub struct Conversation {
     /// [`start_pull_request_adoption`].
     pub adopting_pull_request: Option<AdoptedPullRequest>,
 
+    /// And what it is pointed at, where the human or the Brief has named
+    /// anything: a pull request URL, a `#number`, or a branch — see [`target`].
+    ///
+    /// `None` is the field empty, which is every Conversation but a **Review**
+    /// somebody has named a target on. Which of the three it holds is decided
+    /// when it is read, at Start; nothing about the shape of it is settled
+    /// here.
+    pub target: Option<String>,
+
     /// The other registered Repos this Conversation works alongside, by the
     /// Repo's name — see [`super::companions`].
     ///
@@ -1279,6 +1288,28 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the processes table")?;
 
+    // And what the work is pointed at, where the Process is one that takes a
+    // target: a pull request URL, a `#number` or a branch. A table of its own
+    // for the reason the Process beside it is one — there is no migration
+    // machinery here and `conversations` is STRICT and left alone — and a
+    // Conversation with nothing named has no row, which is the state every one
+    // of them starts in. See [`target`].
+    //
+    // Not the branch name re-used, though both are strings naming something in
+    // git. The branch field says what *this* Conversation's branch is called
+    // and is checked against `git check-ref-format`, which refuses a pull
+    // request URL over its colon; this says which work to take up and is read
+    // once, at Start. See ADR-0020.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS targets (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             target          TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the targets table")?;
+
     // What a roadmap stage's branch was put on top of, where it was put on top
     // of anything. A table of its own for the reason the direction is one, and
     // one row per stage Conversation — written by [`start_stage`] and by nothing
@@ -2104,6 +2135,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         process: process(pool, id).await?,
         adopting: adopting(pool, id).await?,
         adopting_pull_request: adopted_pull_request(pool, id).await?,
+        target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
     }))
 }
@@ -2468,6 +2500,100 @@ pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result
     .with_context(|| format!("recording the Process picked on Conversation {id}"))?;
 
     Ok(Edited::Saved)
+}
+
+/// What the work is pointed at, where anything has been named: the **Target**
+/// field, as it stands.
+///
+/// A string and nothing else. Which of the three things it holds — a pull
+/// request URL, a `#number`, a branch — is decided by whoever reads it, and the
+/// one reader that decides is the press: see the server's own `take_up`. The
+/// record keeps what was typed.
+///
+/// `None` is the field empty, which is no row: nothing is written until
+/// somebody types something or a Brief fills it, and clearing it takes the row
+/// away again.
+pub async fn target(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT target FROM targets WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading what Conversation {id} is pointed at"))?;
+
+    Ok(row.map(|(target,)| target))
+}
+
+/// Name what a drafting Conversation is pointed at, or take the name away.
+///
+/// Refused off the two questions the branch name and the Process are — where
+/// the Conversation has got to, and whether its branch has been made — because
+/// it is the same kind of fact: a Draft's to change, and settled for good from
+/// the moment there is a worktree to read it in.
+///
+/// `None` is the field cleared rather than a target called nothing, and it
+/// drops the row: an empty string and no row are the same state, and keeping
+/// one would be two spellings of it.
+///
+/// Nothing here has an opinion on what the string *is*. A branch that is not on
+/// origin and a URL of another repository are both refused at the press, where
+/// there is a GitHub and a git to ask; this is a field being typed into.
+pub async fn set_target(pool: &SqlitePool, id: i64, target: Option<&str>) -> Result<Edited> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
+    }
+
+    match target {
+        Some(target) => {
+            sqlx::query(
+                "INSERT INTO targets (conversation_id, target) VALUES (?, ?)
+                 ON CONFLICT (conversation_id) DO UPDATE SET target = excluded.target",
+            )
+            .bind(id)
+            .bind(target)
+            .execute(pool)
+            .await
+            .with_context(|| format!("recording what Conversation {id} is pointed at"))?;
+        }
+        None => {
+            sqlx::query("DELETE FROM targets WHERE conversation_id = ?")
+                .bind(id)
+                .execute(pool)
+                .await
+                .with_context(|| format!("clearing what Conversation {id} is pointed at"))?;
+        }
+    }
+
+    Ok(Edited::Saved)
+}
+
+/// Fill an empty Target, and leave a filled one exactly as it is.
+///
+/// What a saved Brief does with the pull request its prose names. The human's
+/// own typing is never overwritten — a branch somebody named survives a URL
+/// arriving in the Brief afterwards — so this is the insert that does nothing
+/// where there is a row, rather than a read followed by a write that could race
+/// the keystroke between them.
+///
+/// Refused for nothing, and asked only where a Brief has just been saved: that
+/// save is refused past drafting, so a Conversation this is reached for is one
+/// whose Target is still its own to change.
+pub async fn fill_target(pool: &SqlitePool, id: i64, target: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO targets (conversation_id, target) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(target)
+    .execute(pool)
+    .await
+    .with_context(|| format!("filling the Target of Conversation {id} out of its Brief"))?;
+
+    Ok(())
 }
 
 /// Which roadmap a Conversation is adopting, where it is adopting one.

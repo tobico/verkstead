@@ -29,6 +29,7 @@ import type {
   RepoView,
   SettingsView,
   TakenUp,
+  TargetRecorded,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
@@ -38,7 +39,7 @@ import setup from "../src/workbench/Setup.module.css";
 import takeUp from "../src/workbench/TakeUp.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
-import { BRANCH_REFUSAL } from "../src/workbench/Setup";
+import { BRANCH_REFUSAL, TARGET, TARGET_REFUSAL } from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
 import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
@@ -907,6 +908,222 @@ describe("the process a compose page is composing under", () => {
       ).toEqual({ process: "Develop" }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(1);
+  });
+});
+
+/// The Target field on this page: the same field the composer draws, held on
+/// the device like everything else in the panel and replayed onto the draft a
+/// press makes.
+describe("the target a compose page is pointed at", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// A page on Review, against the repo it would be composed against, which is
+  /// where a reload leaves one.
+  function composedAsReview(over: Partial<Composed> = {}): void {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "Review" satisfies Process,
+        ...over,
+      }),
+    );
+  }
+
+  it("is drawn under Review and under no other process", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await openRepo(container);
+
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
+    expect(screen.queryByLabelText("Target")).toBeNull();
+
+    pick("Process", PROCESS.Review);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+  });
+
+  /// Filled from the box while it is empty, by the reading the server does
+  /// when a Brief is saved — so a URL written into the brief shows up in the
+  /// field rather than the field standing empty over what a press would find.
+  it("fills itself from the brief while it is empty", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    fireEvent.input(box, {
+      target: {
+        value: "Wrap up https://github.com/tobico/verkstead/pull/41 today.\n",
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Target") as HTMLInputElement).value,
+      ).toBe("https://github.com/tobico/verkstead/pull/41"),
+    );
+    expect(stored().target).toBe(
+      "https://github.com/tobico/verkstead/pull/41",
+    );
+  });
+
+  /// And never over what was typed into it: a branch somebody named survives a
+  /// URL arriving in the box afterwards.
+  it("leaves a target somebody typed exactly as it was", async () => {
+    composedAsReview({ target: "rate-limiting" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    fireEvent.input(box, {
+      target: { value: "Like https://github.com/tobico/verkstead/pull/41.\n" },
+    });
+
+    await waitFor(() => expect(stored().brief).toContain("Like"));
+    expect(
+      (screen.getByLabelText("Target") as HTMLInputElement).value,
+    ).toBe("rate-limiting");
+  });
+
+  /// The base picker follows what the field holds, exactly as it does on a
+  /// draft's own composer.
+  it("takes the base picker away where the target is a pull request", async () => {
+    composedAsReview({ target: "https://github.com/tobico/verkstead/pull/41" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  it("keeps it where the target is a branch", async () => {
+    composedAsReview({ target: "rate-limiting" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+
+  /// And the press waits on it: a Review with a brief and both roles and
+  /// nothing named is inert, and says what it is waiting on.
+  it("holds the press inert while nothing is named", async () => {
+    composedAsReview({ brief: "Wrap the limiter up." });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("true"),
+    );
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, a target, and both roles picked and working.",
+    );
+  });
+
+  /// And the draft a press makes is holding what the page held, replayed
+  /// through the endpoint the composer's own field uses.
+  it("puts the target on the draft it creates", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toEqual(
+        { target: "#41" },
+      ),
+    );
+
+    // And the kickoff is the take-up, the Review's press being the wrap-up
+    // over what the target names.
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toBe(1),
+    );
+  });
+
+  /// And a target the server would not take is carried to that draft's own
+  /// composer, the way every other refused field is.
+  it("says on the draft it made what the server would not take", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("NotDrafting" satisfies TargetRecorded),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `The target could not be named: ${TARGET_REFUSAL.NotDrafting}`,
+        ),
+      ).toBeTruthy(),
+    );
+
+    // And the kickoff is what the refusal stops, exactly as a refused branch
+    // name stops it.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
   });
 });
 
@@ -3053,6 +3270,7 @@ describe("what a device holds between visits", () => {
       repo: 2,
       brief: "Make the widget",
       branch: "widget-work",
+      target: "",
       base: "release-1.4",
       companions: [
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },

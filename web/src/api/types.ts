@@ -1514,6 +1514,21 @@ adopting: AdoptionView | null,
  */
 adopting_pull_request: AdoptedPullRequestView | null, 
 /**
+ * And what the work is pointed at, where the human or the Brief has named
+ * anything: the **Target** field, as it stands.
+ *
+ * `null` is the field empty, which is every Conversation but a **Review**
+ * somebody has named a target on. What is in it is a pull request URL, a
+ * `#number` or a branch, kept as it was typed — which of the three it is
+ * is decided at Start and not before, so there is nothing here saying
+ * which the page is looking at.
+ *
+ * Drawn in the Repo panel under the Branch field, for the Processes that
+ * take a target and no others — see `processes.ts`, where that list is
+ * kept beside the role table.
+ */
+target: string | null, 
+/**
  * The worktree the grilling was given to work in, once there is one.
  *
  * `null` both before grilling starts and after closing — the two ways a
@@ -5236,6 +5251,29 @@ at: string, } } | "WorktreeRefused" | { "Companion": {
  * The Repo's registered name.
  */
 repo: string, why: CompanionRefusal, } };
+
+/**
+ * And what the work is pointed at: a pull request URL, a `#number` or a
+ * branch, as it was typed.
+ *
+ * One string whichever of the three it is, because which it is, is not a
+ * question the field asks — it is decided when the Target is read, at Start.
+ * Blank is the field cleared, which is the target taken away rather than one
+ * called nothing, exactly as a blank [`BranchRename`] is.
+ */
+export type TargetNamed = { target: string, };
+
+/**
+ * What became of naming what the work is pointed at.
+ *
+ * Two refusals rather than the branch field's three, and the missing one is
+ * the point: nothing here asks git whether the string is a well-formed branch
+ * name, because a pull request URL is not one and is the commonest thing to
+ * type in. What the string names is decided at Start, where there is a GitHub
+ * and a git to ask — a branch origin has never heard of and a URL of another
+ * repository are refused there, by name.
+ */
+export type TargetRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting";
 
 /**
  * One task's document as the pane draws it: the entry it belongs to, and the

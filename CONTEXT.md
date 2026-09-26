@@ -157,7 +157,7 @@ writable Worktree it is told to commit nothing from, the signal accepted over
 uncommitted scratch here and nowhere else, and no pull request ever asked for —
 and a steered Investigating ends in the state it was steered from instead, see
 **Investigating**.
-**Review** is the wrap-up run over a pull request or a branch the Brief names:
+**Review** is the wrap-up run over the pull request or branch it is pointed at:
 Draft to Wrapping, reviewed under the Review Pairing, which it always has — no
 *No review* row, a Review without a review being the last Process here.
 **Tinker** is Follow-up entered from a Draft, on a fresh branch and primed with
@@ -172,12 +172,13 @@ every pull request and sending one `addressing` session at the ordered list,
 bottom up, synced with `gh stack sync` whatever the **resolution strategy**
 says — a lone pull request follows the strategy as it always has.
 
-**Review and Fix Merge Issues need a target**, and the Brief is where a pull
-request is named: the first pull request URL or `#number` in it is read at
-Start. A bare branch is not readable out of prose, so it goes in the **Target**
-field, which the Repo panel draws for these two alone, reading **Pull request or
-branch** and taking any of the three — filled from the Brief while empty and
-never over what the human typed; Start is refused while neither names anything.
+**Review and Fix Merge Issues need a target**, and the **Target** field is
+where it stands: drawn in the Repo panel under the Branch field for these two
+alone, reading **Pull request or branch** and taking any of the three. A pull
+request URL or `#number` is unambiguous in prose, so a saved Brief holding one
+fills that field while it is empty and never over what the human typed — a
+bare branch is not readable out of prose, and is typed in. Start reads the
+field, once, and is refused while it is empty.
 A field of its own rather than the Branch field re-read, that one being a rename
 and git refusing a URL as a ref: what the Conversation's branch is called is
 take-up's to decide from the head, and what to take up is this. A pull request

@@ -680,6 +680,20 @@ pub struct ConversationView {
     /// or grilling to settle.
     pub adopting_pull_request: Option<AdoptedPullRequestView>,
 
+    /// And what the work is pointed at, where the human or the Brief has named
+    /// anything: the **Target** field, as it stands.
+    ///
+    /// `null` is the field empty, which is every Conversation but a **Review**
+    /// somebody has named a target on. What is in it is a pull request URL, a
+    /// `#number` or a branch, kept as it was typed — which of the three it is
+    /// is decided at Start and not before, so there is nothing here saying
+    /// which the page is looking at.
+    ///
+    /// Drawn in the Repo panel under the Branch field, for the Processes that
+    /// take a target and no others — see `processes.ts`, where that list is
+    /// kept beside the role table.
+    pub target: Option<String>,
+
     /// The worktree the grilling was given to work in, once there is one.
     ///
     /// `null` both before grilling starts and after closing — the two ways a
@@ -3287,6 +3301,19 @@ pub struct BranchRename {
     pub branch: String,
 }
 
+/// And what the work is pointed at: a pull request URL, a `#number` or a
+/// branch, as it was typed.
+///
+/// One string whichever of the three it is, because which it is, is not a
+/// question the field asks — it is decided when the Target is read, at Start.
+/// Blank is the field cleared, which is the target taken away rather than one
+/// called nothing, exactly as a blank [`BranchRename`] is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TargetNamed {
+    pub target: String,
+}
+
 /// The branch to come off, or `null` to go back to the default-branch rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -3592,6 +3619,26 @@ pub enum BranchRenamed {
     /// Not a name git would take for a branch. Asked of git itself rather than
     /// guessed at from a list of forbidden characters.
     NotABranchName,
+}
+
+/// What became of naming what the work is pointed at.
+///
+/// Two refusals rather than the branch field's three, and the missing one is
+/// the point: nothing here asks git whether the string is a well-formed branch
+/// name, because a pull request URL is not one and is the commonest thing to
+/// type in. What the string names is decided at Start, where there is a GitHub
+/// and a git to ask — a branch origin has never heard of and a URL of another
+/// repository are refused there, by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TargetRecorded {
+    Recorded,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, so what it was pointed at was read
+    /// when the work started and is not a text field any more. The Branch
+    /// field's own rule, and for its reason.
+    NotDrafting,
 }
 
 /// What became of choosing the branch the work comes off.
@@ -4544,12 +4591,15 @@ pub enum TakenUp {
     /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
 
-    /// The Brief names no pull request at all — no
-    /// `github.com/<owner>/<repo>/pull/<n>` URL in it and no bare `#<n>` —
-    /// so there is nothing for this Review to take up.
+    /// The **Target** field names no pull request — nothing in it at all, or
+    /// something that is neither a `github.com/<owner>/<repo>/pull/<n>` URL
+    /// nor a bare `#<n>` — so there is nothing for this Review to take up.
+    ///
+    /// The press is inert on the page while the field is empty, so this is
+    /// what a page whose copy of the world has gone stale gets back.
     NoTarget,
 
-    /// The Brief's URL names a pull request of another repository, and `gh`
+    /// The Target's URL names a pull request of another repository, and `gh`
     /// answers for this Repo's origin. Which repository it named is the whole
     /// of what the human needs: either the URL is the wrong one, or this
     /// Conversation is on the wrong Repo.

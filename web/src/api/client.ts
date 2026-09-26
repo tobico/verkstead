@@ -95,6 +95,7 @@ import type {
   Subscribed,
   Subscription,
   TakenUp,
+  TargetRecorded,
   TerminalClosed,
   TerminalOpened,
   TerminalsView,
@@ -993,6 +994,22 @@ export function renameBranch(
   branch: string,
 ): Promise<BranchRenamed> {
   return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
+}
+
+/// Name what the work is pointed at — a pull request URL, a `#number` or a
+/// branch — or pass the empty string to take the name away.
+///
+/// A route of its own rather than the rename above it, and deliberately: that
+/// one asks git whether the string is a well-formed branch name, which a pull
+/// request URL is not. Which of the three this holds is decided at Start, so
+/// nothing here refuses it for its shape.
+export function nameTarget(
+  id: number,
+  target: string,
+): Promise<TargetRecorded> {
+  return post<TargetRecorded>(`/api/ui/conversations/${id}/target`, {
+    target,
+  });
 }
 
 /// Choose the branch the work comes off, or pass `null` to put the Conversation

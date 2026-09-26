@@ -1,9 +1,10 @@
 //! The composer: where a Conversation is drafted, and the press that starts it.
 //!
 //! A details pane of its own rather than a card on the Timeline. What is
-//! written here — the Brief, the branch, the base, the companions, the three
-//! pairings — is one act of setting a piece of work up, and the record is a
-//! record of what has happened rather than the desk it is arranged on. So the
+//! written here — the Brief, the branch, the target, the base, the companions,
+//! the three pairings — is one act of setting a piece of work up, and the
+//! record is a record of what has happened rather than the desk it is arranged
+//! on. So the
 //! Timeline's Brief card is the five-line rendering of the document at all
 //! times, drafting or frozen, and pressing it opens this.
 //!
@@ -88,7 +89,7 @@ import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
 import { HeldPullRequest, TakeUpRefusal, TakingUp } from "./TakeUp";
-import { roles } from "./processes";
+import { needed } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -403,11 +404,11 @@ function Written(props: {
   );
 }
 
-/// What an unready start is waiting on, said in its tooltip — the roles named
-/// as the Process has them, which is [`roles`]'s to count rather than a three
-/// written into the sentence.
+/// What an unready start is waiting on, said in its tooltip — the clauses and
+/// the roles counted off the Process's own table rather than written into the
+/// sentence, so a Review says it waits on a target and a Develop does not.
 const missing = (process: Process): string =>
-  `This needs a brief, and ${roles(process)} picked and working.`;
+  `This needs ${needed(process, { brief: true, target: true })}.`;
 
 /// The press the whole pane is arranged for, in whichever of its two shapes
 /// this Conversation's Process gives it.

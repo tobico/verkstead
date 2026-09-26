@@ -94,6 +94,7 @@
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

@@ -1,7 +1,7 @@
 //! The role table, away from the two composers that draw off it: which roles
 //! each Process uses, which of them may be picked away, which shape its control
-//! takes, what each of their pickers is labelled, and the words an inert start
-//! counts off it.
+//! takes, which of them are pointed at a target, what each of their pickers is
+//! labelled, and the words an inert start counts off it.
 //!
 //! Asked of the module rather than of a rendered row, for the reason it is a
 //! module at all: it is the one place the table is written down, and a page
@@ -14,11 +14,14 @@ import type { Process } from "../src/api/types";
 import {
   away,
   label,
+  needed,
   OFFERED,
   PROCESS,
   ROLE,
   ROLES,
   roles,
+  TARGETED,
+  targeted,
   uses,
 } from "../src/workbench/processes";
 import type { Role } from "../src/workbench/processes";
@@ -151,6 +154,50 @@ describe("what an inert start says it is waiting on", () => {
   it("says something for every process there is", () => {
     for (const process of EVERY) {
       expect(roles(process)).not.toBe("");
+    }
+  });
+
+  /// And the whole sentence, which is the clauses the caller asked for with
+  /// the target added where the table says the Process takes one.
+  it("names a target where the process is pointed at one", () => {
+    expect(needed("Review", { brief: true, target: true })).toBe(
+      "a brief, a target, and both roles picked and working",
+    );
+    expect(needed("Develop", { brief: true, target: true })).toBe(
+      "a brief, and every role picked and working",
+    );
+  });
+
+  /// And leaves out what the caller says is answered already: a page holding a
+  /// roadmap has its brief, and one holding a pull request has its target.
+  it("leaves out the clauses the caller does not ask for", () => {
+    expect(needed("Develop", { brief: false, target: true })).toBe(
+      "every role picked and working",
+    );
+    expect(needed("Review", { brief: true, target: false })).toBe(
+      "a brief, and both roles picked and working",
+    );
+  });
+});
+
+describe("the processes that are pointed at a target", () => {
+  /// **Review** for now, and Fix Merge Issues when its stage lands: the field
+  /// in the Repo panel comes out of this list, so a Process that gains a
+  /// target gains the field without a line changing in either composer.
+  it("is Review and nothing else yet", () => {
+    expect(TARGETED).toEqual(["Review"]);
+
+    for (const process of EVERY) {
+      expect(targeted(process)).toBe(process === "Review");
+    }
+  });
+
+  /// And every one of them is a Process the wire carries, for the reason the
+  /// role table has a row for each: a word this viewer has never heard of is
+  /// nothing a panel could draw a field for.
+  it("names only processes there is a word for", () => {
+    for (const process of TARGETED) {
+      expect(EVERY).toContain(process);
     }
   });
 });

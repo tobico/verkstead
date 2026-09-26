@@ -123,7 +123,7 @@ export const TAKE_UP_REFUSAL: Record<
   NotHoldingOne:
     "This conversation is holding no pull request, so there is nothing for it to wrap up.",
   NoTarget:
-    "The brief names no pull request — write one in, by its link or as #number.",
+    "The target names no pull request — put one in the Target field, by its link or as #number.",
   Fork:
     "That pull request's branch is in a fork, so nothing fixed here could be pushed to it.",
   NoImplementationProfile:

@@ -33,8 +33,9 @@ use crate::{
     Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -130,6 +131,12 @@ fn the_viewers_types_are_written_from_these() {
     BriefSaved::export_all(&config).unwrap();
     BranchRename::export_all(&config).unwrap();
     BranchRenamed::export_all(&config).unwrap();
+
+    // And what the work is pointed at, which is the Branch field's neighbour and
+    // not the same question: that one names this Conversation's own branch, and
+    // this one names the work to take up.
+    TargetNamed::export_all(&config).unwrap();
+    TargetRecorded::export_all(&config).unwrap();
     BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
