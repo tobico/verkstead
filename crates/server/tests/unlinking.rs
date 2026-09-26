@@ -25,6 +25,7 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView};
+use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
@@ -41,6 +42,13 @@ use verkstead_store::{Linking, Telling};
 const DEVICES: &str = "/api/ui/devices";
 const ADD: &str = "/api/ui/devices/joins";
 const ASKING: &str = "/api/ui/devices/asking";
+
+/// And where an open page listens for the word that something moved.
+const NUDGES: &str = "/api/ui/nudges";
+
+/// How long a test will wait for a Nudge it expects: generous, because it is
+/// only ever paid when the assertion is about to fail.
+const HEARING: Duration = Duration::from_secs(5);
 
 /// And the press this suite is about.
 fn unlink_at(device: &str) -> String {
@@ -245,6 +253,75 @@ async fn allow(app: &Router, request: &str) {
         "POST {ASKING}/{request}/allow: {}",
         String::from_utf8_lossy(&bytes),
     );
+}
+
+/// One of this device's other open workbenches, listening on the Nudge stream.
+///
+/// Read off the wire rather than off the channel behind it, the way
+/// `tests/joining.rs` reads one: the press is answered to the workbench that
+/// made it, and what has to hold is that a page which made no press hears about
+/// it down its own connection.
+struct Listening {
+    body: Body,
+
+    /// What has been read off the stream and is not a whole frame yet. SSE
+    /// frames are not the chunks they arrive in.
+    buffered: String,
+}
+
+impl Listening {
+    /// Open the stream the way a page does. Returns once the response is in
+    /// hand, which is after the handler has subscribed — so anything the test
+    /// does next is something this page is listening for.
+    async fn open(app: &Router) -> Listening {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(NUDGES).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "GET {NUDGES}");
+
+        Listening {
+            body: response.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next Nudge, past the keep-alives that are the stream's other traffic.
+    async fn nudge(&mut self) -> Nudge {
+        let waited_for = tokio::time::timeout(HEARING, async {
+            loop {
+                let frame = self.frame().await;
+
+                if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: ")) {
+                    return serde_json::from_str(data).unwrap();
+                }
+            }
+        });
+
+        waited_for.await.expect("waited for a Nudge in vain")
+    }
+
+    /// The next whole frame off the stream, whatever kind it is.
+    async fn frame(&mut self) -> String {
+        loop {
+            if let Some(end) = self.buffered.find("\n\n") {
+                return self.buffered.drain(..end + 2).collect();
+            }
+
+            let chunk = self
+                .body
+                .frame()
+                .await
+                .expect("the stream ended")
+                .unwrap()
+                .into_data()
+                .expect("the stream carries data frames");
+
+            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
 }
 
 /// Press Unlink on a member's row, and hand back the section as it answered.
@@ -539,6 +616,37 @@ async fn a_member_that_is_not_there_is_unlinked_all_the_same() {
         b.cluster().await,
         sorted(&[A]),
         "and the member that *is* there was told, although the leaver was not",
+    );
+}
+
+/// And the press tells this device's *other* open workbenches, which is the one
+/// way a page here finds out about a row that has gone.
+///
+/// **Every other way this section moves already says so.** A member naming a
+/// newcomer, a member saying a device is out and a member's renewed certificate
+/// each announce it as they land; the press made over here is the same list
+/// moving. Re-reads in the viewer are the Nudge and nothing else — nothing polls
+/// — so without this the one press that takes a row away would be the one change
+/// a second workbench of the pressing device went on drawing the old answer for,
+/// while every other device in the cluster had it right.
+#[tokio::test]
+async fn the_press_tells_this_devices_other_workbenches_too() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    linked(&b, &a).await;
+
+    // The second workbench, opened after the join so that what it hears is the
+    // press rather than the linking.
+    let over_here = a.workbench();
+    let mut page = Listening::open(&over_here).await;
+
+    unlink(&a.workbench(), B).await;
+
+    assert_eq!(page.nudge().await, Nudge::Devices);
+    assert!(
+        listing(&over_here).await.members.is_empty(),
+        "and what it reads back is the cluster without the device that has gone",
     );
 }
 
