@@ -2076,7 +2076,7 @@ async fn owed_a_pull_request(state: &AppState, conversation_id: i64) -> bool {
 ///
 /// [`store::Decision::Verkstead`], as every stop written here is: what to do
 /// about it is the human's, and steering is what they have.
-const NOBODY_FOLLOWING_UP: &str ="nobody is left to ask you anything or to act on what you say, and any question it had \
+const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
      put to you has been closed unanswered";
 
 /// The human has said there is nothing else: end the session, and land the

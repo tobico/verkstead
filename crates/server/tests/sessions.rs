@@ -24090,7 +24090,11 @@ async fn a_tinker_that_committed_only_in_a_companion_lands_in_wrapping_too() {
         .until(|view| {
             commits(view)
                 .iter()
-                .any(|commit| commit.subject.starts_with("feat: count what the other half"))
+                .any(|commit| {
+                    commit
+                        .subject
+                        .starts_with("feat: count what the other half")
+                })
                 .then_some(())
         })
         .await;
