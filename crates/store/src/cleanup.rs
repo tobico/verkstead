@@ -167,8 +167,8 @@ const CONVERSATION_KEYED: &[&str] = &[
     // share: the file itself was put somewhere on purpose and stays there.
     "shares",
     "share_comments",
-    // And where it sat, what it was doing, and how it was set up to do it.
-    "placements",
+    // And whether there is news on it nobody has looked at, what it was doing,
+    // and how it was set up to do it.
     "unseen_conversations",
     "worktrees",
     "directions",

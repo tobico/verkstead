@@ -202,6 +202,10 @@ fn stopped(found: &[remembering::Remembered], kept: &[i64]) -> Vec<i64> {
 mod tests {
     use super::*;
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     use crate::store::Lifecycle;
 
     use crate::sandbox::granting::remembering::Remembered;
@@ -232,7 +236,7 @@ mod tests {
         repo: i64,
         state: Lifecycle,
     ) -> i64 {
-        let id = store::start_conversation(pool, repo, "rate-limiting")
+        let id = store::start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Conversation starts");

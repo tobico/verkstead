@@ -39,6 +39,10 @@ use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A router, plus the Data Directory holding its database alive.
 async fn workbench() -> (tempfile::TempDir, Router) {
     let (dir, _pool, app) = workbench_and_pool().await;
@@ -466,7 +470,7 @@ async fn a_repo_with_live_work_on_it_is_refused() {
     added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
-    let going = store::start_conversation(&pool, id, "rate-limiting")
+    let going = store::start_conversation(&pool, id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

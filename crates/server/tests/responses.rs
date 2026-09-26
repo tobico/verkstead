@@ -14,6 +14,10 @@ use verkstead_schema::{ApiError, Response, ResponseAccepted, SetCreated};
 use verkstead_server::store;
 use verkstead_server::{open_database, router, router_keeping};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation every Set in this file is asked from, made by [`fresh_pool`]
 /// over a database with nothing in it.
 const ASKING_FROM: i64 = 1;
@@ -59,7 +63,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
+    let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

@@ -735,6 +735,16 @@ impl Devices {
         }
     }
 
+    /// What this device is called by everything it writes down: the id off the
+    /// disk, which is what [`Device::id`] answers.
+    ///
+    /// Here as well as on the pane's answer because a record names a device too,
+    /// and a rank is the first of them: a Conversation is ranked with this id
+    /// suffixed after the key (ADR-0020, *Ranks*).
+    pub fn id(&self) -> &str {
+        self.device.id()
+    }
+
     /// The same, browsing the LAN for the devices this one is not linked to — see
     /// [`crate::discovery::Browse`], which is where the Discovered list comes
     /// from.

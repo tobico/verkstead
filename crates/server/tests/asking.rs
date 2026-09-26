@@ -27,6 +27,10 @@ use verkstead_render::{
 use verkstead_schema::{Liveness, SetCreated};
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// What a grilling session asks: a Question, a Sub-question under it, and a
 /// Heading over them — the three shapes a row of the Timeline's table can take.
 const SET: &str = r#"
@@ -86,11 +90,11 @@ async fn two_conversations() -> (tempfile::TempDir, SqlitePool, Router, i64, i64
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let first = store::start_conversation(&pool, repo.id, "outbound-retries")
+    let first = store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let second = store::start_conversation(&pool, repo.id, "rate-limiting")
+    let second = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

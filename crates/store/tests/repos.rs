@@ -15,6 +15,10 @@ use verkstead_store::{
     unregister_repo,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -153,7 +157,7 @@ async fn an_unregistered_repo_still_resolves_by_id() {
         .unwrap();
 
     // Something that is over, so the removal is not refused for it.
-    let over = start_conversation(&pool, repo.id, "rate-limiting")
+    let over = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -176,7 +180,7 @@ async fn a_repo_with_live_work_on_it_cannot_be_unregistered() {
         .unwrap()
         .unwrap();
 
-    let going = start_conversation(&pool, repo.id, "rate-limiting")
+    let going = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -261,14 +265,14 @@ async fn nothing_new_is_started_in_an_unregistered_repo() {
     unregister_repo(&pool, repo.id).await.unwrap();
 
     assert!(
-        start_conversation(&pool, repo.id, "rate-limiting")
+        start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .is_none(),
         "a Repo that was taken away is no Repo to start work in",
     );
     assert!(
-        start_adoption(&pool, repo.id, "pane-paths", "mvp")
+        start_adoption(&pool, repo.id, "pane-paths", "mvp", THIS_DEVICE)
             .await
             .unwrap()
             .is_none(),
@@ -283,7 +287,7 @@ async fn nothing_new_is_started_in_an_unregistered_repo() {
         .unwrap();
 
     assert!(
-        start_conversation(&pool, repo.id, "rate-limiting")
+        start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .is_some()
@@ -306,7 +310,7 @@ async fn an_unregistered_repo_is_no_companion() {
         .unwrap()
         .unwrap();
 
-    let conversation = start_conversation(&pool, own.id, "rate-limiting")
+    let conversation = start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

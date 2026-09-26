@@ -3125,18 +3125,22 @@ pub struct NewPullRequestAdoption {
     pub base: String,
 }
 
-/// The order the human has just dragged the sidebar into: every Conversation
-/// they can see, by id, top first.
+/// Where the human has just put one Conversation: the row it now sits directly
+/// under, or nothing at all for the top of the list.
 ///
-/// The whole list rather than the one row that moved, because the whole list is
-/// what a drag produces and what the human is looking at when they let go. A
-/// move said as *this one, to there* would have to be replayed against a list
-/// the server might have added to since; a list said whole is simply what they
-/// meant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One row rather than the whole list, because one row is what moved. The
+/// server mints the key between that neighbour and whatever is next below it,
+/// so the arithmetic exists once, in one language, and the viewer never learns
+/// what a rank looks like (ADR-0020, *Ranks*). It is also what lets a drag on a
+/// list merged from several devices be written to the device that owns the row
+/// and to nobody else.
+///
+/// A neighbour that has gone since the list was drawn is not a refusal — see
+/// `store::rank_conversation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewOrder {
-    pub order: Vec<i64>,
+pub struct NewRank {
+    pub below: Option<i64>,
 }
 
 /// What became of starting one.

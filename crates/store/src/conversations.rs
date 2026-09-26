@@ -1023,6 +1023,15 @@ pub enum Closing {
 /// And a third column beside them for the stretch between: `naming` says the
 /// work has started on a name Verkstead invented and the first session has been
 /// told to pick a real one — see [`Conversation::naming`].
+///
+/// `rank` is where the row sits in the sidebar: a fractional-indexing key with
+/// the device that issued it suffixed after it (ADR-0020, *Ranks*) — see
+/// [`super::ranks`]. Nullable here and filled by nothing that writes a row:
+/// every start mints one, and a database written before the column existed has
+/// every row of it ranked at the first start that can say which device it is —
+/// see [`super::rank_the_conversations`]. Which is the one thing a column on
+/// this table can be, `conversations` being STRICT and the arrival being what
+/// the rewrites in [`super::migrations`] are.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -1035,6 +1044,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_commit               TEXT,
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
+             rank                      TEXT,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
              implementation_profile_id INTEGER REFERENCES profiles(id),
              review_profile_id         INTEGER REFERENCES profiles(id)
@@ -1339,12 +1349,26 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// The Brief goes in with it, in the same transaction: the Brief is the first
 /// Event, and a Conversation whose Timeline was empty because the second insert
 /// failed would be one the human could not write anything into.
+///
+/// `device` is this Verkstead's own id, and what it is for is the Rank: the row
+/// is ranked above everything in the sidebar as it is written, with that id
+/// suffixed after the key (ADR-0020, *Ranks*) — see [`started`], where every
+/// start path's minting is.
 pub async fn start_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Settled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Settled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// The same, on a name Verkstead invented rather than one anybody settled on.
@@ -1357,8 +1381,17 @@ pub async fn start_unnamed_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Prefilled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Prefilled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// Start a Conversation adopting `roadmap` against a registered Repo, on
@@ -1378,11 +1411,13 @@ pub async fn start_adoption(
     repo_id: i64,
     branch: &str,
     roadmap: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
+        device,
         Named::Prefilled,
         Adopts::Roadmap(roadmap),
     )
@@ -1407,11 +1442,13 @@ pub async fn start_pull_request_adoption(
     repo_id: i64,
     branch: &str,
     pull_request: &AdoptedPullRequest,
+    device: &str,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
+        device,
         Named::Prefilled,
         Adopts::PullRequest(pull_request),
     )
@@ -1481,21 +1518,43 @@ enum Named {
     Prefilled,
 }
 
-/// What all three of them do: the row, its empty Brief, and the adoption mark
-/// where there is one to write.
+/// What all three of them do: the row, its Rank, its empty Brief, and the
+/// adoption mark where there is one to write.
 ///
 /// All of it in one transaction. A Conversation whose Timeline was empty
 /// because the second insert failed would be one the human could not write
 /// anything into, and one that lost its mark to a third would be a Draft drawn
 /// on the wrong page.
+///
+/// **And the rank is read and written inside that same transaction**, which is
+/// the other thing being one place buys. Ranking above everything means reading
+/// what is at the top, and two Conversations started a moment apart would
+/// otherwise read the same top and mint the same key — they carry the same
+/// suffix, being the same device's, so the suffix is no help at all here. See
+/// [`super::ranks`], and [`super::rank_the_conversations`], which is where the
+/// rows written before there were ranks got theirs.
 async fn started(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
     named: Named,
     adopts: Adopts<'_>,
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
+
+    // Above everything, which is where a Conversation nobody has had the chance
+    // to place belongs — and writing it down rather than leaving the row
+    // unranked is what makes *the unplaced float to the top* a rule the sidebar
+    // no longer needs.
+    let top: Option<String> = sqlx::query_scalar(
+        "SELECT rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("reading the rank at the top of the sidebar")?;
+
+    let rank = super::ranks::between(None, top.as_deref(), device)?;
 
     // The registry is asked in the insert's own `SELECT` rather than before it,
     // for the reason the path's uniqueness is left to the index: a look taken
@@ -1508,8 +1567,8 @@ async fn started(
     // name somebody chose has that name to fall back on and no other.
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO conversations
-             (repo_id, created_at, branch, named_branch, base_commit, state)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?
+             (repo_id, created_at, branch, named_branch, base_commit, state, rank)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?, ?
          FROM repos
          WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
@@ -1517,6 +1576,7 @@ async fn started(
     .bind(branch)
     .bind((named == Named::Settled).then_some(branch))
     .bind(Lifecycle::Draft.stored())
+    .bind(&rank)
     .bind(repo_id)
     .fetch_optional(&mut *tx)
     .await
@@ -1680,14 +1740,18 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 ///
 /// The order is theirs: this is one person's working set, and which piece of
 /// work sits at the top is something they say by dragging a row rather than
-/// something a sort decides — see [`super::place_conversations`], which is where
-/// what they said is kept.
+/// something a sort decides. What they said is the **Rank** each row carries —
+/// see [`super::ranks`] — so ordering this list is reading one column, and a
+/// drag writes one row rather than renumbering the table.
 ///
-/// What has never been placed goes above what has, newest first among itself.
-/// A Conversation started a minute ago is the one thing on this list nobody has
-/// had the chance to place, and putting it at the top is both the predictable
-/// answer and the useful one: it arrives where it will be seen, and the hand-made
-/// order underneath it is left exactly as it was.
+/// **There is no unplaced Conversation for the order to make a case of.** A
+/// start mints a rank above everything — see [`started`] — so the row nobody
+/// has had the chance to move is at the top because its own rank says so,
+/// rather than because the query says something about a null. `c.id DESC`
+/// under the rank is a stated order for rows that have no rank at all, which
+/// is a database the rewrite has not reached yet: a serve ranks every row
+/// before it answers anything, and two ranks that are there are distinct by
+/// construction, each carrying the device that issued it.
 ///
 /// `waiting` is folded inside the query rather than by the caller, because
 /// every source of it is a read of this database and the sidebar is one list: a
@@ -1752,12 +1816,11 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 ) AS unseen
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
-         LEFT JOIN placements m ON m.conversation_id = c.id
          WHERE EXISTS (SELECT 1 FROM shown_archives)
             OR NOT EXISTS (
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
-         ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
+         ORDER BY c.rank, c.id DESC",
         waiting = waits_on_the_human(),
     ))
     .fetch_all(pool)
@@ -1797,6 +1860,97 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
             },
         )
         .collect())
+}
+
+/// Put one Conversation where the human just dropped it: a new **Rank** on that
+/// row and on nothing else.
+///
+/// `below` is the row it now sits directly under, as the sidebar was drawn when
+/// they let go, and `None` is the top of the list. What is minted is a key
+/// strictly between that row's rank and the rank of whatever is next below it —
+/// see [`super::ranks`] — so the whole of a drag is one string on one row. That
+/// is what lets a drag on a list merged from several devices be written to the
+/// device that owns the row and to nobody else.
+///
+/// **The row it moves is left out of the search for the row under the gap.** It
+/// may be sitting in that gap already — a card put back roughly where it came
+/// from — and a row ranked between its neighbour and itself would have moved
+/// nowhere at all.
+///
+/// **A neighbour that has gone since the list was drawn is not a refusal.** A
+/// viewer sends the list it drew and a Conversation can be closed and swept from
+/// under it, the way an id in the order this replaces could name a row that was
+/// no longer there. There is nothing left to rank against, so the list stays as
+/// the rest of it says and the call is taken. An id naming no Conversation at
+/// all goes the same way: the `UPDATE` finds nothing and writes nothing.
+///
+/// **The rank this writes carries `device`**, which is the device that owns the
+/// row: a device ranks its own Conversations, and a hub that computes a key for
+/// somebody else's hands it to that device to write. So the moved row comes back
+/// with its own device's suffix whoever its neighbours belong to.
+///
+/// Read and written in one transaction, for [`started`]'s reason: two rows
+/// dropped into the same gap a moment apart would otherwise read the same pair
+/// of neighbours and mint the same key, and they would carry the same suffix.
+pub async fn rank_conversation(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    below: Option<i64>,
+    device: &str,
+) -> Result<()> {
+    let mut tx = super::writing(pool, "ranking a Conversation").await?;
+
+    // The rank of the row it was dropped under, where a row was named at all.
+    let above: Option<String> = match below {
+        None => None,
+        Some(neighbour) => {
+            let rank: Option<String> = sqlx::query_scalar(
+                "SELECT rank FROM conversations WHERE id = ? AND rank IS NOT NULL",
+            )
+            .bind(neighbour)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("reading the rank of Conversation {neighbour}"))?;
+
+            // Gone, or from a database nothing has ranked yet. Either way there
+            // is nothing to rank against — see above.
+            let Some(rank) = rank else {
+                return Ok(());
+            };
+
+            Some(rank)
+        }
+    };
+
+    // And the rank under the gap: the lowest rank above the neighbour's, the
+    // moved row itself left out. `COALESCE` is what makes the two cases one
+    // query — every rank sorts above the empty string, so a top of the list
+    // asks for the first rank there is.
+    let under: Option<String> = sqlx::query_scalar(
+        "SELECT rank FROM conversations
+         WHERE rank IS NOT NULL AND id <> ? AND rank > COALESCE(?, '')
+         ORDER BY rank LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(above.as_deref())
+    .fetch_optional(&mut *tx)
+    .await
+    .context("reading the rank under where a Conversation was dropped")?;
+
+    let rank = super::ranks::between(above.as_deref(), under.as_deref(), device)?;
+
+    sqlx::query("UPDATE conversations SET rank = ? WHERE id = ?")
+        .bind(&rank)
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("ranking Conversation {conversation_id}"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("ranking Conversation {conversation_id}"))?;
+
+    Ok(())
 }
 
 /// How much work is on one Repo, counted by whether it is over.

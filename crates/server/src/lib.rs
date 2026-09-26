@@ -395,6 +395,17 @@ pub(crate) struct AppState {
     /// exist, the way **Reset key** is refused where there is no key.
     devices: Option<device::Devices>,
 
+    /// What this device is called by every record written through this state:
+    /// the Device Id, which is the suffix on every Rank a start mints — see
+    /// [`store::rank_the_conversations`] and [`device::Devices::id`].
+    ///
+    /// The id off the handle above where there is one, and [`STATED_DEVICE`]
+    /// where there is not: a router stood up without a Data Directory invented
+    /// no identity, and a rank still has to say whose it is. Which is a test's
+    /// router rather than a served one — a serve has both, and the rank a
+    /// Conversation is started with there is this machine's.
+    device: String,
+
     /// The Workbench Key the gate in front of this router stands on, where it
     /// stands on one — see [`key`].
     ///
@@ -455,6 +466,14 @@ pub(crate) struct AppState {
     /// already names, so the keep-set holds it whenever the sweep looks.
     checkouts: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// What a router stood up without a Data Directory calls itself where a record
+/// it writes has to name a device.
+///
+/// Every router but the served one — see [`AppState::device`]. Shaped like the
+/// ids [`device`] invents, because what reads one is a comparison and a string
+/// of some other shape would be a device no rank could be told apart from.
+const STATED_DEVICE: &str = "00000000000000000000000000000000";
 
 /// The port Verkstead is served on when nobody has said otherwise, and so the
 /// port `tailscale serve` is put in front of — see the Remote access pane in
@@ -1207,6 +1226,15 @@ fn standing(
         // pane reads — see [`remote`].
         remote,
 
+        // And what this Verkstead is called by everything it writes down, which
+        // is the id off that same handle — see [`AppState::device`]. Taken off
+        // it rather than passed in beside it, there being one identity and no
+        // choice to make about which of the two a record names.
+        device: devices.as_ref().map_or_else(
+            || STATED_DEVICE.to_owned(),
+            |devices| devices.id().to_owned(),
+        ),
+
         // And what this Verkstead is, which the Devices section of that same
         // pane draws — see [`device::Devices`]. `None` on every router that was
         // not stood up over a Data Directory: an identity is invented in one,
@@ -1754,6 +1782,18 @@ pub async fn run_on_keyed(
                 data_dir.display()
             )
         })?;
+
+    // And the Conversations of a database written before the sidebar was ordered
+    // by a Rank, ranked in the order that sidebar has been drawing them in — see
+    // [`store::rank_the_conversations`]. Here rather than inside the open, which
+    // is the one rewrite that cannot be: a rank carries the device that issued
+    // it, and the identity above is read out of the very pool the open is
+    // running on. So it goes at the first moment both are in hand, and before
+    // the routes are stood up at the foot of this function: a sidebar answered
+    // ahead of it would be one with rows nothing could drag.
+    store::rank_the_conversations(&pool, device.id())
+        .await
+        .context("ranking the Conversations of a database written before there were ranks")?;
 
     // And the listener that presents it, taken now: the peer port is the second
     // address this start claims, and one somebody else is already on is a

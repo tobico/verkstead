@@ -37,6 +37,10 @@ use verkstead_render::{
 };
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A router over a fresh database, and the directory holding both it and every
 /// checkout a test makes.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
@@ -67,7 +71,7 @@ async fn grilling_alongside(
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "code-pane")
+    let conversation = store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -269,7 +273,7 @@ async fn a_conversation_with_no_worktree_has_no_roots() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1462,7 +1466,7 @@ async fn a_conversation_with_no_worktree_lists_no_files() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1605,7 +1609,7 @@ async fn a_conversation_with_no_worktree_marks_nothing() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

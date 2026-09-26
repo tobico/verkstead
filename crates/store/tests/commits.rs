@@ -18,6 +18,10 @@ use verkstead_store::{
     open_database, record_commit, recorded_commits, register_repo, start_conversation, timeline,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -32,7 +36,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 async fn conversation(pool: &SqlitePool) -> (i64, i64) {
     let repo = registered(pool, "verkstead").await;
 
-    let id = start_conversation(pool, repo, "rate-limiting")
+    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -278,7 +282,7 @@ async fn one_commit_can_be_on_two_conversations() {
     let (one, own) = conversation(&pool).await;
 
     let other = registered(&pool, "other").await;
-    let two = start_conversation(&pool, other, "stacked")
+    let two = start_conversation(&pool, other, "stacked", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

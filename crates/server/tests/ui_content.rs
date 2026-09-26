@@ -49,6 +49,10 @@ use verkstead_server::{
     router_reading_tailscale, store,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation every Set in this file is asked from.
 ///
 /// Every Set is asked from one, so a test that wants a Set needs somewhere for it
@@ -81,7 +85,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1893,7 +1897,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // adopting and nothing at the Repo level supplies them, so unchosen is the
     // state this page opens in. The Repo's path is the one thing here the
     // filesystem decided, and it is pinned like every other.
-    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp")
+    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1925,6 +1929,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             head: "rate-limiting".to_owned(),
             base: "main".to_owned(),
         },
+        THIS_DEVICE,
     )
     .await
     .unwrap()
@@ -2010,7 +2015,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_health(&get(&app, "/api/ui/profiles").await),
     );
 
-    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2069,7 +2074,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Started the way the New conversation button starts one, on a name nobody
     // has settled on: the row the viewer draws from this one is the Draft, which
     // is what a Conversation whose branch name is still Verkstead's own reads as.
-    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel")
+    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2080,7 +2085,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // by pressing the button, for the reason the Repos are registered this way —
     // going in the front way means a real repository to make a real worktree in,
     // which is `conversations.rs`'s subject and not this one's.
-    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries")
+    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2246,7 +2251,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Answered through `submit_response`, which is the one path a Response takes
     // — pressing the pick into the store by hand would write a fixture no Answer
     // could ever produce. What moves the Conversation is the tail landing, below.
-    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
+    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2452,7 +2457,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // holds, read every time the Conversation is. So the backlog is written into
     // a temporary directory and the path is pinned afterwards, the way every
     // other filesystem reading here is.
-    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
+    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2634,7 +2639,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It carries a Pause Event as well, written by hand the way a Verkstead of
     // before wrote one: those are the record of what happened, nothing rewrites
     // them, and a Timeline holding one still has to draw.
-    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks")
+    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2735,7 +2740,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Recorded rather than found, exactly as the commits above are recorded
     // rather than watched for: what a pull request does to a Conversation is
     // this file's subject, and whether `gh` can find one is `src/github.rs`'s.
-    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2904,7 +2909,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Conversation is about the one its branch wrote — so there is a real
     // commit here and a real roadmap written over it. Both are pinned
     // afterwards, the way every other filesystem reading here is.
-    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap")
+    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -4213,7 +4218,7 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "code-pane")
+    let conversation = store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

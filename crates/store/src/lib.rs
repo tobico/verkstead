@@ -46,10 +46,10 @@ mod migrations;
 mod pairings;
 mod pauses;
 mod pending_steers;
-mod placements;
 mod profiles;
 mod pull_requests;
 mod push;
+mod ranks;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -90,14 +90,14 @@ pub use conversations::{
     Switched, Taking, TimelineEvent, Work, adopted_pull_request, adopting, ask, asked_from,
     closable, close_conversation, conversation_branch, conversations, follow_branch,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
-    open_set, opened_at, pick_direction, picked_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
-    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
-    skip_review, stacks_on, stage_roadmap, start_adoption, start_building, start_conversation,
-    start_grilling, start_implementing, start_pull_request_adoption, start_stage,
-    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, timeline,
-    unfinished_conversations, waiting, work_on_repo,
+    open_set, opened_at, pick_direction, picked_direction, rank_conversation, record_backlog,
+    record_handoff, record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch,
+    rename_branch, resolve_conflicts, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, set_state, settle_naming,
+    skip_grilling, skip_review, stacks_on, stage_roadmap, start_adoption, start_building,
+    start_conversation, start_grilling, start_implementing, start_pull_request_adoption,
+    start_stage, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
+    timeline, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
@@ -114,13 +114,13 @@ pub use members::{
     member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
     record_member, record_renewal, renewal_acknowledged,
 };
+pub use migrations::rank_the_conversations;
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
     Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
-pub use placements::place_conversations;
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
     create_profile, delete_profile, load_profile, profiles, update_profile,
@@ -802,14 +802,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // none of it is an Event.
     wrap_up::apply_schema(pool).await?;
 
-    // And where the human put each Conversation in the sidebar, which hangs off
-    // the Conversations alone for that reason too — an order is a fact about the
-    // list rather than a thing that happened to the work.
-    placements::apply_schema(pool).await?;
-
     // And which of them the human has put away, which the sidebar reads the
-    // same way and for the same reason: what a list draws is not a fact about
-    // the work either.
+    // same way it reads the order it draws them in: what a list shows is not a
+    // fact about the work, any more than the order is. There is no table here
+    // for that order — it is a column on the Conversation itself, its **Rank**,
+    // see [`ranks`].
     archives::apply_schema(pool).await?;
 
     // And what a Cleanup has since taken back out of the ones that were put away

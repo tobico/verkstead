@@ -13,6 +13,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{Event, open_database, register_repo, start_conversation, timeline};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -30,7 +34,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("nothing was registered at that path yet")
         .id;
 
-    start_conversation(pool, repo, "rate-limiting")
+    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -111,7 +115,7 @@ async fn a_manual_task_belongs_to_the_conversation_it_is_on() {
         .unwrap()
         .unwrap()
         .id;
-    let other = start_conversation(&pool, repo, "deferred-asks")
+    let other = start_conversation(&pool, repo, "deferred-asks", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

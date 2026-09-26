@@ -31,6 +31,10 @@ use tower::ServiceExt;
 use verkstead_server::pipe;
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation every Set here is asked from, which is the first one made
 /// in a database with nothing in it.
 const ASKING_FROM: i64 = 1;
@@ -130,7 +134,7 @@ async fn a_conversation(pool: &SqlitePool) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, repo.id, "named-pipe")
+    let conversation = store::start_conversation(pool, repo.id, "named-pipe", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

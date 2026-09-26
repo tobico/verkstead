@@ -49,7 +49,7 @@ pub use conversations::{
     CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, NoticeEvent, OpenPullRequest,
+    NewCompanion, NewConversation, NewPullRequestAdoption, NewRank, NoticeEvent, OpenPullRequest,
     OpenPullRequestRepo, Parked, PendingSteerView, PinnedEvent, ProposalView, PullRequestCheck,
     PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,

@@ -25,6 +25,10 @@ use verkstead_render::{
 };
 use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A directory holding one registered repository, a Conversation drafting on
 /// it, and the app over both.
 ///
@@ -307,7 +311,7 @@ async fn another_conversations_attachment_is_not_this_ones_to_remove() {
     let (_elsewhere, dir, app, pool, mine) = drafting().await;
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
-    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere")
+    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
