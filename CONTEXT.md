@@ -453,7 +453,9 @@ standing behind any of it.
 **The page reaches the app over a preload bridge and over nothing else**:
 `window.verkstead`, which the app puts on its own window, exposing the platform,
 the settings read and written, the log file opened, and the **Startup
-Registration** read and written. **A page with no bridge is a page with no
+Registration** read and written — and carrying, in the other direction and from
+every page rather than from this section, what the page says its heads are drawn
+in (**Window Decorations**). **A page with no bridge is a page with no
 Desktop section**: the same document served to a browser on this machine, or to
 a phone over the tailnet, carries no preload, and that absence reads as *this is
 not the app* rather than as something that failed — which is the whole mechanism
@@ -479,6 +481,59 @@ running in the Dock, and **Show tray icon** reads as the menu bar, that being
 where the icon goes.
 _Avoid_: preferences, app config, device settings, desktop configuration, the
 settings page (that is the whole page, and this is one section of it)
+
+**Window Decorations**:
+The window the desktop app draws has no title bar, and what stands where one
+would have been is the platform's own controls: the traffic lights inset to the
+left of the wordmark on a Mac, the controls overlay at the top-right corner on
+Windows and Linux (ADR-0020). Controls drawn by the page were rejected — the
+platform's keep Windows' snap layouts and a Mac's traffic lights as that
+platform draws them, and neither is worth redrawing by hand. `titleBarStyle:
+"hidden"` is the whole of what asks for it, and there is no platform branch
+behind it: a Mac reads that option as the two platforms with an overlay do, and
+what it does with the overlay beside it is nothing.
+**The strip is the app's to paint and the page's to say what in**: the paper a
+head is drawn on, the ink its marks are in, and how tall the head's band stands,
+pushed over the preload bridge on load and again at every flip of the machine's
+colour scheme, and the overlay recoloured in the run it is pushed in rather than
+at the next launch. **Two fixed colours in the app were rejected** — there is a
+light scheme and a dark one, a head is drawn on the paper of whichever the
+machine is in, and an overlay that did not follow would be a strip of the wrong
+colour welded to the corner of the window. The height travels for a neighbouring
+reason: a band is written in rem, what a rem is is the browser's own answer, and
+a human who has told theirs to draw text larger has a taller head than any
+constant compiled into the app could know about.
+**Every pane header is the region the window is dragged by**, everything
+pressable inside it excepted — said once over the header's descendants rather
+than marked control by control, so the next control put in a head is not the one
+nobody marked. They are one component, so the sidebar's wordmark, the timeline's
+name, the details pane, the settings, the composer and the Set sheet all move
+the window without any of them having been told about it. The text in a header
+stops being selectable, which is the price rather than an oversight: a bar the
+pointer sweeps a selection across cannot also be the bar the window moves by.
+**And keeping clear of the controls is the frame's rather than any pane's**,
+which header stands at an edge of the *window* being a fact about the layout:
+the page reads what the controls left it — `getTitlebarAreaRect()`, which
+answers with the strip across the top that is still the page's, so what they
+took is the slivers either side of it — hands both insets to the frame, and the
+header at each edge is padded by that much. One sum and no platform in it, a
+Mac's traffic lights coming out as a left inset and the other two platforms'
+controls as a right one. Read again whenever the window changes shape, because
+the rectangle at load can disagree with the window it is in; and the one pane a
+narrow window shows is at both edges at once.
+**A page with no header gets a bare drag bar** of the same band: the onboarding
+wizard, the no-such-page, and the moment before the verdict about this machine
+lands. A window that cannot be moved for the length of any of them is the same
+hole three times over, which is why it is one bar in three places rather than
+three bars.
+**And none of it reaches a browser.** A drag region is Chromium's own property
+and only a window with no title bar reads one; every inset is nought where there
+is no overlay to ask, so nothing is padded and nothing is moved; the bare bar is
+drawn on the bridge being there, the way the **Desktop** section of the settings
+is; and the colours cross that same bridge, which a browser on this machine and
+a phone on the tailnet do not have. The same document, drawn the same way,
+telling nobody.
+_Avoid_: title bar, window chrome, custom controls, header bar, frameless
 
 **Workbench Key**:
 The one long-lived secret that says a request is the human's browser rather

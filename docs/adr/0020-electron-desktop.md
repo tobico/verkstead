@@ -69,19 +69,20 @@ and the roll at a few megabytes the Rust app gave it.
 ## The window
 
 **One window, decorated by the page.** It loads the workbench off the
-loopback with nothing about the viewer changed to draw inside it, and it is
-frameless: the platform's own controls stay — the traffic lights inset to
-the left of the Wordmark on a Mac, the controls overlay at the top-right
-corner on Windows and Linux, coloured from the page and recoloured when the
-theme flips — and the pane heads are the drag region, their buttons excepted.
-The frame is what keeps the outermost heads clear of the controls, reading the
-overlay's rectangle, which is also what a narrow window's single pane gets. A
-page with no pane head — onboarding, the no-such-page — is given a bare drag
-bar of the same height, inside the app only. The menu bar is hidden on
-Windows and Linux with its shortcuts kept; a Mac keeps the application menu it
-cannot do without. Links off the workbench open in the system browser, and
-the window never navigates away from localhost. Its size and position are
-remembered between runs.
+loopback with nothing about the viewer changed to draw inside it, and it has
+no title bar: the platform's own controls stand where one would have been —
+the traffic lights inset to the left of the Wordmark on a Mac, the controls
+overlay at the top-right corner on Windows and Linux, coloured and sized from
+the page and recoloured when the scheme flips — and the pane heads are the
+drag region, their buttons excepted. The frame is what keeps the outermost
+heads clear of the controls, reading the overlay's rectangle, which is also
+what a narrow window's single pane gets. A page with no pane head — the
+onboarding wizard, the no-such-page, and the moment before the verdict about
+this machine lands — draws a bare drag bar of the same height, inside the app
+only. The menu bar is hidden on Windows and Linux with its shortcuts kept; a
+Mac keeps the application menu it cannot do without. Links off the workbench
+open in the system browser, and the window never navigates away from
+localhost. Its size and position are remembered between runs.
 
 **Closing the window is a choice, and the choice is one control.** The Brief
 named close-to-tray and warn-before-closing as two checkboxes that exclude
