@@ -111,6 +111,7 @@ impl Listening {
                 peer::Members::none(),
                 peer::joining::Joins::none(),
                 verkstead_server::nudge::Nudges::new(),
+                Router::new(),
             )
         })
     }
@@ -153,6 +154,7 @@ impl Listening {
                 peer::Members::stated(1),
                 peer::joining::Joins::none(),
                 verkstead_server::nudge::Nudges::new(),
+                Router::new(),
             )
         })
     }
@@ -179,6 +181,7 @@ impl Listening {
                     peer::Members::none(),
                     peer::joining::Joins::none(),
                     verkstead_server::nudge::Nudges::new(),
+                    Router::new(),
                 )
             },
             Some(handshake),
@@ -1081,6 +1084,7 @@ fn gated_on(id: &str, pool: SqlitePool) -> Listening {
             members.clone(),
             peer::joining::Joins::none(),
             verkstead_server::nudge::Nudges::new(),
+            Router::new(),
         )
         .merge(peer::members_only(
             Router::new().route(

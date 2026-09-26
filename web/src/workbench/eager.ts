@@ -47,6 +47,17 @@ import { createSignal } from "solid-js";
 
 import { toast } from "../Toasts";
 import type { ConversationEntry, ConversationView } from "../api/types";
+import type { Device } from "../reaching";
+
+/// Which Conversation an entry is about: the device it lives on and its own id.
+///
+/// Ids are each device's own and collide by construction (see `reaching.ts`), so
+/// an overlay keyed by the id alone would draw a close pressed on a member's
+/// Conversation 4 over this device's Conversation 4 — on the very list the press
+/// was not about.
+function of(device: Device, conversation: number): string {
+  return `${device ?? ""}/${conversation}`;
+}
 
 /// What the presses have said about one Conversation, ahead of the server.
 ///
@@ -54,6 +65,15 @@ import type { ConversationEntry, ConversationView } from "../api/types";
 /// different rows: Close says the first, Archive and Unarchive say the second,
 /// and Close and archive says both in one press.
 export type Said = {
+  /// Which device the Conversation it is about lives on, `null` for this one.
+  ///
+  /// Said on the entry as well as spelled into its key, because the two things
+  /// that read this table read it two ways: [`pressed`] is handed a device and
+  /// looks one entry up, and [`pressedRows`] walks the lot of them and has to
+  /// tell whose each is. Taking that back off the entry's `row` would be
+  /// reading an id that means something else on every other device.
+  device: Device;
+
   /// It is closed. Absent where no press here has said so, which is the only
   /// two values there are: nothing closes a Conversation back open.
   closed?: true;
@@ -95,7 +115,7 @@ let answered = 0;
 /// The value `dataUpdatedAt` last had, for telling an answer from a redraw.
 let answeredAt = 0;
 
-const [said, setSaid] = createSignal<Record<number, Said>>({});
+const [said, setSaid] = createSignal<Record<string, Said>>({});
 
 /// The press in flight on each Conversation, as something for the next one to
 /// queue behind. It answers when it landed, or `null` where it did nothing — so
@@ -103,7 +123,7 @@ const [said, setSaid] = createSignal<Record<number, Said>>({});
 ///
 /// Not a signal: nothing is drawn from it. What is drawn is [`said`], which the
 /// press writes the moment it is made.
-const running = new Map<number, Promise<number | null>>();
+const running = new Map<string, Promise<number | null>>();
 
 /// What is true of a Conversation the moment it is closed, in the fields the
 /// menu and the status line read.
@@ -145,8 +165,11 @@ const CLOSED_ROW = {
 /// nearly every moment: the reading is a store the whole pane is merged into
 /// (see `freshness.ts`), and handing back a copy of it would rebuild rows that
 /// have not moved.
-export function pressed(view: ConversationView): ConversationView {
-  const over = said()[view.id];
+export function pressed(
+  device: Device,
+  view: ConversationView,
+): ConversationView {
+  const over = said()[of(device, view.id)];
   if (over === undefined) return view;
 
   return {
@@ -172,8 +195,11 @@ export function pressedRows(
   const ids = Object.keys(over);
   if (ids.length === 0) return rows;
 
+  // This device's own entries throughout: the sidebar lists the work being done
+  // here, whichever Conversation is open beside it, so a press made on a
+  // member's says nothing about any row on it.
   const drawn = rows.flatMap((row) => {
-    const on = over[row.id];
+    const on = over[of(null, row.id)];
     if (on === undefined) return [row];
     if (on.archived === true && !archived) return [];
 
@@ -183,14 +209,23 @@ export function pressedRows(
   // And the one that has to be put back rather than left alone. At the top,
   // which is where a Conversation the order says nothing about goes here and on
   // the server both.
-  const back = ids
-    .map((id) => over[Number(id)]!.row)
-    .filter(
-      (row): row is ConversationEntry =>
-        row !== undefined &&
-        over[row.id]!.archived === false &&
-        !drawn.some((one) => one.id === row.id),
-    );
+  //
+  // Off this device's own entries, read under the very keys they were written
+  // under. A member's press is on the same list of presses and carries a row of
+  // that member's Conversation — and an entry found by an id taken back off
+  // *that* row would be this device's press of the same number, ids colliding
+  // by construction (see [`of`]). Which would put a member's row on a list it
+  // is on no account of, under an id this device's own sidebar already means
+  // something else by.
+  const back = ids.flatMap((id) => {
+    const on = over[id]!;
+
+    if (on.device !== null || on.row === undefined || on.archived !== false) {
+      return [];
+    }
+
+    return drawn.some((one) => one.id === on.row!.id) ? [] : [on.row];
+  });
 
   return back.length === 0 ? drawn : [...back, ...drawn];
 }
@@ -233,13 +268,11 @@ export function caughtUp(readAt: number): void {
   }
 
   const over = said();
-  const read = Object.keys(over)
-    .map(Number)
-    .filter((id) => {
-      const landed = over[id]!.landed;
+  const read = Object.keys(over).filter((id) => {
+    const landed = over[id]!.landed;
 
-      return landed !== undefined && landed < answered;
-    });
+    return landed !== undefined && landed < answered;
+  });
 
   if (read.length === 0) return;
 
@@ -277,11 +310,17 @@ export function rowFor(view: ConversationView): ConversationEntry {
 
 /// One press whose outcome the page is already drawing.
 export type Press<Outcome> = {
-  /// Which Conversation it is about.
+  /// Which Conversation it is about, and which device that Conversation lives
+  /// on — see [`of`], which is why both are asked for.
+  device: Device;
   conversation: number;
 
   /// What it says is true of that Conversation, from this moment.
-  says: Said;
+  ///
+  /// Without the device, which the press already named above: an entry carries
+  /// one so that the whole table can be walked, and a press repeating it here
+  /// would be two places for the one fact to be said differently.
+  says: Omit<Said, "device">;
 
   /// The request itself, which runs behind the page.
   post: () => Promise<Outcome>;
@@ -304,13 +343,17 @@ export type Press<Outcome> = {
 /// Make one: what it says goes on the page now, and the request goes out behind
 /// whatever is already in flight on the same Conversation.
 export function eagerly<Outcome>(press: Press<Outcome>): void {
-  const id = press.conversation;
+  const id = of(press.device, press.conversation);
 
   setSaid((standing) => {
     // Whatever a press before this one said, and this press over it — but not
     // when that one landed. This one has not, and an entry that came up landed
     // would be released by the very reads it is meant to be ahead of.
-    const over: Said = { ...standing[id], ...press.says };
+    const over: Said = {
+      ...standing[id],
+      ...press.says,
+      device: press.device,
+    };
     delete over.landed;
 
     return { ...standing, [id]: over };
@@ -319,7 +362,7 @@ export function eagerly<Outcome>(press: Press<Outcome>): void {
   // Nothing in front of it: a moment long past rather than a press, so the one
   // being made now goes straight out.
   const queued = running.get(id) ?? Promise.resolve<number | null>(0);
-  const mine = queued.then((at) => (at === null ? null : made(press)));
+  const mine = queued.then((at) => (at === null ? null : made(id, press)));
   running.set(id, mine);
 
   void mine.then((at) => {
@@ -340,15 +383,18 @@ export function eagerly<Outcome>(press: Press<Outcome>): void {
 /// count it landed at, or `null` where it did nothing — which is both what the
 /// press behind it waits on and what a read has to be later than to have caught
 /// up with it.
-async function made<Outcome>(press: Press<Outcome>): Promise<number | null> {
+async function made<Outcome>(
+  id: string,
+  press: Press<Outcome>,
+): Promise<number | null> {
   try {
     const refused = press.refusal(await press.post());
     if (refused) {
-      undo(press.conversation, refused);
+      undo(id, refused);
       return null;
     }
   } catch (error) {
-    undo(press.conversation, press.fell(error as Error));
+    undo(id, press.fell(error as Error));
     return null;
   }
 
@@ -376,7 +422,7 @@ async function made<Outcome>(press: Press<Outcome>): Promise<number | null> {
 
 /// The press behind an entry landed, at the read count given, so what it said is
 /// the list's to let go of from here — see [`caughtUp`].
-function marked(id: number, at: number): void {
+function marked(id: string, at: number): void {
   setSaid((standing) => {
     const over = standing[id];
 
@@ -396,12 +442,12 @@ function marked(id: number, at: number): void {
 /// press has just failed to reach. A refusal is the server's own word about
 /// where the Conversation stands, which is the one thing worth more than
 /// anything the page had decided about it.
-function undo(id: number, why: string): void {
+function undo(id: string, why: string): void {
   forgetOne(id);
   toast(() => why);
 }
 
-function forgetOne(id: number): void {
+function forgetOne(id: string): void {
   setSaid((standing) => {
     const rest = { ...standing };
     delete rest[id];

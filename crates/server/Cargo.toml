@@ -75,18 +75,41 @@ notify = "8"
 # crate that type comes from — shared with reqwest and axum, so it is the same
 # request all the way out.
 http = "1"
+# The upgraded connection a relayed socket is bridged over (ADR 0020) — see
+# `src/relaying/bridging.rs`. Named here for one type —
+# `hyper::upgrade::OnUpgrade` — which is how the browser's half of an upgrade is
+# taken out of the request, the way axum's own WebSocket extractor takes it.
+# Already in the tree under axum and reqwest both, so what this line adds to a
+# build is nothing, and no feature is asked for: `hyper::upgrade` is ungated.
+hyper = { version = "1", default-features = false }
+# And what makes that half readable: hyper's own IO traits are not tokio's, and
+# `TokioIo` is the wrapper between them — the same one reqwest hands its own
+# upgraded connection back through, so the two ends of a bridge are the one kind
+# of stream. Here already under reqwest, with `tokio` named because that is the
+# module it lives in.
+hyper-util = { version = "0.1", features = ["tokio"] }
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }
-# Sending the push, and asking GitHub whether a newer Verkstead has been
-# released — between them the whole of what Verkstead says to the public
+# Sending the push, asking GitHub whether a newer Verkstead has been
+# released, and dialling the devices this one is linked to — the first two
+# being the whole of what Verkstead says to the public
 # internet. Default
 # features are off to keep OpenSSL out of the build: rustls, with the roots it
 # bundles, is all that reaching an https endpoint takes. `json` is what reads
 # GitHub's answer, and costs nothing beyond the serde_json already here.
+#
+# And `stream` is the relay (ADR 0020) — see `src/relaying.rs`. A call put to a
+# member is the browser's own request carried through, and an attachment is
+# thirty-two megabytes of it, so the hop reads the body as a stream and writes
+# the answer back as one rather than holding either. It adds `tokio-util`, and
+# makes `futures-util` — here already under `tokio-stream` — reqwest's too. The
+# one other name it puts in the lock file, `wasm-streams`, is reqwest's browser
+# target and is built for nothing Verkstead is.
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
+    "stream",
 ] }
 # The viewer built into the binary — see `src/viewer.rs`. `mime-guess` is what
 # names each file's content type on the way out; `interpolate-folder-path` is what

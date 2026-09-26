@@ -30,6 +30,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Sheet } from "../set/Sheet";
 import { Unreadable } from "../set/Unreadable";
 import { PaneHead } from "./PaneHead";
@@ -41,11 +42,14 @@ export function Asked(props: {
   asked: QuestionSetEvent | UnreadableSetEvent;
   back: () => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const set = useReading(() => ({
     // Under the Set's own id rather than the Event's, so that a Set answered
-    // anywhere is the same Set here: the key is what a Nudge invalidates.
-    queryKey: ["set", String(props.asked.set_id)],
-    queryFn: () => loadSet(String(props.asked.set_id)),
+    // anywhere is the same Set here: the key is what a Nudge invalidates. And
+    // under the device with it, a Set id being each device's own.
+    queryKey: keyOf(device(), "set", String(props.asked.set_id)),
+    queryFn: () => loadSet(device(), String(props.asked.set_id)),
 
     // Merged into what is already drawn rather than replacing it, which is what
     // keeps a re-read from closing the folds the reader has opened down the

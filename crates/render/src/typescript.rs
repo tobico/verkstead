@@ -461,4 +461,9 @@ fn the_viewers_types_are_written_from_these() {
     // moved, which is what decides which of the reads above is worth making
     // again. It hands over nothing itself — see `Nudge`.
     verkstead_schema::Nudge::export_all(&config).unwrap();
+
+    // And the envelope it goes down the stream in, which says whose news it is:
+    // this device's own, or a member's, re-announced under the Device Id the hub
+    // heard it from (ADR-0020, *The opened device relays*).
+    verkstead_schema::Nudged::export_all(&config).unwrap();
 }

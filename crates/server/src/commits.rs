@@ -885,6 +885,8 @@ pub(crate) fn patch(repo: &Path, sha: &str) -> Option<String> {
 mod tests {
     use std::process::{Command, Stdio};
 
+    use verkstead_schema::Nudged;
+
     use super::*;
 
     /// A repository with one commit on `main`, and the tools to add more.
@@ -2066,7 +2068,10 @@ mod tests {
         assert!(
             matches!(
                 listening.try_recv(),
-                Ok(Nudge::Commit { conversation: told }) if told == conversation
+                Ok(Nudged {
+                    device: None,
+                    moved: Nudge::Commit { conversation: told },
+                }) if told == conversation
             ),
             "and the pages were told to look again",
         );

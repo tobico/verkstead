@@ -4,6 +4,14 @@
 //! of the Rust the server fills them in from. Nothing here declares a shape of
 //! its own: a hand-written interface is a second opinion about the wire, and
 //! the whole point of generating them is that there is only ever one.
+//!
+//! **And every call says which device it is for.** A Conversation may live on a
+//! member of this device's cluster, and it is reached through this one: the
+//! browser asks the origin it already has, this device puts the call to the
+//! member, and the answer comes back untouched (ADR-0020, *The opened device
+//! relays*). So everything a member serves takes a `Device` as its first
+//! argument — `null` being this device itself — and [`on`] below is the one
+//! place a path learns about it, so that no caller anywhere composes one.
 
 import type {
   AbandonedRepo,
@@ -102,6 +110,37 @@ import type {
   TranscriptView,
   UpdateNotice,
 } from "./types";
+import type { Device } from "../reaching";
+
+/// The prefix a call for a member stands under, and the namespace it takes the
+/// place of. The server's own two constants — see `relaying.rs`, which is the
+/// device in the middle — said again here because this is the end that writes
+/// them.
+const MEMBERS = "/api/ui/members/";
+const NAMESPACE = "/api/ui";
+
+/// Where a call stands: the path itself on this device, and the same path under
+/// the member's prefix for another's.
+///
+/// **The one place `/api/ui/…` becomes `/api/ui/members/{device}/…`.** The
+/// prefix takes the place of `/api/ui`, so the far end sees the path the browser
+/// would have written locally, and nothing of the hop shows at either end of it.
+///
+/// Every path in this module starts at that namespace, which is what makes the
+/// swap a swap rather than a join: there is no call of the viewer's that is not
+/// one a member could serve.
+function on(device: Device, path: string): string {
+  return device === null
+    ? path
+    : `${MEMBERS}${encodeURIComponent(device)}${path.slice(NAMESPACE.length)}`;
+}
+
+/// Whether a path is one this device puts to a member rather than answers
+/// itself — which is the one thing [`retrying`] needs of it, and is a fact
+/// about the path [`on`] wrote.
+function relayed(path: string): boolean {
+  return path.startsWith(MEMBERS);
+}
 
 /// A refusal from the server, in the shape both halves refuse in.
 ///
@@ -112,11 +151,17 @@ export class RefusedError extends Error {
   readonly status: number;
   readonly violations: NonNullable<ApiError["violations"]>;
 
-  constructor(status: number, refusal: ApiError) {
+  /// And whether it came back from a call put to a member, which is what
+  /// [`retrying`] reads: a refusal made on the way to another machine costs
+  /// something to make again that a local one does not.
+  readonly relayed: boolean;
+
+  constructor(status: number, refusal: ApiError, relayed = false) {
     super(refusal.error);
     this.name = "RefusedError";
     this.status = status;
     this.violations = refusal.violations ?? [];
+    this.relayed = relayed;
   }
 }
 
@@ -132,16 +177,52 @@ export function timedOut(error: unknown): boolean {
 /// the app is retried by, said here because the rule beside it is.
 const RETRIES = 3;
 
+/// The statuses a relayed call is refused with that are a verdict rather than
+/// a bad moment — see [`retrying`], which is where they are read.
+///
+/// `502` is the hop's own and nothing else's: it is what this device answers
+/// when a member answered at none of the addresses it advertised, and no route
+/// in the namespace at the far end ever mints one. `400` and `404` are the two
+/// a Device Id earns before anything is dialled — this device's own id, and an
+/// id that is no member's — and are the far end's own refusals besides, a
+/// Conversation it has no record of among them. None of the three is worth a
+/// second go: the first is a machine that is not there, and the other two are
+/// answers.
+const FINAL_FROM_A_MEMBER = [400, 404, 502];
+
 /// Whether a read that failed is worth making again. The app's retry rule, set
 /// as the query client's default in `App.tsx`.
 ///
-/// The ordinary three attempts, minus the one case where trying again is worse
-/// than not: a read that gave up on its own deadline. Retrying that is thirty
-/// seconds of nothing, three more times, before the page is allowed to say
-/// anything — and what it would say is what it already knew. The error is the
-/// answer, and on the Conversation pane the error is what draws the way out.
+/// The ordinary three attempts, minus the two cases where trying again is worse
+/// than not.
+///
+/// **A read that gave up on its own deadline.** Retrying that is thirty seconds
+/// of nothing, three more times, before the page is allowed to say anything —
+/// and what it would say is what it already knew. The error is the answer, and
+/// on the Conversation pane the error is what draws the way out.
+///
+/// **And a member refusing by name** (ADR-0020, *The opened device relays*). A
+/// call put to a member walks every address that device advertised, at two
+/// seconds apiece, and marks its row unreachable when none of them answers — so
+/// three more goes at a machine that is switched off is half a minute of blank
+/// page and four passes down the same dead list, to arrive at the sentence the
+/// first refusal already carried. A local refusal is still retried: it costs a
+/// round trip on the loopback, and the rule here is about what a second attempt
+/// costs rather than about how likely it is to help.
 export function retrying(attempts: number, error: unknown): boolean {
-  return !timedOut(error) && attempts < RETRIES;
+  if (timedOut(error)) {
+    return false;
+  }
+
+  if (
+    error instanceof RefusedError &&
+    error.relayed &&
+    FINAL_FROM_A_MEMBER.includes(error.status)
+  ) {
+    return false;
+  }
+
+  return attempts < RETRIES;
 }
 
 /// One Set, rendered, with where it stands — or the stored body where this
@@ -150,8 +231,8 @@ export function retrying(attempts: number, error: unknown): boolean {
 /// The id is whatever the URL held, unparsed: one that is not a number cannot
 /// name a Set, and the server answers for that the same way it answers for one
 /// that names no Set — a 404, which the page reads as "there isn't one".
-export function loadSet(id: string): Promise<SetReading> {
-  return get<SetReading>(`/api/ui/sets/${encodeURIComponent(id)}`);
+export function loadSet(device: Device, id: string): Promise<SetReading> {
+  return get<SetReading>(on(device, `/api/ui/sets/${encodeURIComponent(id)}`));
 }
 
 /// Answer a Set, which ends the wait the agent is holding on it.
@@ -161,22 +242,23 @@ export function loadSet(id: string): Promise<SetReading> {
 /// page has to say in words, and only a server that could not answer at all
 /// throws.
 export function submitResponse(
+  device: Device,
   id: number,
   response: Decided,
 ): Promise<Submitted> {
-  return post<Submitted>(`/api/ui/sets/${id}/response`, response);
+  return post<Submitted>(on(device, `/api/ui/sets/${id}/response`), response);
 }
 
 /// Close a Set unanswered: the human declaring that nobody is ever going to
 /// answer it. There is nothing to send but the Set's own id, which is in the
 /// path.
-export function lockSet(id: number): Promise<Locked> {
-  return post<Locked>(`/api/ui/sets/${id}/lock`);
+export function lockSet(device: Device, id: number): Promise<Locked> {
+  return post<Locked>(on(device, `/api/ui/sets/${id}/lock`));
 }
 
 /// The Repos Verkstead has been told about, by name.
-export function listRepos(): Promise<RepoEntry[]> {
-  return get<RepoEntry[]>("/api/ui/repos");
+export function listRepos(device: Device): Promise<RepoEntry[]> {
+  return get<RepoEntry[]>(on(device, "/api/ui/repos"));
 }
 
 /// Every branch of one registered Repo, local and remote-tracking both — which
@@ -184,8 +266,11 @@ export function listRepos(): Promise<RepoEntry[]> {
 ///
 /// Read out of git by the server every time it is asked: branches move without
 /// Verkstead hearing about it, so there is nothing here that could be kept.
-export function listBranches(repoId: number): Promise<string[]> {
-  return get<string[]>(`/api/ui/repos/${repoId}/branches`);
+export function listBranches(
+  device: Device,
+  repoId: number,
+): Promise<string[]> {
+  return get<string[]>(on(device, `/api/ui/repos/${repoId}/branches`));
 }
 
 /// What one registered Repo was last grilled with, judged as something to fill
@@ -197,8 +282,11 @@ export function listBranches(repoId: number): Promise<string[]> {
 /// For the page that asks those three questions before there is a Conversation
 /// to read the answers off. Read again whenever the repo changes, because the
 /// memory is the repo's: another repo is another answer.
-export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
-  return get<RepoPairingsView>(`/api/ui/repos/${repoId}/pairings`);
+export function loadRepoPairings(
+  device: Device,
+  repoId: number,
+): Promise<RepoPairingsView> {
+  return get<RepoPairingsView>(on(device, `/api/ui/repos/${repoId}/pairings`));
 }
 
 /// What one directory holds, for the dropdown a path field browses with.
@@ -214,14 +302,17 @@ export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
 /// missing, not a directory or unreadable is a line the dropdown draws where its
 /// rows would be, and most of those are the ordinary state of a field halfway
 /// through being typed into.
-export function listDirectory(path: string | null): Promise<DirectoryListing> {
+export function listDirectory(
+  device: Device,
+  path: string | null,
+): Promise<DirectoryListing> {
   const asking = new URLSearchParams();
 
   if (path !== null) {
     asking.set("path", path);
   }
 
-  return get<DirectoryListing>(`/api/ui/directories?${asking}`);
+  return get<DirectoryListing>(on(device, `/api/ui/directories?${asking}`));
 }
 
 /// Ask Verkstead to take on the repository at an absolute path.
@@ -230,8 +321,11 @@ export function listDirectory(path: string | null): Promise<DirectoryListing> {
 /// status: a path that names no repository is the server reading the path
 /// rather than failing to, and every refusal is a different sentence to put in
 /// front of the human.
-export function registerRepo(path: string): Promise<Registered> {
-  return post<Registered>("/api/ui/repos", { path });
+export function registerRepo(
+  device: Device,
+  path: string,
+): Promise<Registered> {
+  return post<Registered>(on(device, "/api/ui/repos"), { path });
 }
 
 /// Ask Verkstead to *make* a repository under `parent` and take it on.
@@ -252,11 +346,15 @@ export function registerRepo(path: string): Promise<Registered> {
 /// being nothing to make it as — and a GitHub failure after the local repository
 /// exists comes back as the Repo *and* the reason rather than as either.
 export function createRepo(
+  device: Device,
   parent: string,
   name: string,
   github: boolean,
 ): Promise<Created> {
-  return post<Created>("/api/ui/repos/new", { parent, name, github });
+  return post<Created>(
+    on(device, "/api/ui/repos/new"),
+    { parent, name, github },
+  );
 }
 
 /// Take one off the registry, which is an unregistering rather than a delete:
@@ -361,7 +459,9 @@ export function listConversations(): Promise<ConversationEntry[]> {
 /// Conversation that has gone is passed over on the other side, which is what a
 /// list drawn a moment ago is allowed to carry.
 export async function placeConversations(order: number[]): Promise<void> {
-  await refused(await sent("/api/ui/conversations/order", { order }));
+  const at = "/api/ui/conversations/order";
+
+  await refused(at, await sent(at, { order }));
 }
 
 /// Whether the sidebar is drawing what has been archived, and whether there is
@@ -384,7 +484,9 @@ export function showingArchived(): Promise<ShowingArchived> {
 /// The position rather than a flip, so what is sent is what the human is
 /// looking at. Answered with nothing at all, as the order is.
 export async function showArchived(showing: boolean): Promise<void> {
-  await refused(await sent("/api/ui/conversations/archived", { showing }));
+  const at = "/api/ui/conversations/archived";
+
+  await refused(at, await sent(at, { showing }));
 }
 
 /// How long this read is given before the browser gives up on it.
@@ -408,9 +510,12 @@ const READING_A_CONVERSATION = 30_000;
 /// The id is whatever the URL held, unparsed, as a Set's is: one that is not a
 /// number cannot name a Conversation, and the server answers for that the way it
 /// answers for one that names none.
-export function loadConversation(id: string): Promise<ConversationView> {
+export function loadConversation(
+  device: Device,
+  id: string,
+): Promise<ConversationView> {
   return get<ConversationView>(
-    `/api/ui/conversations/${encodeURIComponent(id)}`,
+    on(device, `/api/ui/conversations/${encodeURIComponent(id)}`),
     READING_A_CONVERSATION,
   );
 }
@@ -423,8 +528,8 @@ export function loadConversation(id: string): Promise<ConversationView> {
 /// link is the whole of how a browser does that: the server names it and says
 /// it is an attachment, so nothing here has to hold a megabyte of HTML in
 /// memory to hand it straight back to the page it came from.
-export function sharePath(id: number): string {
-  return `/api/ui/conversations/${id}/share`;
+export function sharePath(device: Device, id: number): string {
+  return on(device, `/api/ui/conversations/${id}/share`);
 }
 
 /// And the same file put where a link reaches it: one press builds the share
@@ -433,8 +538,13 @@ export function sharePath(id: number): string {
 /// A request rather than a path, unlike the download above, because what comes
 /// back is where it went — and because it costs something: a gist is made in
 /// somebody's account, and every way that can be refused has a name.
-export function publishShare(id: number): Promise<SharePublished> {
-  return post<SharePublished>(`/api/ui/conversations/${id}/share/publish`, {});
+export function publishShare(
+  device: Device,
+  id: number,
+): Promise<SharePublished> {
+  return post<SharePublished>(
+    on(device, `/api/ui/conversations/${id}/share/publish`), {},
+  );
 }
 
 /// And the whole of it in one press: the same publish, and a comment carrying
@@ -445,8 +555,13 @@ export function publishShare(id: number): Promise<SharePublished> {
 /// reviewing the work, and where that is is the server's to know. What comes
 /// back says how far it got: where each comment landed, and which pull request
 /// missed out.
-export function shareToPullRequests(id: number): Promise<ShareCommented> {
-  return post<ShareCommented>(`/api/ui/conversations/${id}/share/comment`, {});
+export function shareToPullRequests(
+  device: Device,
+  id: number,
+): Promise<ShareCommented> {
+  return post<ShareCommented>(
+    on(device, `/api/ui/conversations/${id}/share/comment`), {},
+  );
 }
 
 /// What one session printed, whole.
@@ -454,8 +569,14 @@ export function shareToPullRequests(id: number): Promise<ShareCommented> {
 /// Fetched by the pane that shows it rather than carried by the Conversation: a
 /// session prints megabytes over an hour, and the Timeline is read again every
 /// time this page hears the world moved.
-export function loadCapture(id: number, event: number): Promise<Capture> {
-  return get<Capture>(`/api/ui/conversations/${id}/capture/${event}`);
+export function loadCapture(
+  device: Device,
+  id: number,
+  event: number,
+): Promise<Capture> {
+  return get<Capture>(
+    on(device, `/api/ui/conversations/${id}/capture/${event}`),
+  );
 }
 
 /// And what it said, as a conversation.
@@ -473,6 +594,7 @@ export function loadCapture(id: number, event: number): Promise<Capture> {
 /// does the server whenever it cannot carry on from the one it was given — which
 /// is why what comes back says which of the two it is.
 export function loadTranscript(
+  device: Device,
   id: number,
   event: number,
   after?: string,
@@ -480,7 +602,7 @@ export function loadTranscript(
   const from = after === undefined ? "" : `?after=${encodeURIComponent(after)}`;
 
   return get<TranscriptView>(
-    `/api/ui/conversations/${id}/transcript/${event}${from}`,
+    on(device, `/api/ui/conversations/${id}/transcript/${event}${from}`),
   );
 }
 
@@ -490,8 +612,12 @@ export function loadTranscript(
 /// paint it — the server holds the terminal that decided them, and this is a
 /// repaint to feed the one in the pane (ADR 0007). A session that has ended
 /// repaints to the screen it last stood on.
-export function loadScreen(id: number, event: number): Promise<Screen> {
-  return get<Screen>(`/api/ui/conversations/${id}/screen/${event}`);
+export function loadScreen(
+  device: Device,
+  id: number,
+  event: number,
+): Promise<Screen> {
+  return get<Screen>(on(device, `/api/ui/conversations/${id}/screen/${event}`));
 }
 
 /// And where to watch a session that is still running: a socket rather than a
@@ -502,8 +628,14 @@ export function loadScreen(id: number, event: number): Promise<Screen> {
 /// the window it is being watched in — and whatever is typed into it — going
 /// back the other way. Everything else here stays on SSE and a refetch — a
 /// terminal being drawn is the one thing neither of those is any good for.
-export function screenSocket(id: number, event: number): string {
-  return socketAt(`/api/ui/conversations/${id}/screen/${event}/attach`);
+export function screenSocket(
+  device: Device,
+  id: number,
+  event: number,
+): string {
+  return socketAt(
+    on(device, `/api/ui/conversations/${id}/screen/${event}/attach`),
+  );
 }
 
 /// Where one of our sockets stands, whichever of them it is — the Screen's, and
@@ -527,8 +659,13 @@ function socketAt(path: string): string {
 /// there is to say about one from out here — a terminal is memory on the server
 /// rather than a record, so what is *on* each of them arrives down the socket
 /// below.
-export function listTerminals(id: number): Promise<TerminalsView> {
-  return get<TerminalsView>(`/api/ui/conversations/${id}/terminals`);
+export function listTerminals(
+  device: Device,
+  id: number,
+): Promise<TerminalsView> {
+  return get<TerminalsView>(
+    on(device, `/api/ui/conversations/${id}/terminals`),
+  );
 }
 
 /// And opening another, which answers the number it will answer to.
@@ -536,15 +673,26 @@ export function listTerminals(id: number): Promise<TerminalsView> {
 /// A request rather than a path, and named refusals rather than a status: the
 /// shell is started in the conversation's sandbox, and every way that can be
 /// refused is a sentence the pane has to say.
-export function openTerminal(id: number): Promise<TerminalOpened> {
-  return post<TerminalOpened>(`/api/ui/conversations/${id}/terminals`);
+export function openTerminal(
+  device: Device,
+  id: number,
+): Promise<TerminalOpened> {
+  return post<TerminalOpened>(
+    on(device, `/api/ui/conversations/${id}/terminals`),
+  );
 }
 
 /// And where to watch one, which is the Screen's own socket pointed at a shell:
 /// a repaint on connect, what it prints after that, and the window size and
 /// whatever is typed going back the other way.
-export function terminalSocket(id: number, number: number): string {
-  return socketAt(`/api/ui/conversations/${id}/terminals/${number}/attach`);
+export function terminalSocket(
+  device: Device,
+  id: number,
+  number: number,
+): string {
+  return socketAt(
+    on(device, `/api/ui/conversations/${id}/terminals/${number}/attach`),
+  );
 }
 
 /// And closing one, which is the × at the end of its tab: the shell is hung up
@@ -562,18 +710,22 @@ export function terminalSocket(id: number, number: number): string {
 /// (ADR 0019). Read rather than ignored for that reason: the answer is the
 /// question.
 export async function closeTerminal(
+  device: Device,
   id: number,
   number: number,
   asked = false,
 ): Promise<TerminalClosed> {
+  const at = on(
+    device,
+    `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
+  );
+
   return taken<TerminalClosed>(
-    await fetch(
-      `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
-      {
-        method: "DELETE",
-        headers: { accept: "application/json" },
-      },
-    ),
+    at,
+    await fetch(at, {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    }),
   );
 }
 
@@ -583,8 +735,13 @@ export async function closeTerminal(
 /// What bounds the files API, rather than a list for the eye: the server reads
 /// and writes the worktrees as itself, with no sandbox in front of it, and a
 /// path under none of these is refused (ADR 0019).
-export function listFileRoots(id: number): Promise<FileRootsView> {
-  return get<FileRootsView>(`/api/ui/conversations/${id}/files/roots`);
+export function listFileRoots(
+  device: Device,
+  id: number,
+): Promise<FileRootsView> {
+  return get<FileRootsView>(
+    on(device, `/api/ui/conversations/${id}/files/roots`),
+  );
 }
 
 /// And where a Code pane says it is drawn: a socket it holds open for as long
@@ -596,8 +753,10 @@ export function listFileRoots(id: number): Promise<FileRootsView> {
 /// being *open*, the way a terminal tab's attach is — it dies with the tab
 /// whatever becomes of the browser, so a laptop shut mid-edit stops the watcher
 /// without anybody having to notice.
-export function filesSocket(id: number): string {
-  return socketAt(`/api/ui/conversations/${id}/files/attach`);
+export function filesSocket(device: Device, id: number): string {
+  return socketAt(
+    on(device, `/api/ui/conversations/${id}/files/attach`),
+  );
 }
 
 /// And what one folder of one of them holds.
@@ -614,11 +773,15 @@ export function filesSocket(id: number): string {
 /// Every refusal is in the body rather than in the status: a path outside every
 /// root, a path under `.git`, a worktree that has gone and a folder that has are
 /// four different sentences to draw where the rows would be.
-export function listFolder(id: number, path: string): Promise<FolderListing> {
+export function listFolder(
+  device: Device,
+  id: number,
+  path: string,
+): Promise<FolderListing> {
   const asking = new URLSearchParams({ path });
 
   return get<FolderListing>(
-    `/api/ui/conversations/${id}/files/folder?${asking}`,
+    on(device, `/api/ui/conversations/${id}/files/folder?${asking}`),
   );
 }
 
@@ -639,10 +802,16 @@ export function listFolder(id: number, path: string): Promise<FolderListing> {
 /// Refused in the body like the folder beside it: a path outside every root, a
 /// path under `.git`, a worktree that has gone and a file that has are each
 /// their own sentence rather than a status to retry.
-export function readFile(id: number, path: string): Promise<FileReading> {
+export function readFile(
+  device: Device,
+  id: number,
+  path: string,
+): Promise<FileReading> {
   const asking = new URLSearchParams({ path });
 
-  return get<FileReading>(`/api/ui/conversations/${id}/files/file?${asking}`);
+  return get<FileReading>(
+    on(device, `/api/ui/conversations/${id}/files/file?${asking}`),
+  );
 }
 
 /// And that file written back, over the version the read handed over.
@@ -667,16 +836,20 @@ export function readFile(id: number, path: string): Promise<FileReading> {
 /// Refused in the body like the read beside it, a root that takes no writes
 /// among them, because each of those is a different sentence for the human.
 export function writeFile(
+  device: Device,
   id: number,
   path: string,
   version: string,
   text: string,
 ): Promise<FileWritten> {
-  return post<FileWritten>(`/api/ui/conversations/${id}/files/file`, {
-    path,
-    version,
-    text,
-  } satisfies FileWrite);
+  return post<FileWritten>(
+    on(device, `/api/ui/conversations/${id}/files/file`),
+    {
+      path,
+      version,
+      text,
+    } satisfies FileWrite,
+  );
 }
 
 /// And an empty file made under a folder of one of those roots, which is what a
@@ -690,10 +863,17 @@ export function writeFile(
 /// Refused in the body like everything else here, with one refusal of its own —
 /// a name already taken — and each of them is a sentence drawn beside the field
 /// with what was typed still in it.
-export function makeFile(id: number, path: string): Promise<FileMade> {
-  return post<FileMade>(`/api/ui/conversations/${id}/files/file/new`, {
-    path,
-  } satisfies FileMaking);
+export function makeFile(
+  device: Device,
+  id: number,
+  path: string,
+): Promise<FileMade> {
+  return post<FileMade>(
+    on(device, `/api/ui/conversations/${id}/files/file/new`),
+    {
+      path,
+    } satisfies FileMaking,
+  );
 }
 
 /// And a folder made there, which is the same request about the other kind of
@@ -702,10 +882,17 @@ export function makeFile(id: number, path: string): Promise<FileMade> {
 /// Its own endpoint rather than a flag on the one above, because a file and a
 /// folder are two different things to make: what a new file does afterwards is
 /// open as a tab, and a new folder opens nothing.
-export function makeFolder(id: number, path: string): Promise<FileMade> {
-  return post<FileMade>(`/api/ui/conversations/${id}/files/folder/new`, {
-    path,
-  } satisfies FileMaking);
+export function makeFolder(
+  device: Device,
+  id: number,
+  path: string,
+): Promise<FileMade> {
+  return post<FileMade>(
+    on(device, `/api/ui/conversations/${id}/files/folder/new`),
+    {
+      path,
+    } satisfies FileMaking,
+  );
 }
 
 /// And one of them renamed: whatever is at a path, given a new name in the
@@ -723,14 +910,18 @@ export function makeFolder(id: number, path: string): Promise<FileMade> {
 /// Refused in the body like everything else here, with one refusal of its own
 /// beyond the making's: a root, which is a Worktree rather than anything in one.
 export function renamePath(
+  device: Device,
   id: number,
   path: string,
   name: string,
 ): Promise<FileRenamed> {
-  return post<FileRenamed>(`/api/ui/conversations/${id}/files/rename`, {
-    path,
-    name,
-  } satisfies FileRenaming);
+  return post<FileRenamed>(
+    on(device, `/api/ui/conversations/${id}/files/rename`),
+    {
+      path,
+      name,
+    } satisfies FileRenaming,
+  );
 }
 
 /// And one of them taken away: whatever is at a path, a folder with everything
@@ -748,10 +939,17 @@ export function renamePath(
 /// raises comes back round.
 /// The open tab of a file that has gone stays, read-only, saying so: see
 /// `Code.tsx`, which is where a tab keeps its text after the file under it goes.
-export function deletePath(id: number, path: string): Promise<FileDeleted> {
-  return post<FileDeleted>(`/api/ui/conversations/${id}/files/delete`, {
-    path,
-  } satisfies FileDeleting);
+export function deletePath(
+  device: Device,
+  id: number,
+  path: string,
+): Promise<FileDeleted> {
+  return post<FileDeleted>(
+    on(device, `/api/ui/conversations/${id}/files/delete`),
+    {
+      path,
+    } satisfies FileDeleting,
+  );
 }
 
 /// And every root's files at once, which is what the quick-open palette matches
@@ -770,8 +968,10 @@ export function deletePath(id: number, path: string): Promise<FileDeleted> {
 /// there is no path of anybody's to measure against the roots. A Conversation
 /// with no Worktrees answers with no roots, and a root git will not answer
 /// about answers with no files.
-export function listFiles(id: number): Promise<FileListsView> {
-  return get<FileListsView>(`/api/ui/conversations/${id}/files/list`);
+export function listFiles(device: Device, id: number): Promise<FileListsView> {
+  return get<FileListsView>(
+    on(device, `/api/ui/conversations/${id}/files/list`),
+  );
 }
 
 /// And what git says about every one of those roots, folded into the marks the
@@ -791,8 +991,13 @@ export function listFiles(id: number): Promise<FileListsView> {
 /// named. A conversation with no worktrees answers with no roots, and a root git
 /// will not answer about answers with no marks — which is a tree whose rows are
 /// drawn unmarked rather than a tree that will not draw.
-export function readFileStatus(id: number): Promise<FileStatusView> {
-  return get<FileStatusView>(`/api/ui/conversations/${id}/files/status`);
+export function readFileStatus(
+  device: Device,
+  id: number,
+): Promise<FileStatusView> {
+  return get<FileStatusView>(
+    on(device, `/api/ui/conversations/${id}/files/status`),
+  );
 }
 
 /// One commit, rendered: what it said about itself, and its diff.
@@ -801,8 +1006,14 @@ export function readFileStatus(id: number): Promise<FileStatusView> {
 /// out of the repository by the server rather than out of its database — the
 /// commit is in git, which is what a commit is — where the summary was kept by
 /// the sweep that recorded the commit.
-export function loadCommitPane(id: number, event: number): Promise<CommitPane> {
-  return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
+export function loadCommitPane(
+  device: Device,
+  id: number,
+  event: number,
+): Promise<CommitPane> {
+  return get<CommitPane>(
+    on(device, `/api/ui/conversations/${id}/commit/${event}`),
+  );
 }
 
 /// The backlog opened: every task document `.tasks/` holds, rendered.
@@ -810,8 +1021,11 @@ export function loadCommitPane(id: number, event: number): Promise<CommitPane> {
 /// Named by the conversation alone, unlike the three panes around it. A backlog
 /// is read off the worktree rather than remembered, so there is no event to
 /// reach it by: there is one backlog per conversation, and this is it.
-export function loadBacklogPane(id: number): Promise<BacklogPane> {
-  return get<BacklogPane>(`/api/ui/conversations/${id}/backlog`);
+export function loadBacklogPane(
+  device: Device,
+  id: number,
+): Promise<BacklogPane> {
+  return get<BacklogPane>(on(device, `/api/ui/conversations/${id}/backlog`));
 }
 
 /// The roadmap opened: every stage brief one of them holds, rendered.
@@ -821,11 +1035,15 @@ export function loadBacklogPane(id: number): Promise<BacklogPane> {
 /// hold any number of roadmaps, so the card that opens this says which of them
 /// it is. Encoded, because that name is a directory name out of a repository.
 export function loadRoadmapPane(
+  device: Device,
   id: number,
   name: string,
 ): Promise<RoadmapPane> {
   return get<RoadmapPane>(
-    `/api/ui/conversations/${id}/roadmap/${encodeURIComponent(name)}`,
+    on(
+      device,
+      `/api/ui/conversations/${id}/roadmap/${encodeURIComponent(name)}`,
+    ),
   );
 }
 
@@ -839,11 +1057,12 @@ export function loadRoadmapPane(
 /// on nothing else (ADR-0009). A server that cannot ask refuses with the reason,
 /// which is what the pane shows.
 export function loadPullRequest(
+  device: Device,
   id: number,
   event: number,
 ): Promise<PullRequestDetails> {
   return get<PullRequestDetails>(
-    `/api/ui/conversations/${id}/pull-request/${event}`,
+    on(device, `/api/ui/conversations/${id}/pull-request/${event}`),
   );
 }
 
@@ -867,34 +1086,41 @@ export function startConversation(repoId: number): Promise<Started> {
 /// read and refused: the route's own limit answers a 413, and the composer has
 /// one sentence to say either way — see `Attached::TooLarge`, which is the same
 /// refusal named.
-export async function attachFile(id: number, file: File): Promise<Attached> {
-  const response = await fetch(
+export async function attachFile(
+  device: Device,
+  id: number,
+  file: File,
+): Promise<Attached> {
+  const at = on(
+    device,
     `/api/ui/conversations/${id}/attachments/${encodeURIComponent(file.name)}`,
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/octet-stream",
-      },
-      body: file,
-    },
   );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
 
   if (response.status === 413) {
     return "TooLarge";
   }
 
-  return taken<Attached>(response);
+  return taken<Attached>(at, response);
 }
 
 /// And take one off again, by the row's own id: two files on one Conversation
 /// may share a name, and neither of them is a key.
 export function removeAttachment(
+  device: Device,
   id: number,
   attachment: number,
 ): Promise<AttachmentRemoved> {
   return post<AttachmentRemoved>(
-    `/api/ui/conversations/${id}/attachments/${attachment}/remove`,
+    on(device, `/api/ui/conversations/${id}/attachments/${attachment}/remove`),
   );
 }
 
@@ -911,46 +1137,56 @@ export function removeAttachment(
 /// A body it would not even read comes back as `TooLarge` the way the Brief's
 /// does, and for the same reason.
 export async function attachToAnswer(
+  device: Device,
   set: number,
   label: string,
   file: File,
 ): Promise<AnswerAttached> {
-  const response = await fetch(
+  const at = on(
+    device,
     `/api/ui/sets/${set}/answers/${encodeURIComponent(
       label,
     )}/attachments/${encodeURIComponent(file.name)}`,
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/octet-stream",
-      },
-      body: file,
-    },
   );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
 
   if (response.status === 413) {
     return "TooLarge";
   }
 
-  return taken<AnswerAttached>(response);
+  return taken<AnswerAttached>(at, response);
 }
 
 /// And take one off an Answer again, by the row's own id — which is what the
 /// path names it by, under the Set it was put on: two files on one Set may
 /// share a name, and neither of them is a key.
 export function removeAnswerAttachment(
+  device: Device,
   set: number,
   attachment: number,
 ): Promise<AnswerAttachmentRemoved> {
   return post<AnswerAttachmentRemoved>(
-    `/api/ui/sets/${set}/attachments/${attachment}/remove`,
+    on(device, `/api/ui/sets/${set}/attachments/${attachment}/remove`),
   );
 }
 
 /// Save what the human has written into a Brief.
-export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
-  return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
+export function saveBrief(
+  device: Device,
+  id: number,
+  markdown: string,
+): Promise<BriefSaved> {
+  return post<BriefSaved>(
+    on(device, `/api/ui/conversations/${id}/brief`), { markdown },
+  );
 }
 
 /// Move a drafting Conversation onto another registered Repo.
@@ -959,18 +1195,28 @@ export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
 /// what follows — the base back on the new repo's rule, and a companion that
 /// has just become this Conversation's own Repo going away — is the server's to
 /// do rather than this page's to ask for.
-export function switchRepo(id: number, repoId: number): Promise<RepoSwitched> {
-  return post<RepoSwitched>(`/api/ui/conversations/${id}/repo`, {
-    repo_id: repoId,
-  });
+export function switchRepo(
+  device: Device,
+  id: number,
+  repoId: number,
+): Promise<RepoSwitched> {
+  return post<RepoSwitched>(
+    on(device, `/api/ui/conversations/${id}/repo`),
+    {
+      repo_id: repoId,
+    },
+  );
 }
 /// Name the branch the work will be done on. Whether git would take the name is
 /// the server's to say, so this is another outcome to read rather than a status.
 export function renameBranch(
+  device: Device,
   id: number,
   branch: string,
 ): Promise<BranchRenamed> {
-  return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
+  return post<BranchRenamed>(
+    on(device, `/api/ui/conversations/${id}/branch`), { branch },
+  );
 }
 
 /// Choose the branch the work comes off, or pass `null` to put the Conversation
@@ -979,10 +1225,13 @@ export function renameBranch(
 /// The name rather than where it stands: it is resolved when grilling starts, so
 /// the work comes off wherever that branch is then.
 export function setBaseBranch(
+  device: Device,
   id: number,
   branch: string | null,
 ): Promise<BaseRecorded> {
-  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { branch });
+  return post<BaseRecorded>(
+    on(device, `/api/ui/conversations/${id}/base`), { branch },
+  );
 }
 
 /// Work alongside another registered Repo, read-only and off its own default
@@ -991,34 +1240,40 @@ export function setBaseBranch(
 /// Which Repo is the whole of what goes out: everything else a companion holds
 /// has a default worth having, and picking one out of a menu is one decision.
 export function addCompanion(
+  device: Device,
   id: number,
   repoId: number,
 ): Promise<CompanionAdded> {
-  return post<CompanionAdded>(`/api/ui/conversations/${id}/companions`, {
-    repo_id: repoId,
-  });
+  return post<CompanionAdded>(
+    on(device, `/api/ui/conversations/${id}/companions`),
+    {
+      repo_id: repoId,
+    },
+  );
 }
 
 /// And stop working alongside one. Which Repo is in the path, and there is
 /// nothing else to say about taking it away.
 export function removeCompanion(
+  device: Device,
   id: number,
   repoId: number,
 ): Promise<CompanionRemoved> {
   return post<CompanionRemoved>(
-    `/api/ui/conversations/${id}/companions/${repoId}/remove`,
+    on(device, `/api/ui/conversations/${id}/companions/${repoId}/remove`),
     {},
   );
 }
 
 /// Say how far into one of them the work may reach.
 export function setCompanionMode(
+  device: Device,
   id: number,
   repoId: number,
   mode: CompanionMode,
 ): Promise<CompanionModeChosen> {
   return post<CompanionModeChosen>(
-    `/api/ui/conversations/${id}/companions/${repoId}/mode`,
+    on(device, `/api/ui/conversations/${id}/companions/${repoId}/mode`),
     { mode },
   );
 }
@@ -1029,12 +1284,13 @@ export function setCompanionMode(
 /// The branch is the companion repository's own: a conversation and a companion
 /// of it are two repositories, each with a list of its own.
 export function setCompanionBase(
+  device: Device,
   id: number,
   repoId: number,
   branch: string | null,
 ): Promise<CompanionBaseRecorded> {
   return post<CompanionBaseRecorded>(
-    `/api/ui/conversations/${id}/companions/${repoId}/base`,
+    on(device, `/api/ui/conversations/${id}/companions/${repoId}/base`),
     { branch },
   );
 }
@@ -1042,12 +1298,13 @@ export function setCompanionBase(
 /// Name the branch a read-write companion's work is done on, or send nothing at
 /// all to go back to mirroring the conversation's own.
 export function renameCompanionBranch(
+  device: Device,
   id: number,
   repoId: number,
   branch: string,
 ): Promise<CompanionBranchRenamed> {
   return post<CompanionBranchRenamed>(
-    `/api/ui/conversations/${id}/companions/${repoId}/branch`,
+    on(device, `/api/ui/conversations/${id}/companions/${repoId}/branch`),
     { branch },
   );
 }
@@ -1058,8 +1315,13 @@ export function renameCompanionBranch(
 /// Nothing is sent. Which conversation is in the path, and there is nothing else
 /// to say — everything the server needs it already has, and everything it
 /// refuses for it decides itself when the button is pressed.
-export function startGrilling(id: number): Promise<GrillingStarted> {
-  return post<GrillingStarted>(`/api/ui/conversations/${id}/grill`, {});
+export function startGrilling(
+  device: Device,
+  id: number,
+): Promise<GrillingStarted> {
+  return post<GrillingStarted>(
+    on(device, `/api/ui/conversations/${id}/grill`), {},
+  );
 }
 
 /// Adopt the roadmap an adopting conversation was started for: its next stage
@@ -1068,8 +1330,8 @@ export function startGrilling(id: number): Promise<GrillingStarted> {
 /// Nothing is sent, for the reason nothing is sent to start a grilling: which
 /// conversation is in the path, and which stage is the roadmap's own answer at
 /// the base commit — read again by the server when the button is pressed.
-export function adoptRoadmap(id: number): Promise<Adopted> {
-  return post<Adopted>(`/api/ui/conversations/${id}/adopt`, {});
+export function adoptRoadmap(device: Device, id: number): Promise<Adopted> {
+  return post<Adopted>(on(device, `/api/ui/conversations/${id}/adopt`), {});
 }
 
 /// And take up the pull request a conversation is holding: its head branch
@@ -1079,14 +1341,22 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// conversation is in the path, and what the branch is now is the repository's
 /// own answer — read when the button is pressed rather than taken from a page
 /// that read it a moment ago.
-export function takeUpPullRequest(id: number): Promise<TakenUp> {
-  return post<TakenUp>(`/api/ui/conversations/${id}/take-up`, {});
+export function takeUpPullRequest(
+  device: Device,
+  id: number,
+): Promise<TakenUp> {
+  return post<TakenUp>(on(device, `/api/ui/conversations/${id}/take-up`), {});
 }
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch
 /// left where it is.
-export function closeConversation(id: number): Promise<ConversationClosed> {
-  return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
+export function closeConversation(
+  device: Device,
+  id: number,
+): Promise<ConversationClosed> {
+  return post<ConversationClosed>(
+    on(device, `/api/ui/conversations/${id}/close`), {},
+  );
 }
 
 /// And the same press with the archive already made: the Conversation ends and
@@ -1097,10 +1367,11 @@ export function closeConversation(id: number): Promise<ConversationClosed> {
 /// comes back is what became of the close, the archive of a Conversation just
 /// closed having nothing left to refuse.
 export function closeAndArchiveConversation(
+  device: Device,
   id: number,
 ): Promise<ConversationClosed> {
   return post<ConversationClosed>(
-    `/api/ui/conversations/${id}/close-and-archive`,
+    on(device, `/api/ui/conversations/${id}/close-and-archive`),
     {},
   );
 }
@@ -1111,18 +1382,24 @@ export function closeAndArchiveConversation(
 /// Nothing is sent with it either — which Conversation it is is the whole of
 /// what the press says, and whether it is one to put away is the server's to
 /// answer.
-export function archiveConversation(id: number): Promise<ConversationArchived> {
-  return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
+export function archiveConversation(
+  device: Device,
+  id: number,
+): Promise<ConversationArchived> {
+  return post<ConversationArchived>(
+    on(device, `/api/ui/conversations/${id}/archive`), {},
+  );
 }
 
 /// And take it back out: it is on the sidebar again, for good.
 ///
 /// Archiving's mirror, sending as little as archiving does.
 export function unarchiveConversation(
+  device: Device,
   id: number,
 ): Promise<ConversationUnarchived> {
   return post<ConversationUnarchived>(
-    `/api/ui/conversations/${id}/unarchive`,
+    on(device, `/api/ui/conversations/${id}/unarchive`),
     {},
   );
 }
@@ -1138,10 +1415,16 @@ export function unarchiveConversation(
 /// There is nothing to be refused for — an id naming nothing clears nothing —
 /// and what the row does next arrives as a Nudge like every other change to the
 /// list.
-export async function seeConversation(id: string): Promise<void> {
-  await refused(
-    await sent(`/api/ui/conversations/${encodeURIComponent(id)}/seen`, {}),
+export async function seeConversation(
+  device: Device,
+  id: string,
+): Promise<void> {
+  const at = on(
+    device,
+    `/api/ui/conversations/${encodeURIComponent(id)}/seen`,
   );
+
+  await refused(at, await sent(at, {}));
 }
 
 /// Start driving a conversation again, from wherever the work now stands.
@@ -1152,8 +1435,8 @@ export async function seeConversation(id: string): Promise<void> {
 ///
 /// What comes back either says driving has started or names the reason nothing
 /// could: resume is never silent, and the refusals are what that means.
-export function resume(id: number): Promise<Resumed> {
-  return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
+export function resume(device: Device, id: number): Promise<Resumed> {
+  return post<Resumed>(on(device, `/api/ui/conversations/${id}/resume`), {});
 }
 
 /// Get a finished conversation's merge conflict resolved.
@@ -1167,8 +1450,13 @@ export function resume(id: number): Promise<Resumed> {
 /// Nothing is sent, for the reason nothing goes with a resume: which
 /// conversation it is is the whole of it, and which of its pull requests
 /// conflict is the server's to know.
-export function resolveConflicts(id: number): Promise<Resolved> {
-  return post<Resolved>(`/api/ui/conversations/${id}/resolve-conflicts`, {});
+export function resolveConflicts(
+  device: Device,
+  id: number,
+): Promise<Resolved> {
+  return post<Resolved>(
+    on(device, `/api/ui/conversations/${id}/resolve-conflicts`), {},
+  );
 }
 
 /// Stop driving a conversation after the task it is on.
@@ -1177,8 +1465,13 @@ export function resolveConflicts(id: number): Promise<Resolved> {
 /// now runs to its own end, and the conversation stops before the next launch.
 /// Nothing is sent, for the reason nothing goes with a resume — which
 /// conversation it is is the whole of it.
-export function stopConversation(id: number): Promise<ConversationStopped> {
-  return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
+export function stopConversation(
+  device: Device,
+  id: number,
+): Promise<ConversationStopped> {
+  return post<ConversationStopped>(
+    on(device, `/api/ui/conversations/${id}/stop`), {},
+  );
 }
 
 /// Press steer: stop the drive and open the pending steer the form is written
@@ -1195,8 +1488,11 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
 ///
 /// Nothing is sent, as nothing is sent with either stop: which conversation it
 /// is is the whole of it.
-export function steerConversation(id: number): Promise<SteerOpened> {
-  return post<SteerOpened>(`/api/ui/conversations/${id}/steer`, {});
+export function steerConversation(
+  device: Device,
+  id: number,
+): Promise<SteerOpened> {
+  return post<SteerOpened>(on(device, `/api/ui/conversations/${id}/steer`), {});
 }
 
 /// Keep the form as it stands, so the item can be left and come back to.
@@ -1206,8 +1502,14 @@ export function steerConversation(id: number): Promise<SteerOpened> {
 /// never on anybody's screen. Posted on a pause in the typing and on the way
 /// out of a field, the way a drafting brief's saves are — see
 /// `src/workbench/settling.ts`, which is the pause both of them keep.
-export function saveSteer(id: number, form: SteerForm): Promise<SteerSaved> {
-  return post<SteerSaved>(`/api/ui/conversations/${id}/steer/save`, form);
+export function saveSteer(
+  device: Device,
+  id: number,
+  form: SteerForm,
+): Promise<SteerSaved> {
+  return post<SteerSaved>(
+    on(device, `/api/ui/conversations/${id}/steer/save`), form,
+  );
 }
 
 /// Cancel it: the pending steer goes, and the conversation is left exactly as
@@ -1215,8 +1517,13 @@ export function saveSteer(id: number, form: SteerForm): Promise<SteerSaved> {
 ///
 /// Nothing is sent for the same reason, and nothing lands on the timeline: a
 /// steer that decided nothing is no event.
-export function cancelSteer(id: number): Promise<SteerCancelled> {
-  return post<SteerCancelled>(`/api/ui/conversations/${id}/steer/cancel`, {});
+export function cancelSteer(
+  device: Device,
+  id: number,
+): Promise<SteerCancelled> {
+  return post<SteerCancelled>(
+    on(device, `/api/ui/conversations/${id}/steer/cancel`), {},
+  );
 }
 
 /// And submit the form: where the work goes, and whether to end what is running
@@ -1227,11 +1534,12 @@ export function cancelSteer(id: number): Promise<SteerCancelled> {
 /// it wrote, the stop the press left is taken away, and the pending steer goes
 /// in the same transaction as the record it became.
 export function steer(
+  device: Device,
   id: number,
   submission: SteerSubmission,
 ): Promise<ConversationSteered> {
   return post<ConversationSteered>(
-    `/api/ui/conversations/${id}/steer/submit`,
+    on(device, `/api/ui/conversations/${id}/steer/submit`),
     submission,
   );
 }
@@ -1243,10 +1551,11 @@ export function steer(
 /// Nothing else goes either — the worktree stays, the branch stays, and a
 /// question set nobody has answered is left standing.
 export function forceStopConversation(
+  device: Device,
   id: number,
 ): Promise<ConversationStopped> {
   return post<ConversationStopped>(
-    `/api/ui/conversations/${id}/force-stop`,
+    on(device, `/api/ui/conversations/${id}/force-stop`),
     {},
   );
 }
@@ -1256,8 +1565,8 @@ export function forceStopConversation(
 /// Each says whether its pair is still where it was left, which the server
 /// answers on every read: a directory can be moved after it was saved, and only
 /// the side that can look at the filesystem knows.
-export function listProfiles(): Promise<ProfileEntry[]> {
-  return get<ProfileEntry[]>("/api/ui/profiles");
+export function listProfiles(device: Device): Promise<ProfileEntry[]> {
+  return get<ProfileEntry[]>(on(device, "/api/ui/profiles"));
 }
 
 /// Take on an account, named by the pair that is mounted for it. Like
@@ -1288,11 +1597,12 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 /// other rather than the absence of one: the brief goes straight to an inline
 /// implementation.
 export function chooseGrillingPairing(
+  device: Device,
   id: number,
   choice: RoleChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    `/api/ui/conversations/${id}/grilling-pairing`,
+    on(device, `/api/ui/conversations/${id}/grilling-pairing`),
     choice,
   );
 }
@@ -1300,11 +1610,12 @@ export function chooseGrillingPairing(
 /// And the one its implementation runs under, which is a separate choice: the
 /// implementation session cannot simply carry the grilling one on.
 export function chooseImplementationPairing(
+  device: Device,
   id: number,
   pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    `/api/ui/conversations/${id}/implementation-pairing`,
+    on(device, `/api/ui/conversations/${id}/implementation-pairing`),
     pairing,
   );
 }
@@ -1315,11 +1626,12 @@ export function chooseImplementationPairing(
 /// `null` is the picker's own "No review" row, which is a choice like any
 /// other rather than the absence of one.
 export function chooseReviewPairing(
+  device: Device,
   id: number,
   choice: RoleChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    `/api/ui/conversations/${id}/review-pairing`,
+    on(device, `/api/ui/conversations/${id}/review-pairing`),
     choice,
   );
 }
@@ -1635,11 +1947,14 @@ export function subscribePush(subscription: Subscription): Promise<Subscribed> {
 /// endpoint the server never stored leaves what was asked for holding either
 /// way.
 export async function unsubscribePush(endpoint: string): Promise<void> {
-  await refused(await sent("/api/ui/push/unsubscribe", { endpoint }));
+  const at = "/api/ui/push/unsubscribe";
+
+  await refused(at, await sent(at, { endpoint }));
 }
 
 async function get<T>(path: string, within?: number): Promise<T> {
   return taken(
+    path,
     await fetch(path, {
       headers: { accept: "application/json" },
       // Only where the caller named one. A deadline is a decision about what a
@@ -1652,7 +1967,7 @@ async function get<T>(path: string, within?: number): Promise<T> {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  return taken(await sent(path, body));
+  return taken(path, await sent(path, body));
 }
 
 function sent(path: string, body?: unknown): Promise<Response> {
@@ -1668,17 +1983,26 @@ function sent(path: string, body?: unknown): Promise<Response> {
   });
 }
 
-async function taken<T>(response: Response): Promise<T> {
-  await refused(response);
+async function taken<T>(path: string, response: Response): Promise<T> {
+  await refused(path, response);
 
   return (await response.json()) as T;
 }
 
 /// Throw if the server refused, in its own words. Split out from [`taken`] for
 /// the endpoints that answer with no body to read.
-async function refused(response: Response): Promise<void> {
+///
+/// The path is carried in beside the answer so that the refusal knows whether
+/// it crossed a hop, which is what [`retrying`] reads — see [`relayed`]. Off
+/// the path this module wrote rather than off `response.url`, because that is
+/// the one account of it that is there whatever answered.
+async function refused(path: string, response: Response): Promise<void> {
   if (!response.ok) {
-    throw new RefusedError(response.status, await refusal(response));
+    throw new RefusedError(
+      response.status,
+      await refusal(response),
+      relayed(path),
+    );
   }
 }
 

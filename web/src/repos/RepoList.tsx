@@ -108,6 +108,7 @@ import type {
 import { repoParent, setRepoParent } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
@@ -171,7 +172,10 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
 function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
-    queryFn: listRepos,
+    // This device's own: the Repos section is the settings page's, and a
+    // member's registry is read through the dropdown on that member's work —
+    // see [`RepoRegistration`], which is where the device comes in.
+    queryFn: () => listRepos(null),
     freshness: { reconcile: "id" },
   }));
 }
@@ -460,6 +464,14 @@ export function RepoRegistration(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
+  /// Which device the repository is being opened on.
+  ///
+  /// The dropdown this form is reached from is a draft's composer, and a draft
+  /// may be a member's: the path is one on that machine, the field browses that
+  /// machine's filesystem — see `PathField`, which takes the device the same
+  /// way — and the Repo lands on that machine's registry.
+  const device = useDevice();
+
   // The path typed into the field.
   const [path, setPath] = createSignal("");
 
@@ -469,7 +481,7 @@ export function RepoRegistration(props: {
   const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
   const register = useMutation(() => ({
-    mutationFn: (asked: string) => registerRepo(asked),
+    mutationFn: (asked: string) => registerRepo(device(), asked),
     onSuccess: (outcome: Registered) => {
       // A refusal, which is a bare word on the wire — the two outcomes that
       // leave a Repo registered carry it. Said where the path was typed, which
@@ -490,8 +502,10 @@ export function RepoRegistration(props: {
       // roadmap in it has something to offer the moment it lands — and
       // registering a path that was taken away brings a whole repository's worth
       // back at once.
-      void queries.invalidateQueries({ queryKey: ["repos"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "abandoned-roadmaps"),
+      });
       props.landed(
         "Added" in outcome ? outcome.Added : outcome.AlreadyRegistered,
       );
@@ -691,6 +705,10 @@ export function CreateRepo(props: {
   // has said what they mean to do with it.
   const [onGithub, setOnGithub] = createSignal(true);
 
+  // And which device it is being made on, for [`RepoRegistration`]'s reason:
+  // the dropdown this card was opened from may be a member's draft.
+  const device = useDevice();
+
   // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
   // drawn on one page, and an id is the page's to keep unique.
   const id = createUniqueId();
@@ -743,7 +761,7 @@ export function CreateRepo(props: {
 
   const create = useMutation(() => ({
     mutationFn: (asked: { parent: string; name: string; github: boolean }) =>
-      createRepo(asked.parent, asked.name, asked.github),
+      createRepo(device(), asked.parent, asked.name, asked.github),
     onSuccess: (outcome: Created) => {
       // Four of the refusals are a bare word, which this file has the sentence
       // for; the fifth is git's own account of what it would not do, said in
@@ -789,8 +807,10 @@ export function CreateRepo(props: {
     // waiting to be adopted — a registration invalidates both for the same
     // reason, and a repository that was just made is a repository that has
     // just arrived.
-    void queries.invalidateQueries({ queryKey: ["repos"] });
-    void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+    void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+    void queries.invalidateQueries({
+      queryKey: keyOf(device(), "abandoned-roadmaps"),
+    });
   };
 
   const make = (ev: SubmitEvent) => {

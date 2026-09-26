@@ -6074,6 +6074,6 @@ pub(crate) fn unavailable(message: &str) -> HttpResponse {
 
 /// A refusal, in the same shape the agent API refuses in: the viewer's fetches
 /// then have one thing to read whichever half of the server answered.
-fn refused(status: StatusCode, error: ApiError) -> HttpResponse {
+pub(crate) fn refused(status: StatusCode, error: ApiError) -> HttpResponse {
     (status, Json(error)).into_response()
 }

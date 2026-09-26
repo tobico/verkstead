@@ -2921,7 +2921,32 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" };
+
+/**
+ * One Nudge as it goes down a stream: what moved, and **whose news it is**.
+ *
+ * A page reaches a member's Conversation through the device it opened
+ * (ADR-0020, *The opened device relays*), so the news of one has to arrive on
+ * that device's stream too: the hub holds a Nudge stream to each of its members
+ * and re-announces what comes down one under the Device Id it came from — see
+ * `relaying::freshness`. Which device a Nudge is about is what the viewer's
+ * table keys its invalidation by, ids being each device's own and colliding by
+ * construction.
+ *
+ * **A local Nudge is the JSON it always was.** The device is flattened over
+ * [`Nudge`] and left out when there is none, so what an open page has been
+ * reading since ADR-0009 goes down the wire byte for byte — a kind, and a
+ * Conversation where the change belongs to one — and a member's carries one
+ * field more.
+ */
+export type Nudged = { 
+/**
+ * Which device the news is about: a member of this one's cluster, by its
+ * Device Id — absent for this device's own, which is every Nudge a
+ * workbench has ever sent about its own work.
+ */
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.

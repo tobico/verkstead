@@ -20,7 +20,7 @@ import type {
   RepoPairingsView,
   ShowingArchived,
 } from "../src/api/types";
-import { Moved, Shell } from "../src/App";
+import { Shell, conversationRoutes } from "../src/App";
 import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
 import { Workbench } from "../src/workbench/Workbench";
@@ -139,25 +139,16 @@ export function mount(at = "/") {
             toast has the layer to say it on — see `Shell` in `src/App.tsx`. */}
         <MemoryRouter history={history} root={Shell}>
           <Route path="/" component={Workbench} />
-          {/* And the details panes nested under the Conversation, exactly as
-              `App.tsx` nests them: the nesting is what keeps the middle pane up
-              while the leaf under it changes, so a mount that flattened them
-              would be testing a page the app does not build.
-
-              With the one path beside them that is a redirect rather than a
-              pane — where Code stood while it was the Terminal pane — for the
-              same reason: a mount without it would be testing an app where the
-              old link reaches no page at all. */}
-          <Route path="/conversations/:id" component={Workbench}>
-            <Route path="/" />
-            <Route path="/events/:event" />
-            <Route path="/backlog" />
-            <Route path="/share" />
-            <Route path="/code" />
-            <Route path="/steer" />
-            <Route path="/roadmaps/:name" />
-          </Route>
-          <Route path="/conversations/:id/terminal" component={Moved} />
+          {/* The Conversation's own routes as the app builds them, rather than
+              a copy of them: the nesting is what keeps the middle pane up while
+              the leaf under it changes, and the redirect beside them is where
+              Code stood while it was the Terminal pane. A mount that wrote its
+              own would be testing a page the app does not have. */}
+          {conversationRoutes()}
+          {/* And the same Conversation reached on a member of this device's
+              cluster, which is the whole of the device dimension in the route
+              table — see `App.tsx`. */}
+          <Route path="/devices/:device">{conversationRoutes()}</Route>
           {/* And the compose page beside them, exactly as `App.tsx` has it: a
               press on the sidebar's link is a navigation, and a test mounting
               the workbench without this would be testing an app where that link

@@ -435,7 +435,11 @@ at the first start and read back at every one after it — because clearing the
 GitHub token writes `secrets.yaml` empty and would take a key kept there with
 it.
 **What it gates is every page of the workbench and the viewer's own `/api/ui/`
-namespace**: without a cookie carrying the current key, a 401. **The link is
+namespace**: without a cookie carrying the current key, a 401. **And it never
+leaves the device it was issued on** — a **Relay** is admitted at the far end
+by this device's certificate rather than by anybody's key, the `Cookie` header
+is not passed on, and the three prefixes that would hand one over are refused
+at the **Member Gate**. **The link is
 the address with `?key=…` on it**, and opening one is the whole of logging in:
 the server sets the cookie and redirects to the same path without the
 parameter, so the secret is out of the URL bar, the history entry and any
@@ -729,6 +733,14 @@ which machine that is and where else it could have been dialled. It asks for no 
 linking possible — the human types an address, and what comes back is the device
 they are about to link to, before anything has been agreed between the two
 machines.
+**And behind the gate is the viewer's whole namespace**, which is how a
+**Member** reaches this device's workbench: the same `/api/ui/` router the
+browser asks, mounted a second time over the one state, with the **Member
+Gate** in front of it instead of the **Workbench Key**'s — see **Relay**, which
+is the other end of it, and where the three prefixes this device keeps to
+itself are. Nothing else of the workbench is here: the health check is nobody's
+Conversation, and a page of the workbench is something a browser asks the
+device it opened.
 **Two Verksteads on one machine want a port each**, as they want a `--listen`
 each: an address somebody else is already on refuses the start rather than
 letting a server come up answering half of what it promised.
@@ -982,6 +994,11 @@ certificate that pending request is holding rather than against the member
 list. Everything else on that listener is a member's or is refused — including
 a path no route answers, which is refused rather than missed, a stranger having
 no business being told which of this device's endpoints exist.
+**And three prefixes are refused inside it**, which is the one thing a member
+does not reach: `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/` — see
+**Relay**, which is what they are kept back from and why. Inside the gate
+rather than outside, so that a stranger is refused for not being a member and
+learns nothing about which of this device's namespaces are relayed.
 **The refusal says it is a membership rather than a missing path.** A device
 posting a join has two ways of not getting through — a Verkstead that will not
 have it, and a Verkstead too old to have the route at all — and those want
@@ -990,6 +1007,66 @@ machine. So the refusal is `Forbidden` and names what it is, and it carries no
 challenge, the credential being a certificate already asked for and already
 given or withheld.
 _Avoid_: peer auth, mutual TLS gate, the cluster gate, peer middleware
+
+**Relay**:
+The device the browser opened putting a call to one of its **Members** and
+handing the answer back untouched, which is how a **Member**'s whole workbench
+is reachable through any other (ADR-0020, *The opened device relays*). A
+Conversation of a member's is opened at `/devices/{device}/conversations/{id}`
+with every leaf under it, and everything that page asks for goes to
+`/api/ui/members/{device}/…` on the device it is served from. The prefix takes
+the place of `/api/ui`, so the far end sees the path the browser would have
+written locally — `/api/ui/members/0011…ee/conversations/4` is that device's own
+`/api/ui/conversations/4` and nothing else — and it is a prefix of its own
+rather than a segment under `/api/ui/devices/`, that being the **Devices**
+section's namespace already.
+**The browser stays same-origin and holds one cookie.** Teaching the client N
+origins was the other shape and was rejected: CORS and cross-origin cookies on
+every device, every device served to the phone, a query cache keyed by server.
+So the client learns one thing and one thing only — *which device* — and a
+local URL keeps the shape it always had, because this device is where most of
+the work is and a device segment on every URL would say nothing.
+**Verbatim in both directions**: the method, the path, the query, the body and
+the headers that matter go over, and the status, the headers and the body come
+back. The body is streamed rather than held, both ways, so an attachment is an
+ordinary post through the hop and what refuses an oversized one is the far
+end's own `413` rather than a judgement made after buffering the file. The
+three attach endpoints are carried too — a Conversation terminal, a session's
+**Screen** and the **Code** pane's watcher — as a socket rather than a call:
+the same upgrade is put to the member, its own `101` handed back untouched and
+the two connections joined byte for byte, with either end going taking the
+other with it.
+**What admits it at the far end is this device's certificate**, at the **Member
+Gate**, and the `Cookie` header does not travel. Which is what makes *a
+device's **Workbench Key** never leaves it* a fact about the mechanism: the
+three prefixes the gate refuses inside itself are the other half of it, and
+`/api/ui/remote/` is there because the **Remote Access** reading carries the
+login link with that key on it. `/api/ui/devices/` is one human at one machine
+deciding who this device is linked to, and `/api/ui/push/` is the browsers
+*this* device pushes to. Refused **by name** rather than quietly missing, so
+that a caller can tell *this is not relayed* from *this Verkstead is too old to
+have it*.
+**Three Device Ids are refused rather than dialled**, each by name: one that is
+no member's, this device's own — local URLs keep their shape, so nothing should
+ask — and a member that answered at none of the addresses it advertised, which
+is the row **Devices** is already drawing dimmed. That last is a verdict rather
+than a bad moment, so the page says it at once rather than walking the dead
+list again.
+**And the news comes back the same way**, which is what keeps a remote page
+from drawing once and going stale: this device holds one **Nudge** stream to
+each of its members — that member's own `/api/ui/nudges`, read over the **Peer
+Listener** — and announces everything down it locally under the **Device Id**
+it came from. Held by the server rather than by the browser, so one connection
+per member serves every page this device has open, the phone on the tailnet
+included. A stream that ends is taken up again, and what a stream that has just
+come back says is *everything* of that device, there being no knowing what it
+missed. A member that is not answering is announced about not at all: the page
+keeps what it last read and goes stale, exactly as it does when its own stream
+is down. What goes over the **Peer Listener** is this device's own news alone —
+in a cluster everybody holds a stream to everybody, so a device passing on what
+a third one told it would be saying that news was its own.
+_Avoid_: proxy, forwarding, tunnel, the bridge (which is the socket half of it
+alone), remote mode
 
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the
@@ -3222,6 +3299,18 @@ to visibility each fall back to re-reading everything — which is also the
 whole meaning of the push-relayed Nudge. A query whose rendering holds reader
 state must still reconcile its re-reads, or be `static` where its payload
 cannot change (ADR-0005).
+**And it says whose news it is, where it is not this device's own.** A page reads
+a **Member's** Conversation through the device it opened, so that member's news
+arrives on the same stream: the device holds one Nudge stream to each of its
+members and announces what comes down one under that **Device Id**, which is what
+the viewer's table keys its invalidation by — ids being each device's own and
+colliding by construction. A Nudge naming no device is this device's own and is
+the signal it has always been. One kind exists for the stream itself rather than
+for anything in the world: *everything* of one device's, which is what a stream
+that has just been taken up says, having no way to know what it missed while it
+was down. A member that is not answering is not announced about at all: the page
+keeps what it last read and goes stale, exactly as it does when its own stream is
+down. See **Relay**, which is the hop those streams come back over.
 
 Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
 an agent's terminal. This one is a signal to a browser and never leaves the

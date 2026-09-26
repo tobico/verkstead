@@ -85,7 +85,10 @@ export function holding(): Holding {
     // a name already taken counts up on its way in, so which of two `notes.md`s
     // becomes `notes-2.md` is decided by which of them was chosen first.
     for (const one of held()) {
-      const outcome = await attachFile(conversation, one.file);
+      // This device's own, always: what holds files is the compose page, and
+      // there is no composing on anybody else's behalf — a Conversation of a
+      // member's exists over there before its composer is ever drawn.
+      const outcome = await attachFile(null, conversation, one.file);
       if (typeof outcome === "string") {
         rejected.push({ name: one.file.name, refused: outcome });
       }

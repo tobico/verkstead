@@ -610,6 +610,34 @@ impl Device {
     }
 }
 
+/// Why a call was not put to a member — see [`Devices::relay`], and
+/// [`crate::relaying`], which is what turns each of these into an answer the
+/// browser reads.
+///
+/// **Four findings rather than one refusal**, because they are four different
+/// things to have found out and the page does different things with them: two
+/// are a Device Id that was never going to be dialled, one is a machine that is
+/// not there, and one is this device's own store. What they have in common is
+/// that none of them is the far end's answer, which is the only other thing a
+/// relayed call ever comes back as.
+pub(crate) enum Unrelayed {
+    /// The id named is this device's own. Local URLs keep their shape, so
+    /// nothing should ever ask.
+    ThisDevice,
+
+    /// And the id named is no member's: this device holds no certificate for
+    /// it and no address to reach it at.
+    NoSuchMember,
+
+    /// The member is one of this device's and answered at none of the
+    /// addresses it advertised — or the machine that answered was not it.
+    Unreachable(anyhow::Error),
+
+    /// And the membership itself could not be read, which is this device's own
+    /// trouble rather than anything about the device named.
+    Unreadable(anyhow::Error),
+}
+
 /// What the **Devices** section of the Remote access pane reads: this device,
 /// and every other device in its cluster (ADR-0020).
 ///
@@ -1365,6 +1393,23 @@ impl Devices {
         tokio::spawn(async move { devices.announce_renewal().await });
     }
 
+    /// Hold a Nudge stream to every member, announcing what comes down each on
+    /// `nudges` under the Device Id it came from (ADR-0020, *The opened device
+    /// relays*) — see [`crate::relaying::freshness`], which is the whole of it.
+    ///
+    /// **Here because the two things it is made of are here**: the membership it
+    /// works down, and the dial it makes at each member's addresses. `nudges` is
+    /// the one thing that is neither — it is what this device's own pages listen
+    /// on, and holding a member's stream is the only part of a cluster that has
+    /// anything to say to them.
+    ///
+    /// Never returns, and is spawned rather than waited on for the reason
+    /// [`Devices::announce_renewal`] is: the first thing it does is dial members
+    /// that may be switched off.
+    pub async fn stay_fresh(&self, nudges: crate::nudge::Nudges) {
+        crate::relaying::freshness::held(self.members.clone(), self.peers.clone(), nudges).await
+    }
+
     /// What an announcement of the renewal carries: this device as it answers
     /// anybody, and the fingerprint of the certificate it is changing to.
     ///
@@ -1480,6 +1525,44 @@ impl Devices {
     /// [`Devices::caught_up`], which is what pays either debt the moment that
     /// member is found answering.
     ///
+    /// Put `call` to `device` over the link this one holds to it, and hand back
+    /// what that device answered (ADR-0020, *The opened device relays*).
+    ///
+    /// **Two Device Ids are not dialled**, and both are refused by name rather
+    /// than tried. One that is no member's is a device this machine knows
+    /// nothing about — there is no certificate to pin a dial on and no address
+    /// to make it at, and saying so is a different thing from a path that is
+    /// wrong. And this device's own id is refused too: local URLs keep their
+    /// shape, so nothing should ever ask, and a relay that quietly answered its
+    /// own id would be a second way of spelling every local call.
+    ///
+    /// **Everything else is the dial this tree already makes to a member** —
+    /// this device's certificate presented, the member's fingerprint pinned,
+    /// and every address it advertised tried in the order it advertised them,
+    /// so a device that has moved is reached at its later address. A dial that
+    /// answered nowhere leaves the row unreachable the way any other does. See
+    /// [`Peers::relay`].
+    pub(crate) async fn relay(
+        &self,
+        device: &str,
+        call: crate::relaying::Call,
+    ) -> std::result::Result<reqwest::Response, Unrelayed> {
+        if device == self.device.id() {
+            return Err(Unrelayed::ThisDevice);
+        }
+
+        let held = self.members.rows().await.map_err(Unrelayed::Unreadable)?;
+
+        let Some(member) = held.into_iter().find(|member| member.device == device) else {
+            return Err(Unrelayed::NoSuchMember);
+        };
+
+        self.peers
+            .relay(&member, &call)
+            .await
+            .map_err(Unrelayed::Unreachable)
+    }
+
     /// **A second press is not a second thing happening.** A device that is not
     /// a member is one this machine has already unlinked, and saying so twice
     /// is not a failure — the stance [`verkstead_store::forget_member`] takes,

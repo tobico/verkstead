@@ -247,6 +247,65 @@ it is bounded at both ends: a post saying more about itself than is kept is
 refused, and so is one that would take this device past sixteen questions held
 at once.
 
+**Once two devices are linked, either one's whole workbench is reachable through
+the other.** A member serves `/api/ui/` over its peer listener behind the member
+gate, and the device the browser opened relays for the rest: everything under
+`/api/ui/members/{device}/…` is put to that device verbatim — method, path,
+query, body and the headers that matter — and its answer comes back untouched,
+status and body and all. The prefix takes the place of `/api/ui`, so
+`/api/ui/members/0011…ee/conversations/4` is that device's own
+`/api/ui/conversations/4` and nothing else. The browser stays same-origin
+throughout and a device's workbench key never leaves it: what admits the hop at
+the far end is this device's certificate, and the cookie is not passed on.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/members/0011…ee/conversations
+$ curl -X POST -H 'Content-Type: application/octet-stream' --data-binary @notes.md \
+    http://127.0.0.1:8422/api/ui/members/0011…ee/conversations/4/attachments/notes.md
+```
+
+The body is streamed rather than held, in both directions, so an attachment is
+an ordinary post here and the limit that refuses an oversized one is the far
+end's own `413` rather than a judgement made after buffering the file. Three
+Device Ids are refused by name instead of dialled: one that is no member's, this
+device's own — local URLs keep their shape, so nothing should ask — and a member
+that answered at none of the addresses it advertised, which is the row the pane
+is already drawing dimmed.
+
+**And the news comes back the same way.** This device holds one Nudge stream to
+each of its members — that member's own `/api/ui/nudges`, read over the peer
+listener — and announces everything down it on the stream its own pages are
+listening to, under the Device Id it came from. So a page drawn on a member's
+Conversation stays fresh without a poll and without a reload, and a phone on the
+tailnet hears about that machine at all. The streams are the server's rather than
+the browser's: one per member serves every page this device has open.
+
+```console
+$ curl -N http://127.0.0.1:8422/api/ui/nudges
+event: nudge
+data: {"kind":"set","conversation":4}
+
+event: nudge
+data: {"kind":"set","conversation":7,"device":"0011…ee"}
+
+event: nudge
+data: {"kind":"everything","device":"0011…ee"}
+```
+
+A Nudge with no device is this device's own and is the frame it always was; one
+with a device is that member's news, and the viewer's own table keys the reads it
+makes by it. The `everything` kind is the stream itself rather than anything in
+the world: a member's stream that has just been taken up knows nothing about what
+it missed, so it says *read back whatever of this device is on screen*. Nothing at
+all is announced for a member that is not answering: the page keeps what it last
+read and goes stale, exactly as it does when its own stream is down. A stream that
+ends is taken up again five seconds later, and while nothing answers at all that
+wait doubles to a minute — a laptop that is shut for a fortnight is worth a dial a
+minute rather than one every five seconds. What goes over the
+peer listener is this device's own news alone: in a cluster everybody holds a
+stream to everybody, so a device passing on what a third one told it would be
+saying that news was its own.
+
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
 account anywhere the server can read, and every path field browses the same

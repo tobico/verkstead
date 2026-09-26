@@ -33,6 +33,7 @@ import { createSignal, Show, type JSX } from "solid-js";
 import { takeUpPullRequest } from "../api/client";
 import type { ConversationView, TakenUp } from "../api/types";
 import { ErrorLine, Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { companionRefusal } from "./Timeline";
 import styles from "./TakeUp.module.css";
 
@@ -159,11 +160,12 @@ export function TakingUp(props: {
   held: NonNullable<ConversationView["adopting_pull_request"]>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<TakenUp | null>(null);
 
   const take = useMutation(() => ({
-    mutationFn: () => takeUpPullRequest(props.conversation.id),
+    mutationFn: () => takeUpPullRequest(device(), props.conversation.id),
     onSuccess: (outcome: TakenUp) => {
       // Whatever it came back with, the page is read again: what the take-up
       // did is a conversation that has moved, and what refused it is a
@@ -171,10 +173,14 @@ export function TakingUp(props: {
       // either way.
       setRefused(outcome === "TakenUp" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      void queries.invalidateQueries({ queryKey: ["open-pull-requests"] });
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "open-pull-requests"),
+      });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
     },
   }));
 

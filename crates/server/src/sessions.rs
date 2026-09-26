@@ -2023,7 +2023,7 @@ impl Sessions {
 
     /// Whether this server can launch an agent at all.
     ///
-    /// The served router always can — see [`crate::router_with_ui`] — so this
+    /// The served router always can — see [`crate::routers_with_ui`] — so this
     /// is only ever false for a router built without [`Agents`], which is every
     /// test about something other than sessions. What such a server cannot do
     /// is take a Conversation up: nothing is driving one, nothing ever will,

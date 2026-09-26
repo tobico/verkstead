@@ -163,6 +163,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice, type Device } from "../reaching";
 import styles from "./Actions.module.css";
 import { eagerly, pressed, pressedRows, rowFor } from "./eager";
 import { pathOf, pathTo } from "./openings";
@@ -497,6 +498,23 @@ function actions(): {
   /// rows are drawn beside every page the sidebar stands on.
   const opened = useParams();
 
+  /// And which device the Conversation a press is about lives on.
+  ///
+  /// The page's where these rows are the Timeline header's — the menu acts on
+  /// the Conversation being read — and `null` where they are a sidebar card's,
+  /// the sidebar listing this device's own work whichever Conversation is open
+  /// beside it. One accessor for both, because the provider is what differs
+  /// rather than the menu (see `reaching.ts`).
+  const device = useDevice();
+
+  /// Whether a Conversation is the one the page is standing on, which is the id
+  /// **and** the device: ids collide by construction, so a sidebar card for this
+  /// device's Conversation 4 is not the member's Conversation 4 being read
+  /// beside it.
+  const isOpen = (conversation: ConversationView): boolean =>
+    String(conversation.id) === opened.id &&
+    device() === (opened.device ?? null);
+
   /// The sidebar's own list, read under the key the sidebar reads it under — so
   /// this is the answer already in hand rather than a second fetch of it.
   ///
@@ -543,8 +561,16 @@ function actions(): {
   /// Called before the press writes what it says, because what it reads is the
   /// list with this Conversation still on it. See `eager.ts`.
   const leaving = (conversation: ConversationView): void => {
-    if (String(conversation.id) !== opened.id) return;
+    if (!isOpen(conversation)) return;
     if (archived.data?.showing ?? false) return;
+
+    // A member's Conversation is on no list of this device's — the sidebar's
+    // rows are its own until the lists are merged — so there is no row above it
+    // to land on, and what the page leaves to is the bare workbench.
+    if (device() !== null) {
+      navigate("/", { replace: true });
+      return;
+    }
 
     const rows = pressedRows(conversations.data ?? [], false);
     const at = rows.findIndex((row) => row.id === conversation.id);
@@ -574,7 +600,7 @@ function actions(): {
   /// accessor again from inside it would be asking about another one.
   const [confirming, setConfirming] = createSignal<{
     conversation: ConversationView;
-    ending: (id: number) => Promise<ConversationClosed>;
+    ending: (device: Device, id: number) => Promise<ConversationClosed>;
     away: boolean;
     /// The pressed row's own name, which is what the confirming button reads.
     label: string;
@@ -607,7 +633,7 @@ function actions(): {
   /// than something set going — see `eager.ts`.
   const reread = (): Promise<unknown> =>
     Promise.all([
-      queries.invalidateQueries({ queryKey: ["conversation"] }),
+      queries.invalidateQueries({ queryKey: keyOf(device(), "conversation") }),
       queries.invalidateQueries({ queryKey: ["conversations"] }),
     ]);
 
@@ -615,7 +641,7 @@ function actions(): {
   /// something rather than ending it. Its refusals are the whole of what it is
   /// for, so a press that found nothing to start says so in as many words.
   const start = useMutation(() => ({
-    mutationFn: (id: number) => resume(id),
+    mutationFn: (id: number) => resume(device(), id),
     onSuccess: (outcome: Resumed) => {
       if (RESUME_REFUSAL[outcome]) {
         refuse(RESUME_REFUSAL[outcome]);
@@ -632,8 +658,10 @@ function actions(): {
   /// Both stops answer the same way, so both are pressed the same way: a
   /// refusal opens as a card over the page and the re-read behind it corrects
   /// what was drawn, and anything else is the press having landed.
-  const pressing = (stopping: (id: number) => Promise<ConversationStopped>) => ({
-    mutationFn: stopping,
+  const pressing = (
+    stopping: (device: Device, id: number) => Promise<ConversationStopped>,
+  ) => ({
+    mutationFn: (id: number) => stopping(device(), id),
     onSuccess: (outcome: ConversationStopped) => {
       if (STOP_REFUSAL[outcome]) {
         refuse(STOP_REFUSAL[outcome]);
@@ -677,7 +705,7 @@ function actions(): {
   /// that has just changed under it is a menu nobody meant to leave open.
   const click = useMutation(() => ({
     mutationFn: (conversation: ConversationView) =>
-      steerConversation(conversation.id),
+      steerConversation(device(), conversation.id),
     onSuccess: (outcome: SteerOpened, conversation: ConversationView) => {
       if (outcome === "NoSuchConversation") {
         refuse("This conversation is gone.");
@@ -689,8 +717,8 @@ function actions(): {
       // the button the press came from, which is where a narrow window is
       // walking away from.
       shut();
-      navigate(pathTo(conversation.id, "steer"), {
-        replace: String(conversation.id) === opened.id,
+      navigate(pathTo(conversation.id, "steer", device()), {
+        replace: isOpen(conversation),
       });
 
       // The conversation has stopped and is carrying a pending steer, whatever
@@ -714,7 +742,7 @@ function actions(): {
   /// `eager.ts`.
   const closing = (
     conversation: ConversationView,
-    ending: (id: number) => Promise<ConversationClosed>,
+    ending: (device: Device, id: number) => Promise<ConversationClosed>,
     away: boolean,
   ) => {
     shut();
@@ -725,12 +753,13 @@ function actions(): {
     if (away) leaving(conversation);
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       // The archive is the half the two rows differ by, and it is said here
       // rather than in a second press: the server makes both in one request,
       // which is what stops a dropped connection leaving the pair half made.
       says: away ? { closed: true, archived: true } : { closed: true },
-      post: () => ending(conversation.id),
+      post: () => ending(device(), conversation.id),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be closed: ${error.message}`,
@@ -752,7 +781,7 @@ function actions(): {
   /// focus back to when it is answered.
   const ends = (
     conversation: ConversationView,
-    ending: (id: number) => Promise<ConversationClosed>,
+    ending: (device: Device, id: number) => Promise<ConversationClosed>,
     away: boolean,
     label: string,
   ) => {
@@ -787,9 +816,10 @@ function actions(): {
     leaving(conversation);
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       says: { archived: true },
-      post: () => archiveConversation(conversation.id),
+      post: () => archiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be archived: ${error.message}`,
@@ -809,9 +839,10 @@ function actions(): {
     shut();
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       says: { archived: false, row: rowFor(conversation) },
-      post: () => unarchiveConversation(conversation.id),
+      post: () => unarchiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationUnarchived) => UNARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be unarchived: ${error.message}`,
@@ -827,7 +858,7 @@ function actions(): {
       /// with whatever a press here has already said about it laid over. Which
       /// is what stands Archive where Close was the instant Close is pressed,
       /// rather than a round trip later — see `eager.ts`.
-      const conversation = () => pressed(given());
+      const conversation = () => pressed(device(), given());
 
       return (
         <>
@@ -1072,8 +1103,9 @@ export function CardActions(props: {
     return {
       // The key the Conversation pane reads under, so the open one is already
       // in hand and any other is in hand for the pane that opens it next.
+      // This device's own, the card being a row of its sidebar.
       queryKey: ["conversation", of],
-      queryFn: () => loadConversation(of),
+      queryFn: () => loadConversation(null, of),
       enabled: of !== "",
 
       // Merged, as the pane's own read of this is: a Nudge landing while the

@@ -87,6 +87,7 @@ import {
 import { listDirectory } from "./api/client";
 import type { DirectoryEntry, DirectoryListing } from "./api/types";
 import { useReading } from "./freshness";
+import { keyOf, useDevice } from "./reaching";
 import { Empty, ErrorLine } from "./notices";
 import styles from "./PathField.module.css";
 import { dropping } from "./picking";
@@ -282,6 +283,12 @@ export function PathField(props: {
     return cut < 0 ? null : cut === 0 ? "/" : props.value.slice(0, cut);
   };
 
+  /// Which device is being browsed, where the form this field is on is one of a
+  /// member's: an Open repo asked from a remote Conversation's Repo dropdown is
+  /// looking through that device's filesystem, this one's paths being no use to
+  /// it. `null` on every form of this device's own, which is most of them.
+  const device = useDevice();
+
   /// And what filters them: the segment after that separator, which is the part
   /// of a path typed but not finished. Nothing filters the rows of a directory
   /// that was tapped into — the whole of it is what was asked for.
@@ -297,8 +304,8 @@ export function PathField(props: {
   /// separator sends a request. Merged by path, a re-read being the same
   /// directory read again.
   const listing = useReading(() => ({
-    queryKey: ["directories", inside()],
-    queryFn: () => listDirectory(inside()),
+    queryKey: keyOf(device(), "directories", inside()),
+    queryFn: () => listDirectory(device(), inside()),
     enabled: open(),
     freshness: { reconcile: "path" },
   }));

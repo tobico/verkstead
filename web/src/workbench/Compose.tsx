@@ -265,7 +265,10 @@ function Compose(props: {
   // reader of this list uses, so it is the one read.
   const repos = useReading(() => ({
     queryKey: ["repos"],
-    queryFn: listRepos,
+    // This device's own, as everything on this page is: a Conversation is
+    // started where the work will be done, and a member's is started over
+    // there.
+    queryFn: () => listRepos(null),
     freshness: { reconcile: "id" },
   }));
 
@@ -355,7 +358,7 @@ function Compose(props: {
   // runs is made where the profiles and the repositories are.
   const remembered = useReading(() => ({
     queryKey: ["repos", on(state()), "pairings"],
-    queryFn: () => loadRepoPairings(on(state())!),
+    queryFn: () => loadRepoPairings(null, on(state())!),
     enabled: on(state()) !== null,
 
     // Merged by the id each profile carries, for the pickers below: what a

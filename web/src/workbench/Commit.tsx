@@ -75,6 +75,7 @@ import type { CommitEvent, CommitPane, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
@@ -157,11 +158,14 @@ export function Commit(props: {
   commit: CommitEvent;
   back: () => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const opened = useReading(() => ({
     // The event is in the key, so opening another commit is another query
     // rather than the same one showing the wrong commit for a moment.
-    queryKey: ["commit", props.conversation.id, props.commit.id],
-    queryFn: () => loadCommitPane(props.conversation.id, props.commit.id),
+    queryKey: keyOf(device(), "commit", props.conversation.id, props.commit.id),
+    queryFn: () =>
+      loadCommitPane(device(), props.conversation.id, props.commit.id),
 
     // A commit cannot change, so it is read once and never again.
     // "static" and not a finite time: a Nudge invalidates every active query,

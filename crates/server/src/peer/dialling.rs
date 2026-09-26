@@ -55,6 +55,7 @@
 //! Which is why it is worth making at all when this end already holds a row: the
 //! answer is the row said again by the machine it is about.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -184,6 +185,55 @@ pub struct Peers {
     /// And how long the one that answered has to finish. [`ANSWERING`] on a
     /// running server.
     answering: Duration,
+
+    /// The client each member's **relayed** traffic goes over, held so that a
+    /// second call reuses the connection the first one opened — see
+    /// [`Held`] and [`Peers::held_for`].
+    ///
+    /// Shared across every clone of this handle, because the point of it is
+    /// that there is one pool per member rather than one per caller: the hop
+    /// dials from whichever request task the browser landed in, and a cache
+    /// that cloned would be no cache at all.
+    ///
+    /// **Relayed traffic alone.** Every other dial here happens now and then —
+    /// an identity read, a telling, a join — and builds its client as it always
+    /// did: a client apiece costs nothing at that rate, and each of those walks
+    /// wants its own reading of what it met.
+    holding: Arc<Mutex<HashMap<String, Held>>>,
+}
+
+/// One member's dialling client, and what it was built against.
+///
+/// **Rebuilt rather than refreshed when either end's certificate moves.** A
+/// client presents this device's own certificate and pins the member's, and
+/// both are re-issued from time to time — a renewal here, a changeover there —
+/// so what is kept beside the client is the fingerprints it was made for. One
+/// that no longer matches is a client that would present something the far end
+/// has never acknowledged, or pin something that member no longer holds.
+///
+/// There is an entry per member ever dialled and nothing prunes them: a cluster
+/// is a handful of devices, an unlinked one leaves a client whose idle
+/// connections reqwest reaps on its own, and a device linked again lands on its
+/// own key.
+#[derive(Debug)]
+struct Held {
+    /// The fingerprints this client accepts from the far end — the member's,
+    /// and the one it is changing over from where it is.
+    expecting: Vec<String>,
+
+    /// And the fingerprint of this device's own certificate it presents.
+    presenting: String,
+
+    /// Where a certificate met that was not one of `expecting` is written,
+    /// shared with the verifier inside the client for as long as it lives.
+    ///
+    /// Which is why [`Peers::held_for`] empties it before handing it back: it
+    /// holds whatever the *last* walk met, and a walk that reaches nobody says
+    /// whatever is in it — so one carried over would have this device reporting
+    /// a mismatch from ten minutes ago as the reason a member is not there.
+    met: Arc<Mutex<Option<String>>>,
+
+    client: reqwest::Client,
 }
 
 impl Peers {
@@ -195,6 +245,7 @@ impl Peers {
             members,
             reaching: REACHING,
             answering: ANSWERING,
+            holding: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -257,14 +308,36 @@ impl Peers {
             }
         }
 
-        // A certificate met that was not the one recorded is a machine that
-        // answered rather than a member that is not there — somebody else on
-        // that address, or a device whose identity has been made again behind
-        // this row's back. Neither is anything to dim a row over: the member is
-        // where it was and this is a refusal, so the row is left alone and the
-        // fingerprint that turned up is said.
+        Err(self.nowhere(member, &met, &nothing_at).await)
+    }
+
+    /// What a walk that reached nobody came to, in the words the caller hands
+    /// back — and the row dimmed where that is what it means.
+    ///
+    /// **One reading rather than one per thing a dial is for.** The three walks
+    /// here — the identity read, the tellings, and a relayed call — end the
+    /// same way whatever they were carrying, because what they ran out of is
+    /// the same thing: a member's addresses.
+    ///
+    /// A certificate met that was not the one recorded is a machine that
+    /// answered rather than a member that is not there — somebody else on that
+    /// address, or a device whose identity has been made again behind this
+    /// row's back. Neither is anything to dim a row over: the member is where
+    /// it was and this is a refusal, so the row is left alone and the
+    /// fingerprint that turned up is said.
+    ///
+    /// And a member that advertised nothing has nowhere to be dialled at all,
+    /// which is the same finding reached by a shorter road: a device on neither
+    /// a tailnet nor a network answers with an empty list, and a row holding
+    /// one is a row nothing can get to.
+    async fn nowhere(
+        &self,
+        member: &Member,
+        met: &Arc<Mutex<Option<String>>>,
+        nothing_at: &[&str],
+    ) -> anyhow::Error {
         if let Some(met) = met.lock().expect("nothing panics holding this").take() {
-            bail!(
+            return anyhow!(
                 "device {} is recorded against {}, and the machine answering for it presented \
                  {met} instead",
                 member.device,
@@ -272,14 +345,12 @@ impl Peers {
             );
         }
 
-        self.members.unreachable(&member.device).await?;
+        if let Err(why) = self.members.unreachable(&member.device).await {
+            return why;
+        }
 
-        // A member that advertised nothing has nowhere to be dialled at all,
-        // which is the same finding reached by a shorter road: a device on
-        // neither a tailnet nor a network answers with an empty list, and a row
-        // holding one is a row nothing can get to.
         if nothing_at.is_empty() {
-            bail!(
+            return anyhow!(
                 "device {} advertised no address to dial it at",
                 member.device
             );
@@ -292,11 +363,11 @@ impl Peers {
              one of them does",
         );
 
-        bail!(
+        anyhow!(
             "device {} answered at none of the addresses it advertised ({})",
             member.device,
             nothing_at.join(", "),
-        );
+        )
     }
 
     /// What a dial does with the answer it got: check that it is this member's,
@@ -549,40 +620,80 @@ impl Peers {
             }
         }
 
-        // A certificate met that was not the one recorded is a machine that
-        // answered rather than a member that is not there — the same reading
-        // [`Peers::identity`] makes of one, and the same refusal to dim a row
-        // over it.
-        if let Some(met) = met.lock().expect("nothing panics holding this").take() {
-            bail!(
-                "device {} is recorded against {}, and the machine answering for it presented \
-                 {met} instead",
-                member.device,
-                member.fingerprint,
-            );
+        Err(self.nowhere(member, &met, &nothing_at).await)
+    }
+
+    /// Put `call` to `member` and hand back what it answered, which is the hop
+    /// a relayed call is made over (ADR-0020, *The opened device relays*) — see
+    /// [`crate::relaying`], which is the end of it the browser reaches.
+    ///
+    /// **An ordinary member's call, pinned like every other**, and the same
+    /// walk down the same addresses. What is different is that it carries
+    /// somebody else's request rather than something this device had to say,
+    /// so nothing is read out of the answer here: the status, the headers and
+    /// the body are the browser's and are handed straight back.
+    ///
+    /// **And a body cannot be sent twice**, which is what shortens the walk.
+    /// The other dials here try the next address on any failure; this one tries
+    /// it only where the attempt failed to *connect*, that being the one
+    /// failure that happens before a single byte of the body has been asked for
+    /// — see [`crate::relaying::Streamed`]. A machine that answered the
+    /// handshake and then stopped is a machine that has had part of the
+    /// request, and there is nothing left to send it to the next address.
+    ///
+    /// **No deadline on the answer**, unlike every other dial here — see
+    /// [`Peers::relaying`]. The address still has [`REACHING`] to answer the
+    /// connection, so a member that has moved costs what it always did.
+    ///
+    /// **And a socket is one of the answers.** Three of the endpoints in that
+    /// namespace answer `101` rather than a body, and this is the dial that asks
+    /// them: what comes back is handed to [`crate::relaying::bridging`], which
+    /// takes the connection out of it and joins it to the browser's. Nothing here
+    /// is different for one — it is the same request under the same certificate,
+    /// and the deadline this dial does without is what lets the connection live
+    /// as long as the pane does.
+    pub(crate) async fn relay(
+        &self,
+        member: &Member,
+        call: &crate::relaying::Call,
+    ) -> Result<reqwest::Response> {
+        let (dialling, met) = self.held_for(member)?;
+        let mut nothing_at = Vec::new();
+
+        for address in &member.addresses {
+            let mut attempt = dialling
+                .request(call.method.clone(), reaching(address, &call.onwards))
+                .headers(call.headers.clone());
+
+            if let Some(body) = call.body.for_one_attempt() {
+                attempt = attempt.body(body);
+            }
+
+            match attempt.send().await {
+                Ok(answered) => return Ok(answered),
+
+                Err(why) if why.is_connect() => {
+                    tracing::debug!(
+                        device = %member.device,
+                        %address,
+                        %why,
+                        "a member did not answer at one of its addresses, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+
+                Err(why) => {
+                    bail!(
+                        "device {} stopped answering at {address} partway through a call this \
+                         device was relaying to it: {why}",
+                        member.device,
+                    );
+                }
+            }
         }
 
-        self.members.unreachable(&member.device).await?;
-
-        if nothing_at.is_empty() {
-            bail!(
-                "device {} advertised no address to dial it at",
-                member.device
-            );
-        }
-
-        tracing::info!(
-            device = %member.device,
-            addresses = %nothing_at.join(", "),
-            "a member answered at none of its addresses, so it is drawn unreachable until \
-             one of them does",
-        );
-
-        bail!(
-            "device {} answered at none of the addresses it advertised ({})",
-            member.device,
-            nothing_at.join(", "),
-        );
+        Err(self.nowhere(member, &met, &nothing_at).await)
     }
 
     /// Ask the device at `address` to let this one into its cluster, saying
@@ -984,7 +1095,84 @@ impl Peers {
         expecting: Vec<String>,
         met: &Arc<Mutex<Option<String>>>,
     ) -> Result<reqwest::Client> {
-        self.client(|algorithms| {
+        self.client(Some(self.answering), |algorithms| {
+            Arc::new(ThePinnedOne {
+                expecting,
+                met: Arc::clone(met),
+                algorithms,
+            })
+        })
+    }
+
+    /// The client `member`'s relayed traffic goes over, and where a mismatch
+    /// met on the way is written — built the first time and held after it, so
+    /// that a second call reuses the connection the first one opened.
+    ///
+    /// **Because a relay is traffic rather than an errand.** Every other dial
+    /// here happens now and then; this one is the browser, and a remote
+    /// Conversation is a page load's worth of calls with a Code pane putting
+    /// one more on it per folder opened and per file read. A client apiece
+    /// meant this device's certificate re-parsed, a rustls config built and a
+    /// whole TLS handshake for each of them — over a tailnet, the handshake
+    /// *is* the page load.
+    ///
+    /// **Rebuilt where either certificate has moved**, which is the whole of
+    /// what makes holding one safe — see [`Held`]. And what it holds of the
+    /// last walk is emptied on the way out, for the reason [`Held::met`] gives.
+    fn held_for(&self, member: &Member) -> Result<(reqwest::Client, Arc<Mutex<Option<String>>>)> {
+        let expecting = accepted(member);
+        let presenting = self.device.fingerprint().to_owned();
+
+        let mut holding = self.holding.lock().expect("nothing panics holding this");
+
+        let standing = holding.get(&member.device).and_then(|held| {
+            (held.expecting == expecting && held.presenting == presenting)
+                .then(|| (held.client.clone(), Arc::clone(&held.met)))
+        });
+
+        if let Some((client, met)) = standing {
+            met.lock().expect("nothing panics holding this").take();
+            return Ok((client, met));
+        }
+
+        let met = Arc::new(Mutex::new(None));
+        let client = self.relaying(expecting.clone(), &met)?;
+
+        holding.insert(
+            member.device.clone(),
+            Held {
+                expecting,
+                presenting,
+                met: Arc::clone(&met),
+                client: client.clone(),
+            },
+        );
+
+        Ok((client, met))
+    }
+
+    /// And the one a relayed call is made with: the same certificate presented
+    /// and the same fingerprint pinned, and no deadline on the answer.
+    ///
+    /// **Because the work at the far end is the browser's rather than this
+    /// device's.** [`ANSWERING`] is how long a machine has to say what it is,
+    /// which is a reading it makes of itself; a relayed call is a press on a
+    /// workbench, and the namespace it lands in has presses that cut a branch,
+    /// make a worktree and push to GitHub. A deadline here would be this device
+    /// deciding how long another one's work may take, and it would cut off
+    /// exactly the calls worth relaying. What bounds the wait instead is the
+    /// browser's own patience, which is the same thing that bounds a local
+    /// press.
+    ///
+    /// [`REACHING`] stays, being about the address rather than the answer: a
+    /// member that has moved costs a walk down its old addresses here as
+    /// anywhere else.
+    fn relaying(
+        &self,
+        expecting: Vec<String>,
+        met: &Arc<Mutex<Option<String>>>,
+    ) -> Result<reqwest::Client> {
+        self.client(None, |algorithms| {
             Arc::new(ThePinnedOne {
                 expecting,
                 met: Arc::clone(met),
@@ -1000,7 +1188,7 @@ impl Peers {
     /// gives — there is nothing to pin it to until the humans have compared the
     /// fingerprints, and this call is how they come to have one to compare.
     fn asking(&self, met: &Arc<Mutex<Option<String>>>) -> Result<reqwest::Client> {
-        self.client(|algorithms| {
+        self.client(Some(self.answering), |algorithms| {
             Arc::new(WhateverIsThere {
                 met: Arc::clone(met),
                 algorithms,
@@ -1008,11 +1196,13 @@ impl Peers {
         })
     }
 
-    /// What both of those come down to: this device's certificate to present,
-    /// `verifier` deciding what the far end's has to be, and a deadline apiece
-    /// on reaching a machine and on being answered by one.
+    /// What all three of those come down to: this device's certificate to
+    /// present, `verifier` deciding what the far end's has to be, a deadline on
+    /// reaching a machine, and `answering` on being answered by one where there
+    /// is one to keep.
     fn client(
         &self,
+        answering: Option<Duration>,
         verifier: impl FnOnce(WebPkiSupportedAlgorithms) -> Arc<dyn ServerCertVerifier>,
     ) -> Result<reqwest::Client> {
         let pem = self.device.certificate().as_bytes();
@@ -1035,17 +1225,23 @@ impl Peers {
             .with_client_auth_cert(vec![certificate], key)
             .context("presenting this device's certificate to a peer")?;
 
-        reqwest::Client::builder()
+        let built = reqwest::Client::builder()
             .use_preconfigured_tls(dialling)
             // The connection and the answer are two deadlines because they are
             // two different waits — see [`REACHING`] and [`ANSWERING`]. The
             // first is what a dead address costs, and it is spent once per
             // address; the second is what the machine that answered is given,
-            // and it is spent once.
-            .connect_timeout(self.reaching)
-            .timeout(self.answering)
-            .build()
-            .context("building the client a peer is dialled with")
+            // and it is spent once — and is not kept at all where what the far
+            // end is answering is somebody else's request, which is
+            // [`Peers::relaying`].
+            .connect_timeout(self.reaching);
+
+        match answering {
+            Some(answering) => built.timeout(answering),
+            None => built,
+        }
+        .build()
+        .context("building the client a peer is dialled with")
     }
 }
 
@@ -1305,6 +1501,124 @@ impl ServerCertVerifier for WhateverIsThere {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A device to dial *from*: an identity in a directory of its own, which is
+    /// what a client presents.
+    ///
+    /// The directory is handed back with it because dropping one takes the
+    /// certificate off the disk with it.
+    fn dialling_as(id: &str) -> (Peers, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("a directory to keep an identity in");
+        let device = Device::stated(dir.path(), id).expect("an identity to present");
+
+        (Peers::of(device, Members::none()), dir)
+    }
+
+    /// And a member to dial: the Device Id and the fingerprints are the whole
+    /// of what a client is built against, so everything else is the row's
+    /// ordinary shape.
+    fn a_member(device: &str, fingerprint: &str) -> Member {
+        Member {
+            device: device.to_owned(),
+            name: "workbench".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["192.168.1.24".to_owned()],
+            fingerprint: fingerprint.to_owned(),
+            last_seen: "2026-09-26T00:00:00Z".to_owned(),
+            reachable: true,
+            renewing_from: None,
+            acknowledged: None,
+        }
+    }
+
+    /// One client per member rather than one per call, so a remote
+    /// Conversation's second read goes over the connection its first one
+    /// opened.
+    ///
+    /// Asked of the handle the client's verifier writes into, that being the
+    /// one thing made alongside a client and shared with it: the same handle
+    /// back is the same client back.
+    #[test]
+    fn a_members_dialling_client_is_held_rather_than_built_for_every_call() {
+        let (peers, _dir) = dialling_as("aa00bb11cc22dd33ee44ff5566778899");
+        let member = a_member("0011223344556677889900aabbccddee", "sha256:theirs");
+
+        let (_, first) = peers.held_for(&member).expect("a client to dial with");
+        let (_, again) = peers.held_for(&member).expect("and the same one again");
+
+        assert!(
+            Arc::ptr_eq(&first, &again),
+            "a second call to the one member should go over the client the first built",
+        );
+    }
+
+    /// And a member apiece, because a client is pinned on the fingerprint it
+    /// was built for.
+    #[test]
+    fn two_members_are_dialled_with_a_client_each() {
+        let (peers, _dir) = dialling_as("aa00bb11cc22dd33ee44ff5566778899");
+
+        let (_, one) = peers
+            .held_for(&a_member("0011223344556677889900aabbccddee", "sha256:one"))
+            .unwrap();
+        let (_, other) = peers
+            .held_for(&a_member("ffeeddccbbaa00998877665544332211", "sha256:two"))
+            .unwrap();
+
+        assert!(!Arc::ptr_eq(&one, &other));
+    }
+
+    /// A member that has re-issued its certificate is dialled with a client
+    /// built for the new one: a held client pins the fingerprint it was made
+    /// with, and one kept past a renewal would refuse the machine it is for.
+    #[test]
+    fn a_renewed_member_is_dialled_with_a_client_built_for_it() {
+        let (peers, _dir) = dialling_as("aa00bb11cc22dd33ee44ff5566778899");
+        let device = "0011223344556677889900aabbccddee";
+
+        let (_, before) = peers.held_for(&a_member(device, "sha256:before")).unwrap();
+        let (_, after) = peers.held_for(&a_member(device, "sha256:after")).unwrap();
+
+        assert!(
+            !Arc::ptr_eq(&before, &after),
+            "the fingerprint moved, so the client pinned on the old one is not reused",
+        );
+
+        // And the changeover's second fingerprint counts the same way: a member
+        // in the middle of one is accepted under two, and a client built for
+        // one of them is not built for both.
+        let mut renewing = a_member(device, "sha256:after");
+        renewing.renewing_from = Some("sha256:before".to_owned());
+
+        let (_, changing) = peers.held_for(&renewing).unwrap();
+
+        assert!(!Arc::ptr_eq(&after, &changing));
+    }
+
+    /// And what a walk met is emptied before the next one, so that a mismatch
+    /// from an earlier call is not handed back as the reason a member is not
+    /// there now.
+    ///
+    /// The one thing a held client makes possible that a fresh one could not:
+    /// the handle lives as long as the client does, and [`Peers::nowhere`]
+    /// reports whatever is in it.
+    #[test]
+    fn what_an_earlier_walk_met_is_not_carried_into_the_next() {
+        let (peers, _dir) = dialling_as("aa00bb11cc22dd33ee44ff5566778899");
+        let member = a_member("0011223344556677889900aabbccddee", "sha256:theirs");
+
+        let (_, met) = peers.held_for(&member).unwrap();
+
+        *met.lock().unwrap() = Some("sha256:somebody-else".to_owned());
+
+        let (_, next) = peers.held_for(&member).unwrap();
+
+        assert_eq!(
+            *next.lock().unwrap(),
+            None,
+            "the next walk starts having met nobody",
+        );
+    }
 
     /// A bare address of either family is dialled on the peer port, and the v6
     /// one is bracketed — an address with colons in it and a port after it is
