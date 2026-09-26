@@ -153,7 +153,7 @@ impl Linked {
             Members::recorded(pool.clone()),
             peer::joining::Joins::none(),
             Nudges::new(),
-            router_over_the_link(pool.clone()),
+            router_over_the_link(pool.clone(), dir.path().to_owned()),
         )));
 
         let key = WorkbenchKey::stated(dir.path(), "the-workbench-key").unwrap();

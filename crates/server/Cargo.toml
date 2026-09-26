@@ -78,15 +78,25 @@ http = "1"
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }
-# Sending the push, and asking GitHub whether a newer Verkstead has been
-# released — between them the whole of what Verkstead says to the public
+# Sending the push, asking GitHub whether a newer Verkstead has been
+# released, and dialling the devices this one is linked to — the first two
+# being the whole of what Verkstead says to the public
 # internet. Default
 # features are off to keep OpenSSL out of the build: rustls, with the roots it
 # bundles, is all that reaching an https endpoint takes. `json` is what reads
 # GitHub's answer, and costs nothing beyond the serde_json already here.
+#
+# And `stream` is the relay (ADR 0020) — see `src/relaying.rs`. A call put to a
+# member is the browser's own request carried through, and an attachment is
+# thirty-two megabytes of it, so the hop reads the body as a stream and writes
+# the answer back as one rather than holding either. It adds `tokio-util`, and
+# makes `futures-util` — here already under `tokio-stream` — reqwest's too. The
+# one other name it puts in the lock file, `wasm-streams`, is reqwest's browser
+# target and is built for nothing Verkstead is.
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
+    "stream",
 ] }
 # The viewer built into the binary — see `src/viewer.rs`. `mime-guess` is what
 # names each file's content type on the way out; `interpolate-folder-path` is what
