@@ -1164,6 +1164,49 @@ async fn a_press_tells_the_workbench_that_did_not_press() {
     );
 }
 
+/// And the presses on the pane itself tell this device's other workbenches, so
+/// a pending row appears and goes on a page that pressed nothing.
+///
+/// **The same arrangement every other way this section moves already makes.** A
+/// member naming a newcomer, a member saying a device is out and a press on the
+/// modal each say so as they land; Add and Cancel are the same list moving, on
+/// the machine the press was made on. Re-reads in the viewer are the Nudge and
+/// nothing else — nothing polls — so a second workbench that heard neither
+/// would go on drawing the section as it was before the press.
+#[tokio::test]
+async fn the_presses_on_the_pane_tell_the_workbench_that_did_not_press() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    // The second workbench of the device doing the asking, opened before any
+    // press so that what it hears is the press.
+    let over_here = asking.workbench();
+    let mut page = Listening::open(&over_here).await;
+
+    let (status, said) = add(&asking.workbench(), &asked.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    assert_eq!(page.nudge().await, Nudge::Devices);
+
+    let pending = listing(&over_here).await.pending;
+    assert_eq!(
+        pending.len(),
+        1,
+        "and what it reads back is the row the press left behind",
+    );
+
+    assert_eq!(
+        cancel(&asking.workbench(), &pending[0].request).await,
+        StatusCode::OK,
+    );
+
+    assert_eq!(page.nudge().await, Nudge::Devices);
+    assert!(
+        listing(&over_here).await.pending.is_empty(),
+        "and the row it was drawing is gone",
+    );
+}
+
 /// And a cancel from the device that asked settles it the same way, so a modal
 /// standing over a question that has been taken back goes too.
 #[tokio::test]

@@ -5672,7 +5672,7 @@ async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> 
         return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
     }
 
-    listed(&devices).await
+    moved(&state, &devices).await
 }
 
 /// `POST /api/ui/devices/joins/{request}/cancel` — **Cancel** on a pending row,
@@ -5691,7 +5691,7 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
         return unavailable(&format!("the request could not be taken back: {why:#}"));
     }
 
-    listed(&devices).await
+    moved(&state, &devices).await
 }
 
 /// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
@@ -5717,7 +5717,7 @@ async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>
         return unavailable(&format!("the device could not be unlinked: {why:#}"));
     }
 
-    listed(&devices).await
+    moved(&state, &devices).await
 }
 
 /// `GET /api/ui/devices/asking` — every device asking to be let into this one's
@@ -5809,8 +5809,32 @@ async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
     Json(asking).into_response()
 }
 
-/// The Devices section as the pane reads it, which is what all three of the
-/// above answer with: one reading, made at the moment it is asked for.
+/// What the three presses on the section answer with: the list read again, and
+/// every other open workbench told the cluster moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement [`settled`] makes beside this and the one
+/// every other way this section moves already made: a member naming a newcomer,
+/// a member saying a device is out, and a member's renewed certificate each
+/// announce [`Nudge::Devices`] as they land. A press made over here is the same
+/// list moving, so it says the same word — and without it the one press that
+/// takes a row away would be the only change a second workbench of the pressing
+/// device went on drawing the old answer for, while every other device in the
+/// cluster had it right. Re-reads in the viewer are the Nudge and nothing else;
+/// nothing polls.
+///
+/// [`Nudge::Devices`] rather than [`Nudge::Joins`] for all three, Add and Cancel
+/// included: a pending row is part of the reading the Devices section is drawn
+/// from, and the joins this device is being *asked* — which is what the other
+/// word names — have not moved.
+async fn moved(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Devices);
+
+    listed(devices).await
+}
+
+/// The Devices section as the pane reads it, which is what all of the above
+/// answer with: one reading, made at the moment it is asked for.
 async fn listed(devices: &crate::device::Devices) -> HttpResponse {
     let view: DevicesView = match devices.listing().await {
         Ok(view) => view,
