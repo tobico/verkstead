@@ -55,8 +55,16 @@
 
 import { faGear } from "@fortawesome/free-solid-svg-icons";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { Gate } from "../src/App";
+import { DragBar } from "../src/DragBar";
+import bare from "../src/DragBar.module.css";
+// And that component's sheet as text, for the reason the head's is read as text:
+// the property the strip is a drag region by is Chromium's own and jsdom parses
+// none of it.
+import barely from "../src/DragBar.module.css?raw";
 import { CLEAR, insets, reserved, type Area } from "../src/controls";
 import { band, dress, worn } from "../src/head";
 import { IconButton } from "../src/IconButton";
@@ -68,6 +76,7 @@ import shell from "../src/Panes.module.css";
 import stylesheet from "../src/Panes.module.css?raw";
 import { Switch } from "../src/Switch";
 import { ALL_THREE, BESIDE } from "../src/widths";
+import type { OnboardingView } from "../src/api/types";
 import { NAME, type Bridge, type Head } from "../src/settings/bridge";
 import { PaneHead } from "../src/workbench/PaneHead";
 import styles from "../src/workbench/PaneHead.module.css";
@@ -75,20 +84,27 @@ import styles from "../src/workbench/PaneHead.module.css";
 // and jsdom parses neither, so what says which selector they are written over is
 // the source of the rule.
 import sheet from "../src/workbench/PaneHead.module.css?raw";
+import { SET_UP, theWorkbench } from "./bench";
+import { hangs, json, whenever } from "./serving";
+import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(navigator, "windowControlsOverlay");
 });
 
-/// Every rule in the sheet with its comments taken out: the selector as written,
+/// Every rule in a sheet with its comments taken out: the selector as written,
 /// and what it declares.
 ///
 /// Flat, so the `@media` block's own brace leaves a fragment behind rather than
 /// a rule — which is harmless, because nothing is looked up here except by the
 /// property it declares, and the two properties under test are declared once
 /// each.
-function rules(): { selects: string; declares: string }[] {
+///
+/// Told which sheet, because there are two that draw a drag region: the head's
+/// and the bare bar's. The rule is the same rule in both, and reading it out of
+/// the sheet is the same reading.
+function rules(sheet: string): { selects: string; declares: string }[] {
   return sheet
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("}")
@@ -110,8 +126,8 @@ function rules(): { selects: string; declares: string }[] {
 /// The selector `property: value` is declared over, and the insistence that it
 /// is declared exactly once: two rules saying where the window is dragged by
 /// would be two answers to one question.
-function declaring(property: string, value: string): string {
-  const declared = rules()
+function declaring(sheet: string, property: string, value: string): string {
+  const declared = rules(sheet)
     .filter((rule) => rule.declares.includes(`${property}: ${value};`))
     .map((rule) => rule.selects);
 
@@ -120,12 +136,15 @@ function declaring(property: string, value: string): string {
   return declared[0]!;
 }
 
-/// A selector out of the stylesheet as the document has it: every plain class
+/// A selector out of a stylesheet as the document has it: every plain class
 /// name in it swapped for the hashed one the bundler gave the module, which is
 /// what the component draws and so what an element can be put to.
-function asDrawn(selector: string): string {
+function asDrawn(
+  selector: string,
+  names: Record<string, string | undefined>,
+): string {
   return selector.replace(/\.([\w-]+)/g, (_, name: string) => {
-    const hashed = (styles as Record<string, string | undefined>)[name];
+    const hashed = names[name];
 
     expect(hashed, `the sheet selects .${name} and does not define it`).toBeTypeOf(
       "string",
@@ -137,8 +156,11 @@ function asDrawn(selector: string): string {
 
 /// Where the window is dragged by, and what is excepted from it — the two
 /// selectors, as the document has them.
-const DRAGS = asDrawn(declaring("-webkit-app-region", "drag"));
-const EXCEPTED = asDrawn(declaring("-webkit-app-region", "no-drag"));
+const DRAGS = asDrawn(declaring(sheet, "-webkit-app-region", "drag"), styles);
+const EXCEPTED = asDrawn(
+  declaring(sheet, "-webkit-app-region", "no-drag"),
+  styles,
+);
 
 /// A head with one of everything a head carries in it: the way back out, an
 /// icon button, a ⋯ menu, a switch, and a group of buttons like the
@@ -784,5 +806,169 @@ describe("telling the app", () => {
     dress()();
 
     expect(pushed).toEqual([]);
+  });
+});
+
+/// The bar's own selectors, out of its own sheet: the strip that is the region,
+/// and the room it takes in the page.
+const BARE = asDrawn(declaring(barely, "-webkit-app-region", "drag"), bare);
+const ROOM = `.${bare.bar}`;
+
+/// What the strip declares, for the things about it that are not a class on an
+/// element: it is fixed across the window rather than stuck to the page, it is
+/// drawn at the band the component writes, and the page's own paper is behind
+/// it. Found by the selector as the sheet writes it, which is what `rules` reads.
+const STRIP = rules(barely).find((rule) => rule.selects === ".drag")?.declares;
+
+/// A start on a bare machine — nothing installed, no Profile, no author — which
+/// is the reading that leaves the wizard as the only page there is.
+const FRESH = fresh as OnboardingView;
+
+/// The wizard's own heading, and what the app answers a path nothing has: the
+/// two of the three pages that draw anything at all.
+const WIZARD = "Set Verkstead up";
+const MISSED = "No such page.";
+
+/// What the machine answers with, which is a value or a hang: how long the read
+/// takes is one of the three cases.
+type Reading = Parameters<typeof whenever>[1];
+
+/// The app's own gate at a path, over a machine that reads as `machine` says.
+///
+/// The real gate rather than the pages under it, because which of the three
+/// pages with no pane head is drawn is the gate's own answer: the wizard while
+/// the mode is on, the no-such-page at a path nothing has while it is off, and
+/// nothing at all for as long as the read of the machine is still in flight.
+///
+/// A query client of this test's own, for the reason `setup-routes.test.tsx`
+/// keeps one: `App` builds one at module scope that outlives every render, and a
+/// verdict cached by one test here would be the wrong page drawn in the next.
+function opened(path: string, machine: Reading) {
+  window.history.pushState({}, "", path);
+  theWorkbench(whenever("/api/ui/onboarding", machine));
+
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  return render(() => (
+    <QueryClientProvider client={client}>
+      <Gate />
+    </QueryClientProvider>
+  ));
+}
+
+/// How many bare drag bars are on the page.
+function bars(container: ParentNode): number {
+  return container.querySelectorAll(ROOM).length;
+}
+
+describe("the bare drag bar", () => {
+  /// The whole of what it is for: a page with no pane head has no bar the window
+  /// moves by, and this is the bar — the same one declaration a head is the
+  /// region by, over the strip this draws.
+  it("is the region the window is dragged by", () => {
+    theApp("linux");
+
+    const { container } = render(() => <DragBar />);
+    const room = container.querySelector(ROOM)!;
+    const strip = container.querySelector(BARE)!;
+
+    expect(room.contains(strip)).toBe(true);
+  });
+
+  /// And it stands as tall as a head, which is what the controls are drawn as
+  /// tall as: a bar of any other height would leave them hanging over its edge
+  /// or under it. The same `band` the app is told the overlay's height in, so
+  /// the two cannot disagree.
+  it("stands at the head's own band", () => {
+    theApp("linux");
+
+    const { container } = render(() => <DragBar />);
+    const room = container.querySelector<HTMLElement>(ROOM)!;
+
+    expect(room.style.getPropertyValue("--band")).toBe(`${band()}px`);
+    // Both halves of it at that band: the room the page keeps for it, and the
+    // strip drawn over the window.
+    expect(barely).toContain(`.bar {\n  height: var(--band);\n}`);
+    expect(STRIP).toContain("height: var(--band);");
+  });
+
+  /// Across the window rather than across the page, which is the one thing here
+  /// a head does differently: a head spans its pane and a pane spans the window,
+  /// while these pages are drawn in the column `styles/base.css` measures — and
+  /// the controls are at the window's own corner, outside that column in any
+  /// window wider than it.
+  it("is drawn across the window rather than across the page", () => {
+    expect(STRIP).toContain("position: fixed;");
+    expect(STRIP).toContain("right: 0;");
+    expect(STRIP).toContain("left: 0;");
+    // And on the page's own paper, the way `.paneChrome` is: what scrolls up
+    // passes under the strip rather than over it.
+    expect(STRIP).toContain("background: var(--paper);");
+  });
+
+  /// And the half that keeps it out of a browser. A drag region is inert outside
+  /// the app, so a bar drawn there would move nothing — but it would still be a
+  /// band of the head's height across the top of a page a phone has no use for.
+  it("is nothing at all where there is no bridge", () => {
+    const { container } = render(() => <DragBar />);
+
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("the three pages with no pane head", () => {
+  afterEach(() => window.history.pushState({}, "", "/"));
+
+  /// The moment before the verdict about this machine lands, which draws nothing
+  /// at all: the window cannot be moved for the length of that read, and how
+  /// long that read takes is the machine's business rather than the page's.
+  it("the moment before the verdict lands draws one", async () => {
+    theApp("linux");
+
+    const { container } = opened("/", hangs());
+
+    await waitFor(() => expect(bars(container)).toBe(1));
+  });
+
+  /// The wizard, which is the only page there is while onboarding mode is on —
+  /// and the page a fresh install opens on, so the first window anybody sees is
+  /// one of the three.
+  it("the wizard draws one", async () => {
+    theApp("linux");
+
+    const { container, findByText } = opened("/setup", json(FRESH));
+
+    await findByText(WIZARD);
+    expect(bars(container)).toBe(1);
+  });
+
+  /// And the no-such-page, which is one line of notice and nothing else.
+  it("the no-such-page draws one", async () => {
+    theApp("linux");
+
+    const { container, findByText } = opened("/nonsense", json(SET_UP));
+
+    await findByText(MISSED);
+    expect(bars(container)).toBe(1);
+  });
+
+  /// And none of the three in a browser, where the pages are otherwise exactly
+  /// what they were: the same wizard and the same notice, with no band of
+  /// nothing across the top of either.
+  it("draws none of them in a browser", async () => {
+    const wizard = opened("/setup", json(FRESH));
+    await wizard.findByText(WIZARD);
+    expect(bars(wizard.container)).toBe(0);
+    wizard.unmount();
+
+    const missed = opened("/nonsense", json(SET_UP));
+    await missed.findByText(MISSED);
+    expect(bars(missed.container)).toBe(0);
+    missed.unmount();
+
+    const waiting = opened("/", hangs());
+    expect(bars(waiting.container)).toBe(0);
   });
 });

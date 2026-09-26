@@ -1,0 +1,36 @@
+/* The bar a page with no pane head is dragged by — see `DragBar.tsx`.
+
+   Two elements, because the two things a bar is are not the same shape here:
+   the room it takes is the page's, and the strip it draws is the window's. How
+   tall both of them stand is `--band`, which the component writes — the band is
+   rules in rem added up against the rem this browser is actually drawing, so
+   there is no length to write it as here. */
+
+/* The room: the head's band kept at the top of the page, so that nothing the
+   page draws stands under the strip or under the window's own controls. */
+.bar {
+  height: var(--band);
+}
+
+/* And the strip, across the window rather than across the page: the controls
+   are drawn at the window's top-right corner, which is outside the column a
+   page is read at in any window wider than it.
+
+   The paper the page is on behind it, and above what the page draws, for the
+   reason `.paneChrome` has both: what scrolls up passes under it rather than
+   over it, and a drag region something else showed through would be a region
+   that swallowed the presses meant for it.
+
+   `-webkit-app-region` is Chromium's own property and only a frameless Electron
+   window has ever read one, so this is inert wherever there is no app — which is
+   nowhere, this being drawn only where the bridge is. */
+.drag {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: var(--band);
+  background: var(--paper);
+  -webkit-app-region: drag;
+}
