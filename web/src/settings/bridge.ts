@@ -83,7 +83,10 @@ export interface DesktopSettings {
 export interface Registration {
   /// Whether this machine can be registered with at all. A greyed box rather
   /// than one that ticks and does nothing — an unpackaged run is the case a
-  /// developer meets, and a machine with nowhere to keep an entry is the other.
+  /// developer meets, a machine with nowhere to keep an entry is the second,
+  /// and a Mac holding Verkstead's login item for the human's approval is the
+  /// third: there, the registration is made and System Settings is the only
+  /// place it can be turned on.
   readonly possible: boolean;
 
   /// Whether Verkstead comes up when the desktop session does.

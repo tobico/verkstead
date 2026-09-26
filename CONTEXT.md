@@ -438,6 +438,20 @@ Verkstead nobody can reach. Which is a reading of the login rather than a
 its own way**: Linux's entry and the Run key on Windows are command lines and
 carry a flag, while a Mac's login item carries no arguments and is asked whether
 it started the run.
+**The tray app's launch agent is taken over once**, on a Mac that had it: that
+app wrote `~/Library/LaunchAgents/net.tobico.Verkstead.plist` by hand and the
+login item API knows nothing about it, so left alone it is a login starting a
+binary that is gone while the box reads off. The first launch of a packed
+Verkstead reads it — its presence, and the two keys `launchd` turns an agent off
+by — registers through the API where it said on, registers nothing where it said
+off, and removes it either way. Read at a launch rather than offered as a
+control: it is a registration this app made another way, not a second setting.
+**And a Mac can hold a registration that is there off.** The login item is
+`SMAppService` from macOS 13, so a human who switches Verkstead off under Login
+Items in System Settings leaves one registered and not running, which nothing
+Verkstead can call puts back — the box is greyed there with that place named
+under it, the third of the three reasons it is greyed at all beside a run from a
+checkout and a machine with nowhere to keep an entry.
 _Avoid_: autostart setting, startup preference, run at login option
 
 **Desktop Settings**:
