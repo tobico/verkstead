@@ -618,23 +618,48 @@ same variable the static musl one the CLI matrix published. What comes out is
 `desktop/package.json` pins — fetched by the pack rather than taken from the dev
 shell, whose Electron is a different patch version. The viewer is inside the CLI
 rather than beside it, so `web/dist` is that build's business rather than the
-pack's; one configuration serves all three platforms, with only the Linux target
-filled in.
+pack's; one configuration serves all three platforms, with the Linux and macOS
+targets filled in and Windows still the script below.
 
-The dmg is `Verkstead.app` — the same binary built for both Apple targets and
-`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` whose
-`CFBundleIdentifier` is `net.tobico.Verkstead` and whose `LSUIElement` is what
-makes it a menu-bar app with no Dock tile. Its `CFBundleIconFile` names that
-icns with the extension on it — macOS appends `.icns` only to a value that has
-none, and a dotted identifier reads as having one already, so a value without
-it is a name no file answers to and Finder draws the generic app icon. The
-release's dmg leg reads the key back off the mounted bundle and has `iconutil`
-open what it names, which is the only way that failure is visible from outside
-a Finder window. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
-the operating system's own tools, and there is no cross build of it from here.
-The bundle is ad-hoc signed rather than signed with a Developer ID, because
-Apple silicon will not execute a binary with no signature at all — that is not
-the signing that gets an app past Gatekeeper, and there is none of that.
+The dmg is the same pack on a Mac, and the one place `pnpm run pack` is given
+two paths rather than one: the download there is a universal app for both Apple
+machines, so the sidecar inside it has to be universal too, and the script
+`lipo`s the two Mac builds into the one staged `verkstead` before
+electron-builder builds either half. Both halves come from that Mac's own
+toolchain, the second Apple target a `rustup target add` away.
+
+```console
+$ cargo build --release -p verkstead-cli --no-default-features \
+    --target aarch64-apple-darwin
+$ cargo build --release -p verkstead-cli --no-default-features \
+    --target x86_64-apple-darwin
+$ cd desktop && pnpm run pack \
+    ../target/aarch64-apple-darwin/release/verkstead \
+    ../target/x86_64-apple-darwin/release/verkstead
+```
+
+What comes out is `target/electron/out/Verkstead-universal.dmg`, holding
+`Verkstead.app` — one file for both Macs, electron-builder building each half
+and `@electron/universal` merging the two, which is why the sidecar has to be
+joined first: that merge refuses a resource that differs between the halves. The
+bundle's `CFBundleIdentifier` is `net.tobico.Verkstead` and its
+`CFBundleIconFile` names the staged icns, both of them electron-builder's to
+write; the release's dmg leg reads that key back off the mounted bundle and has
+`iconutil` open what it names, which is the only way a Finder icon that resolves
+to nothing is visible from outside a Finder window. **Nothing in that plist asks
+for a menu-bar app with no Dock tile**, and that absence is the whole of what
+makes this a regular Dock app where the Rust bundle was one the Dock never held
+— see the `mac:` section of
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml), which says
+which key that was and why it is read back off what was packed
+([ADR-0020](adr/0020-electron-desktop.md)). The bundle is ad-hoc signed rather
+than signed with a Developer ID, because Apple silicon will not execute a binary
+with no signature at all — that is not the signing that gets an app past
+Gatekeeper, and there is none of that — with the hardened runtime off beside it,
+which under an ad-hoc signature would enforce library validation and reject the
+pre-signed Electron framework for carrying another Team ID. It packs on a Mac
+only: `lipo`, `codesign` and `hdiutil` are the operating system's own tools, and
+there is no cross build of it from here.
 
 The msi is the two files a Windows install is — the unified `verkstead` and the
 windows-subsystem shim that opens it from an icon — wrapped in an installer,
@@ -850,8 +875,9 @@ it draws a *template* image — one colour and an alpha channel — black on a l
 bar and white on a dark one. So that platform gets the hammer's silhouette at
 the 22 points the bar lays out, and the `Template` at the end of the name is the
 whole of how it is asked for: Electron reads the suffix off the file name. Then
-`net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
-bundle, and `net.tobico.Verkstead.ico`, which Windows wants twice:
+`net.tobico.Verkstead.icns`, which `pack.mjs` stages beside the icon directory
+for electron-builder to copy into the Mac bundle and name in its `Info.plist`,
+and `net.tobico.Verkstead.ico`, which Windows wants twice:
 `crates/desktop/build.rs` compiles it into the shim as a resource, nothing
 installed beside an exe being what Alt-Tab and the taskbar draw it with, and
 `tools/verkstead.wxs` names it again for the entry the msi leaves in Apps &

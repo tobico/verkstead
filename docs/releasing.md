@@ -95,19 +95,22 @@ fails on anything above the 2.25
 Whichever way round it is written, the promise and the check are one number —
 move Electron and both move.
 
-The macOS desktop leg is one runner for both Macs: `macos-15` is the Apple
-silicon image, an Apple host cross-compiles to the other Apple architecture, and
-[`tools/build-macos-dmg.sh`](../tools/build-macos-dmg.sh) builds both halves,
-`lipo`s them into one executable and packs the bundle into the image. What it
-joins is the unified `verkstead`, built with the `desktop` feature its default
-leaves on, and the bundle's executable is a launcher script beside it that
-supplies the `desktop` verb — a bundle names an executable and has nowhere to
-write a command line for it, so the launcher is where that verb is said
-(ADR-0012, as amended). The script is called `Verkstead-launcher` rather than
-`Verkstead` because a Mac's filesystem is case-insensitive and the binary beside
-it is called `verkstead`. Its floor is written into the bundle rather than
-inherited from a runner — `LSMinimumSystemVersion`, 11.0, which is the Apple
-silicon half's own and the higher of the two — and it is the number
+The macOS desktop leg compiles nothing either, and it is the one runner that
+packs for both Macs at once: `macos-15` is the Apple silicon image, and what it
+builds there is the app rather than the CLI. It waits on the whole of the matrix
+above and downloads both `verkstead-macos-arm64` and `verkstead-macos-x64` — the
+two headless binaries that matrix built and ran — then hands the pair to `pnpm
+run pack`, which `lipo`s them into the one universal sidecar the app carries
+before electron-builder builds the x64 app and the arm64 app that
+`@electron/universal` merges into `Verkstead-universal.dmg`
+([ADR-0020](adr/0020-electron-desktop.md)). Both halves of the sidecar a
+downloader gets are the very files the CLI legs published beside it, and the
+`lipo` is the pack's rather than the leg's, so a developer packing from a
+checkout packs the same way. A universal merge refuses an extra resource that
+differs between the two halves, which a sidecar joined before either app is
+built cannot. Its floor is written into the bundle rather than inherited from a
+runner — `LSMinimumSystemVersion`, 12.0, which is Electron's own where the Rust
+bundle's was the Apple silicon half's 11.0 — and it is the number
 [adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
 
 The Windows desktop leg is the one with an installer in it, and it is an
@@ -115,16 +118,15 @@ installer because a Windows install became two files:
 [`tools/build-windows-msi.sh`](../tools/build-windows-msi.sh) builds the unified
 `verkstead` with the `desktop` feature its default leaves on, and beside it the
 windows-subsystem shim that supplies the `desktop` verb a Start-menu shortcut
-has nowhere to write — the job the launcher script does in the bundle. Two files
-beside each other are not a portable download, so
-[`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them in
+has nowhere to write. Two files beside each other are not a portable download,
+so [`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them in
 `Verkstead-x86_64.msi` (ADR-0012, as amended). That package is per-user
 throughout — the binaries under `%LOCALAPPDATA%\Programs\Verkstead`, the
 shortcut in the user's own Start menu, the install directory appended to the
 user's `PATH` — because the app is unsigned and elevation would buy a downloader
 nothing they wanted. The WiX toolset that compiles it is the runner image's own.
 There is no floor to hold any of it to: what an AppImage promises about glibc
-and a bundle about macOS 11, an exe gets from the C runtime Windows itself
+and a bundle about macOS 12, an exe gets from the C runtime Windows itself
 ships.
 
 One thing about that package cannot say what the tag says. A Windows Installer
@@ -150,14 +152,20 @@ asked for: the half of the binary a *session* gets. In the AppImage and the
 bundle that is the binary inside the artifact, run by path and asked for `ask`;
 on Windows it is `verkstead guide` in a terminal opened after the install, which
 is the same claim through the door an msi has — the `PATH` entry it wrote. An
-artifact carrying the tray alone would pass every assertion above it and hand
+artifact carrying the app alone would pass every assertion above it and hand
 each session it spawned a binary with no `ask` in it. The Windows leg checks two
 more that are the installer's own: the install is in the user's profile with its
 record under `HKCU`, and the Start-menu entry opens the shim rather than the
-console program beside it. The dmg's leg adds one still — that the app comes
-back out of the image with its signature intact — because the bundle's
-executable is a script now, and a signature over a script lives beside the file
-rather than inside it.
+console program beside it. The dmg's leg adds two of its own. That the app comes
+back out of the image sealed, over the bundle and over the sidecar inside it:
+the reason that was first written is gone — the bundle's executable was a shell
+script, whose signature lives in an extended attribute a copy can drop, and it
+is a real Mach-O again — but an Apple silicon Mac refuses to execute a Mach-O
+carrying no signature at all, so a seal the pack or the image broke is the
+"damaged" a Mac will not open rather than the "unidentified developer" it offers
+a way past. And that the icon resolves: `CFBundleIconFile` read off the mounted
+plist and `iconutil` opened on the file it names, the Finder icon being the one
+thing about a bundle that nothing running the app can tell you about.
 
 The manifest is the nix systems alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the
@@ -239,8 +247,16 @@ newcomer actually follows.
 
    Drag Verkstead into Applications, double-click it, and walk the three steps
    through System Settings → Privacy & Security that
-   [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The icon lands
-   in the menu bar and the viewer opens in the browser.
+   [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The workbench
+   comes up in a window of its own, with a tile in the Dock and an icon in the
+   menu bar beside it.
+
+   Then tick **Launch on Startup** on the settings page's **Desktop** section,
+   log out and back in: Verkstead comes back with the icon in the menu bar and
+   no window over what you were doing, and **Open** on that icon is the way to
+   one. That is the one reading no runner can take — a job dies with its login
+   session, and what the app reads is the launch event `loginwindow` alone
+   sends.
 
 5. **The msi, downloaded in a browser and opened** on a Windows machine. In a
    browser deliberately, for the reason the dmg is: the mark SmartScreen reads

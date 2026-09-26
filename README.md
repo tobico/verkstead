@@ -25,8 +25,9 @@ daemon and the NixOS module runs it. On a Linux desktop,
 workbench in a window of its own, with a tray icon beside it — or no icon at all
 where the desktop has no tray host, vanilla GNOME being the case people meet,
 and the window is there just the same. On a Mac, `Verkstead-universal.dmg`
-carries `Verkstead.app` — one download for both Macs, the same server again,
-with its icon in the menu bar. That app is unsigned, so the first launch is
+carries `Verkstead.app` — one download for both Macs, the same server again: the
+workbench in a window, a tile in the Dock the window comes back from, and an
+icon in the menu bar beside it. That app is unsigned, so the first launch is
 refused and System Settings is where it is allowed through; the steps are
 written out beside the download in
 [adoption](docs/adoption.md#the-desktop-app-on-a-mac). On Windows,

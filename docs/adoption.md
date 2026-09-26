@@ -51,11 +51,12 @@ spellings of one. **The flake and the NixOS module run the headless daemon**, on
 a machine that is always on and answering from wherever you are. **The AppImage
 is the same server started from an icon**, on the Linux desktop in front of you,
 with the workbench in the app's own window and a tray icon beside it. **The dmg
-is that same server for a Mac**, the viewer in your browser and the icon in the
-menu bar instead. **The msi installs that same app on Windows**, into your own
-profile and without asking for administrator. Which one you want is which of
-those machines you were describing; two at once is two Verksteads, and the
-second to reach port 8422 says so in a dialog and exits.
+is that same server for a Mac**, the workbench in a window there too, with a
+tile in the Dock and an icon in the menu bar beside it. **The msi installs that
+same app on Windows**, into your own profile and without asking for
+administrator. Which one you want is which of those machines you were
+describing; two at once is two Verksteads, and the second to reach port 8422
+says so in a dialog and exits.
 
 ### The daemon, on NixOS
 
@@ -326,28 +327,27 @@ Mac and on Windows.
 
 ### The desktop app, on a Mac
 
-`Verkstead-universal.dmg` holds `Verkstead.app`: the same server and the same
-viewer, drawn over AppKit, and universal — the Apple silicon build and the Intel
-one are in the one executable, so there is one download and no architecture to
-choose between. macOS 11 is the oldest it will start on. Open the image and drag
-Verkstead into the Applications folder beside it in the window, which is the
-whole of the install.
-
-Inside the bundle is the whole `verkstead`, with a small launcher script beside
-it that supplies the `desktop` verb — a bundle names an executable and has
-nowhere to say a verb — so the app you double-click and the binary a session
-asks with are one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as
-amended).
+`Verkstead-universal.dmg` holds `Verkstead.app`: the app, the server it starts
+and the viewer the two of them draw between them, with Electron's own browser
+runtime beside them — so a Mac with none of that installed needs nothing else to
+put the workbench on the screen. Universal, as the bundle before it was: the
+Apple silicon build and the Intel one are both in the download, so there is one
+file and no architecture to choose between. macOS 12 is the oldest it will start
+on, which is the floor Electron's own runtime writes into the bundle. Open the
+image and drag Verkstead into the Applications folder beside it in the window,
+which is the whole of the install.
 
 **The first launch is then refused, and that is expected.** The app is unsigned
 — there is no Developer ID behind it, which is
-[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
-— and Gatekeeper will not open an app that arrived over the internet unsigned
-just because somebody double-clicked it. What it says is that macOS "could not
-verify" Verkstead "is free of malware", in a dialog with no way past on it.
-There is a way past, and it is three steps — the first of them being the launch
-that fails, because the refusal is what puts Verkstead in the list the second
-step reads:
+[ADR-0020](adr/0020-electron-desktop.md)'s decision rather than an oversight.
+What it carries is an ad-hoc signature, because an Apple silicon Mac will not
+execute a binary with no signature at all, and that buys nothing here: a
+signature with nobody behind it is one of the things Gatekeeper exists to
+refuse. So it will not open an app that arrived over the internet just because
+somebody double-clicked it. What it says is that macOS "could not verify"
+Verkstead "is free of malware", in a dialog with no way past on it. There is a
+way past, and it is three steps — the first of them being the launch that fails,
+because the refusal is what puts Verkstead in the list the second step reads:
 
 1. Double-click **Verkstead** in Applications, and click **Done** on the
    refusal.
@@ -362,26 +362,74 @@ and starting it afterwards — by hand, or from Launch on Startup — is ordinar
 Replacing it with a newer download is a different copy and wants the same three
 steps again.
 
-What is on the screen after that is an icon in the menu bar, and the menu on it
-is four items: **Open** brings the viewer back, and heads the menu a click on
-the icon opens; **View Logs** opens the file under `~/Library/Logs/Verkstead`
-that the server's logging goes to when there is no terminal to print it in;
-**Launch on Startup** is a checkbox over a launch agent at
-`~/Library/LaunchAgents/net.tobico.Verkstead.plist`; and **Exit** stops the
-server. `--no-open` starts it without the browser and `--data-dir` moves the
-Data Directory off `~/Library/Application Support/Verkstead`, both of them for a
-run from a terminal — an app launched from Finder is launched with no arguments
-at all.
+**What is on the screen after that is a window**, with a tile in the Dock and an
+icon in the menu bar. The window is the workbench itself, loaded off
+`127.0.0.1:8422` with nothing about the viewer changed to draw inside it, and
+closing it leaves Verkstead running: the application stays in the Dock and a
+click on its tile is the window back. `Cmd+Q` is the other ending, and it quits
+at once — no warning, no question — taking the server and every session with it.
+The strip at the top of the screen is the app's own — **Verkstead**, **Edit**,
+**View** and **Window** under the Apple menu — and the menu on the icon in the
+menu bar is three items: **Open** brings the window forward, **View Logs** opens
+the file under `~/Library/Logs/Verkstead` that this run's logging goes to when
+there is no terminal to print it in, and **Quit** stops the app and the server
+with it.
 
-macOS keeps a **Login Items** list of its own beside that plist, in a database
-the file is not in, and the checkbox cannot see it: switching Verkstead off
-there leaves the box ticked and the plist where it was.
+**The window has no title bar**, as on Linux. The workbench's own heads are the
+top of it, and what stands where a title bar would have been is your Mac's
+traffic lights, inset from the left edge and in the head's first row — left of
+the wordmark, which is where the sidebar's head leaves room for them. They
+travel down the window with the head when the text size grows, so nothing in a
+head is ever under them, and full screen is where macOS withdraws them and the
+head takes that room back. What moves the window is any pane head, and a
+double-click on one maximises it.
 
-**The browser it opens is logged in**, as it is on Linux: what the app opens is
-the login link rather than the bare address, and **Open** composes it afresh at
-every press, which is what a browser that has forgotten the cookie wants.
-Started with `--no-open`, **Open** is the whole of it: the app's own startup
-line names the address and no key, **View Logs** opening a file on your desk.
+**There is nothing to learn about starting it.** The app takes no flags at all;
+what it reads instead is the server's own environment, so `VERKSTEAD_DATA_DIR`
+moves the Data Directory off `~/Library/Application Support/Verkstead` exactly
+as it does for a `verkstead serve` run by hand. Everything else about this
+machine is set rather than typed, on the **Desktop** section of the settings
+page: **Show menu bar icon**, which starts on, **Launch on Startup**, and **View
+Logs** beside them for the desktop where the icon is switched off. There is no
+choice about closing the window here, that being the platform's own answer
+rather than a position anybody picks.
+
+**The window it opens is logged in.** Every page of the workbench answers 401
+without the **Workbench Key**, the secret Verkstead keeps in its Data Directory
+where no session can reach it — and the app reads that file itself, before there
+is a server to ask one of, so the window comes up on the address with the key on
+the end of it. There is nothing to keep anywhere and nothing to type: **Open**
+and the Dock tile are both that same window brought forward rather than a login
+handed over again. The app's own startup line names the address and no key,
+because **View Logs** opens a file on your desk and a workbench key written into
+it would be a login for anybody reading over your shoulder.
+
+**Launch on Startup is the login item macOS keeps for itself**, the one listed
+under **Login Items** in System Settings, rather than a launch agent written
+into your home directory. The box is that list read: ticking it registers
+Verkstead there, unticking it takes the registration away, and there is no copy
+of the answer anywhere for the two to disagree about. A login start comes up
+with no window on the screen while there is an icon in the menu bar to reach it
+by, and with a window where that icon is switched off. **A Mac can also hold a
+registration that is there and will not start**: switching Verkstead off under
+Login Items rather than removing it there leaves one registered and inert, and
+nothing Verkstead can call puts it back — so the box is greyed, with that pane
+named underneath it as the one place it can be turned on again. **And an upgrade
+from the old menu bar app takes its registration over once**: that app wrote a
+launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` by hand,
+which the login item list knows nothing about, so the first launch of this one
+reads whether it said start at login, carries that into the registration and
+removes the file. Once, at a launch, and nothing you are asked about: it is this
+app's own registration under an older name rather than a second setting.
+
+**What is inside is the app and the released `verkstead` beside it**, rather
+than one binary whose entry point supplies a verb. The CLI sits in a directory
+of its own under the app's resources, and it is the very build a Release
+publishes — the two Mac binaries the same run's CLI leg made, downloaded into
+the package and joined with `lipo` into one universal executable rather than
+compiled a second time ([ADR-0020](adr/0020-electron-desktop.md)). It is what a
+session started here is handed to ask with, so the two halves of an ask are one
+build.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on Linux, and Tailscale itself is the Mac's own. What differs is the
@@ -453,11 +501,12 @@ four files the Linux section names. It is read as the root is built, so a
 change there reaches the next session and a running one keeps what it started
 with, and an empty box writes no file at all.
 
-**Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
-is on Linux, and so is the process being killed outright: every session and the
-compile server go with it either way. Linux has that from bubblewrap's
-`--die-with-parent`; a Mac has no such flag, so Verkstead starts a keeper beside
-each sandbox whose whole job is to end it once the server is gone.
+**Nothing outlives the app.** **Quit** off the menu bar icon is a stop where it
+stands, as it is on Linux, and so are `Cmd+Q` and the process being killed
+outright: every session and the compile server go with it either way. Linux has
+that from bubblewrap's `--die-with-parent`; a Mac has no such flag, so Verkstead
+starts a keeper beside each sandbox whose whole job is to end it once the server
+is gone.
 
 **Two things stay the machine's**, where three do on Linux.
 
