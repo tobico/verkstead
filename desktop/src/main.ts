@@ -8,14 +8,16 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
-//! **And it is what answers the page**, over the five channels
+//! **And it is what answers the page**, over the six channels
 //! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
-//! run it arrives in, the log file opened, and the startup registration read and
-//! written. Each of them is something only this process can do — a file under
-//! Electron's user data, an icon on somebody's panel, a file handed to whatever
-//! the desktop reads text with, a login item registered — while what a set
-//! *means* is [`changed`](./settings.js)'s and what a registration *is* is
-//! [`startup.ts`](./startup.js)'s, both of which vitest runs.
+//! run it arrives in, the log file opened, the startup registration read and
+//! written, and the window's overlay recoloured to whatever the head turned out
+//! to be drawn in. Each of them is something only this process can do — a file
+//! under Electron's user data, an icon on somebody's panel, a file handed to
+//! whatever the desktop reads text with, a login item registered, a window
+//! redressed — while what a set *means* is [`changed`](./settings.js)'s, what a
+//! registration *is* is [`startup.ts`](./startup.js)'s and what a head *is* is
+//! [`decorations.ts`](./decorations.js)'s, all of which vitest runs.
 //!
 //! **The order at the top of [`run`] is the lifecycle**, and it is an order
 //! rather than a sequence of conveniences: the log file, so that every line
@@ -36,13 +38,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, dialog, ipcMain, type BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 
 import { artwork } from "./artwork.js";
 import { FILE } from "./bounds.js";
-import { ASKED, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import { ASKED, HEAD, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
+import { overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { heard, keep, say } from "./log.js";
@@ -226,6 +229,50 @@ function ticked(starts: Startup, asked: unknown): Registration {
   say(`the Desktop page asked for Launch on Startup ${asked ? "on" : "off"}`);
 
   return starts.set(asked);
+}
+
+/// Wear what the page says its head is drawn in: the window's controls overlay
+/// recoloured and resized to the band beneath it, while the window is open.
+///
+/// **The one thing on this bridge the page says rather than asks** (Set 847
+/// Q11b). The strip the platform draws its controls on belongs to a window with
+/// no title bar, so it is the app's to paint — and what to paint it is the page's
+/// to know: the viewer has a light scheme and a dark one, the head is drawn on
+/// the paper of whichever the machine is in, and the band is written in rem
+/// against a root font size only that browser can be asked about. So this
+/// answers the push by doing as it is told, and has no opinion about any of the
+/// three values.
+///
+/// **And on a Mac it does nothing.** The traffic lights are not an overlay, and
+/// `setTitleBarOverlay` throws *"Titlebar overlay is not enabled"* wherever there
+/// is none — see [`overlaid`](./decorations.js). The page pushes all the same,
+/// there being no platform branch in it, and this is where the answer is silence.
+///
+/// **And a push that is not a head changes nothing**, the same reading [`enact`]
+/// and [`ticked`] make of what arrives: what an unchecked one reaches is a call
+/// that throws at a colour it cannot parse.
+function wearing(window: BrowserWindow | null, platform: NodeJS.Platform, pushed: unknown): void {
+  const head = worn(pushed);
+
+  if (head === undefined) {
+    say("a head came over the bridge that is not one, so the overlay is left as it was");
+    return;
+  }
+
+  if (!overlaid(platform)) {
+    // Not said: this is every push on a Mac rather than anything gone wrong, and
+    // a line per flip of the scheme in a file somebody is asked to send is noise.
+    return;
+  }
+
+  if (window === null) {
+    // A push from a window that has since gone. Nothing to recolour and nothing
+    // the matter either — the page said it on its way out.
+    return;
+  }
+
+  say(`the page's head is ${head.paper} with ${head.ink} marks, ${head.band}px tall`);
+  window.setTitleBarOverlay(overlay(head));
 }
 
 async function run(): Promise<void> {
@@ -460,17 +507,27 @@ async function run(): Promise<void> {
   // asked to be started on is left exactly as it is.
   starts.refresh();
 
-  // The bridge's five acts, enacted here because here is the process that can
+  // The bridge's six acts, enacted here because here is the process that can
   // — the file is read and written, the icon is raised and lowered, the log
-  // file is handed to whatever the desktop reads text with, and the platform is
-  // asked about its startup registration. Registered before the window is
-  // opened, because the page is loaded the moment there is one and a page that
-  // asked before this would be asking nobody.
+  // file is handed to whatever the desktop reads text with, the platform is
+  // asked about its startup registration, and the window's overlay is
+  // recoloured. Registered before the window is opened, because the page is
+  // loaded the moment there is one and a page that asked before this would be
+  // asking nobody.
   ipcMain.handle(ASKED, () => settings(desk));
   ipcMain.handle(SET, (_event, sent: unknown) => enact(desk, trayed, sent));
   ipcMain.handle(LOGS, () => logs(kept));
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
+
+  // And the one that is a statement rather than a question, so `on` rather than
+  // `handle`. The window is the one the push came *from* rather than `onscreen`:
+  // this is registered before there is a window at all, and the page that says
+  // what it is drawn in is by definition inside the window whose overlay is to
+  // be recoloured.
+  ipcMain.on(HEAD, (event, pushed: unknown) => {
+    wearing(BrowserWindow.fromWebContents(event.sender), machine.platform, pushed);
+  });
 
   // Whether this launch is a login's — the flag the registration writes, or a
   // Mac saying its login item started this — read against the tray, because the

@@ -15,10 +15,14 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { ASKED, LOGS, NAME, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
+import { ASKED, HEAD, LOGS, NAME, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
 
 /// Every channel the bridge crosses on, which is the list both tests below read.
-const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER];
+/// [`HEAD`] among them though it is the one that goes the other way: a channel is
+/// a name in a renderer's namespace whichever direction the message travels in,
+/// and a push that shared a name with a question would be an overlay recoloured by
+/// a set.
+const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, HEAD];
 
 /// This project's own directory, which is what `src/` is under.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));

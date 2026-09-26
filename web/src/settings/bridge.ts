@@ -29,6 +29,13 @@
 //! is nothing kept beside it to disagree with, and a box drawn from it says what
 //! the machine is actually going to do at the next login.
 //!
+//! **And one of them is not on the settings page at all.** [`Head`] travels the
+//! other way, and from everywhere rather than from a section: the page says what
+//! its heads are drawn in and how tall their band stands, and the app wears that
+//! on the window's controls overlay — see `head.ts`. So what is here is the whole
+//! of `window.verkstead` whichever direction a value goes in, which is what makes
+//! it the one place either side of the bridge is read off.
+//!
 //! What this module holds is the shape and the reading of the window, and
 //! nothing else: the words the section is drawn in are `Desktop.tsx`'s, and what
 //! a set *means* is the app's — see `changed` in `desktop/src/settings.ts`.
@@ -91,6 +98,28 @@ export interface Registration {
   readonly refused?: string;
 }
 
+/// What the head is drawn in and how tall its band stands — `Head` in
+/// `desktop/src/decorations.ts`, said again on this side of the bridge.
+///
+/// **The one thing on this bridge the page tells the app** rather than asks it
+/// (Set 847 Q11b). A window with no title bar has the platform's own controls
+/// drawn on a strip of its top corner, and that strip is the app's to paint — but
+/// what to paint it is the page's to know, there being a light scheme and a dark
+/// one and the head being drawn on the paper of whichever the machine is in. Two
+/// fixed colours in the app were rejected. The height is the page's for a
+/// neighbouring reason: the band is written in rem, and what a rem is is the
+/// browser's answer. See `head.ts`, which reads all three and pushes them.
+export interface Head {
+  /// The paper the head is drawn on, as the `#rrggbb` Electron parses.
+  readonly paper: string;
+
+  /// And the ink its marks are in, which the overlay draws its own symbols in.
+  readonly ink: string;
+
+  /// How tall the band stands, in whole pixels.
+  readonly band: number;
+}
+
 /// What `window.verkstead` is, where there is one.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
@@ -119,6 +148,15 @@ export interface Bridge {
   /// moves the box is the answer rather than the press, here as everywhere else
   /// on this page.
   register(on: boolean): Promise<Registration>;
+
+  /// Say what the head is drawn in and how tall its band stands, so that the
+  /// window's controls overlay is the same strip of paper the head beneath it is.
+  ///
+  /// The one call here that answers with nothing: there is nothing for the app to
+  /// say back — it recolours the overlay, or it is a Mac with traffic lights and
+  /// does nothing at all — and a page awaiting an acknowledgement would be
+  /// awaiting one at every flip of the colour scheme.
+  head(worn: Head): void;
 }
 
 /// The bridge this page is drawn over, or `null` where there is none — which is
@@ -152,6 +190,7 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.set === "function" &&
     typeof reached.logs === "function" &&
     typeof reached.startup === "function" &&
-    typeof reached.register === "function"
+    typeof reached.register === "function" &&
+    typeof reached.head === "function"
   );
 }

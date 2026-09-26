@@ -13,13 +13,20 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the five channels, and
+//! **What is in this file is what crosses**: the name, the six channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
 //! and what the app *does* about each of them is `main.ts`'s while what they
-//! *mean* is elsewhere: a set is [`changed`](./settings.js)'s, and the startup
-//! registration is [`startup.ts`](./startup.js)'s.
+//! *mean* is elsewhere: a set is [`changed`](./settings.js)'s, the startup
+//! registration is [`startup.ts`](./startup.js)'s, and the head's colours and
+//! height are [`decorations.ts`](./decorations.js)'s.
+//!
+//! **And five of the six go one way while the last goes the other.** Everything
+//! the page *asks* is an `invoke` and comes back answered; the head is something
+//! the page *says* — the app cannot know what the viewer resolved its tokens to,
+//! and there is nothing to answer once it has been told. See [`HEAD`].
 
+import type { Head } from "./decorations.js";
 import type { Settings } from "./settings.js";
 import type { Registration } from "./startup.js";
 
@@ -66,13 +73,32 @@ export const STARTUP = "verkstead:startup";
 /// reason: what moves the box is the answer rather than the press.
 export const REGISTER = "verkstead:register";
 
+/// And the channel the **head's colours and height** are pushed on — the one
+/// thing on this bridge the page says rather than asks.
+///
+/// **Which it has to be the one to say** (ADR-0020, Set 847 Q11b): the app's
+/// window has no title bar, so the strip the platform draws its controls on is
+/// the app's to paint — and what colour to paint it is something only the page
+/// knows, the viewer having a light scheme and a dark one and the head being
+/// drawn on the paper of whichever is in force. Two fixed colours here were
+/// rejected. The height is the page's for the same kind of reason: the band is
+/// written in rem, and what a rem is on that machine is the browser's answer
+/// rather than this file's.
+///
+/// **A push rather than a question.** There is nothing for the app to answer —
+/// the overlay is recoloured, or there is no overlay to recolour — and a page that
+/// awaited an acknowledgement would be awaiting one at every flip of the scheme.
+/// What crosses is [`Head`](./decorations.js).
+export const HEAD = "verkstead:head";
+
 /// What `window.verkstead` is, where there is one.
 ///
-/// Five acts and one value, which is the whole of what the page needs: what
-/// machine this is, the settings read and written, the log file opened, and the
-/// startup registration read and written. Everything asynchronous, because
-/// everything but the platform is a question for the process on the other side
-/// of the bridge.
+/// Six acts and one value, which is the whole of what the page needs: what
+/// machine this is, the settings read and written, the log file opened, the
+/// startup registration read and written, and the head's colours and height
+/// said. Everything the page *asks* is asynchronous, because everything but the
+/// platform is a question for the process on the other side of the bridge; the
+/// one thing it *says* answers with nothing at all.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
   /// preload where there is a process to read it from.
@@ -109,4 +135,13 @@ export interface Bridge {
   /// reason beside it, so the box goes back where it was and the human is told
   /// why — see [`Registration`](./startup.js).
   register(on: boolean): Promise<Registration>;
+
+  /// Say what the head is drawn in and how tall its band stands, so that the
+  /// controls overlay is the same strip of paper the head beneath it is.
+  ///
+  /// Pushed when the page loads and again at every flip of the colour scheme,
+  /// which is the whole of what moves either colour. Nothing comes back: a
+  /// platform with an overlay recolours it, a Mac has traffic lights and does
+  /// nothing at all, and neither is news the page can act on — see [`HEAD`].
+  head(worn: Head): void;
 }
