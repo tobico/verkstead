@@ -813,35 +813,45 @@ mod tests {
 
         let said = |saying: DeviceIdentity| too_much(&saying).unwrap_or_default().to_owned();
 
-        assert!(said(DeviceIdentity {
-            device: "a".repeat(LONGEST_ID + 1),
-            ..fine.clone()
-        })
-        .contains("device id"));
+        assert!(
+            said(DeviceIdentity {
+                device: "a".repeat(LONGEST_ID + 1),
+                ..fine.clone()
+            })
+            .contains("device id")
+        );
 
-        assert!(said(DeviceIdentity {
-            name: "a".repeat(LONGEST_NAME + 1),
-            ..fine.clone()
-        })
-        .contains("hostname"));
+        assert!(
+            said(DeviceIdentity {
+                name: "a".repeat(LONGEST_NAME + 1),
+                ..fine.clone()
+            })
+            .contains("hostname")
+        );
 
-        assert!(said(DeviceIdentity {
-            os: "a".repeat(LONGEST_OS + 1),
-            ..fine.clone()
-        })
-        .contains("operating system"));
+        assert!(
+            said(DeviceIdentity {
+                os: "a".repeat(LONGEST_OS + 1),
+                ..fine.clone()
+            })
+            .contains("operating system")
+        );
 
-        assert!(said(DeviceIdentity {
-            addresses: vec!["192.168.1.24".to_owned(); MOST_ADDRESSES + 1],
-            ..fine.clone()
-        })
-        .contains("more addresses"));
+        assert!(
+            said(DeviceIdentity {
+                addresses: vec!["192.168.1.24".to_owned(); MOST_ADDRESSES + 1],
+                ..fine.clone()
+            })
+            .contains("more addresses")
+        );
 
-        assert!(said(DeviceIdentity {
-            addresses: vec!["a".repeat(LONGEST_ADDRESS + 1)],
-            ..fine
-        })
-        .contains("any address"));
+        assert!(
+            said(DeviceIdentity {
+                addresses: vec!["a".repeat(LONGEST_ADDRESS + 1)],
+                ..fine
+            })
+            .contains("any address")
+        );
     }
 
     /// The path a cancel is dialled at is the route that answers it, with the

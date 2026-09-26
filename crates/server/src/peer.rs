@@ -301,6 +301,23 @@ pub fn router(
     joins: Joins,
     nudges: crate::nudge::Nudges,
 ) -> Router {
+    // This device's cluster as something to *do* things to, which two of the
+    // routes below need for one thing apiece: a device written into this
+    // membership by somebody else's call has acknowledged nothing, so where a
+    // changeover is in flight it is one more member holding it up and this end
+    // is the only end that can tell it — see
+    // [`crate::device::Devices::announcing_renewal`].
+    //
+    // Built here out of the four handles this router already has rather than
+    // passed in, because there is nothing to choose: it is the same four,
+    // assembled the same way the start assembles them for the workbench.
+    let devices = crate::device::Devices::of(
+        device.clone(),
+        reading.clone(),
+        members.clone(),
+        joins.clone(),
+    );
+
     Router::new()
         .route(IDENTITY, get(identity))
         .with_state(Answering {
@@ -331,6 +348,7 @@ pub fn router(
                     members: members.clone(),
                     joins,
                     nudges: nudges.clone(),
+                    devices: devices.clone(),
                 }),
         )
         .fallback_service(members_only(
@@ -340,6 +358,7 @@ pub fn router(
                     device: device.clone(),
                     members: members.clone(),
                     nudges: nudges.clone(),
+                    devices,
                 })
                 .merge(
                     Router::new()

@@ -1126,6 +1126,42 @@ impl Devices {
         self.changeover_settled().await;
     }
 
+    /// The same announcement, set going in a task of its own rather than waited
+    /// on.
+    ///
+    /// **For the two places a device is written into this membership by somebody
+    /// else's call**: a member naming a newcomer — see
+    /// [`crate::peer::announcing`] — and the roster an Exchange hands over — see
+    /// [`crate::peer::exchange`]. A device recorded there has acknowledged
+    /// nothing, so it is one more member a changeover in flight is waiting on;
+    /// and nothing over there would ever tell it, because the announcement is
+    /// this device's own to make.
+    ///
+    /// Left undone it is not a link that breaks but a changeover that cannot
+    /// finish: the member holding it up is perfectly reachable, so the old
+    /// certificate goes on going out until the next start reads the file again —
+    /// and the old certificate is the one with at most [`RENEW_WITHIN`] left on
+    /// it. [`Devices::allow`] has always done this at the end of its own press,
+    /// for exactly this reason; these two are the same moment arriving from the
+    /// other direction.
+    ///
+    /// **A task, because the caller is a route a peer is waiting on.** A member
+    /// that is switched off costs a dial's patience apiece down its addresses,
+    /// and an announcement that would not be answered until somebody's laptop had
+    /// been dialled for would be a call the announcing device gave up on.
+    ///
+    /// Nothing at all where no changeover is in flight, which is every recording
+    /// on every device but the one in the middle of one.
+    pub(crate) fn announcing_renewal(&self) {
+        if self.device.incoming_fingerprint().is_none() {
+            return;
+        }
+
+        let devices = self.clone();
+
+        tokio::spawn(async move { devices.announce_renewal().await });
+    }
+
     /// What an announcement of the renewal carries: this device as it answers
     /// anybody, and the fingerprint of the certificate it is changing to.
     ///

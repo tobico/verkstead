@@ -92,6 +92,13 @@ pub(crate) struct Settling {
     /// device that happens to be open: the pending row has either become a
     /// member or become a refusal, and both are things a page is drawing.
     pub(crate) nudges: crate::nudge::Nudges,
+
+    /// And this device's cluster as something to dial, held for the one thing a
+    /// roster landing here sets off: where a changeover of this device's own is
+    /// in flight, every device on that roster is a member that has acknowledged
+    /// nothing, and this end is the only end that can tell them. See
+    /// [`crate::device::Devices::announcing_renewal`].
+    pub(crate) devices: crate::device::Devices,
 }
 
 /// `POST /api/peer/v1/join/{request}/settled` — the device that was asked,
@@ -224,6 +231,18 @@ pub(crate) async fn settled(
 
                 return unreadable("this device could not let go of the request");
             }
+
+            // And where this device is in the middle of a changeover of its own,
+            // every device on that roster is one more member that has
+            // acknowledged nothing — they have just been written down here and
+            // have never heard of it, and the announcement is this end's to
+            // make. Without it a changeover is held open by devices this machine
+            // has only this second learned how to reach.
+            //
+            // In a task, so the introducer is answered now rather than after a
+            // dial apiece, and nothing at all where no changeover is in flight —
+            // which is every device joining a cluster for the first time.
+            settling.devices.announcing_renewal();
         }
     }
 
