@@ -18,6 +18,29 @@
 //! inset and Windows' and Linux's controls as a right one, because that is where
 //! each platform put them, and the page never has to ask which it is on.
 //!
+//! **And a Mac really does answer**, which was the one thing about the sum above
+//! that had been reasoned rather than measured. Driven on macOS 15 under Electron
+//! 43, against the packed app: the overlay is there, it says it is `visible`, and
+//! its rectangle begins past the traffic lights — `x: 81` in a window whose lights
+//! the app had put twenty points in and which therefore ended at seventy-five. So
+//! the left inset the frame pads by is the lights' own strip, and the head at that
+//! edge clears them by the same reading Windows and Linux are padded by.
+//!
+//! **The far margin of that strip is the platform's own**, and it is worth knowing
+//! that it moves a little: the same window read `x: 94` after a push had moved the
+//! lights down to a taller head's row, and stayed there when the row came back up.
+//! What never moves is the lights' own right edge — the app insets them by a
+//! constant and only ever changes how far *down* they sit — so a strip measured a
+//! few points wide of them is a head kept a few points further clear, and never a
+//! head underneath them.
+//!
+//! **And full screen is where a Mac withdraws them altogether**, which is the one
+//! state that would have been a gap in the head with nothing in it: measured in the
+//! same run, the overlay there says `visible: false` over a rectangle of zeroes, so
+//! [`CLEAR`] is what comes back and the head stands at the window's own edge again.
+//! The guard that answers it is the one written for a browser, and it wanted no
+//! platform added to it.
+//!
 //! **Read again on `geometrychange`, which is not an optimisation.** The
 //! rectangle at load can disagree with the window it is in — on COSMIC the first
 //! reading gave a titlebar area wider than `innerWidth`, and the

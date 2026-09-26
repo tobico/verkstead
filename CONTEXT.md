@@ -494,7 +494,8 @@ platform's keep Windows' snap layouts and a Mac's traffic lights as that
 platform draws them, and neither is worth redrawing by hand. `titleBarStyle:
 "hidden"` is the whole of what asks for it, and there is no platform branch
 behind it: a Mac reads that option as the two platforms with an overlay do, and
-what it does with the overlay beside it is nothing.
+what it does with the two colours beside it is nothing — where its lights go it is
+told instead, over the same bridge and out of the same push.
 **What the overlay holds is Chromium's answer rather than the desktop's.** On a
 Wayland desktop it is one button wide — a close and nothing else — where the same
 app over Xwayland draws the usual three: measured on a COSMIC session whose
@@ -508,10 +509,17 @@ on the hidden menu bar under **Window**, on the platform's own
 `CommandOrControl+M`, because that desktop binds no minimise of its own out of the
 box and putting the window away is the one gesture the overlay leaves wanting.
 **The strip is the app's to paint and the page's to say what in**: the paper a
-head is drawn on, the ink its marks are in, and how tall the head's band stands,
-pushed over the preload bridge on load and again at every flip of the machine's
-colour scheme, and the overlay recoloured in the run it is pushed in rather than
-at the next launch. **Two fixed colours in the app were rejected** — there is a
+head is drawn on, the ink its marks are in, how tall the head's band stands and
+how far down the window the middle of its first row sits, pushed over the preload
+bridge on load and again at every flip of the machine's colour scheme, and the
+overlay recoloured in the run it is pushed in rather than at the next launch.
+**And on a Mac that push moves the traffic lights** rather than painting anything:
+there is no overlay to recolour there, so the app centres the buttons on the row
+the page said it drew — the platform's own inset from the left edge kept, the row
+being the only part of it a head can have an opinion about. Which is why the row
+travels beside the band: the band is the whole strip the controls are drawn over,
+while the row is the line inside it that a head's title and its buttons stand in,
+and lights centred on the band would be centred on nothing the page draws. **Two fixed colours in the app were rejected** — there is a
 light scheme and a dark one, a head is drawn on the paper of whichever the
 machine is in, and an overlay that did not follow would be a strip of the wrong
 colour welded to the corner of the window. The height travels for a neighbouring

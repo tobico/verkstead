@@ -120,10 +120,13 @@ as it opens it and which both **View Logs** open.
 **And the window has no title bar of its own.** What stands at its top-right
 corner on Linux and Windows is the platform's own controls overlay, drawn on the
 paper the page's heads are drawn on with its symbols in their ink and as tall as
-the head beneath it: the page pushes those three values over the same preload
-bridge at load and at every flip of the machine's colour scheme, so going dark
-recolours the controls with no restart and the log says each push. A Mac has the
-traffic lights inset at its top-left instead and ignores the three values. What moves
+the head beneath it: the page pushes what it is drawn in, how tall its band
+stands and where the row inside that band is over the same preload bridge at load
+and at every flip of the machine's colour scheme, so going dark recolours the
+controls with no restart and the log says each push. A Mac has traffic lights
+rather than an overlay, so it ignores the two colours and the same push moves the
+lights instead — centred in the head's first row, left of the wordmark, which is
+how a larger text size carries them down the window along with the head. What moves
 the window is any pane head — the sidebar's wordmark, a pane's own title row,
 the settings, the composer — with every button standing in one still pressing,
 and a double-click on one maximising. The frame pads whichever head is at an
