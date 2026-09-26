@@ -43,8 +43,11 @@
 //! the human is doing at the moment they log in — the reading `--no-open` made
 //! of a login for the tray app, and [`hidden`](./startup.js)'s to make.
 //!
-//! The decorated window is this stage's; the frameless one with the controls
-//! overlay is the stage after it.
+//! **And it has no title bar.** What stands where one would have been is the
+//! platform's own — the controls overlay at the top-right on Windows and Linux,
+//! the traffic lights at the top-left on a Mac — and the options that ask for
+//! that are [`decorations.ts`](./decorations.js)'s, for the reason every other
+//! value here is somewhere else.
 
 import { BrowserWindow, dialog, screen, shell } from "electron";
 
@@ -59,6 +62,7 @@ import {
   STILL,
 } from "./bounds.js";
 import { CANCEL, type Closing, QUIT, WARNING } from "./closing.js";
+import { DECORATIONS } from "./decorations.js";
 import { where } from "./elsewhere.js";
 import { link } from "./key.js";
 import { why } from "./loading.js";
@@ -145,6 +149,12 @@ export function open(workbench: Workbench): BrowserWindow {
     // hides it and the call alone leaves Alt showing it permanently. On a Mac
     // neither does anything: its menu is the strip at the top of the screen.
     autoHideMenuBar: true,
+
+    // No title bar, and the platform's own controls where it was — the style
+    // and the overlay together, out of [`decorations.ts`](./decorations.js).
+    // The colours and the height in them are where the overlay starts; the page
+    // is what it ends up wearing.
+    ...DECORATIONS,
 
     webPreferences: {
       // The bridge, and the whole of what the app adds to the document the
