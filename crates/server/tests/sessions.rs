@@ -2186,6 +2186,19 @@ async fn tinkering(spill: tempfile::TempDir, stub: &str) -> Grilling {
 /// Tinker's ending, which turns on the branch being on no pull request until
 /// the session sent for one has opened it.
 async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    tinkering_alongside(spill, stub, gh, &[]).await
+}
+
+/// And the same with whatever `companions` names beside it, which is what the
+/// test about a Tinker that commits in one and nowhere else needs: its own branch
+/// stays exactly as the press cut it, so the companion is the whole of what the
+/// ending has to find.
+async fn tinkering_alongside(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    companions: &[(&str, CompanionMode)],
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, *BRISKLY, None).await;
     let app = &bench.app;
 
@@ -2208,6 +2221,30 @@ async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
+
+    // While it is still drafting, which is the only time a companion can be added
+    // or configured — and off the same endpoints the setup card presses.
+    for (name, mode) in companions {
+        let repo_id = bench.register(name).await;
+
+        let added: CompanionAdded = post(
+            app,
+            &format!("/api/ui/conversations/{id}/companions"),
+            &serde_json::json!({ "repo_id": repo_id }),
+        )
+        .await;
+        assert_eq!(added, CompanionAdded::Added);
+
+        if *mode != CompanionMode::ReadOnly {
+            let chosen: CompanionModeChosen = post(
+                app,
+                &format!("/api/ui/conversations/{id}/companions/{repo_id}/mode"),
+                &serde_json::json!({ "mode": mode }),
+            )
+            .await;
+            assert_eq!(chosen, CompanionModeChosen::Chosen);
+        }
+    }
 
     let saved: BriefSaved = post(
         app,
@@ -23794,6 +23831,158 @@ async fn a_tinker_that_built_nothing_lands_done_with_nothing_dispatched() {
         notices(&view).is_empty(),
         "and nothing stopped: a Conversation that finished is not one that halted: \
          {:?}",
+        notices(&view),
+    );
+}
+
+/// A `gh` that answers for the Conversation's own repository and for the
+/// companion beside it, each finding nothing until its own marker is written.
+///
+/// [`gh_alongside`]'s directory switch and [`gh_opened_by_hand`]'s marker in one:
+/// the test needs *no pull request anywhere* while the rounds run, and both of
+/// them once the `submitting` session has pushed — the Conversation's own to make
+/// a wrap-up, and the companion's because the Done signal is refused while one
+/// the work committed in is uncovered.
+fn gh_alongside_opened_when_asked(opened: &Path, companion: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$(pwd -P)" in
+*/askance)
+    if [ ! -f {companion} ]; then
+        printf 'no pull requests found for branch "%s"\n' "$3" >&2
+        exit 1
+    fi
+    printf '{{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+    exit 0
+    ;;
+esac
+if [ ! -f {opened} ]; then
+    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1
+fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        companion = quoted(companion),
+    )
+}
+
+/// A Tinker whose round commits in the companion and nowhere else, and then a
+/// `submitting` session that pushes both halves.
+///
+/// Its own branch is left exactly as the press cut it, which is the whole point:
+/// nothing stands on it for the ending to read, so the companion is the only
+/// thing that says work was done.
+fn a_tinker_that_commits_in_the_companion_alone(opened: &Path, companion: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'both branches are pushed and both pull requests are open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    printf 'https://github.com/tobico/askance/pull/7\n' > {companion}
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    (cd ../askance-* && printf 'the other half\n' >> halves.md && git add -A \
+        && git commit --quiet -m 'feat: count what the other half rejects')
+    SAYING='following it up'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        companion = quoted(companion),
+    )
+}
+
+/// And a Tinker that committed in a companion and nowhere else lands in Wrapping
+/// too, rather than being finished with.
+///
+/// The ending asks every branch the work reaches rather than the Conversation's
+/// own alone. A round that changed only a companion leaves this branch exactly as
+/// the press cut it, so reading it by itself would say *nothing built* — and land
+/// Done with the companion's commits on a branch that has no pull request, no
+/// checks and nothing sent to open one. Which is the one reading the rest of the
+/// run does not take: the sweep puts those commits on the Timeline, the wrap-up
+/// stops over a companion left without a pull request, and the `submitting`
+/// session's own Done signal is refused while one is uncovered.
+#[tokio::test]
+async fn a_tinker_that_committed_only_in_a_companion_lands_in_wrapping_too() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let alongside = spill.path().join("companion-opened-when-asked");
+
+    let fixture = tinkering_alongside(
+        spill,
+        &a_tinker_that_commits_in_the_companion_alone(&opened, &alongside),
+        &gh_alongside_opened_when_asked(&opened, &alongside),
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // The companion's commit, once the sweep has it: what lands this Conversation
+    // in Wrapping is that commit, so a mark answered before it existed would be
+    // reading the fixture rather than the rule.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the other half"))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_requests(view).len() == 2)
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull requests the work was owed",
+    );
+    assert!(
+        pull_requests(&view).iter().any(|opened| opened.number == 7),
+        "and the companion's is pinned beside the Conversation's own, which is the \
+         wrap-up covering it: {:?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped along the way: {:?}",
         notices(&view),
     );
 }

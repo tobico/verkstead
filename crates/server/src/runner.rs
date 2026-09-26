@@ -2005,18 +2005,19 @@ const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act 
 /// steered into is something taken up about work that is already on one, so where
 /// it ends is where it started — see [`back_to_the_wrap_up`]. A **Tinker** starts
 /// straight into Follow-up on a branch nobody has opened anything on, and what
-/// its rounds left on that branch is the whole of what decides: commits mean the
+/// its rounds committed is the whole of what decides: anything at all means the
 /// pull request is sent for and the ordinary wrap-up runs over what is opened,
-/// and nothing means Done.
+/// and nothing anywhere means Done.
 ///
-/// **The branch is asked, once, here — and not the `pushed` flag.** `pushed` is
-/// *more commits than when this session launched*, and a follow-up picked up
+/// **The branches are asked, once, here — and not the `pushed` flag.** `pushed`
+/// is *more commits than when this session launched*, and a follow-up picked up
 /// again reads that baseline afresh, so a Tinker that commits, loses its session,
 /// is relaunched and then ends on a round that committed nothing reads
 /// `pushed: false`. Landing Done on that would leave the work on a branch with no
-/// pull request and nothing watching it. So what stands on the branch past the
-/// commit it was cut from is asked of git — see [`crate::commits::touched`] — and
-/// `pushed` goes on meaning what it has always meant.
+/// pull request and nothing watching it. So what stands past the commits they
+/// were cut from is asked of git — the Conversation's own branch and every
+/// read-write companion's, see [`holds_commits`] — and `pushed` goes on meaning
+/// what it has always meant.
 ///
 /// The session is ended first, because the Worktree is about to be handed to
 /// whatever comes next: a review or a `submitting` session queueing behind an
@@ -2072,8 +2073,8 @@ async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Dri
     if holds_commits(state, &conversation).await {
         tracing::info!(
             conversation_id,
-            "the follow-up built something on a branch that is on no pull request, so a \
-             session is being sent to open one",
+            "the follow-up built something, here or in a companion, and the branch is on no \
+             pull request, so a session is being sent to open one",
         );
 
         // Held across the session and the wrap-up it starts, which is what
@@ -2160,11 +2161,12 @@ async fn back_to_the_wrap_up(
     crate::checks::afresh(state.clone(), conversation_id).await;
 }
 
-/// And land one in Done, because its rounds built nothing.
+/// And land one in Done, because its rounds built nothing anywhere.
 ///
 /// A Tinker that was questions and answers alone: there is no pull request to
-/// carry anything to and nothing to carry, so there is nothing for a wrap-up to
-/// be about and nothing to dispatch. The move and the line on the Timeline are
+/// carry anything to and nothing to carry — in its own repository or in any
+/// companion beside it — so there is nothing for a wrap-up to be about and
+/// nothing to dispatch. The move and the line on the Timeline are
 /// the whole of it, and the Worktree stays as it is for any Done Conversation.
 ///
 /// Nothing is pushed to the devices and nothing is stamped unseen either, which
@@ -2195,7 +2197,8 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 
     tracing::info!(
         conversation_id,
-        "the follow-up built nothing and its branch is on no pull request, so the work is done",
+        "the follow-up built nothing anywhere and its branch is on no pull request, so the \
+         work is done",
     );
 
     // The Timeline has a move on it and the card reads differently, and an open
@@ -2205,8 +2208,49 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
     });
 }
 
-/// Whether anything stands on the Conversation's branch past the commit it was
-/// cut from.
+/// Whether the follow-up's rounds committed anything anywhere the work reaches:
+/// the Conversation's own branch, or any read-write companion's.
+///
+/// **Every repository, because every one of them ends on a pull request of its
+/// own.** A round that changed only a companion leaves the Conversation's own
+/// branch exactly as the start cut it, and reading that branch alone would land
+/// the Conversation Done with the companion's commits on a branch that has no
+/// pull request, no checks and nothing sent to open one. The rest of the run
+/// already knows better: the commit sweep puts those commits on the Timeline,
+/// [`crate::wrapping::covering`] stops a wrap-up over a companion left without a
+/// pull request, and the `submitting` session's own Done signal is refused while
+/// one is uncovered — so an ending that read past them would be the one reading
+/// out of step with all three.
+///
+/// **The companions are asked through [`crate::wrapping::committed_in`]**, which
+/// is that one reading: the companions it says the work has committed in and has
+/// no pull request for are exactly the ones a wrap-up is about to expect one of.
+/// A reading that fell over says so rather than saying *none*, and *cannot say*
+/// is taken here as *there may be work* — the cost that way round is a
+/// `submitting` session that stops with a Notice naming what is wrong, and the
+/// cost the other way is work quietly finished with.
+///
+/// The Conversation's own branch is asked first and on its own account: it is
+/// the cheaper question and it is the usual answer.
+async fn holds_commits(state: &AppState, conversation: &store::Conversation) -> bool {
+    if own_branch_holds_commits(state, conversation).await {
+        return true;
+    }
+
+    match crate::wrapping::committed_in(state, conversation).await {
+        Some(committed) => !committed.is_empty(),
+        None => {
+            tracing::warn!(
+                conversation_id = conversation.id,
+                "what a follow-up's companions hold cannot be read, so the work is taken to \
+                 a pull request rather than finished with",
+            );
+            true
+        }
+    }
+}
+
+/// And the half of that which is the Conversation's own branch.
 ///
 /// Asked of git in the Conversation's own repository, which is where a branch is
 /// a fact: the record's own commit count is a poller's, and what this decides is
@@ -2225,7 +2269,7 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 /// of, and a branch git cannot resolve reads as holding nothing. One
 /// `git symbolic-ref` in the ordinary case; see [`crate::renames`], whose reading
 /// the commit sweep does every couple of seconds for the same reason.
-async fn holds_commits(state: &AppState, conversation: &store::Conversation) -> bool {
+async fn own_branch_holds_commits(state: &AppState, conversation: &store::Conversation) -> bool {
     let Some(base) = conversation.base_commit.clone() else {
         tracing::error!(
             conversation_id = conversation.id,
