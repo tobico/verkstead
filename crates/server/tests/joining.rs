@@ -53,7 +53,7 @@ use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
 use verkstead_server::peer::dialling::Peers;
-use verkstead_server::peer::joining::{HELD, Joins};
+use verkstead_server::peer::joining::{HELD, HELD_AT_ONCE, Joins};
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
@@ -642,6 +642,100 @@ async fn a_device_cannot_ask_itself() {
         asked_joins(&itself.pool).await.unwrap().is_empty(),
         "and none on the device that was asked, which is the same one",
     );
+}
+
+/// A device already holding as many questions as it will refuses the next one,
+/// and nothing of it is written down.
+///
+/// **The one route a stranger reaches that writes**, so how much of this machine
+/// it is worth is this machine's to decide rather than the caller's — see
+/// `HELD_AT_ONCE`. Every held request is a row, a push to this human's phones, a
+/// Nudge to every open workbench and a task that wakes ten minutes later to dial
+/// the addresses the post named; without the ceiling, all of that is spent as
+/// often as anybody who can reach the port cares to ask.
+#[tokio::test]
+async fn a_device_holding_all_the_questions_it_will_refuses_the_next() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    fill(&asked, &far_ahead()).await;
+
+    let (status, said) = add(&asking.workbench(), &asked.at()).await;
+
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "the press says what the far end said: {said}",
+    );
+    assert!(
+        said.contains("as many join requests as it will"),
+        "in the far end's own words, so the human can tell it from a machine that \
+         is off: {said}",
+    );
+
+    assert_eq!(
+        held_joins(&asked.pool).await.unwrap().len(),
+        HELD_AT_ONCE,
+        "nothing was written, so nothing was pushed and no timer was set",
+    );
+
+    assert!(
+        listing(&asking.workbench()).await.pending.is_empty(),
+        "and nothing is drawn over here either: there is no request to cancel",
+    );
+}
+
+/// And questions that ran out do not keep a device from being asked, because the
+/// sweep runs before the counting.
+///
+/// A device turned away for questions nobody answered last week is a device that
+/// stopped taking them a week ago — which is the ceiling refusing the thing it
+/// exists to protect.
+#[tokio::test]
+async fn questions_that_ran_out_leave_room_for_another() {
+    let asked = Verkstead::answering().await;
+    let asking = Verkstead::asking().await;
+
+    fill(&asked, LONG_AGO).await;
+
+    let (status, said) = add(&asking.workbench(), &asked.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    assert_eq!(
+        held_joins(&asked.pool).await.unwrap().len(),
+        1,
+        "the ones that had run out went with the sweep, and the new one is held",
+    );
+}
+
+/// As many questions as a device will hold, written straight into its store:
+/// what the ceiling is asked about is the count, and posting sixteen real joins
+/// would be asking the same question sixteen times over a socket.
+async fn fill(asked: &Verkstead, expires_at: &str) {
+    for held in 0..HELD_AT_ONCE {
+        hold_join(
+            &asked.pool,
+            &HeldJoin {
+                request: format!("{held:032x}"),
+                device: format!("{held:032x}"),
+                name: "laptop".to_owned(),
+                os: "Linux".to_owned(),
+                addresses: vec!["192.168.1.99".to_owned()],
+                fingerprint: format!("AA:BB:{held:02X}"),
+                asked_at: LONG_AGO.to_owned(),
+                expires_at: expires_at.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
+/// A moment well ahead of any test run: the near side of *has this run out*.
+fn far_ahead() -> String {
+    (time::OffsetDateTime::now_utc() + Duration::from_secs(600))
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap()
 }
 
 /// The ten minutes on the row are the ten minutes the ADR says, taken from when

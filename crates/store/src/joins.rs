@@ -463,6 +463,26 @@ pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
         .collect())
 }
 
+/// How many joins this device is holding, expired ones included.
+///
+/// **Counted rather than listed**, because what asks is the ceiling on them —
+/// see `crates/server/src/peer/joining.rs`, which refuses a post that would take
+/// this device past it. A list of names and addresses is not the answer to *how
+/// many*, and this is asked of every join that arrives.
+///
+/// The ones that have run out are counted with the rest, which is why the sweep
+/// in [`let_go_of_expired_joins`] runs before it: a device turned away for
+/// questions nobody answered last week would be a device that stopped taking
+/// them a week ago.
+pub async fn held_join_count(pool: &SqlitePool) -> Result<usize> {
+    let (counted,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM joins_held")
+        .fetch_one(pool)
+        .await
+        .context("counting the joins this device is holding")?;
+
+    Ok(counted as usize)
+}
+
 /// Let go of a join this device was holding: a cancel from the far end, an
 /// Allow or a Deny that has settled it, and a sweep of the ones that ran out.
 ///

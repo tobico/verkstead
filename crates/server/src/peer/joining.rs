@@ -87,6 +87,49 @@ pub fn cancelling(request: &str) -> String {
 /// asking for.
 pub const HELD: Duration = Duration::from_secs(10 * 60);
 
+/// How many unanswered questions this device will hold at once.
+///
+/// **Because this is the one route a stranger reaches that writes.** Everything
+/// a held request costs — a row, a push to this human's phones, a Nudge to every
+/// open workbench, and a task that wakes ten minutes later to dial the addresses
+/// the post named — is spent on the say-so of a device that has proved nothing
+/// but that it holds the key to the certificate it presented. Without a ceiling,
+/// how much of it is spent is the caller's to decide, and anybody who can reach
+/// this port can decide it.
+///
+/// Sixteen, which is more devices than a human owns and nowhere near enough to
+/// be worth anybody's while. A post that would go past it is refused rather than
+/// queued, and the ones that have run out are swept first — so what fills this is
+/// sixteen questions somebody is really being asked right now.
+///
+/// **What it does not do is keep the slots apart.** A device that filled all
+/// sixteen would hold a real join out for the ten minutes until they expire, and
+/// that is the trade this number makes: a ceiling nobody can get past costs the
+/// machine nothing, and one per caller would key the accounting on a certificate
+/// a stranger mints for free.
+pub const HELD_AT_ONCE: usize = 16;
+
+/// And how much of what a stranger says about itself this device will keep.
+///
+/// **A join is a payload from a non-member, and the row it writes is the list a
+/// dial back later works down.** So the addresses are the one of these that is
+/// more than storage: a post naming tens of thousands of them is a task that,
+/// ten minutes later, spends a dial's patience apiece connecting to hosts and
+/// ports the caller chose — with nobody having pressed anything, that walk being
+/// the expiry telling the asker its request ran out. See
+/// [`super::dialling::Peers::settle`], which is what works the list down.
+///
+/// Every one of them is generous against what a Verkstead really says: the id is
+/// thirty-two hex characters, the OS word is one of four, a name is a hostname,
+/// and no machine advertises sixteen addresses. A join saying more than this is
+/// refused whole rather than trimmed — a name cut in half is a row nobody can
+/// read, and a well-behaved device never comes near any of them.
+const LONGEST_ID: usize = 64;
+const LONGEST_NAME: usize = 255;
+const LONGEST_OS: usize = 64;
+const LONGEST_ADDRESS: usize = 255;
+const MOST_ADDRESSES: usize = 16;
+
 /// The device being asked, as the two routes above answer out of it: what to
 /// say about itself, and where to keep the question.
 #[derive(Debug, Clone)]
@@ -176,16 +219,31 @@ impl Joins {
     /// a reason for one: a device nobody ever asks has nothing to sweep, and one
     /// asked twice a year should not be keeping last year's question. It changes
     /// nothing any caller is told — see the module note.
-    pub(crate) async fn hold(&self, held: &HeldJoin, now: OffsetDateTime) -> Result<()> {
+    ///
+    /// **And the ceiling is read between the two**, which is why it is here
+    /// rather than in the handler: what is being asked is how many questions are
+    /// still live, and that is a different number before the sweep and after it.
+    /// `false` is this device already holding [`HELD_AT_ONCE`] of them — nothing
+    /// is written, and the caller is refused rather than queued.
+    pub(crate) async fn hold(&self, held: &HeldJoin, now: OffsetDateTime) -> Result<bool> {
         let pool = self.store()?;
 
         verkstead_store::let_go_of_expired_joins(pool, &stamp(now)?)
             .await
             .context("letting go of the joins whose ten minutes had run out")?;
 
+        let holding = verkstead_store::held_join_count(pool)
+            .await
+            .context("counting the joins this device is already holding")?;
+
+        if holding >= HELD_AT_ONCE {
+            return Ok(false);
+        }
+
         verkstead_store::hold_join(pool, held)
             .await
             .with_context(|| format!("holding the join device {} asked", held.device))
+            .map(|()| true)
     }
 
     /// One of them, where it is there and its ten minutes have not run out.
@@ -381,6 +439,17 @@ pub(crate) async fn join(
         );
     }
 
+    if let Some(why) = too_much(&saying) {
+        tracing::warn!(
+            fingerprint = %presented,
+            why,
+            "a device asking to link said more about itself than this one will keep, so the \
+             request is refused",
+        );
+
+        return refused(StatusCode::BAD_REQUEST, why);
+    }
+
     let now = OffsetDateTime::now_utc();
 
     let (asked_at, expires_at) = match (stamp(now), stamp(now + HELD)) {
@@ -408,10 +477,34 @@ pub(crate) async fn join(
         expires_at: expires_at.clone(),
     };
 
-    if let Err(why) = holding.joins.hold(&held, now).await {
-        tracing::error!(%why, "a join could not be written down, so it is refused");
+    match holding.joins.hold(&held, now).await {
+        Ok(true) => {}
 
-        return unreadable("this device could not write the request down");
+        // The ceiling, which is what keeps a stranger from deciding how much of
+        // this machine a join is worth — see [`HELD_AT_ONCE`]. Nothing is
+        // written, so nothing is pushed, nothing is Nudged and no timer is set:
+        // a refused post costs this device the read it took to refuse it.
+        Ok(false) => {
+            tracing::warn!(
+                device = %held.device,
+                fingerprint = %held.fingerprint,
+                holding = HELD_AT_ONCE,
+                "a device asked to link while this one was already holding as many \
+                 questions as it will, so the request is refused",
+            );
+
+            return refused(
+                StatusCode::TOO_MANY_REQUESTS,
+                "this device is already holding as many join requests as it will, and lets \
+                 go of each one ten minutes after it was made",
+            );
+        }
+
+        Err(why) => {
+            tracing::error!(%why, "a join could not be written down, so it is refused");
+
+            return unreadable("this device could not write the request down");
+        }
     }
 
     tracing::info!(
@@ -573,6 +666,52 @@ fn asked(holding: &Holding, request: String) {
     });
 }
 
+/// Whether a join says more about itself than this device will keep, and what
+/// it was.
+///
+/// **The one thing a stranger writes into this machine, read before any of it is
+/// written.** What the row holds is what a dial back will later work down and
+/// what a modal and a lock screen will later draw, so the bound is taken here
+/// rather than at each of those: one reading, in front of the write, against
+/// [`LONGEST_ID`] and the four beside it.
+///
+/// Refused whole rather than trimmed, and the reason is the addresses: a list cut
+/// to sixteen would be a device quietly unreachable at the seventeenth address it
+/// really has, where a refusal is a device saying plainly that it said too much.
+/// A name or an OS word cut in half is the same kind of lie in smaller print.
+///
+/// Counted in characters rather than bytes, because what these are bounds on is
+/// what somebody reads: a hostname in kanji is a hostname.
+///
+/// `None` is a join this device will keep, which is every join a Verkstead makes.
+fn too_much(saying: &DeviceIdentity) -> Option<&'static str> {
+    if saying.device.chars().count() > LONGEST_ID {
+        return Some("that is longer than any device id");
+    }
+
+    if saying.name.chars().count() > LONGEST_NAME {
+        return Some("that is longer than any hostname");
+    }
+
+    if saying.os.chars().count() > LONGEST_OS {
+        return Some("that is longer than any word for an operating system");
+    }
+
+    if saying.addresses.len() > MOST_ADDRESSES {
+        return Some("that is more addresses than a device is reachable at");
+    }
+
+    if saying
+        .addresses
+        .iter()
+        .any(|address| address.chars().count() > LONGEST_ADDRESS)
+    {
+        return Some("that is longer than any address");
+    }
+
+    None
+}
+
 /// A moment in the spelling both sides of a join write one in: RFC 3339, UTC.
 fn stamp(at: OffsetDateTime) -> Result<String> {
     at.format(&Rfc3339).context("saying what the time is")
@@ -639,6 +778,70 @@ mod tests {
     #[test]
     fn a_moment_that_cannot_be_read_has_run_out() {
         assert!(run_out("whenever", OffsetDateTime::now_utc()));
+    }
+
+    /// What a Verkstead really says about itself is nowhere near any of the
+    /// bounds, which is the whole of what makes them safe to refuse on.
+    #[test]
+    fn a_join_a_verkstead_makes_is_well_inside_every_bound() {
+        assert_eq!(
+            too_much(&DeviceIdentity {
+                device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
+                fingerprint: "3F:0A".to_owned(),
+                name: "workbench".to_owned(),
+                os: "Linux (WSL)".to_owned(),
+                addresses: vec![
+                    "workbench.tailnet-name.ts.net".to_owned(),
+                    "100.64.0.1".to_owned(),
+                    "192.168.1.24".to_owned(),
+                ],
+            }),
+            None,
+        );
+    }
+
+    /// And each of the five is refused on its own, saying which it was.
+    #[test]
+    fn a_join_that_says_too_much_is_refused_by_the_thing_it_said_too_much_of() {
+        let fine = DeviceIdentity {
+            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
+            fingerprint: "3F:0A".to_owned(),
+            name: "workbench".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["192.168.1.24".to_owned()],
+        };
+
+        let said = |saying: DeviceIdentity| too_much(&saying).unwrap_or_default().to_owned();
+
+        assert!(said(DeviceIdentity {
+            device: "a".repeat(LONGEST_ID + 1),
+            ..fine.clone()
+        })
+        .contains("device id"));
+
+        assert!(said(DeviceIdentity {
+            name: "a".repeat(LONGEST_NAME + 1),
+            ..fine.clone()
+        })
+        .contains("hostname"));
+
+        assert!(said(DeviceIdentity {
+            os: "a".repeat(LONGEST_OS + 1),
+            ..fine.clone()
+        })
+        .contains("operating system"));
+
+        assert!(said(DeviceIdentity {
+            addresses: vec!["192.168.1.24".to_owned(); MOST_ADDRESSES + 1],
+            ..fine.clone()
+        })
+        .contains("more addresses"));
+
+        assert!(said(DeviceIdentity {
+            addresses: vec!["a".repeat(LONGEST_ADDRESS + 1)],
+            ..fine
+        })
+        .contains("any address"));
     }
 
     /// The path a cancel is dialled at is the route that answers it, with the
