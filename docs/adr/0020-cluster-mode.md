@@ -162,15 +162,25 @@ The web client is same-origin: relative paths, one `HttpOnly` cookie per
 origin, a relative nudge stream, relative sockets. Rather than teach it N
 origins — CORS and cross-origin cookies on every device, every device served
 to the phone, a query cache keyed by server — **the device the browser opened
-relays for the rest**. A member serves the whole of `/api/ui/` to another
-member over the peer listener, authenticated by the handshake rather than the
-key cookie, and the hub forwards a call to `/api/ui/devices/{device}/…`
-verbatim and hands the answer back untouched: calls, the nudge stream, the
-terminal and file-watcher sockets, multipart uploads. A member's workbench key
-never leaves it. Remote Conversations live at
-`/devices/{device}/conversations/{id}` with every leaf under it; local ones
-keep their URLs, because this device is where most of the human's work is and
-a device segment on every URL would say nothing.
+relays for the rest**. A member serves `/api/ui/` to another member over the
+peer listener, authenticated by the handshake rather than the key cookie, and
+the hub forwards a call to `/api/ui/members/{device}/…` verbatim and hands the
+answer back untouched: calls, the nudge stream, the three attach sockets — a
+Conversation terminal, the Code pane's file watcher and a session's Screen —
+and an attachment upload, whose body is streamed through rather than held.
+**A prefix of its own rather than a segment under `/api/ui/devices/`**, that
+being the Devices section's own namespace already: a Device Id is sixteen
+random hex bytes and could not collide with the words under it, but two
+namespaces one segment apart read as one thing.
+**And three prefixes are the device's own and are not served over that listener
+at all** — `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/`, refused
+there by name. Which is what makes *a member's workbench key never leaves it* a
+fact about the mechanism rather than about the pages that happen to exist
+today: the Remote access reading carries the login link with that key on it, and
+a namespace served whole would hand it to whoever holds the hub's cookie.
+Remote Conversations live at `/devices/{device}/conversations/{id}` with every
+leaf under it; local ones keep their URLs, because this device is where most of
+the human's work is and a device segment on every URL would say nothing.
 
 The hub holds one nudge stream to each member, keeps that member's
 Conversation list in memory, refreshes it on a nudge, and re-announces every
@@ -225,7 +235,7 @@ only where another device exists, reading the device last picked in this
 browser — remembered the way pane widths are — and this device until then.
 Picking one makes the Repo select list that device's Repos and the pairings
 prefill from it, and Start creates the Conversation there: the compose page's
-replay goes through `/api/ui/devices/{device}/…` unchanged. A saved draft's
+replay goes through `/api/ui/members/{device}/…` unchanged. A saved draft's
 composer moves it too, by replaying it onto the other device and closing it
 here. Inside the select's panel, under *May be transferred to*, a tick per
 other device says where the agent may move the work; the device it was
