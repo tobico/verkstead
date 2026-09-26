@@ -39,6 +39,13 @@ let
   # reason the home is: the probe looks for it by path.
   cacheDir = "/var/cache/verkstead";
 
+  # Where the peer listener is put, which is not where it would go on its own.
+  # The module's default is 8423, and a test that read the identity endpoint
+  # there would answer the same whether the option reached the unit or the
+  # binary's own default did — so it is moved, and what is looked for on the
+  # command line, on the port and in the firewall's ruleset is this number.
+  peerPort = 9423;
+
   # And the file the test attaches to the Conversation before its work starts,
   # which the probe then looks for inside. Named once for the probe's reason: the
   # test uploads it and the probe opens it, and two spellings would be a probe
@@ -234,6 +241,13 @@ testers.runNixOSTest {
       # not about network access: a `fetchurl` is a fixed-output derivation and
       # the binary would download here perfectly well.
       services.verkstead.package = package;
+
+      # The peer listener, moved off the module's own default so that reading it
+      # proves the option carried rather than the binary's default — see
+      # `peerPort` above. Every interface all the same, which is what the option
+      # is for: what a device dials this machine on is a LAN or a tailnet
+      # address, and the firewall rule the module opens is what lets one arrive.
+      services.verkstead.peerListen = "0.0.0.0:${toString peerPort}";
 
       # The directories the unit is told to bind, and so the whole of what the
       # service can see of this machine. The service refuses to start on one that
@@ -549,6 +563,110 @@ testers.runNixOSTest {
         machine.succeed("systemctl is-active --quiet verkstead.service")
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
+
+    with subtest("the peer listener answers the identity on the port the option named"):
+        # A second listener of its own, on a port the module named rather than
+        # one the binary defaulted to, presenting a certificate this machine
+        # made for itself at its first start — and saying what it is to a caller
+        # that has shown nothing at all.
+        #
+        # This sits before the subtest below that goes looking for the Workbench
+        # Key, and that is the whole point of where it is: nothing here is
+        # logged in to anything, and the identity endpoint is the one route on
+        # this listener nobody has to be anybody to read. A linking that needed
+        # a secret before it could start would be a linking nobody could ever
+        # start.
+        #
+        # What the unit is passing is readable in the unit, which is what
+        # passing flags rather than setting the environment is for: a human
+        # wondering where the peer listener went reads `systemctl cat`.
+        unit = machine.succeed("systemctl cat verkstead.service")
+        assert "--peer-listen 0.0.0.0:${toString peerPort}" in unit, (
+            f"the option did not reach the command line:\n{unit}"
+        )
+
+        machine.wait_for_open_port(${toString peerPort})
+
+        # `--insecure` because the certificate is self-signed and made out to
+        # the device id rather than to an address: what proves the far end in a
+        # cluster is the fingerprint compared afterwards, and there is no
+        # authority anywhere in one for curl to check a chain against. That
+        # comparison is the next assertion but one.
+        identity = json.loads(
+            machine.succeed(
+                "curl -sf --insecure"
+                " https://127.0.0.1:${toString peerPort}/api/peer/v1/identity"
+            )
+        )
+
+        # The id, which is what a record and a URL name this device by: sixteen
+        # random bytes as hex, invented at the first start this VM ever had.
+        assert re.fullmatch(r"[0-9a-f]{32}", identity["device"]), (
+            f"the identity names no device: {identity}"
+        )
+
+        # And the fingerprint of the certificate the handshake just carried.
+        # Both are checked against the startup line rather than only against
+        # their own shape: a device that answered with an id and a certificate
+        # other than the ones it came up on would answer this exactly as well.
+        printed = machine.succeed("journalctl -u verkstead.service --no-pager -o cat")
+        assert identity["device"] in printed, (
+            f"the id answered is not the one the startup line printed:\n{printed}"
+        )
+        assert identity["fingerprint"] in printed, (
+            f"nor is the fingerprint, which is what a human compares two "
+            f"machines by:\n{printed}"
+        )
+
+        # Then the three read off the machine rather than kept anywhere. The
+        # name is the hostname — nothing is configured and nothing is typed —
+        # and the OS is the platform's own word, which is the plain one here: a
+        # *Linux (WSL)* is read off a kernel release no VM has.
+        hostname = machine.succeed("hostname").strip()
+        assert identity["name"] == hostname, (
+            f"the device is shown as {identity['name']!r} on a machine called "
+            f"{hostname!r}"
+        )
+        assert identity["os"] == "Linux", f"this VM reads as {identity['os']!r}"
+
+        # And every address a peer could dial it on, which on this machine is
+        # what its own interfaces carry: the tailnet half is empty, the daemon
+        # next door having joined none. The loopback is not among them and is
+        # not meant to be — a peer handed one would reach itself.
+        interfaces = machine.succeed(
+            "ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1"
+        ).split()
+        assert interfaces, "this VM has no address of its own to advertise"
+        for address in interfaces:
+            assert address in identity["addresses"], (
+                f"{address} is on this machine and not in {identity['addresses']}"
+            )
+        assert "127.0.0.1" not in identity["addresses"], (
+            f"the loopback is nowhere a peer can dial: {identity['addresses']}"
+        )
+
+    with subtest("the module opens the peer port on the host's firewall"):
+        # A NixOS host firewalls by default, so a peer listener bound to every
+        # interface behind a shut port is a feature that silently does not work:
+        # the device dialling in times out, and nothing on either machine says
+        # why. `openFirewall` is on for that reason, and this is the ruleset it
+        # produced rather than the option that was set.
+        #
+        # The port is the one `peerListen` named above, which is what says the
+        # rule follows the listener rather than standing on 8423 whatever the
+        # option says. What a host that turned the option *off* is left with is
+        # nix/module-peer.nix's — one machine boots with its firewall one way.
+        rules = machine.succeed("nixos-firewall-tool show")
+        assert "dpt:${toString peerPort}" in rules, (
+            f"the peer port is shut on a host that opened it:\n{rules}"
+        )
+
+        # And the workbench's own port is not opened, which is the other half of
+        # what the option says: what reaches that one from another device is
+        # `tailscale serve` on the tailnet rather than anything arriving here.
+        assert "dpt:8422" not in rules, (
+            f"the workbench port is open to this machine's network:\n{rules}"
+        )
 
     with subtest("the workbench is behind the key, and the startup line hands it over"):
         # Everything of the human's is gated — the viewer's own namespace and the

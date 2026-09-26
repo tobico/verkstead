@@ -10,9 +10,9 @@
 //! workbench is served on, and the one press that puts it there.
 //!
 //! **Three commands, and nothing else.** `tailscale status --json` says whether
-//! the daemon is answering and what this node is called; `tailscale serve
-//! status --json` says what is proxied where; and `tailscale serve` is the
-//! switch. There is no Tailscale library here and no socket opened by hand: the
+//! the daemon is answering, what this node is called and what it answers on;
+//! `tailscale serve status --json` says what is proxied where; and `tailscale
+//! serve` is the switch. There is no Tailscale library here and no socket opened by hand: the
 //! binary on the machine is the one thing that is certain to speak this
 //! machine's Tailscale, whatever version it happens to be.
 //!
@@ -54,6 +54,14 @@
 //! failure to report as one — the serve is off, which is the truth of the
 //! machine, and the line stands on the pane for whoever would rather type it.
 //!
+//! **And one reading here is not the pane's at all.** [`Tailscale::tailnet`]
+//! answers where this machine is reachable on the tailnet — the node name and
+//! its addresses — which is the tailnet half of what a device advertises to its
+//! peers (ADR-0020). The same command as the pane's reading and a different
+//! question of it: the pane has four things to say about a machine and tells
+//! every way of not knowing apart, where that one has a list of addresses to
+//! contribute to and nothing at all to contribute where there is no Tailscale.
+//!
 //! **And the one thing here that is not read off Tailscale at all**: the login
 //! link. A served address is where a phone would reach the workbench and the
 //! Workbench Key is what it would be let in by, so the two of them together are
@@ -64,6 +72,7 @@
 use std::collections::HashMap;
 use std::process::Output;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::process::Command;
@@ -183,6 +192,16 @@ const RUNNING: &str = "Running";
 /// HTTPS on the tailnet name. Taken off the address that is drawn, because a
 /// URL naming it is a URL saying what its scheme already said.
 const HTTPS: &str = "443";
+
+/// How long `tailscale` is given to answer the one reading a stranger can ask
+/// for — see [`Tailscale::tailnet`] and [`Tailscale::run_within`].
+///
+/// Five seconds, which is a hundred times what asking a daemon on the same
+/// machine what it is called actually takes, and short enough that a daemon
+/// which has wedged is a slow answer rather than a request that never ends. The
+/// pane's own readings have no deadline: those are the human's, behind the key
+/// on the loopback, and one of them may be waiting on a password dialog.
+const ANSWERING: Duration = Duration::from_secs(5);
 
 impl Tailscale {
     /// The real thing: whatever `tailscale` the host has on its PATH, in front
@@ -317,6 +336,66 @@ impl Tailscale {
                 }
             }
         }
+    }
+
+    /// Where this machine answers on the tailnet, in the order a peer should
+    /// try: the node's name first, then the addresses behind it.
+    ///
+    /// What the identity endpoint puts in front of this device's LAN addresses
+    /// (ADR-0020, *Addresses*) — the tailnet half of *every device advertises
+    /// all its addresses*. The name comes first because it is the one that
+    /// survives: a tailnet address is handed out by the coordination server and
+    /// a name is what the machine is known by whatever it is handed.
+    ///
+    /// **Nothing where there is no Tailscale, and nothing where it is not up.**
+    /// A machine with none of it contributes nothing to the list rather than
+    /// failing the answer it is part of: what a device is reachable on is
+    /// whatever it can say it is reachable on, and a LAN address is an answer.
+    /// So every way of not knowing comes to the same empty list, where
+    /// [`Tailscale::reading`] tells them apart — that one is a pane with four
+    /// things to say about this machine, and this is a list of addresses with
+    /// nothing to say about a machine that has none. A daemon that does not
+    /// answer within [`ANSWERING`] is one of those ways: this is the one
+    /// reading a stranger can ask for, so what a wedged daemon costs is bounded
+    /// here rather than left to whoever is asking.
+    ///
+    /// Read now rather than held from startup, for the reason the pane's own
+    /// reading is: a laptop moves between tailnets and DHCP moves everybody,
+    /// and an address remembered from a start weeks ago is an address a peer
+    /// would dial into nothing.
+    pub(crate) async fn tailnet(&self) -> Vec<String> {
+        let Ok(told) = self.run_within(&["status", "--json"], ANSWERING).await else {
+            return Vec::new();
+        };
+
+        if !told.status.success() {
+            return Vec::new();
+        }
+
+        let Ok(status) = serde_json::from_slice::<Status>(&told.stdout) else {
+            return Vec::new();
+        };
+
+        if status.backend_state.as_deref() != Some(RUNNING) {
+            return Vec::new();
+        }
+
+        let Some(node) = status.this else {
+            return Vec::new();
+        };
+
+        // The name as a DNS name arrives with the trailing dot one carries, and
+        // what goes in the list is what somebody would type — see
+        // [`Tailscale::reading`], which trims the same dot off the same field.
+        let name = node
+            .dns_name
+            .map(|name| name.trim_end_matches('.').to_owned())
+            .filter(|name| !name.is_empty());
+
+        name.into_iter()
+            .chain(node.tailscale_ips.unwrap_or_default())
+            .filter(|address| !address.trim().is_empty())
+            .collect()
     }
 
     /// The login link for whatever `serve` says the workbench answers on.
@@ -508,18 +587,54 @@ impl Tailscale {
     /// business writing on the server's own terminal, and both streams are what
     /// this module reads its answer out of.
     async fn run(&self, arguments: &[&str]) -> std::io::Result<Output> {
+        self.command(arguments).output().await
+    }
+
+    /// The same, given `within` to answer in — and killed where it does not.
+    ///
+    /// **For the readings a stranger can ask for.** [`Tailscale::tailnet`] is
+    /// behind the peer listener's identity endpoint, which anybody who can
+    /// reach the port may read, so a call to it is a process somebody else
+    /// started on this machine: without a deadline a daemon that has wedged
+    /// leaves every one of them standing, and they pile up as fast as the
+    /// requests arrive. The pane's own readings are behind the Workbench Key on
+    /// the loopback and go through [`Tailscale::run`] as they always did — a
+    /// serve press may be waiting on a password dialog, and a deadline over that
+    /// would be a grant cut off mid-answer.
+    ///
+    /// `kill_on_drop`, because a timeout that left the process running would be
+    /// this deadline saying the pile-up had stopped while it went on.
+    async fn run_within(&self, arguments: &[&str], within: Duration) -> std::io::Result<Output> {
+        match tokio::time::timeout(within, self.command(arguments).kill_on_drop(true).output())
+            .await
+        {
+            Ok(told) => told,
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("`tailscale` did not answer within {within:?}"),
+            )),
+        }
+    }
+
+    /// `tailscale` with `arguments`, built and not yet run.
+    ///
+    /// Apart from the running so that the two ways of running it — with a
+    /// deadline and without — are one command said once.
+    fn command(&self, arguments: &[&str]) -> Command {
         let (program, before) = self
             .program
             .split_first()
             .expect("a Tailscale is built with a program to run");
 
-        Command::new(program)
+        let mut command = Command::new(program);
+
+        command
             .args(before)
             .args(arguments)
             .unseen()
-            .stdin(std::process::Stdio::null())
-            .output()
-            .await
+            .stdin(std::process::Stdio::null());
+
+        command
     }
 }
 
@@ -712,12 +827,18 @@ struct Status {
 }
 
 /// And the half of the node it names: what this machine is called on the
-/// tailnet.
+/// tailnet, and what it answers on there.
 #[derive(Debug, Deserialize)]
 struct Node {
     /// A DNS name, so it arrives with the trailing dot one carries.
     #[serde(rename = "DNSName")]
     dns_name: Option<String>,
+
+    /// And the addresses behind that name, which is what a peer dials when it
+    /// has one — see [`Tailscale::tailnet`]. Both families where the tailnet
+    /// has both, in the order Tailscale itself lists them.
+    #[serde(rename = "TailscaleIPs")]
+    tailscale_ips: Option<Vec<String>>,
 }
 
 /// One host of a serve configuration's `Web` section, keyed by `host:port`.

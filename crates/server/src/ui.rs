@@ -37,18 +37,18 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileListsView, FileMade,
-    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite,
-    FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    ConversationView, Creation, Cursor, DevicesView, FileDeleted, FileDeleting, FileListsView,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -588,6 +588,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/remote/banner",
             get(remote_banner).post(dismiss_remote_banner),
         )
+        // And what this machine *is*, which is the third section of that same
+        // pane: this device and how many others are linked to it. A read of its
+        // own beside the one above for the one above's reason — nothing about a
+        // device is configured either, and what it answers changes without
+        // anybody having been to this page.
+        //
+        // Named for devices rather than filed under `remote`, because a device
+        // is what it is about wherever it is drawn: the pane is where the list
+        // happens to live, and everything a cluster relays later stands under
+        // this same segment.
+        .route("/api/ui/devices", get(devices))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -5557,6 +5568,36 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
             unavailable("the banner could not be dismissed")
         }
     }
+}
+
+/// `GET /api/ui/devices` — this device, and how many others are linked to it,
+/// which is the **Devices** section of the Remote access pane (ADR-0020).
+///
+/// **The same answer a peer reads, told to the browser instead.** A stranger
+/// asks the identity endpoint on the peer listener; the browser cannot, that
+/// listener presenting a certificate nothing but another Verkstead has a reason
+/// to trust — so the reading is assembled again over here rather than the
+/// workbench dialling its own peer port to ask itself who it is. See
+/// [`crate::device::Devices`].
+///
+/// Read off the machine on every request rather than held, exactly as the
+/// Tailscale reading above it is and for the same reason: a laptop moves
+/// between the LAN and the tailnet, and an address remembered from a start
+/// weeks ago is one a peer would dial into nothing.
+///
+/// Refused on a router that was never given an identity, which is every router
+/// but the served one — a device is invented in a Data Directory, and one with
+/// nowhere to have invented it has nothing to answer for. The same judgement
+/// **Reset key** makes about a router standing behind no gate: an answer about
+/// a device that does not exist is the one answer this must not give.
+async fn devices(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    let view: DevicesView = devices.listing().await;
+
+    Json(view).into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

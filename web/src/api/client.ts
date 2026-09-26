@@ -35,6 +35,7 @@ import type {
   ConversationView,
   Created,
   Dependency,
+  DevicesView,
   DirectoryListing,
   FileDeleted,
   FileDeleting,
@@ -1341,6 +1342,22 @@ export function chooseReviewPairing(
 /// each of them is a different thing to say to the human.
 export function loadRemote(): Promise<RemoteView> {
   return get<RemoteView>("/api/ui/remote");
+}
+
+/// What this Verkstead is: the device this machine runs, and how many others
+/// are linked to it.
+///
+/// Read off the machine on every ask, the way the Tailscale reading above is
+/// and for the same reason — the name is the hostname, the OS is the platform's
+/// own word and the addresses are whatever interfaces this box has at the
+/// moment it answers, none of which anybody configured.
+///
+/// The same answer a peer reads off this device's identity endpoint, told to
+/// the browser instead: that listener is TLS on a port of its own, presenting a
+/// certificate nothing but another Verkstead has a reason to trust, so the
+/// workbench is where the pane reads it.
+export function loadDevices(): Promise<DevicesView> {
+  return get<DevicesView>("/api/ui/devices");
 }
 
 /// Put this machine's tailnet name in front of the workbench, or take it off

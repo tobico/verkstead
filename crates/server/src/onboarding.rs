@@ -106,7 +106,7 @@ use verkstead_render::{
 };
 
 use crate::github::Gh;
-use crate::platform::{Environment, Platform};
+use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
@@ -209,32 +209,11 @@ const NO_XCODE_SELECT: &str = "the git a session would run is the stub Apple shi
      xcode-select on this machine's PATH to ask whether the command line tools behind it are \
      installed";
 
-/// What a machine calls itself when it will not say, and what a stated one is
-/// called until a test says otherwise — see [`Machine::called`].
-///
-/// The sentence it goes in is *waiting for the password dialog on …*, so what
-/// stands in for a name is the thing that sentence is pointing at.
-const NAMELESS: &str = "this machine";
-
-/// And what a stated machine is called, which is a name nobody's box has: what
+/// What a stated machine is called, which is a name nobody's box has: what
 /// a test asserts about is what the server made of what it was told, and a
 /// hostname read off the box the suite is on would be a golden fixture nobody
 /// could commit.
 const STATED: &str = "a-machine";
-
-/// What this box calls itself, or [`NAMELESS`] where it will not say.
-///
-/// Read at the edge with everything else about the machine — see
-/// [`Machine::here`] — and never again: a hostname is a fact about the box
-/// rather than about a request, and the one sentence that needs it is written
-/// while somebody is waiting for a dialog.
-fn hostname() -> String {
-    hostname::get()
-        .ok()
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| NAMELESS.to_owned())
-}
 
 /// What this machine says about [`ARM64`], where it is a machine with an
 /// opinion — which is a Mac and nothing else.

@@ -1,9 +1,10 @@
 /* Remote access — see `Remote.tsx`.
 
    Two halves in two panes, like every other section of this page: the card says
-   whether this workbench can be reached from a phone, and the pane beside it is
-   the controls — the box, the code, the link and the key — with what the machine
-   said only where somebody has something to do about it.
+   whether this workbench can be reached from a phone and how many devices are
+   linked to it, and the pane beside it is the controls — the box, the code, the
+   link, the key and the devices — with what the machine said only where somebody
+   has something to do about it.
 
    What a card *is* is `CardButton.module.css`'s. What is here is only what
    stands on it. */
@@ -215,4 +216,68 @@
     color: var(--card);
     background: var(--stopped);
   }
+}
+
+/* And the devices this workbench is one of, which is the third section of the
+   pane — see `Remote.tsx`. A rule above it like the two before it, because that
+   is what says a new thing has started here now that the headings are gone. */
+.devices {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One device: the mark for its operating system, and what it is called with
+   its addresses under it. */
+.device {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+/* The mark, set to the line it stands beside rather than to a size of its own,
+   the way every other icon in the app is. */
+.os {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  color: var(--ink-soft);
+}
+
+.about {
+  min-width: 0;
+}
+
+.deviceName {
+  margin: 0;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+/* *this device*, which is what stands where another device's row will carry an
+   Unlink: quiet, because it is a fact about the row rather than something to
+   press. */
+.here {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* And every address a peer could reach it on, set the way the tailnet name
+   above is: exact strings, to be read character by character and typed into
+   another machine. */
+.addresses {
+  margin: 0.25rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }

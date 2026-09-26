@@ -187,9 +187,10 @@ _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 **Data Directory**:
 The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
-directories, the settings files it is told the human's credentials and identity
-in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the platform's own place for it when nothing says otherwise —
+directories, the **Device** this install is, the settings files it is told the
+human's credentials and identity in, and whatever later stages need to put
+somewhere. Said once, as `--data-dir`, and the platform's own place for it when
+nothing says otherwise —
 `~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
 on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
 that a Verkstead launched from an icon finds what one launched from a shell
@@ -475,13 +476,15 @@ _Avoid_: password, login, token, API key, session
 **Remote Access**:
 The settings section that puts this workbench in front of a phone: what this
 machine's Tailscale is doing, the checkbox that puts the tailnet name in front
-of the port Verkstead is listening on, and the **Workbench Key** handed over as
-something a camera can read. A card and a pane like every other section, and
+of the port Verkstead is listening on, the **Workbench Key** handed over as
+something a camera can read, and the **Devices** this workbench is one of. A
+card and a pane like every other section, and
 the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
 terminal. **The pane is the controls and nothing around them**: the box with the
-one line that is its own, the code, the link with its copy beside it, and
-**Reset key** with the one line that is its own. Which of the four states the
-machine is in is the card's line; the pane says what the machine said only where
+one line that is its own, the code, the link with its copy beside it,
+**Reset key** with the one line that is its own, and the Devices list. Which of
+the four states the machine is in is the card's line, with how many devices are
+linked after it; the pane says what the machine said only where
 somebody has something to do about it.
 **Everything on it is read off the machine rather than configured**: two
 commands at the moment the pane opens, so a tailnet joined in a terminal and a
@@ -528,6 +531,207 @@ desk and pointing at a phone would otherwise meet the human again on the very
 device it sent them to.
 _Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
 (it is served to a tailnet, never to the internet)
+
+**Device**:
+One Verkstead install, as another one sees it. What it *is* is a **Device Id**
+and a self-signed certificate, both invented at its first start and kept in the
+**Data Directory** beside `workbench.key` — `device.id` and `device.pem`, files
+of their own at mode `0600`, read back at every start after, and an empty one
+counting as one that is not there. **One that is there and cannot be read stops
+the start instead**, as one that will not parse does: writing a fresh identity
+over the one a cluster has pinned is the single act here that cannot be taken
+back, and a file left out of this account's reach by one start under `sudo` is
+not a file that is missing. Nothing is configured and nothing is typed.
+**The certificate is what a link is made of** rather than a detail of how a
+connection is encrypted: a link between two devices is the two fingerprints
+each side holds, with no bearer token and nothing stored beside the
+certificates. It is good for **ninety days**, said in Verkstead's own code
+rather than inherited from a crate's default, because an expired certificate is
+refused at the handshake and a validity nobody chose is the day every link goes
+down together.
+**And it is made again before it runs out**, at the first start with fewer than
+**thirty** of those days left — which is what a **Changeover** is the middle
+of. Nothing is on a timer: a start is when these files are read at all, which
+leaves two months of ordinary starts to make the certificate again in and a
+month of them after in which to notice that one did. A process left running
+past its own ninety days is the trade that buys, and a restart is its whole
+remedy.
+**Its fingerprint is spelled to be compared by eye**: the SHA-256 of the
+certificate's own bytes as upper-case hex in colon-separated pairs, which is
+what every other tool prints of the same certificate. That is what it is for —
+two people, one reading off a phone and one off a screen, checking that the
+device being linked is the device being offered.
+**What it is shown under is its hostname**, with an icon for its OS and the
+addresses it can be reached on beside it — the **Device Reading**, which is read
+off the machine as it is answered rather than kept anywhere.
+**The startup line names it**: `device=` and `fingerprint=` beside the listen
+address and the **Data Directory**, which is where an operator reads either of
+them off a machine.
+_Avoid_: node, host, machine (a device is an install, and two of them can be on
+one machine), peer (which is what a device is to another device)
+
+**Device Id**:
+What every record and URL names a **Device** by: sixteen random bytes as
+lower-case hex, invented at the first start and never changing. Short enough to
+sit in a URL segment, and spelled in an alphabet no URL and no host name has to
+escape — the certificate is made out to it, in the subject's common name and as
+its one subject alternative name.
+**The tailnet node name and the hostname were both rejected as ids.** The first
+is gone the moment the machine leaves the tailnet; the second collides, a
+Windows machine and its WSL answering to one. Which is why the id is invented
+rather than read off the machine: what a device is *called* can change and can
+be shared, and what a device is *named by* can do neither.
+_Avoid_: name (which is the hostname a device is shown under), uuid, serial
+
+**Device Reading**:
+What a **Device** says about the machine it is on, as against what it *is*:
+its **name**, its **OS** and its **addresses**. None of the three is
+configured, none is typed, and none is written down — they are read at the
+moment the identity endpoint answers, because a laptop moves between the LAN
+and the tailnet and DHCP moves everybody.
+**The name is the hostname**, the same reading the install run's status line
+names a machine by, and a machine that will not say what it is called reads
+*this machine*.
+**The OS is the platform's own word** — *Linux*, *macOS*, *Windows* — except
+under WSL, which reads ***Linux (WSL)*** and is detected from the kernel
+release. That case is the reason the reading exists at all: a Windows machine
+and the WSL on it share a hostname, so the OS is the only thing that tells the
+two rows apart.
+**The addresses are every one a peer could try, in the order to try them**: the
+tailnet name and its addresses first where Tailscale is up, then the LAN
+addresses, with the loopback and the link-local left out and the tailnet
+address not named twice for being on an interface as well. **The tailnet half
+stands for five seconds** — reading it is a command run on this machine and the
+endpoint that wants it is the one nobody has to be anybody to read, so without
+that a stranger's request is a process, as fast as they care to ask; the LAN
+half is read every time, being a syscall. A machine with no
+Tailscale, or one whose daemon is not up — or whose daemon does not answer
+within five seconds — answers with its LAN addresses rather
+than failing — and a device on neither a tailnet nor a network still answers,
+having an id and a fingerprint, which is what somebody typing an address by
+hand is looking at. The address typed at link time is only the first one ever
+known: this list is what keeps a device that moved reachable.
+_Avoid_: device info, device metadata, machine details, the device's profile
+
+**Devices**:
+The list of every **Device** this workbench is one of, and the third section of
+the **Remote Access** pane. One row each: the OS icon, the name, and the
+addresses under them — with *this device* on this machine's own row, where
+another's carries an Unlink.
+**A section of that pane rather than a settings section of its own**, because
+linking is how this machine is reached as much as the serve and the key are.
+There is no word of its own in the settings' openings, no card and no route: the
+pane grows a section and a reading. A section of its own was considered — the
+pane is long already and this list brings an Add, a Discovered list and a
+pending row with it — and was not taken.
+**It reads off the machine rather than out of the settings**, as the two
+sections beside it do and for their reason: nothing about a device is
+configured, so what it draws is the **Device Reading** answered fresh — the same
+answer a stranger reads off the **Peer Listener**, told to the browser instead,
+that listener presenting a certificate no browser has a reason to trust.
+**It is drawn whatever Tailscale is doing.** A machine that has never heard of
+a tailnet has an identity all the same, and a list that vanished on one would be
+a cluster feature that appeared to need Tailscale.
+**And the card above it says how many devices are linked** — *other* devices,
+this one being the row the list already holds — after whichever of its sentences
+the machine's Tailscale earned.
+_Avoid_: linked devices pane, cluster list, machines, the device list (it is
+**Devices**, as **Repos** is)
+
+**Changeover**:
+What a **Device** is in the middle of between making its certificate again and
+every member holding the new one. Two certificates side by side in the **Data
+Directory**: `device.pem`, which is what the **Peer Listener** presents, and
+`device.next.pem`, which is what is coming.
+**The outgoing one goes on being presented** until every member has
+acknowledged the new fingerprint, so a changeover never costs a call — what a
+member holds is what it is answered with. A member that was unreachable is
+announced to again when it next answers, and one that never answers is a member
+the human unlinks anyway.
+**Both fingerprints are printable while one is in flight**, on a startup line
+of its own, because that is the only way anybody tells which of the two a peer
+met.
+**With no member there is nobody to announce to**, and then it completes at the
+start that began it: the new certificate is written over the old, the file it
+was waiting in goes, and the line says it had nobody to tell. Which is every
+re-issue a Verkstead of this build can make — a member is made by a join, and
+the join is the linking stage's.
+**A device keeps its id through one.** It is the certificate that is renewed —
+the **Device Id** was invented once and lasts as long as the **Data Directory**
+does.
+_Avoid_: rotation, rollover, key rotation, cert refresh
+
+**Peer Listener**:
+The second listener, and the one another **Device** dials: TLS on every
+interface, port 8423 by default — `--peer-listen`, `VERKSTEAD_PEER_LISTEN` —
+presenting this device's own certificate and naming its address on the startup
+line beside the workbench's. What a device is reached *on*, where the **Device
+Id** and the certificate are what it is.
+**A listener of its own rather than a share of the workbench's.** The workbench
+stays as it was — loopback, `tailscale serve` in front of it, plain HTTP to the
+browser, the **Workbench Key** over it — and two things ruled out putting this
+on it: the served address carries Tailscale's certificate rather than this
+device's, so a link pinned on a fingerprint could never go through it, and the
+workbench port speaks plain HTTP to the browser and to the serve alike. A
+listener that sniffed the first byte of every connection for a TLS handshake was
+considered and rejected as a trick where a port would do. The
+Conversation-scoped session API is on neither: it answers the loopback and the
+named pipe, which is all a session ever dials.
+**A client certificate is asked for and not insisted on.** The request goes out
+once per connection, before any path is known, so the handshake cannot be what
+decides which endpoints a caller reaches: whatever arrives is taken — or
+nothing — and the routes are what act on it. A verifier that refused every
+non-member outright was the first shape of this and is the shape a join could
+never have got through, the device posting one being a stranger by definition.
+What the handshake does insist on is that the certificate is a certificate — the
+caller holds the key that signed it, and it is inside its own validity. That
+second check is what the renewal rests on: nothing in a cluster checks a chain
+and a membership is a set of fingerprints that would go on matching one for
+ever, so the handshake is the only place an expiry is a fact rather than a date
+in a file. What the certificate *means* is a per-route question.
+**The identity endpoint is the one route nobody has to be anybody to read**, at
+`/api/peer/v1/identity`: the **Device Id** and the fingerprint of the
+certificate the handshake just presented, so that a caller can check the device
+naming itself is the device that presented and a human can compare the
+fingerprint by eye — and the **Device Reading** beside them, which is what says
+which machine that is and where else it could have been dialled. It asks for no certificate at all, which is what makes
+linking possible — the human types an address, and what comes back is the device
+they are about to link to, before anything has been agreed between the two
+machines.
+**Two Verksteads on one machine want a port each**, as they want a `--listen`
+each: an address somebody else is already on refuses the start rather than
+letting a server come up answering half of what it promised.
+**On NixOS it is an option and a firewall rule**: `peerListen` beside `listen`
+in the module, and `openFirewall` on by default, which opens the port that
+option named and nothing else. A NixOS host firewalls by default, so a module
+that left it shut would ship a listener nothing could reach — which is a linking
+that cannot happen, with nothing on either machine saying why. A host that says
+its open ports somewhere of its own turns the option off.
+_Avoid_: peer port (which is only the number), mutual TLS listener, cluster
+port, the second socket
+
+**Member Gate**:
+What stands over every route on the **Peer Listener** but the un-gated three:
+the certificate the handshake took is matched against this device's members by
+fingerprint, and a caller that is not one of them is refused. The handshake
+asks for a certificate and does not insist on one, so this is the first place a
+path and a caller are known together and the only place either is judged.
+**The un-gated surface is a list of three and nothing grows it.** The identity
+endpoint, which asks for no certificate at all; the join post, which comes from
+a non-member by definition and whose certificate is pinned into the pending
+request it creates; and the dial-back answering a join, matched against the
+certificate that pending request is holding rather than against the member
+list. Everything else on that listener is a member's or is refused — including
+a path no route answers, which is refused rather than missed, a stranger having
+no business being told which of this device's endpoints exist.
+**The refusal says it is a membership rather than a missing path.** A device
+posting a join has two ways of not getting through — a Verkstead that will not
+have it, and a Verkstead too old to have the route at all — and those want
+different things of it: a human to press Allow, or an upgrade on the other
+machine. So the refusal is `Forbidden` and names what it is, and it carries no
+challenge, the credential being a certificate already asked for and already
+given or withheld.
+_Avoid_: peer auth, mutual TLS gate, the cluster gate, peer middleware
 
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the

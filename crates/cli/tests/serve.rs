@@ -86,6 +86,17 @@ impl Serve {
             // database somewhere nobody looks.
             .env_remove("VERKSTEAD_WATCHED_PATHS")
             .env_remove("VERKSTEAD_DATA_DIR")
+            // And a peer listener on a port the machine picks, for the reason
+            // the workbench port is a free one: the default is `0.0.0.0:8423`,
+            // and every server started here would otherwise be fighting the
+            // last one for it — and whatever real Verkstead this machine is
+            // running. `:0` rather than a port found and released here, because
+            // a port found and released is a port something else can take in
+            // between. In the environment rather than on the command line so
+            // that it is out of the way of the tests which read the flags back,
+            // and before the caller's own so that a test about the variable
+            // still wins.
+            .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -630,6 +641,104 @@ fn the_directories_default_to_the_platform_directories() {
     );
 }
 
+/// The peer listener, from outside the process: a caller dials the port over
+/// TLS and reads back what this Verkstead says it is (ADR-0020).
+///
+/// The whole of the stage's demonstration in one test. The certificate is
+/// self-signed and made out to the device id rather than to an address, so
+/// verification is off here exactly as it is off for the first call a device
+/// linking to another one makes: what proves the far end in a cluster is the
+/// fingerprint compared afterwards, and there is no certificate authority
+/// anywhere in it to check a chain against.
+#[test]
+fn the_peer_listener_answers_the_identity_over_tls() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("peered");
+    let port = free_port();
+    let peer_port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--peer-listen",
+            &format!("127.0.0.1:{peer_port}"),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[],
+    );
+
+    let caller = ureq::Agent::config_builder()
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .disable_verification(true)
+                .build(),
+        )
+        .build()
+        .new_agent();
+
+    let answered = caller
+        .get(&format!(
+            "https://127.0.0.1:{peer_port}/api/peer/v1/identity"
+        ))
+        .call()
+        .expect("the peer listener should complete a handshake and answer")
+        .body_mut()
+        .read_to_string()
+        .unwrap();
+
+    let identity: serde_json::Value =
+        serde_json::from_str(&answered).expect("the identity is JSON");
+
+    let logged = uncoloured(&serving.stop());
+
+    let device = identity["device"].as_str().expect("an id is a string");
+
+    assert!(
+        logged.contains(device),
+        "the id read over the wire should be the one the startup line printed, \
+         got {device} and:\n{logged}"
+    );
+    assert!(
+        logged.contains(identity["fingerprint"].as_str().unwrap()),
+        "and so should the fingerprint, which is what an operator compares two \
+         machines by, got:\n{logged}"
+    );
+    assert!(
+        logged.contains(&format!("peer_listen=127.0.0.1:{peer_port}")),
+        "and the line says where the peer listener is, which is the other half of \
+         what somebody linking to this machine has to type, got:\n{logged}"
+    );
+}
+
+/// And the environment says the same thing the flag does, as it does for the
+/// workbench's own address.
+#[test]
+fn the_peer_address_comes_from_the_environment_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("peer-env");
+    let port = free_port();
+    let peer_port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &["--data-dir", data_dir.to_str().unwrap()],
+        &[
+            ("VERKSTEAD_LISTEN", &format!("127.0.0.1:{port}")),
+            ("VERKSTEAD_PEER_LISTEN", &format!("127.0.0.1:{peer_port}")),
+        ],
+    );
+
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains(&format!("peer_listen=127.0.0.1:{peer_port}")),
+        "the variable is how a unit file says it, got:\n{logged}"
+    );
+}
+
 #[test]
 fn the_help_describes_the_flags_and_their_defaults() {
     let help = stdout(&run(&["serve", "--help"]));
@@ -640,6 +749,9 @@ fn the_help_describes_the_flags_and_their_defaults() {
         "VERKSTEAD_LISTEN",
         "VERKSTEAD_DATA_DIR",
         "127.0.0.1:8422",
+        "--peer-listen",
+        "VERKSTEAD_PEER_LISTEN",
+        "0.0.0.0:8423",
         "verkstead.db",
     ] {
         assert!(

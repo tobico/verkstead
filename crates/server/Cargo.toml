@@ -24,13 +24,26 @@ base64.workspace = true
 clap.workspace = true
 # The random half of a Conversation's prefilled branch name.
 getrandom.workspace = true
-# What this machine calls itself, for the one sentence that has to name it: the
-# install run's status line, which says whose screen the password dialog is on.
-# The reader may be on a phone on the tailnet, so *this machine* would name
-# nothing. A crate rather than a syscall because the call is a different one on
-# each platform and the answer is one string — `set` is off, nothing here
-# renames anything.
+# What this machine calls itself, which two things name it out of: the install
+# run's status line, which says whose screen the password dialog is on — the
+# reader may be on a phone on the tailnet, so *this machine* would name nothing
+# — and what a device is shown under in a cluster (ADR 0020). One reading for
+# both, in `src/platform.rs`. A crate rather than a syscall because the call is
+# a different one on each platform and the answer is one string — `set` is off,
+# nothing here renames anything.
 hostname = { version = "0.4", default-features = false }
+# This machine's own interfaces, which is the LAN half of the addresses a device
+# advertises (ADR 0020) — see `src/device/reading.rs`. A crate for the reason
+# `hostname` above is one: enumerating them is `getifaddrs` on a Unix and
+# `GetAdaptersAddresses` on Windows, and this is those two behind one call. No
+# socket is opened and nothing is probed — what it reads is what the kernel
+# already knows. It brings nothing new into the build: `libc` and `windows-sys`
+# are the two crates under it and the tree already carries both.
+#
+# Default features, which is that set: `link-local` is off, and what it would
+# add is exactly what this must not advertise — an address no peer off this
+# machine's own link could ever reach.
+if-addrs = "0.15"
 # The watcher behind the `files` Nudge: the Worktrees a Code pane is drawn over,
 # followed while it is attached (ADR 0019) — see `src/watchers.rs`. Each
 # platform's own mechanism rather than a poll, which is the whole reason for a
@@ -66,6 +79,23 @@ rust-embed = { version = "8", features = [
     "interpolate-folder-path",
     "mime-guess",
 ] }
+# The device's own self-signed certificate, made at the first start beside the
+# Workbench Key and read back at every one after it (ADR 0020) — see
+# `src/device.rs`. Making one is new to this tree: `rustls` was here only as
+# reqwest's way of reaching an https endpoint, and nothing generated a
+# certificate at all.
+#
+# Default features off and each named back, so that the signing behind it is
+# `ring` — already in the tree under reqwest's rustls — rather than the
+# `aws_lc_rs` the defaults would also enable, which brings a C toolchain into
+# the build for what ring is doing already. `crypto` is the key pair being
+# generated here rather than handed in, and `pem` is the spelling the file on
+# disk is kept in.
+rcgen = { version = "0.14", default-features = false, features = [
+    "crypto",
+    "pem",
+    "ring",
+] }
 # The engine behind the ignore rules in `settings`: a human's pattern for the
 # comments Wrapping is never to address, compiled against whatever a bot writes
 # on a pull request. This one rather than the `fancy-regex` syntect already
@@ -74,6 +104,31 @@ rust-embed = { version = "8", features = [
 # the text is a stranger's comment, so a backtracking engine would be a way to
 # hang the poll from either end.
 regex = "1"
+# The TLS the peer listener speaks (ADR 0020) — see `src/peer.rs`. A
+# server-side stack is new to this tree: rustls was here only as reqwest's way
+# of *reaching* an https endpoint, and nothing in the workspace ever presented
+# a certificate or asked a caller for one.
+#
+# Default features off and each named back, because the defaults would bring
+# `aws-lc-rs` and its C toolchain into the build for what `ring` — already here
+# under reqwest — is doing already. `std` and `logging` are what the rest of
+# the tree has; `tls12` is the one version below the one every device in a
+# cluster of this build negotiates, kept so that this port is not the reason
+# something older cannot reach it.
+rustls = { version = "0.23", default-features = false, features = [
+    "logging",
+    "ring",
+    "std",
+    "tls12",
+] }
+# Reading the device's certificate back off the disk: the PEM its file holds,
+# parsed into the DER the fingerprint is a hash of — and the private key beside
+# it, parsed for no other reason than that half a pair is not an identity and a
+# start is the moment to find that out. Already in the tree under reqwest's
+# rustls, so it adds nothing to a build, and the types are the ones a TLS
+# configuration takes: the identity is read into what will present it rather
+# than into something that has to be converted first.
+rustls-pki-types = "1"
 # Comparing the latest release's tag against the version this was built as.
 semver.workspace = true
 serde.workspace = true
@@ -109,6 +164,15 @@ tokio = { workspace = true, features = [
     "sync",
     "time",
 ] }
+# And the handshake itself, run over a tokio socket: what turns an accepted
+# connection into one this server can read and write — see `src/peer.rs`. The
+# same feature set as `rustls` above and for the same reason, so that one
+# cryptographic library is in the build rather than two.
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "logging",
+    "ring",
+    "tls12",
+] }
 # The Nudge stream is a broadcast channel turned into a `Stream` for axum's SSE
 # response, which is the `sync` feature and nothing else here uses.
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -122,6 +186,17 @@ tracing = "0.1"
 # than 0.5 for the same reason: 0.5's hashing is a generation ahead of the one
 # p256 uses, and would put two of every crypto crate in the tree.
 web-push-native = { version = "0.4", default-features = false }
+# Reading the expiry back out of the certificate this device presents, which is
+# what says whether a re-issue is due (ADR 0020) — see `src/device.rs`. rcgen
+# wrote that date and cannot be asked for it afterwards: what a later start
+# finds on disk is a PEM file rather than the parameters it was made from, so
+# the renewal reads the certificate the way any other tool would.
+#
+# The device suite reads it the same way and for a reason of its own — a test
+# that took the validity back out of rcgen's own parameters would be a test of
+# nothing — which is what this was here for before the server itself had to
+# ask.
+x509-parser = "0.18"
 
 # The Unix half of the server: everything the session machinery does that is a
 # syscall rather than a record.

@@ -1860,6 +1860,108 @@ export type DependencyView = { dependency: Dependency, state: DependencyState,
 install: InstallState, };
 
 /**
+ * One device, as it answers for itself.
+ */
+export type DeviceIdentity = { 
+/**
+ * The Device Id: sixteen random bytes as lower-case hex, invented at this
+ * device's first start and never changing.
+ *
+ * Spelled `device` rather than `id` because that is what the startup line
+ * calls it and what a URL segment will be — an `id` on a payload that is
+ * about a device could be a Conversation's or a Repo's.
+ */
+device: string, 
+/**
+ * And the fingerprint of the certificate the handshake that carried this
+ * answer presented: the SHA-256 of its own bytes, upper-case hex in
+ * colon-separated pairs.
+ *
+ * Answered rather than left to be worked out from the connection, because
+ * the two are checked against each other: a caller compares what it read
+ * here with what the handshake handed it, and a device that named a
+ * certificate other than the one it presented is not the device it says it
+ * is. And it is what the human compares by eye — one person reading off a
+ * phone while another reads off a screen — which is why it is spelled the
+ * way every other tool spells one.
+ */
+fingerprint: string, 
+/**
+ * What this device is *shown* under: the hostname of the machine it is on,
+ * read at the moment this is answered.
+ *
+ * Nothing is configured and nothing is typed. A name somebody could set
+ * would be a name two devices could be given, and what a device is *named
+ * by* is the id above — which was invented precisely because neither the
+ * hostname nor the tailnet node name can be relied on to be anybody's
+ * alone.
+ *
+ * A machine that will not say what it is called reads *this machine*,
+ * which is what the one other sentence naming this box already falls back
+ * to.
+ */
+name: string, 
+/**
+ * And the word for the operating system it is running, which is what
+ * draws the icon beside the name.
+ *
+ * **A WSL reads *Linux (WSL)*, and that is the whole reason this is
+ * here.** A Windows machine and the WSL on it share a hostname, so the
+ * name cannot tell the two apart and this is the only thing that can —
+ * which is the setup cluster mode was written for. Everywhere else it is
+ * the platform's own spelling of itself: *Linux*, *macOS*, *Windows*.
+ */
+os: string, 
+/**
+ * And every address a peer could reach this device on, in the order one
+ * should try them: the tailnet name and its addresses first where
+ * Tailscale is up, then the LAN addresses.
+ *
+ * **All of them, read at each answer rather than configured.** A laptop
+ * moves between the LAN and the tailnet and DHCP moves everybody, so the
+ * address somebody typed to link two devices is only the first one ever
+ * known — this list is what keeps a device that moved reachable.
+ *
+ * Empty is a device on neither a tailnet nor a network, which is an answer
+ * rather than a failure: it still has an id and a fingerprint, and those
+ * are what somebody looking at this is comparing.
+ */
+addresses: Array<string>, };
+
+/**
+ * The **Devices** list, as the Remote access pane reads it off this machine.
+ *
+ * The other side of [`DeviceIdentity`]: that one is what this device tells a
+ * *peer* over the peer listener, and this is what it tells the browser over
+ * the workbench. The same device described twice rather than two descriptions
+ * of it — the identity is carried whole inside this, so the row the pane draws
+ * and the answer a stranger reads cannot come to disagree about a name, an OS
+ * or an address.
+ *
+ * **Read off the machine rather than out of the settings.** Nothing here is
+ * configured, which is why the pane's Devices section reads this rather than
+ * the settings query the rest of the page shares — the two sections beside it
+ * are read the same way and for the same reason.
+ */
+export type DevicesView = { 
+/**
+ * This device, which is the whole of the list until something is linked to
+ * it: the one row, marked *this device* and offering no Unlink.
+ */
+this: DeviceIdentity, 
+/**
+ * And how many other devices are linked to it, which is the clause the
+ * Remote access card's line carries beside what Tailscale is doing.
+ *
+ * A count rather than the devices themselves, because a count is the whole
+ * of what anything in this build can draw: a member is made by a join, and
+ * the join is the next stage's — so this is nought on every Verkstead that
+ * can be built from here, and it is nought because there is nothing to
+ * count rather than because nobody looked.
+ */
+linked: number, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *

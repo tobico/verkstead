@@ -27,7 +27,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 peer_listen=0.0.0.0:8423 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
 **`workbench=` is how you get in.** Every page of the workbench and the viewer's
@@ -35,6 +35,57 @@ own `/api/ui/` namespace answer 401 without the **Workbench Key**, and that link
 is the address with the key on it: paste it once and the browser holds the
 cookie from then on. The key is `workbench.key` in the Data Directory, made at
 the first start and read back at every one after it.
+
+**`device=` and `fingerprint=` are what this install *is*.** The id is invented
+at the first start and read back at every one after it, and it is what every
+record and URL naming a device will name this one by; the fingerprint is its
+self-signed certificate's, in the spelling two people compare one in. Both are
+in the Data Directory beside the key, as `device.id` and `device.pem`. The
+certificate is good for ninety days and the first start with fewer than thirty
+of them left makes another ([ADR 0020](adr/0020-cluster-mode.md)) — an expired
+one is refused at the handshake, so a certificate issued once and read back for
+ever would be the day every link in a cluster went down together. The id is
+untouched by that: it is the certificate that is renewed.
+
+While the new certificate is waiting on members to acknowledge it, a line of
+its own says so and names both fingerprints — the one still going out and the
+one coming in. Nothing is linked yet, so what that line says here is that there
+was nobody to announce to and the changeover is already over:
+
+```console
+  INFO verkstead_server: this device's certificate was near its expiry and has been made again, and there was no member to announce the new fingerprint to fingerprint=9C:4B:…
+```
+
+**`peer_listen=` is where another Verkstead reaches this one.** A second
+listener, TLS on every interface at port 8423, presenting the certificate
+above and asking a caller for one without insisting on it — `--peer-listen` or
+`VERKSTEAD_PEER_LISTEN` moves it, and a second Verkstead on this machine needs
+its own the way it needs its own `--listen`. Nothing links anything yet: the one
+route on it is the identity endpoint, which anybody may read —
+
+```console
+$ curl -k https://127.0.0.1:8423/api/peer/v1/identity
+{"device":"86f1933fecb070cbee865fbb84819d14","fingerprint":"3F:0A:…","name":"workbench",
+ "os":"Linux","addresses":["workbench.tailnet-name.ts.net","100.64.0.1","192.168.1.24"]}
+```
+
+`-k` because the certificate is self-signed and made out to the device id
+rather than to an address: in a cluster what proves the far end is that
+fingerprint compared against the one the other machine printed, and there is no
+certificate authority anywhere in it to check a chain against.
+
+The three after the fingerprint are read off the machine as that request is
+answered rather than configured anywhere: `name` is the hostname, `os` is the
+platform's own word — a WSL reads `Linux (WSL)`, a Windows machine and the WSL
+on it sharing a hostname — and `addresses` is everywhere a peer could reach this
+device, the tailnet name and address first where Tailscale is up and the LAN
+behind them. Ask it again from another machine on the same tailnet and it says
+the same thing; ask it off a laptop that has moved and the addresses have
+moved with it.
+
+Every other path on that port answers `403` and says so, whatever you present
+and whether or not a route answers it: everything but the identity endpoint is
+behind the member gate, and nothing has made a member yet.
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
@@ -54,13 +105,13 @@ rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
-directories and the settings files. `--data-dir` says where, or
-`VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own place for it —
-`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
-on macOS — which is what an installed Verkstead wants and not what a dev run
-out of a checkout does: `--data-dir .` is why every command here says it, and
-it keeps the database, the worktrees and the settings beside the checkout where
-they can be deleted with it.
+directories, the files this device is, and the settings files. `--data-dir`
+says where, or `VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own
+place for it — `~/.local/share/verkstead` on Linux, `~/Library/Application
+Support/Verkstead` on macOS — which is what an installed Verkstead wants and
+not what a dev run out of a checkout does: `--data-dir .` is why every command
+here says it, and it keeps the database, the worktrees and the settings beside
+the checkout where they can be deleted with it.
 
 The desktop app is a verb of that same binary, and the same server: `cargo run
 -p verkstead-cli -- desktop --data-dir .` serves what the command above serves
