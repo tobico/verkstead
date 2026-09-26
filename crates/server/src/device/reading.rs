@@ -218,10 +218,28 @@ impl Reading {
         DeviceIdentity {
             device: device.id().to_owned(),
             fingerprint: device.fingerprint().to_owned(),
-            name: platform::hostname(),
-            os: platform::os_word(self.platform, self.kernel.as_deref()),
+            name: self.name(),
+            os: self.os(),
             addresses: self.addresses().await,
         }
+    }
+
+    /// What this machine is called, which is its hostname.
+    ///
+    /// Named beside the identity above because the advertisement is the other
+    /// thing that says it — see [`crate::discovery`], which puts this and the
+    /// OS below in a TXT record on the LAN. One reading for both, so that the
+    /// machine a discovered row draws and the machine an identity answers for
+    /// cannot disagree, and so that a suite stating a WSL has stated it for
+    /// both at once.
+    pub(crate) fn name(&self) -> String {
+        platform::hostname()
+    }
+
+    /// And the word for the operating system it is running: the platform's own
+    /// everywhere but under WSL.
+    pub(crate) fn os(&self) -> String {
+        platform::os_word(self.platform, self.kernel.as_deref())
     }
 
     /// Every address this device can be reached on, in the order a peer should

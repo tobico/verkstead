@@ -97,6 +97,14 @@ impl Serve {
             // and before the caller's own so that a test about the variable
             // still wins.
             .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0")
+            // And nothing advertised on the LAN, which is on by default and is
+            // one thing a test has no business doing: what a real Verkstead
+            // three desks away would hear is a device with a fresh id and a
+            // hostname, gone again when the test ends. The switch rather than a
+            // port of its own, because mDNS is spoken on 5353 wherever it is
+            // spoken at all — see `crates/server/tests/advertising.rs`, which is
+            // where the advertisement is read back off a port nobody else is on.
+            .env("VERKSTEAD_NO_ADVERTISING", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -260,6 +268,40 @@ impl Serve {
             );
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// Ask it to stop the way a service manager does, and hand back how it went
+    /// and what it said.
+    ///
+    /// A signal rather than [`Serve::stop`]'s kill, which is the difference this
+    /// is here for: a server asked to stop ends of its own accord — the one
+    /// ordered stop it has — where a killed one dies where it stands and leaves
+    /// its advertisement to run out on its own TTL (ADR-0020).
+    ///
+    /// `kill` rather than a crate: sending a signal is two lines of libc and a
+    /// dependency to carry on three platforms for the one test on this one that
+    /// wants it.
+    #[cfg(unix)]
+    fn asked_to_stop(&mut self) -> (std::process::ExitStatus, String) {
+        let child = self.child.take().expect("stopped once");
+
+        let signalled = Command::new("kill")
+            .arg("-TERM")
+            .arg(child.id().to_string())
+            .status()
+            .expect("a `kill` to send the signal with");
+
+        assert!(
+            signalled.success(),
+            "the test could not send `verkstead serve` a SIGTERM"
+        );
+
+        let output = child.wait_with_output().unwrap();
+
+        (
+            output.status,
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+        )
     }
 
     /// Stop serving and hand back what the server said on its way up.
@@ -739,6 +781,49 @@ fn the_peer_address_comes_from_the_environment_too() {
     );
 }
 
+/// A signal is an ordered stop: the server ends of its own accord, saying so,
+/// rather than dying where it stands (ADR-0020, *Discovery*).
+///
+/// **The one ordered stop this server has, and what it is for is the goodbye.**
+/// A signal is where the advertisement is withdrawn — the packet that takes this
+/// device's row off every other machine's list at once instead of leaving it to
+/// run out on its TTL. What that packet *is* is read back off the wire by
+/// `crates/server/tests/withdrawing.rs`, which can raise a signal at itself and
+/// browse for the result; what this asks is the half that suite cannot, which is
+/// that a real `verkstead serve` hears one at all and comes back rather than
+/// being killed by it.
+///
+/// Nothing is advertised here — the harness turns that off, a test having no
+/// business announcing devices to whatever LAN the runner is on — so what is
+/// being watched is the stop itself.
+#[cfg(unix)]
+#[test]
+fn a_signal_is_an_ordered_stop() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("stopped");
+    let port = free_port();
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
+
+    let (status, logged) = serving.asked_to_stop();
+    let logged = uncoloured(&logged);
+
+    assert!(
+        status.success(),
+        "a server that heard the signal returns rather than being killed by it, got \
+         {status} and:\n{logged}"
+    );
+    assert!(
+        logged.contains("verkstead has been asked to stop"),
+        "and it says so on its way out, which is what says the signal was heard rather \
+         than that the process happened to end, got:\n{logged}"
+    );
+    assert!(
+        logged.contains("SIGTERM"),
+        "naming the signal, because SIGINT from a terminal and SIGTERM from a service \
+         manager are the same stop arriving two ways, got:\n{logged}"
+    );
+}
+
 #[test]
 fn the_help_describes_the_flags_and_their_defaults() {
     let help = stdout(&run(&["serve", "--help"]));
@@ -752,6 +837,8 @@ fn the_help_describes_the_flags_and_their_defaults() {
         "--peer-listen",
         "VERKSTEAD_PEER_LISTEN",
         "0.0.0.0:8423",
+        "--no-advertising",
+        "VERKSTEAD_NO_ADVERTISING",
         "verkstead.db",
     ] {
         assert!(

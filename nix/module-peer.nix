@@ -1,5 +1,5 @@
-# The module's `peerListen` and `openFirewall` options, evaluated rather than
-# booted.
+# The module's `peerListen`, `advertising` and `openFirewall` options, evaluated
+# rather than booted.
 #
 # The VM test next door brings a Verkstead up on the port these name and reads
 # its identity endpoint back over TLS, which is what proves the option reaches
@@ -53,6 +53,11 @@ let
   # And the ports this host would answer on.
   ports = chosen: (evaluated chosen).networking.firewall.allowedTCPPorts;
 
+  # And the ones on the other protocol, which is the multicast two Verksteads
+  # find each other over: mDNS is UDP 5353, and a host that opened the peer port
+  # and not this one would be advertising into its own firewall.
+  udpPorts = chosen: (evaluated chosen).networking.firewall.allowedUDPPorts;
+
   # One complaint per flag that did not come out on the command line, spelled
   # with the same escaping the module built it with — so that the day the
   # quoting changes, what is looked for changes with it rather than quietly
@@ -70,6 +75,17 @@ let
     else
       [ "${what}: no ${wanted} in ${command chosen}" ];
 
+  # And one apiece for a bare flag — one that is a switch rather than a name and
+  # a value — in either direction: the switches here are all off by default, so
+  # what is asked of them is as often that nothing was passed at all.
+  carries =
+    what: chosen: flag:
+    if lib.hasInfix flag (command chosen) then [ ] else [ "${what}: no ${flag} in ${command chosen}" ];
+
+  omits =
+    what: chosen: flag:
+    if lib.hasInfix flag (command chosen) then [ "${what}: ${flag} in ${command chosen}" ] else [ ];
+
   # And one per set of ports other than the set said.
   opens =
     what: chosen: want:
@@ -77,6 +93,16 @@ let
       got = ports chosen;
     in
     if got == want then [ ] else [ "${what}: opens [${toString got}], expected [${toString want}]" ];
+
+  opensUdp =
+    what: chosen: want:
+    let
+      got = udpPorts chosen;
+    in
+    if got == want then
+      [ ]
+    else
+      [ "${what}: opens UDP [${toString got}], expected [${toString want}]" ];
 
   complaints =
     # The peer listener's address, defaulted and chosen. Every interface by
@@ -100,7 +126,23 @@ let
     ++ (opens "by default" { } [ 8423 ])
     ++ (opens "for a listener somebody moved" { peerListen = "0.0.0.0:9423"; } [ 9423 ])
     ++ (opens "for one written as IPv6" { peerListen = "[::]:9423"; } [ 9423 ])
-    ++ (opens "on a host that turned it off" { openFirewall = false; } [ ]);
+    ++ (opens "on a host that turned it off" { openFirewall = false; } [ ])
+
+    # And the multicast the discovery is spoken over, opened with it: mDNS is
+    # UDP 5353, which is nobody's port to choose.
+    ++ (opensUdp "by default" { } [ 5353 ])
+    ++ (opensUdp "on a host that turned the firewall off" { openFirewall = false; } [ ])
+    # Including on a host that says nothing about itself, because what arrives
+    # there is an answer to this host's own browsing as much as a query about
+    # its advertisement.
+    ++ (opensUdp "on a host that turned advertising off" { advertising = false; } [ 5353 ])
+
+    # Advertising, which is on unless somebody turns it off — for the reason the
+    # firewall rule is on: a discovery nothing can hear is a feature that
+    # silently does not work, with nothing on either machine saying why. On, the
+    # unit passes nothing at all; off, it passes the switch.
+    ++ (omits "advertising by default" { } "--no-advertising")
+    ++ (carries "a host that turned advertising off" { advertising = false; } "--no-advertising");
 in
 
 runCommand "verkstead-module-peer" { } (

@@ -741,6 +741,44 @@ its open ports somewhere of its own turns the option off.
 _Avoid_: peer port (which is only the number), mutual TLS listener, cluster
 port, the second socket
 
+**Advertising**:
+What a **Device** says about itself on the LAN, so that a Verkstead on the next
+desk finds it without anybody typing an address: the service
+`_verkstead._tcp.local`, with a TXT record of the **Device Id**, the name and
+the OS word out of the **Device Reading**, and the port the **Peer Listener**
+answers on.
+**In the server's own process**, advertised and browsed with `mdns-sd`: there is
+no avahi to install on Linux and no Bonjour to find on Windows, which is one
+behaviour on three platforms rather than three ways of shelling out to somebody
+else's daemon.
+**The instance is named by the Device Id** rather than by the hostname, because
+two Verksteads on one machine are two devices and a hostname cannot tell them
+apart — which is the same reason the id was invented rather than read off the
+machine. It is what the address records are hung off as well, that being the one
+string on a machine that is certainly a legal label and certainly not somebody
+else's.
+**Against the port the listener landed on** rather than the one the
+configuration asked for: a `:0` is a port the operating system chose, and an
+advertisement naming any other number is one nothing can be dialled at.
+**And it can be turned off** — `--no-advertising`, `VERKSTEAD_NO_ADVERTISING`,
+and `advertising` beside `peerListen` in the NixOS module. What goes out is a
+hostname, an operating system and a **Device Id**, on a LAN that may not be the
+human's alone, and anything saying that much about a machine to whoever is on
+the wire has to be able to be told not to. On by default for the reason
+`openFirewall` is: a discovery nothing can hear is a feature that silently does
+not work, with nothing on either machine saying why — and the rule that opens
+the peer port opens UDP 5353 beside it, whether or not this host advertises,
+because the answers to its own browsing arrive there too.
+**And it is withdrawn on the way out**, which is the one ordered stop this
+server has: a signal it is asked to stop on sends the goodbye that takes the row
+off every other machine's list at once, and then the process ends as it always
+did — nothing else is drained and nothing else waits. A *killed* server
+withdraws nothing and its row runs out on its own TTL instead, the same thing
+that covers a machine whose lid shut, so the withdrawal is what makes a restart
+tidy rather than what makes a stale row impossible.
+_Avoid_: broadcasting, publishing, mDNS registration (it is **Advertising**),
+Bonjour, zeroconf
+
 **Join**:
 One **Device** asking another to let it into its cluster, and the whole of what
 follows the press on **Add**. The asking device dials the address somebody

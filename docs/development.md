@@ -90,6 +90,31 @@ behind them. Ask it again from another machine on the same tailnet and it says
 the same thing; ask it off a laptop that has moved and the addresses have
 moved with it.
 
+**And the same device says so on the LAN, so that nobody has to type any of
+that.** A start advertises `_verkstead._tcp.local` over mDNS — in this process,
+with no avahi or Bonjour to install — carrying the device id, the hostname, the
+OS word and the port the peer listener really landed on. Anything that browses
+mDNS reads it back:
+
+```console
+$ avahi-browse -rt _verkstead._tcp
+= enp10s0 IPv4 86f1933fecb070cbee865fbb84819d14  _verkstead._tcp  local
+  hostname = [86f1933fecb070cbee865fbb84819d14.local]
+  address = [192.168.1.24]
+  port = [8423]
+  txt = ["port=8423" "os=Linux" "name=workbench" "id=86f1933fecb070cbee865fbb84819d14"]
+```
+
+The instance is named by the device id rather than by the hostname, because two
+Verksteads on one machine are two devices and a hostname cannot tell them apart —
+start the second one below and this lists two, each naming its own peer port.
+`--no-advertising` or `VERKSTEAD_NO_ADVERTISING=1` turns it off, and on NixOS
+`services.verkstead.advertising = false;` does: what goes out is a hostname, an
+operating system and a device id, on a LAN that may not be yours. A server
+*asked* to stop — a `SIGTERM`, or a `^C` — withdraws the advertisement on its way
+out, which is the one ordered stop this server has; a killed one leaves the row
+on the other machine to run out on its own TTL, the way a shut lid does.
+
 **Three routes stand outside the member gate and they are the whole of the
 un-gated surface**: that identity endpoint, the join post, and the cancel and
 the dial-back a join is settled through. Every other path on that port answers

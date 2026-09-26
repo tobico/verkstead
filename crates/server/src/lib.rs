@@ -64,6 +64,13 @@ mod deferrals;
 pub mod device;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+/// How a device is found by one nobody has typed an address into: what this one
+/// says about itself on the LAN, over mDNS (ADR-0020, *Discovery*).
+///
+/// Public for the reason [`device`] above is: what a machine says about itself
+/// to whoever is on the wire is the product's own boundary, and a suite that
+/// browses for it is standing where another Verkstead stands.
+pub mod discovery;
 mod done;
 mod drivers;
 mod exchanges;
@@ -593,6 +600,31 @@ pub struct Config {
         value_parser = clap::builder::FalseyValueParser::new(),
     )]
     pub no_update_check: bool,
+
+    /// Don't say what this device is on the LAN, and so be found only by a
+    /// machine somebody has typed this one's address into (ADR-0020).
+    ///
+    /// What advertising puts on the wire is this machine's hostname, the word
+    /// for its operating system and its device id, and the LAN it goes out on
+    /// may not be the human's alone — so it is a switch for the reason the
+    /// update check above is one. On by default all the same, for the reason
+    /// `openFirewall` is on by default in the NixOS module: a discovery nothing
+    /// can hear is a feature that silently does not work, with nothing on
+    /// either machine saying why.
+    ///
+    /// It is the advertising half: what this turns off is what other devices
+    /// hear of this one.
+    #[arg(
+        long,
+        env = "VERKSTEAD_NO_ADVERTISING",
+        action = clap::ArgAction::SetTrue,
+        // Anything that is not a falsey word counts as set, for the reason the
+        // update check's own parser is this one: `=1` is how a switch is thrown
+        // in a service unit, and clap's own parser for a flag would refuse it
+        // for not being the word `true`.
+        value_parser = clap::builder::FalseyValueParser::new(),
+    )]
+    pub no_advertising: bool,
 }
 
 impl Config {
@@ -601,6 +633,14 @@ impl Config {
     /// that what it decided can be asked about rather than inferred.
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
+    }
+
+    /// Whether this device says what it is on the LAN — the one thing
+    /// [`Config::no_advertising`] decides, named so that what it decided can be
+    /// asked about rather than inferred, which is what [`Config::releases`]
+    /// above is for.
+    pub fn advertises(&self) -> bool {
+        !self.no_advertising
     }
 
     /// The Data Directory this configuration comes to, made where it is not
@@ -1694,6 +1734,7 @@ pub async fn run_on_keyed(
         device = %device.id(),
         fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
+        advertising = config.advertises(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -1763,6 +1804,29 @@ pub async fn run_on_keyed(
     // answer told to two different askers.
     let reading =
         device::reading::Reading::of_this_machine(remote::Tailscale::on_path(config.listen.port()));
+
+    // And what this device says about itself on the LAN, so that a Verkstead on
+    // the next desk can draw a row for it with nobody typing an address
+    // (ADR-0020) — see [`discovery`]. Four things: the device id, the name and
+    // the OS word out of the reading above, and the port the peer listener
+    // *landed* on rather than the one the configuration asked for — a `:0` is a
+    // port the operating system chose, and an advertisement naming any other
+    // number is one nothing can be dialled at.
+    //
+    // Registered here rather than beside the bind, because this is where the
+    // reading is: the machine a discovered row draws and the machine the
+    // identity endpoint answers for are one answer told to two askers.
+    let advertisement = discovery::Advertisement::of_this_device(
+        config.advertises(),
+        &discovery::Announcement::of(&device, &reading, peer.address().port()),
+    );
+
+    // And the signal an ordered stop arrives as, listened for from here rather
+    // than from the moment it is awaited: one that arrives before the handler is
+    // in place is one that kills the process, and what would be lost with it is
+    // the goodbye that takes the row above off every other machine's list at
+    // once — see [`discovery::ToldToStop`].
+    let mut stopping = discovery::ToldToStop::listening();
 
     // And this device's cluster as something to *do* things to rather than to
     // read: the Devices section's presses go through it, and so does the one thing
@@ -1862,6 +1926,7 @@ pub async fn run_on_keyed(
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
 
@@ -1872,6 +1937,24 @@ pub async fn run_on_keyed(
         tokio::select! {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
+}
+
+/// The ordered stop: the advertisement withdrawn, and then this server ending
+/// the way it always did.
+///
+/// **The one thing this process does on its way out, and the only reason it has
+/// a way out at all.** A row on another machine's **Discovered** list runs out
+/// on its own TTL, which is what covers a killed server and a lid that shut —
+/// this is what makes a restart tidy rather than what makes a stale row
+/// impossible. Nothing else is drained, stopped or closed in order: no request
+/// waits, no session is asked to finish, and the listeners go with the process.
+async fn stopped(signal: &str, advertisement: &discovery::Advertisement) -> Result<()> {
+    tracing::info!(signal, "verkstead has been asked to stop");
+
+    advertisement.withdrawn().await;
+
+    Ok(())
 }

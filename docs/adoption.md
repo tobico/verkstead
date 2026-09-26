@@ -129,17 +129,31 @@ directory you can see from a shell is one the workbench says is not there.
 A bare binary outside NixOS has no namespace like this and needs no options at
 all: see [development.md](development.md#quickstart).
 
-Two more are about the **Peer Listener**, which is the second listener and the
+Three more are about the **Peer Listener**, which is the second listener and the
 one other devices dial. **`peerListen`** is where it binds — `0.0.0.0:8423` by
 default, every interface, because the device calling this one is on a LAN or a
 tailnet and neither of those is the loopback — and **`openFirewall`** opens that
 port on the host's firewall, on by default. That default is the one worth
 knowing about: a NixOS host firewalls by default, and a peer listener nothing
 can reach is a linking that cannot happen, with the device dialling in timing
-out and nothing on either machine saying why. Only that port is opened; the
-workbench's own stays shut, because what reaches it from another device is
-`tailscale serve` on the tailnet. A host that declares its open ports somewhere
-of its own sets `openFirewall = false;` and opens the peer port there instead.
+out and nothing on either machine saying why. The workbench's own port stays
+shut, because what reaches it from another device is `tailscale serve` on the
+tailnet. A host that declares its open ports somewhere of its own sets
+`openFirewall = false;` and opens what it needs there instead.
+
+The third is how the two machines find each other in the first place.
+**`advertising`** is whether this host says what it is on the LAN: an mDNS
+advertisement of `_verkstead._tcp.local` carrying this device's id, the
+machine's hostname, the word for its operating system and the port `peerListen`
+named — which is what another Verkstead on the same LAN reads to find this one,
+with no address for anybody to type. On by default, for `openFirewall`'s reason:
+a discovery nothing can hear is a feature that silently does not work. Set
+`advertising = false;` on a LAN that is not yours alone — a hostname, an
+operating system and a device id is more than some networks are worth telling —
+and link by a typed address instead. `openFirewall` opens UDP 5353 for this
+beside the peer port, and opens it whether or not the host advertises: the
+answers to its *own* browsing arrive there too, so a host that only looks for
+others still has to be able to hear.
 
 What device this install is reads in the **Devices** list at the foot of that
 same **Remote access** section: its name with an icon for its OS, and the
