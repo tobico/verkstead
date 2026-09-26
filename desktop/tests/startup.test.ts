@@ -76,6 +76,7 @@ const same = (one: string[], two: string[]): boolean =>
 function loginItem(
   on = false,
   args: string[] = [...ARGS],
+  opened = false,
 ): LoginItem & { asked: LoginAsked[]; read: string[][] } {
   const asked: LoginAsked[] = [];
   const read: string[][] = [];
@@ -88,6 +89,7 @@ function loginItem(
       read.push(wanted);
       return registered !== undefined && same(registered, wanted);
     },
+    openedAtLogin: () => opened,
     register: (wanted) => {
       asked.push(wanted);
       registered = wanted.openAtLogin ? wanted.args : undefined;
@@ -98,6 +100,9 @@ function loginItem(
 /// One that is never called, for the arms that are a file rather than a call.
 const noLogin: LoginItem = {
   registered: (): boolean => {
+    throw new Error("the Linux arm is a file, and asked the login-item API");
+  },
+  openedAtLogin: (): boolean => {
     throw new Error("the Linux arm is a file, and asked the login-item API");
   },
   register: () => {
@@ -422,8 +427,11 @@ describe("the login-item arm", () => {
     });
   });
 
-  /// And the hidden start is that API's own: a Mac has a word for it, and
-  /// Windows takes the flag on the command line the way the entry on Linux does.
+  /// And the hidden start is not asked of the API at all: `openAsHidden` was a
+  /// Mac's word for it and has been deprecated and inert since macOS 13, so what
+  /// is sent is the flag Windows reads on the command line — and a Mac is asked
+  /// afterwards whether its login item started the run, which is the describe
+  /// below.
   it("registers a login start that comes up hidden", () => {
     const login = loginItem();
     const starts = startup(packed(dir, { platform: "darwin" }), login);
@@ -469,6 +477,7 @@ describe("the login-item arm", () => {
   it("says what the API refused", () => {
     const login: LoginItem = {
       registered: () => false,
+      openedAtLogin: () => false,
       register: () => {
         throw new Error("the login item could not be written");
       },
@@ -484,6 +493,41 @@ describe("the login-item arm", () => {
   });
 });
 
+describe("a Mac's own account of a login start", () => {
+  /// What that platform has instead of the flag: its login item carries no
+  /// arguments — `args` is Windows' alone — so `--hidden` never reaches
+  /// `process.argv` there and the platform is asked directly.
+  it("is the login item saying it started this run", () => {
+    const starts = startup(packed(dir, { platform: "darwin" }), loginItem(true, [...ARGS], true));
+
+    expect(starts.atLogin()).toBe(true);
+  });
+
+  it("is nothing where the login item did not", () => {
+    expect(startup(packed(dir, { platform: "darwin" }), loginItem(true)).atLogin()).toBe(false);
+  });
+
+  /// And nothing the other two are asked, their registrations being command
+  /// lines: a stub that throws when it is asked is what says so.
+  it("is not asked of Linux, whose entry carries the flag", () => {
+    expect(startup(packed(dir), noLogin).atLogin()).toBe(false);
+  });
+
+  it("is not asked of Windows, whose Run key carries it", () => {
+    expect(
+      startup(packed(dir, { platform: "win32" }), loginItem(true, [...ARGS], true)).atLogin(),
+    ).toBe(false);
+  });
+
+  /// Nor of a machine with nowhere to keep a registration: one that was never
+  /// made started nothing.
+  it("is nothing on an unpackaged run", () => {
+    expect(
+      startup(packed(dir, { platform: "darwin", packaged: false }), noLogin).atLogin(),
+    ).toBe(false);
+  });
+});
+
 describe("a login start", () => {
   const tray = (trayIcon: boolean): Settings => ({ whenClosed: "tray", trayIcon });
 
@@ -491,20 +535,27 @@ describe("a login start", () => {
   /// to reach Verkstead by, so no window arrives over whatever the human is
   /// doing.
   it("comes up hidden while the tray is shown", () => {
-    expect(hidden(["/opt/verkstead/verkstead", HIDDEN], tray(true))).toBe(true);
+    expect(hidden(["/opt/verkstead/verkstead", HIDDEN], tray(true), false)).toBe(true);
+  });
+
+  /// And on a Mac, where the same thing is said by the platform rather than by
+  /// the command line.
+  it("comes up hidden where the platform says the login item started it", () => {
+    expect(hidden(["/Applications/Verkstead.app/…/Verkstead"], tray(true), true)).toBe(true);
   });
 
   /// And comes up with a window where there is not, which is what keeps this a
   /// **Launch on Startup** rather than one that needs the tray: an app with no
   /// icon and no window is a Verkstead nobody can reach.
   it("comes up shown where there is no icon to reach it by", () => {
-    expect(hidden(["/opt/verkstead/verkstead", HIDDEN], tray(false))).toBe(false);
+    expect(hidden(["/opt/verkstead/verkstead", HIDDEN], tray(false), false)).toBe(false);
+    expect(hidden(["/Applications/Verkstead.app/…/Verkstead"], tray(false), true)).toBe(false);
   });
 
   /// And a launch by hand is a window whatever the tray says: somebody who
   /// started Verkstead is asking for it.
   it("is nothing a launch without the flag does", () => {
-    expect(hidden(["/opt/verkstead/verkstead"], tray(true))).toBe(false);
-    expect(hidden(["/usr/bin/electron", "."], tray(false))).toBe(false);
+    expect(hidden(["/opt/verkstead/verkstead"], tray(true), false)).toBe(false);
+    expect(hidden(["/usr/bin/electron", "."], tray(false), false)).toBe(false);
   });
 });
