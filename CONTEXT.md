@@ -508,9 +508,12 @@ pressable inside it excepted — said once over the header's descendants rather
 than marked control by control, so the next control put in a head is not the one
 nobody marked. They are one component, so the sidebar's wordmark, the timeline's
 name, the details pane, the settings, the composer and the Set sheet all move
-the window without any of them having been told about it. The text in a header
-stops being selectable, which is the price rather than an oversight: a bar the
-pointer sweeps a selection across cannot also be the bar the window moves by.
+the window without any of them having been told about it. Inside the app the
+text in a header gives up taking a selection, which is the price rather than an
+oversight: a bar the pointer sweeps a selection across cannot also be the bar
+the window moves by. Inside the app **and nowhere else** — the region itself is
+a property no browser acts on, while giving up the selection is an ordinary one
+every browser honours, so that half is worn where the bridge is.
 **And keeping clear of the controls is the frame's rather than any pane's**,
 which header stands at an edge of the *window* being a fact about the layout:
 the page reads what the controls left it — `getTitlebarAreaRect()`, which
@@ -528,11 +531,12 @@ hole three times over, which is why it is one bar in three places rather than
 three bars.
 **And none of it reaches a browser.** A drag region is Chromium's own property
 and only a window with no title bar reads one; every inset is nought where there
-is no overlay to ask, so nothing is padded and nothing is moved; the bare bar is
-drawn on the bridge being there, the way the **Desktop** section of the settings
-is; and the colours cross that same bridge, which a browser on this machine and
-a phone on the tailnet do not have. The same document, drawn the same way,
-telling nobody.
+is no overlay to ask, so nothing is padded and nothing is moved; the bare bar
+and the header's giving up of the selection are drawn on the bridge being there,
+the way the **Desktop** section of the settings is; and the colours cross that
+same bridge, which a browser on this machine and a phone on the tailnet do not
+have. The same document, drawn the same way, telling nobody — and a standalone
+share, which is the one of these a stranger is handed, reads exactly as it did.
 _Avoid_: title bar, window chrome, custom controls, header bar, frameless
 
 **Workbench Key**:

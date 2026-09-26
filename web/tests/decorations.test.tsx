@@ -17,10 +17,12 @@
 //! covering a head's buttons fails here, and so does one narrowed to a list of
 //! the controls that happen to exist today.
 //!
-//! **And the whole of what a browser sees of it is nothing.** The property is
-//! inert outside a frameless Electron window, and there is no branch anywhere
-//! near it: the head is the same markup with the app's bridge on the window and
-//! without one, which is what that half's last case pins.
+//! **And the whole of what a browser sees of the region is nothing.** The
+//! property is inert outside a frameless Electron window, so nothing guards it
+//! and the head is the same markup either way. What a head *gives up* to be one
+//! is not inert out there — a selection is an ordinary thing an ordinary
+//! browser does — so that much is drawn on the bridge and asked about on both
+//! sides of it, which is what that half's last cases pin.
 //!
 //! The second half is the other thing a window with no title bar does to a page:
 //! the platform draws its own controls over a corner of it, so the head at that
@@ -268,14 +270,29 @@ describe("the head", () => {
     expect(title.matches(EXCEPTED)).toBe(false);
   });
 
-  /// And its text stops taking a selection, which is the price ADR-0020 settled
-  /// this with: a bar a pointer sweeps a selection across cannot also be the
-  /// bar the window moves by. jsdom knows this property, so it is the one thing
-  /// here the cascade can be asked about.
-  it("no longer takes a selection", () => {
+  /// And inside the app its text stops taking a selection, which is the price
+  /// ADR-0020 settled this with: a bar a pointer sweeps a selection across
+  /// cannot also be the bar the window moves by. jsdom knows this property, so
+  /// it is the one thing here the cascade can be asked about.
+  it("gives up taking a selection inside the app", () => {
+    theApp("linux");
+
     const { container } = aHead();
 
     expect(getComputedStyle(headOf(container)).userSelect).toBe("none");
+  });
+
+  /// And nowhere else, which is the half the property itself will not enforce.
+  /// `-webkit-app-region` is inert outside the app and needs no guarding;
+  /// `user-select` is an ordinary property every browser honours, so a head that
+  /// declared it unconditionally took the selection away from a phone on the
+  /// tailnet and from whoever opens a standalone share — neither of whom has a
+  /// window to move, and either of whom may want to copy the name of what they
+  /// are reading.
+  it("goes on taking one in a browser", () => {
+    const { container } = aHead();
+
+    expect(getComputedStyle(headOf(container)).userSelect).not.toBe("none");
   });
 });
 
@@ -358,21 +375,26 @@ describe("a browser", () => {
     expect(DRAGS).toBe(`.${styles.head}`);
   });
 
-  /// And the same head either way, which is what says no page ever asks. The
-  /// bridge is what tells the app from a browser everywhere it matters — see
-  /// `src/settings/bridge.ts` — and this is the one piece of the decorations
-  /// that does not consult it, because a rule a browser ignores needs no
-  /// guarding.
-  it("is handed the same head the app is", () => {
+  /// And the same head as the app's but for the one name that gives up the
+  /// selection, which is the whole of what the bridge changes about a head. The
+  /// region itself is not on that list and does not need to be: a rule a browser
+  /// ignores needs no guarding, and asking about one would be a branch drawn for
+  /// nothing.
+  it("is handed the app's head but for what gives up the selection", () => {
     const browser = aHead();
-    const drawn = headOf(browser.container).outerHTML;
+    const drawn = headOf(browser.container);
+    const bare = [...drawn.classList];
+    const markup = drawn.outerHTML;
     browser.unmount();
 
     theApp("linux");
 
-    const app = aHead();
+    const app = headOf(aHead().container);
 
-    expect(headOf(app.container).outerHTML).toBe(drawn);
+    expect([...app.classList]).toEqual([...bare, styles.inApp]);
+    // And nothing else about it moved: the same tags, the same attributes, the
+    // same controls — one class deep and no further.
+    expect(app.outerHTML.replace(` ${styles.inApp}`, "")).toBe(markup);
   });
 });
 

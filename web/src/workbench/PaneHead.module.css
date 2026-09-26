@@ -25,18 +25,12 @@
    the settings, the composer, the Set sheet and the share's details all move the
    window without any of them being told about it.
 
-   Nothing of it reaches a browser. `-webkit-app-region` is Chromium's own
-   property and only a frameless Electron window reads one, so the same document
-   served to a browser on this machine or to a phone on the tailnet behaves
-   exactly as it did — which is why the standalone share keeps the rule it
-   inherits from this head rather than being given a build without it.
-
-   The text in a head stops being selectable, and that is the price rather than
-   an oversight: a bar the pointer sweeps a selection across cannot also be the
-   bar the window moves by. So a Conversation's name and the Timeline's
-   truncated branch no longer take a selection. ADR-0020 settled the heads as
-   the drag region knowing that, and it is written here so the next reader does
-   not take it for a bug. */
+   Nothing of it reaches a browser, and that is what lets it be one rule rather
+   than a build. `-webkit-app-region` is Chromium's own property and only a
+   frameless Electron window reads one, so the same document served to a browser
+   on this machine or to a phone on the tailnet behaves exactly as it did —
+   which is why the standalone share keeps the rule it inherits from this head
+   rather than being given a build without it. */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -46,6 +40,28 @@
   margin: -1rem 0 0;
   padding: 1rem 0;
   -webkit-app-region: drag;
+}
+
+/* And the text in a head gives up taking a selection — inside the app, and only
+   there. That is the price of the region rather than an oversight: a bar the
+   pointer sweeps a selection across cannot also be the bar the window moves by,
+   so a Conversation's name and the Repo beside it do not take one while the
+   window they head is one this page can move.
+
+   Which is the one thing here that is not inert outside the app, and so the one
+   thing that has to be asked about rather than declared and forgotten.
+   `user-select` is an ordinary property every browser honours: left on `.head`
+   it took the selection away from a phone on the tailnet, from a browser on this
+   machine, and from whoever opens a standalone share — none of whom has a window
+   to move, and any of whom may want to copy the name of the Conversation they
+   are reading. ADR-0020 settled the heads as the drag region on nothing about it
+   reaching a browser, and this is that.
+
+   So `PaneHead.tsx` wears this name where the app's bridge is on the window, the
+   way the bare drag bar is drawn on it — see `DragBar.tsx`. The region above
+   needs no such marker, being a property only a window with no title bar has
+   ever read. */
+.inApp {
   user-select: none;
 }
 

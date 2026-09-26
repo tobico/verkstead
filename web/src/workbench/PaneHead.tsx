@@ -20,11 +20,26 @@
 //! under them is a fact about the layout rather than about any pane. So the frame
 //! is what pads a head clear of them — see `paneHead` in `Panes.module.css` —
 //! and this says no more about it than that it is a head.
+//!
+//! **And it is the region the window is dragged by**, which is what a window with
+//! no title bar has instead of one (ADR-0020). That is a rule in this component's
+//! own stylesheet and nothing here: `-webkit-app-region` is a property only a
+//! frameless Electron window has ever read, so the head a browser is handed is
+//! the head it was before any of it.
+//!
+//! **The one part of it that is not inert outside the app is the selection**, so
+//! that part is the only part this asks about. A head the window moves by cannot
+//! also be a head a pointer sweeps a selection across — but `user-select` is an
+//! ordinary property every browser honours, and a phone on the tailnet or whoever
+//! opens a standalone share has no window to move and every reason to copy the
+//! name of what they are reading. So the giving-up is worn where the bridge is,
+//! the way the bare drag bar is drawn where it is — see `DragBar.tsx`.
 
 import { Show, type JSX } from "solid-js";
 
 import styles from "./PaneHead.module.css";
 import shell from "../Panes.module.css";
+import { bridge } from "../settings/bridge";
 
 export function PaneHead(props: {
   /// The pane this one was entered from, named as the way back reads it — "←
@@ -41,8 +56,17 @@ export function PaneHead(props: {
   /// The pane's own controls, standing in the header row after the title.
   children?: JSX.Element;
 }): JSX.Element {
+  // Read once rather than followed, the way the bare drag bar and the Desktop
+  // section of the settings read it: a preload is there before the document is,
+  // so nothing can arrive or leave while a page is open.
+  const app = bridge() !== null;
+
   return (
-    <div class={`${styles.head} ${shell.paneHead}`}>
+    <div
+      class={[styles.head, shell.paneHead, app ? styles.inApp : undefined]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <Show when={props.back}>
         {(back) => (
           <button
