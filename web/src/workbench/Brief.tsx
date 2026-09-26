@@ -201,7 +201,7 @@ function Configuration(props: {
             is about the machine rather than about the work, so the half a share
             does not draw. The record it would be drawn from is empty there
             anyway; this is what keeps the pane from reporting that emptiness as
-            *not checked out* and *no grilling*, which would be a share telling
+            *not checked out* and *nobody grilling*, which would be a share telling
             the reader something untrue instead of nothing at all. */}
         <Show when={!props.readOnly}>
           <Machine conversation={props.conversation} />
@@ -275,12 +275,13 @@ function Machine(props: { conversation: ConversationView }): JSX.Element {
       <Fact term="Worktree">
         <Where worktree={props.conversation.worktree} />
       </Fact>
+      {/* An account or nothing, this role having had no row that runs no
+          session since *No grilling* retired. */}
       <Show when={uses(props.conversation.process, "grilling")}>
         <Fact term={ROLE.grilling}>
-          <Picked
-            picked={props.conversation.grilling_pairing}
+          <Paired
+            pairing={props.conversation.grilling_pairing}
             saved={profiles.data}
-            away="No grilling."
           />
         </Fact>
       </Show>
@@ -432,12 +433,12 @@ function Paired(props: {
   );
 }
 
-/// And a role that could be picked away as well as paired, which is the grilling
-/// and the review.
+/// And the role that could be picked away as well as paired, which is the
+/// review.
 ///
-/// Said as the choice it was rather than as an absence: *no grilling* and *no
-/// review* are what the human picked, and a pane that read either as "not
-/// chosen" would show a settled conversation as an unsettled one.
+/// Said as the choice it was rather than as an absence: *no review* is what the
+/// human picked, and a pane that read it as "not chosen" would show a settled
+/// conversation as an unsettled one.
 function Picked(props: {
   picked: PickedView;
   saved: ProfileEntry[] | undefined;

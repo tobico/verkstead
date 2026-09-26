@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked,
+    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
     ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
     any_archived, archive_conversation, archived, close_conversation, conversation_branch,
     conversations, create_profile, follow_branch, load_conversation, open_database, register_repo,
     reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
-    settle_naming, show_archived, showing_archived, start_adoption, start_building,
-    start_conversation, start_grilling, start_pull_request_adoption, start_unnamed_conversation,
+    settle_naming, show_archived, showing_archived, start_adoption, start_conversation,
+    start_grilling, start_pull_request_adoption, start_tinkering, start_unnamed_conversation,
     switch_repo, timeline, unarchive_conversation,
 };
 
@@ -308,32 +308,6 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
             .naming,
         "a name the human typed has nothing to wait for",
     );
-}
-
-/// A start with no grilling in it leaves the same job to the session it starts,
-/// there being nothing different about it but which state it lands in.
-#[tokio::test]
-async fn a_start_with_no_grilling_leaves_the_branch_to_be_named_too() {
-    let (_dir, pool) = fresh_pool().await;
-    let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
-        .await
-        .unwrap()
-        .unwrap();
-
-    start_building(
-        &pool,
-        id,
-        "c0ffee",
-        Path::new("/data/worktrees/amber-kestrel"),
-        &[],
-    )
-    .await
-    .unwrap();
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Implementing);
-    assert!(conversation.naming);
 }
 
 /// The rename the instruction asked for is the end of the waiting, and so is a
@@ -748,7 +722,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     );
     assert_eq!(conversation.branch, "rate-limiting");
     assert!(conversation.branch_named);
-    assert!(matches!(conversation.grilling_pairing, Picked::Under(_)));
+    assert!(conversation.grilling_pairing.is_some());
 }
 
 /// The freeze: a checkout is of one repository, so from the moment there is one
@@ -966,6 +940,48 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
     );
     assert_eq!(moves(&pool, id).await, [Lifecycle::Grilling]);
+}
+
+/// And the **Tinker** landing writes the same three things and leaves the
+/// Conversation in Follow-up, which is the whole of what separates the two.
+#[tokio::test]
+async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        start_tinkering(
+            &pool,
+            id,
+            "deadbeef",
+            Path::new("/state/worktrees/verkstead-rate-limiting"),
+            &[],
+        )
+        .await
+        .unwrap(),
+        Grilling::Started
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        conversation.state,
+        Lifecycle::FollowUp,
+        "a Tinker is never interviewed, so there is no grilling to land in",
+    );
+    assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
+    assert_eq!(
+        conversation.worktree.as_deref(),
+        Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
+    );
+    assert_eq!(moves(&pool, id).await, [Lifecycle::FollowUp]);
+
+    assert_eq!(
+        start_tinkering(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
+            .await
+            .unwrap(),
+        Grilling::NotDrafting,
+        "and it cannot be started twice, for the reason no start can",
+    );
 }
 
 /// The rule that the base commit is the default branch's tip *at grill start*

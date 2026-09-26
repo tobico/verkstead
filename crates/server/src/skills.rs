@@ -375,39 +375,6 @@ pub(crate) fn implementing(skills: &Skills, brief: &str, handoff: Option<&str>) 
     )
 }
 
-/// And what an inline session on a Conversation that was never grilled is
-/// started on: the Brief alone, under the same line, and the paragraph that says
-/// there was no grilling.
-///
-/// Said rather than left to be inferred from an absent handoff, because the two
-/// are different situations and only one of them is a plan. A grilling that died
-/// before writing its handoff leaves a session that should build what the
-/// interview settled and cannot read it; this is a human who chose not to be
-/// interviewed, and the Brief is the whole of what they decided.
-///
-/// Which is why the paragraph says what to do with what the Brief leaves open. A
-/// session that guesses at a real decision builds the wrong thing quietly; one
-/// that asks reaches the human on their phone and builds the right thing.
-///
-/// The skill is the same implementation skill an ordinary inline run reads, and
-/// it knows this run happens: it says a Conversation can be started with no
-/// grilling, that the Brief is the whole of the agreement where one was, and
-/// that the instruction about what the Brief leaves open is here rather than
-/// there. The split is deliberate — the skill is where a session learns what
-/// kind of run this is, and the prompt is where it is told what to do about it,
-/// because only the prompt knows which kind this one is.
-pub(crate) fn ungrilled(skills: &Skills, brief: &str) -> String {
-    format!(
-        "{}\n# Nothing was grilled\n\nThis work was not put through a grilling: \
-         the Brief above is the whole of the plan, and there is no handoff \
-         because there was no interview to write one. Build what it describes. \
-         Where it leaves a real decision open — one that changes what gets built \
-         rather than how it is spelled — put that to me as an ordinary ask rather \
-         than guessing at it.\n",
-        implementing(skills, brief, None),
-    )
-}
-
 /// What a roadmap Conversation's own work is started on where Resume launches it:
 /// the Brief, under the line that sends the agent into the staging fork.
 ///
@@ -719,6 +686,19 @@ pub(crate) fn instruction(
 /// conversation the Timeline kept. Every follow-up a steer starts hands in
 /// nothing here: a heading over an empty digest would tell the session that
 /// something had already been said.
+///
+/// **And an empty `brief` is a session with no documents at all**, which is the
+/// one a **Tinker** start opens: nothing has been built, so what the work is and
+/// what is being followed up on are the same words — and they are said once,
+/// under the heading that says act on them, rather than twice under two headings
+/// that would have the session reading the second as news.
+///
+/// **Which is also the one whose branch is on no pull request**, and that is
+/// what the opening line has to be true about. A steered follow-up is about work
+/// that has been submitted, so it is sent to follow the pull request up; a
+/// Tinker's branch was cut a moment ago and has none, so its session is sent to
+/// the branch it is standing on and promised nothing that is not there. What to
+/// do with either is the skill's, which asks the branch rather than assuming.
 pub(crate) fn following_up(
     skills: &Skills,
     brief: &str,
@@ -728,11 +708,16 @@ pub(crate) fn following_up(
 ) -> String {
     let skill = skills.named(FOLLOWING_UP);
 
-    let prompt = on_the_documents(
-        &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
-        brief,
-        handoff,
-    );
+    let prompt = match brief.trim().is_empty() {
+        true => alone(&format!(
+            "Read {skill} and follow up on the work on this branch, the way it says."
+        )),
+        false => on_the_documents(
+            &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
+            brief,
+            handoff,
+        ),
+    };
 
     let prompt = format!(
         "{prompt}\n# What I want to follow up on\n\n{}\n",
@@ -1023,7 +1008,7 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
         "{}\n\n# This branch has no name yet\n\nThe branch this session starts on \
          carries a name Verkstead invented at random, because the work had not \
          been read by anybody when it was cut. Switch it to a short kebab-case \
-         name taken from what the Brief above is about — `git branch -m <name>` \
+         name taken from what the work above is about — `git branch -m <name>` \
          in this worktree — before anything lands on it, and carry on. There is \
          nobody to ask and nothing to report: the rename is read off the \
          checkout, and the name is left as it is by leaving it alone.\n",
@@ -1031,12 +1016,22 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
+/// The opening line and the one thing said beside it wherever a session is
+/// started: how to reach the human.
+///
+/// On its own only for the session a **Tinker** start opens, which has no
+/// documents to be told the work in — everything else built here goes on to
+/// [`on_the_documents`], which is this with them under it.
+fn alone(opening: &str) -> String {
+    format!("{opening} Nothing else in this session tells you how to reach me.\n")
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
     let mut prompt = format!(
-        "{opening} Nothing else in this session tells you how to reach me.\n\n\
-         # The Brief this started from\n\n{brief}\n"
+        "{}\n# The Brief this started from\n\n{brief}\n",
+        alone(opening)
     );
 
     if let Some(handoff) = handoff {
@@ -3037,36 +3032,6 @@ mod tests {
         );
     }
 
-    /// And a Conversation whose human picked *No grilling* is told so, which is
-    /// a different thing from a handoff that failed to arrive: the Brief is the
-    /// plan, and what it leaves open is asked about rather than guessed at.
-    #[test]
-    fn an_ungrilled_implementation_is_told_the_brief_is_the_whole_plan() {
-        let prompt = ungrilled(&mounted(), "# Rate limiting\n\nThe API has none.\n");
-
-        assert!(
-            prompt.contains(&at(IMPLEMENTING)),
-            "the same skill an ordinary inline run reads: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none."),
-            "primed with the Brief, whole: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("What the grilling settled"),
-            "and with no handoff, there having been no interview: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("Nothing was grilled") && prompt.contains("ordinary ask"),
-            "said in words, along with what to do about what the Brief leaves \
-             open: {prompt:?}"
-        );
-        assert!(
-            prompt.find("The API has none.") < prompt.find("Nothing was grilled"),
-            "under the Brief, which is what it is about"
-        );
-    }
-
     /// What the instruction skill has to say that no other working skill here
     /// does: the pipeline carries on from here.
     ///
@@ -3221,8 +3186,8 @@ mod tests {
 
         assert!(
             following_up.contains("git push"),
-            "this branch is already on a pull request, so a round that stayed local \
-             is one nobody can see: {following_up}"
+            "a branch that is on a pull request and stayed local is one nobody \
+             can see: {following_up}"
         );
         assert!(
             following_up.contains("before you ask them anything"),
@@ -3230,7 +3195,47 @@ mod tests {
         );
         assert!(
             !following_up.contains("gh pr create"),
-            "the pull request exists, and this session opens nothing: {following_up}"
+            "and this session opens no pull request, whether or not there is one: \
+             {following_up}"
+        );
+    }
+
+    /// And a branch that is on none is read and committed to all the same: a
+    /// **Tinker**'s follow-up starts on a branch cut a moment ago, so the skill
+    /// asks rather than assumes, and says what a round with nothing to push to
+    /// does instead.
+    #[test]
+    fn the_following_up_skill_says_what_to_do_on_a_branch_with_no_pull_request() {
+        let following_up = skill("following-up/SKILL.md");
+        let flowed = flowed("following-up/SKILL.md");
+
+        assert!(
+            !following_up.contains("already has a pull request open"),
+            "nothing promises one any more: a follow-up may be the start of the \
+             work: {following_up}"
+        );
+        assert!(
+            following_up.contains("gh pr view"),
+            "which one it is is asked rather than assumed: {following_up}"
+        );
+        assert!(
+            flowed.contains("the branch itself is what to read"),
+            "so a round with no pull request reads the branch rather than a diff \
+             that is not there: {following_up}"
+        );
+        assert!(
+            flowed.contains("the commit is the whole of it"),
+            "and commits what it was asked for and carries on: {following_up}"
+        );
+        assert!(
+            flowed.contains("nowhere to push to and no checks to set running"),
+            "with no push to a branch nothing is tracking, and nothing said about \
+             checks: {following_up}"
+        );
+        assert!(
+            flowed.contains("Do not open a pull request either way"),
+            "and it still opens nothing: what becomes of the branch is \
+             Verkstead's: {following_up}"
         );
     }
 
@@ -3297,6 +3302,91 @@ mod tests {
                  header saying when it resets.\n"
             ),
             "and the follow-up brief is the last thing said, under them: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("follow up on this branch's pull request"),
+            "and the work is on one, so that is what it is sent to follow up: \
+             {prompt:?}"
+        );
+    }
+
+    /// And the one a **Tinker** start opens says the Brief once, under the
+    /// heading that says act on it.
+    ///
+    /// Nothing has been built, so there are no documents to be told the work in:
+    /// a session handed the same words twice under two headings would read the
+    /// second as something new the human had said about the first.
+    #[test]
+    fn a_tinkers_session_is_primed_with_the_brief_as_what_to_follow_up_on() {
+        let prompt = following_up(
+            &mounted(),
+            "",
+            None,
+            "# Rate limiting\n\nThe API has none.\n",
+            "",
+        );
+
+        assert!(
+            prompt.contains(&at(FOLLOWING_UP)),
+            "it is the follow-up's own session, in the follow-up's own skill: \
+             {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("# The Brief this started from"),
+            "and there are no documents over it: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("# What the grilling settled"),
+            "nor a handoff, a Tinker never having been grilled: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("The API has none.").count(),
+            1,
+            "the Brief is said once, and it is said here: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with(
+                "# What I want to follow up on\n\n# Rate limiting\n\nThe API has none.\n"
+            ),
+            "under the heading that says act on it: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Nothing else in this session tells you how to reach me."),
+            "with the one thing every session is told beside the skill: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("pull request"),
+            "and nothing promising a pull request the branch does not have: \
+             {prompt:?}"
+        );
+        assert!(
+            prompt.contains("follow up on the work on this branch"),
+            "what it is sent to is the branch it is standing on: {prompt:?}"
+        );
+    }
+
+    /// And the naming instruction goes on it as it goes on every first session:
+    /// a Tinker is cut on a name Verkstead invented, exactly as a grilling is.
+    #[test]
+    fn a_tinkers_session_is_told_to_name_the_branch() {
+        let prompt = naming(
+            &following_up(
+                &mounted(),
+                "",
+                None,
+                "# Rate limiting\n\nThe API has none.\n",
+                "",
+            ),
+            true,
+        );
+
+        assert!(
+            prompt.contains("# This branch has no name yet"),
+            "the branch is still carrying the name nobody read: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`git branch -m <name>`") && prompt.contains("kebab-case"),
+            "said as the command and the shape, as it is everywhere: {prompt:?}"
         );
     }
 
@@ -3534,7 +3624,7 @@ mod tests {
     /// rename is read off the checkout, so there is nobody to ask.
     #[test]
     fn the_naming_instruction_asks_for_nothing_back() {
-        let prompt = naming(&ungrilled(&mounted(), "# Rate limiting\n"), true);
+        let prompt = naming(&implementing(&mounted(), "# Rate limiting\n", None), true);
 
         assert!(
             prompt.contains("There is nobody to ask and nothing to report"),

@@ -1125,12 +1125,14 @@ fn roles(target: SteerTarget) -> &'static [Role] {
 /// choice as one made now.
 ///
 /// And whether the role was picked away rather than paired, which is settled
-/// too: a Conversation that will not be grilled or will not be reviewed is not
-/// one with a Pairing missing, and the difference is what the two readers below
-/// turn on.
+/// too: a Conversation that will not be reviewed is not one with a Pairing
+/// missing, and the difference is what the two readers below turn on. The
+/// grilling role reads as a Pairing or as nothing — its own such row retired
+/// with *No grilling*, and a skip left on a record from before it did is read as
+/// nothing chosen, which is what lets a steer settle the role afresh.
 fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
     match role {
-        Role::Grilling => conversation.grilling_pairing.clone(),
+        Role::Grilling => carried(conversation.grilling_pairing.as_ref()),
         Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
         Role::Review => conversation.review_pairing.clone(),
     }

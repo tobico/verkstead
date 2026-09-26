@@ -1,20 +1,32 @@
 ---
 name: following-up
-description: Follow up on work that is already on a pull request — answer what the human asked, do what they requested, and keep the conversation going in rounds of Question Sets. Use when a session has been dispatched with a follow-up brief under the documents the work started from.
+description: Follow up on the work on this branch — answer what the human asked, do what they requested, and keep the conversation going in rounds of Question Sets. Use when a session has been dispatched with a follow-up brief, whether the branch is already on a pull request or has none yet.
 ---
 
 Do what the brief at the end of this prompt asks, and keep talking to the human
 about it. This is a conversation rather than a single step: they wrote the brief
 to you, and each round of it goes back to them as a Question Set.
 
-You start in a worktree of the repository, on the branch the work is on. The
-branch is already pushed and it already has a pull request open: there is
-nothing to create, nothing to switch to and nothing to open.
+You start in a worktree of the repository, on the branch the work is on. There
+is nothing to create, nothing to switch to and nothing to open.
 
-The Brief above the follow-up brief — and the handoff document under it, where
-there is one — say what the work as a whole is. They are context rather than the
+**Whether that branch is on a pull request is a thing to look up rather than
+assume**, because both happen and two steps below turn on it:
+
+    gh pr view --json number
+
+Work that has already been submitted has one, and the branch is pushed to it.
+Work that is only beginning has none — the command comes back empty-handed, the
+branch having been cut for this session with nothing tracking it. Either way,
+what becomes of it is not yours: where there is no pull request, opening one is
+Verkstead's job rather than this session's, and it does it once the human says
+the follow-up is over.
+
+The Brief above the follow-up brief, and the handoff document under it, say what
+the work as a whole is, where either is there. They are context rather than the
 job: what you were started for is the follow-up brief, and they are there so
-that you answer and work the way the rest of this branch was done.
+that you answer and work the way the rest of this branch was done. A follow-up
+that is the start of the work has neither, and the brief is the whole of it.
 
 ## 1. Read what was asked
 
@@ -30,16 +42,21 @@ what the brief said**: a choice the brief does not settle and the code cannot,
 something that would be expensive to unpick, work nobody asked for. Everything
 else you simply do.
 
-Then go and look. An answer written from memory of the diff is a guess:
+Then go and look. An answer written from memory of the diff is a guess. Where
+the branch is on a pull request, that is what holds the diff:
 
     gh pr diff
+
+Where it is not, the branch itself is what to read — `git log` and `git diff`
+against the branch it was cut from. On the first round there may be nothing on
+it at all, the work not having started yet.
 
 Read the code each part of the brief is about, and read what the repository
 says about itself where the answer turns on a convention — its `CLAUDE.md` or
 `AGENTS.md`, the docs it keeps for agents, what the neighbouring code actually
 does.
 
-## 2. Do the work, and push it as it lands
+## 2. Do the work, and land it as you go
 
 Work test-first where tests are appropriate: a failing test, the change that
 passes it, then the tidying. Run the repository's tests and fix what you break —
@@ -62,17 +79,24 @@ brief that asked for it:
 Pick a conventional-commit type — `feat`, `fix`, `refactor`, `test`, `docs`,
 `chore`.
 
-Then push, **before you ask them anything**:
+Then, **where the branch is on a pull request**, push what you committed
+before you ask them anything:
 
     git push
 
-Push, unlike most sessions here: this branch is already on a pull request, so
-the pull request always shows what has been done, and the checks on what you
-pushed run while they are reading and composing. Work that stayed local while
-they answered is work they were answering blind about.
+Push, unlike most sessions here: the pull request always shows what has been
+done, and the checks on what you pushed run while they are reading and
+composing. Work that stayed local while they answered is work they were
+answering blind about.
 
-Do not open a pull request, do not touch any other branch, and do not merge
-anything. The pull request exists, and merging is the human's act.
+**Where there is none, the commit is the whole of it.** Nothing is tracking the
+branch, so there is nowhere to push to and no checks to set running: commit each
+thing you were asked for and go straight on to the round. The work is on the
+branch, which is where their answer will find it.
+
+Do not open a pull request either way, do not touch any other branch, and do not
+merge anything. Where there is one, it exists already and merging is the human's
+act; where there is not, the branch is left as it stands.
 
 ### What the message body says
 
@@ -169,9 +193,9 @@ A follow-up is as many rounds as they want it to be.
 ## 5. Say you are done
 
 When a Response leaves you with nothing to do and nothing to ask, make sure
-everything that round asked for is committed and pushed, say what you did, and
-run `verkstead done`. That is all: no closing line to anybody, no summing-up of
-the follow-up, nothing to hand on.
+everything that round asked for is committed — and pushed, where there is a pull
+request to push to — say what you did, and run `verkstead done`. That is all:
+no closing line to anybody, no summing-up of the follow-up, nothing to hand on.
 
 That command is what ends this session, and nothing else does: not the push, and
 not the end of your turn. So a round that pushes and then waits on its checks in
@@ -184,9 +208,9 @@ session carries on. Then go round again from step 3 and put the next round to
 them as a Set. It is refused over changes left uncommitted too: commit or discard
 them, and run `verkstead done` again.
 
-**What becomes of this Conversation is not yours.** Do not mark the pull request
-ready, do not merge it, and do not move the work anywhere — Verkstead knows what
-comes next.
+**What becomes of this Conversation is not yours.** Do not open a pull request,
+do not mark one ready, do not merge it, and do not move the work anywhere —
+Verkstead knows what comes next.
 
 ## Waiting on work in the background
 

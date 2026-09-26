@@ -64,7 +64,7 @@ export const COMPANION_BRANCHES = ["trunk", "origin/trunk"];
 /// golden file of this endpoint could only ever hold this same nothing. A test
 /// about a Repo that does remember something serves its own.
 export const NO_PAIRINGS: RepoPairingsView = {
-  grilling: "Nothing",
+  grilling: null,
   implementation: null,
   review: "Nothing",
 };

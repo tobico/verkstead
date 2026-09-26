@@ -432,7 +432,7 @@ export async function create(
   if (state.grilling !== null) {
     const outcome = await chooseGrillingPairing(
       id,
-      pairing.role(state.grilling),
+      pairing.choice(state.grilling),
     );
     said(
       outcome === "Chosen",

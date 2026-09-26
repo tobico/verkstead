@@ -377,6 +377,16 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// this record is what starts it. Which Drafts those are is a row rather than a
 /// state, so it is asked as one — see [`taking_one_up`].
 ///
+/// And a fourth, which is a **Tinker** finishing: a Conversation in Follow-up
+/// whose branch holds commits and no pull request is one whose ending sent a
+/// `submitting` session to open one, and this is the pull request it opened. The
+/// door is here rather than a move written beside the ending, so a Tinker carries
+/// into Wrapping through the entry every other ending uses — with the PR Event,
+/// the row and the move in one transaction, and the wrap-up's watchers started
+/// over what was opened. See `crate::runner`, which is where the branch is asked.
+/// A follow-up steered into never reaches this: it is on a pull request already,
+/// and its ending is [`super::follow_up_over`].
+///
 /// One transaction, as every move is — and this one carries more than a move:
 /// the PR Event, the row it hangs off, the state, and the move itself. What the
 /// Timeline must never hold is one of them without the others.
@@ -416,13 +426,15 @@ pub async fn record_pull_request(
         return Ok(Wrapping::NoSuchConversation);
     };
 
-    // Three states reach here, and the third is a door rather than an ending: a
+    // Four states reach here, and two of them are doors rather than endings: a
     // Draft holding a pull request is one the human is taking up, its worktree
     // is already on that pull request's head branch, and this record is the same
     // move the finish step makes. Asked of the record rather than of the state
-    // alone, so that nothing else can carry a Draft into Wrapping.
+    // alone, so that nothing else can carry a Draft into Wrapping. A Follow-up
+    // is the Tinker whose ending sent for the pull request its branch was on
+    // none of — nothing else opens one over a Conversation in that state.
     let wrappable = match Lifecycle::read(&state)? {
-        Lifecycle::Implementing | Lifecycle::Grilling => true,
+        Lifecycle::Implementing | Lifecycle::Grilling | Lifecycle::FollowUp => true,
         Lifecycle::Draft => taking_one_up(&mut tx, conversation_id).await?,
         _ => false,
     };

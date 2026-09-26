@@ -71,10 +71,11 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BriefSaved, Capture, CommitEvent,
     CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
-    TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
+    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
+    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, SetReading, SetView, Shown,
+    Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent, TranscriptView,
+    Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -573,6 +574,18 @@ impl Grilling {
 
         if asked.exists() {
             std::fs::remove_file(asked).unwrap();
+        }
+    }
+
+    /// Read one back the way the sheet does, which is where what is drawn
+    /// around a Set is decided — the Nothing-else box included.
+    async fn set(&self, set_id: i64) -> SetView {
+        match get(&self.app, &format!("/api/ui/sets/{set_id}")).await {
+            SetReading::Set(view) => *view,
+            SetReading::Unreadable(unreadable) => panic!(
+                "Set {set_id} came back unreadable, which nothing here asks: {}",
+                unreadable.why
+            ),
         }
     }
 
@@ -2158,6 +2171,117 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
+/// The same workbench with the same press, on a draft whose Process is
+/// **Tinker**: it lands in Follow-up rather than Grilling, and the one session
+/// it starts is the follow-up's.
+///
+/// Two roles rather than three — a Tinker is never interviewed, so no Grilling
+/// picker is drawn for one — and the Process picked before the Brief is written,
+/// which is the order the composer sends its fields in.
+async fn tinkering(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    tinkering_asking(spill, stub, PULL_REQUEST).await
+}
+
+/// The same, with something else where `gh` goes — for the tests about a
+/// Tinker's ending, which turns on the branch being on no pull request until
+/// the session sent for one has opened it.
+async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    tinkering_alongside(spill, stub, gh, &[]).await
+}
+
+/// And the same with whatever `companions` names beside it, which is what the
+/// test about a Tinker that commits in one and nowhere else needs: its own branch
+/// stays exactly as the press cut it, so the companion is the whole of what the
+/// ending has to find.
+async fn tinkering_alongside(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    companions: &[(&str, CompanionMode)],
+) -> Grilling {
+    let bench = bench_at_pace(spill, stub, gh, *BRISKLY, None).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_two_a_wrap_up_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": Process::Tinker }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    // While it is still drafting, which is the only time a companion can be added
+    // or configured — and off the same endpoints the setup card presses.
+    for (name, mode) in companions {
+        let repo_id = bench.register(name).await;
+
+        let added: CompanionAdded = post(
+            app,
+            &format!("/api/ui/conversations/{id}/companions"),
+            &serde_json::json!({ "repo_id": repo_id }),
+        )
+        .await;
+        assert_eq!(added, CompanionAdded::Added);
+
+        if *mode != CompanionMode::ReadOnly {
+            let chosen: CompanionModeChosen = post(
+                app,
+                &format!("/api/ui/conversations/{id}/companions/{repo_id}/mode"),
+                &serde_json::json!({ "mode": mode }),
+            )
+            .await;
+            assert_eq!(chosen, CompanionModeChosen::Chosen);
+        }
+    }
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A Tinker's one session: it writes down what it was primed with, then waits on
+/// the human, which is what a follow-up spends its time doing.
+///
+/// Written to a file rather than printed, for the reason the wrap-up's review
+/// prompts are: what is being read is a whole prompt, and a terminal is eighty
+/// columns wide.
+fn a_tinker_round(prompts: &Path) -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
 /// The same over a repository `seed` has committed into before the Conversation
 /// is started — see [`Seeded`], which is where the moment is explained.
 ///
@@ -2203,27 +2327,8 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
     .await
 }
 
-/// And the same with the *Grilling* picker moved onto its own such row, which is
-/// the Conversation whose press starts the work rather than an interview: it
-/// lands Implementing with a session on the Brief alone.
-async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_however_started(
-        spill,
-        stub,
-        gh,
-        *BRISKLY,
-        &[],
-        NOTHING_ATTACHED,
-        Pickers::Ungrilled,
-        Origin::None,
-        Seeded::Nothing,
-        None,
-    )
-    .await
-}
-
 /// How the Conversation a fixture builds was left on the setup card: every
-/// picker under a Pairing, one of them moved onto its *no session* row, or the
+/// picker under a Pairing, the review one moved onto its *no session* row, or the
 /// grilling one moved onto an account of the second agent type.
 ///
 /// The one thing the builders below differ over, and all of it is settled while
@@ -2233,9 +2338,6 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
 enum Pickers {
     /// Every role under a Pairing of its own.
     UnderEveryPairing,
-
-    /// The human picked *No grilling*, so the press starts the work.
-    Ungrilled,
 
     /// The human picked *No review*, so the wrap-up runs none.
     Unreviewed,
@@ -2452,7 +2554,6 @@ async fn grilling_however_started(
 
     match pickers {
         Pickers::UnderEveryPairing => {}
-        Pickers::Ungrilled => bench.ungrilled(id).await,
         Pickers::Unreviewed => bench.unreviewed(id).await,
         Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
@@ -2591,11 +2692,11 @@ impl Bench {
                 "model": format!("claude-{role}-5"),
             });
 
-            // Two of the pickers offer a row that is no account at all, so what
-            // they send is which of their rows was picked — see
-            // [`Bench::ungrilled`] and [`Bench::unreviewed`].
+            // The review picker offers a row that is no account at all, so what
+            // it sends is which of its rows was picked — see
+            // [`Bench::unreviewed`].
             let picked = match role {
-                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                "review" => serde_json::json!({ "pairing": pairing }),
                 _ => pairing,
             };
 
@@ -2777,11 +2878,11 @@ impl Bench {
         for (role, model) in roles {
             let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
 
-            // The two pickers that offer a row which is no account at all send
+            // The one picker that offers a row which is no account at all sends
             // which row was picked, exactly as [`Bench::under_every_pairing`]
             // does.
             let picked = match *role {
-                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                "review" => serde_json::json!({ "pairing": pairing }),
                 _ => pairing,
             };
 
@@ -2793,22 +2894,6 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
-    }
-
-    /// And pick the Grilling picker's other row instead: this Conversation is
-    /// not to be grilled at all, so the press starts the work rather than an
-    /// interview.
-    ///
-    /// Pressed after [`Bench::under_every_pairing`] for the reason
-    /// [`Bench::unreviewed`] is.
-    async fn ungrilled(&self, id: i64) {
-        let chosen: verkstead_render::ProfileChosen = post(
-            &self.app,
-            &format!("/api/ui/conversations/{id}/grilling-pairing"),
-            &serde_json::json!({ "pairing": null }),
-        )
-        .await;
-        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
     /// And pick the Review picker's other row instead: this Conversation is not
@@ -3992,7 +4077,7 @@ async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_run
 
     assert_eq!(
         fixture.view().await.grilling_pairing,
-        PickedView::Nothing,
+        None,
         "the Conversation is nulled out of while its session runs",
     );
 
@@ -16456,11 +16541,11 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
     assert_eq!(
         after
             .grilling_pairing
-            .pairing()
+            .as_ref()
             .map(|pairing| pairing.profile.id),
         before
             .grilling_pairing
-            .pairing()
+            .as_ref()
             .map(|pairing| pairing.profile.id),
     );
     assert_eq!(
@@ -17483,6 +17568,15 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
+    );
+    assert_eq!(
+        stage
+            .grilling_pairing
+            .as_ref()
+            .and_then(|pairing| pairing.profile.name.clone()),
+        Some("grilling".to_owned()),
+        "the grilling one among them — a stage steered into a second round is \
+         grilled by whatever the roadmap's work has been grilled by all along",
     );
 
     let brief = stage
@@ -23182,6 +23276,859 @@ questions:
       - n: 2
         text: No, see below
 "#;
+
+/// A **Tinker** starts where a steer arrives: the press cuts the branch and the
+/// Worktree and lands the Conversation in Follow-up, with the follow-up's own
+/// session running on the Brief.
+///
+/// One session and no interview, under the Implementation Pairing, inside the
+/// same skill a steered follow-up is put in. What it is primed with is the Brief
+/// under *What I want to follow up on* and nowhere else — nothing has been
+/// built, so there are no documents over it — with the naming instruction that
+/// rides every first session, the branch still carrying the name Verkstead
+/// invented.
+#[tokio::test]
+async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("follow-up-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round(&written_to)).await;
+
+    // The session, once it is printing — and then the round it puts, which is
+    // what a follow-up waits on the human with and what keeps the rescue and
+    // the sweep off it while this reads the record.
+    fixture.running().await;
+    fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the press landed it there rather than in a grilling",
+    );
+    assert!(
+        view.worktree.is_some_and(|worktree| !worktree.missing),
+        "with somewhere to work, cut as a grill start cuts one",
+    );
+
+    let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one session, the follow-up's: {started:?}",
+    );
+
+    let prompt = started[0];
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "run under the Implementation Pairing, a Tinker having no other: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        "inside the follow-up skill, which is the one that keeps asking until \
+         the human is finished: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# What I want to follow up on"),
+        "primed with the Brief as the thing to act on: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("# The Brief this started from")
+            && !prompt.contains("# What the grilling settled"),
+        "and with no documents over it: nothing has been built, and nothing \
+         was grilled: {prompt:?}",
+    );
+    assert_eq!(
+        prompt.matches("The API has none.").count(),
+        1,
+        "so the Brief is read once, under the heading that says act on it: \
+         {prompt:?}",
+    );
+    assert!(
+        prompt.contains("# This branch has no name yet"),
+        "with the instruction every first session carries, the branch still \
+         being on the name Verkstead invented: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("pull request"),
+        "and with nothing promising one: the branch was cut a moment ago and is \
+         on none, so the opening sends it to the branch it is standing on: \
+         {prompt:?}",
+    );
+}
+
+/// A Tinker's session that does what it was asked for, commits it, and puts the
+/// round — which is a round on a branch nothing is tracking and no pull request
+/// is on.
+///
+/// No push: there is nowhere to push to, and a stub that tried would fail
+/// against a repository with no remote — which is the whole of what the skill
+/// says to do here, held to the one thing a test can see.
+fn a_tinker_round_that_commits() -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'a limiter\\n' >> limiter.md\n\
+         git add -A\n\
+         git commit --quiet -m 'feat: count what the limiter rejects'\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         sleep 300\n",
+    )
+}
+
+/// And one that does its round, is answered, and then finishes without the
+/// human having said there is nothing else — which is the stop a Tinker's
+/// follow-up is picked up again from.
+fn a_tinker_round_then_gone(prompts: &Path) -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         printf 'that is that, then\\n'\n",
+        prompts = quoted(prompts),
+    )
+}
+
+/// A Tinker's round is an ordinary follow-up round on a branch with no pull
+/// request: it commits what it was asked for, opens nothing, and reaches the
+/// human as a Set carrying the **Nothing else** box.
+///
+/// The box is drawn from where the Conversation stands rather than from anything
+/// in the Set — see the server's `ui` module — so a Tinker's rounds carry it for
+/// the reason a steered follow-up's do, which is that they are rounds of a
+/// Conversation in Follow-up. Held to a test rather than taken on trust: it is
+/// the only way the human ends one, and a Tinker that asked without it would be
+/// a Conversation nobody could finish.
+#[tokio::test]
+async fn a_tinkers_round_commits_and_asks_on_a_branch_with_no_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+
+    let fixture = tinkering(spill, &a_tinker_round_that_commits()).await;
+
+    let view = fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the round is being worked where the start left it",
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "on a branch that is on no pull request: nothing has opened one, and \
+         nothing in the round is waiting on one: {:?}",
+        view.pinned,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert!(
+        fixture.set(set).await.follow_up,
+        "and the round reaches the human as an ordinary Set carrying the \
+         Nothing-else box, which is how they say the follow-up is over",
+    );
+}
+
+/// And a Tinker that loses its session is picked up again, on the Brief it is
+/// following up and the rounds it has already been through.
+///
+/// The relaunch a steered follow-up gets, on a Conversation that was never
+/// steered: there is no Steer Event to read the subject off, so the Brief is
+/// what the follow-up is about and the move the start wrote is where its rounds
+/// begin. Without that reading a Tinker whose session died could be neither
+/// resumed nor swept up — a Conversation in Follow-up that nothing could start
+/// anything for.
+#[tokio::test]
+async fn resume_tinkers_again_on_the_brief_and_the_rounds_answered() {
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("follow-up-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round_then_gone(&written_to)).await;
+
+    fixture.running().await;
+
+    // One round, answered without the mark: the human has more to say, and the
+    // session goes away before they get to say it.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture.stopped().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|_| {
+            let written = std::fs::read_to_string(&written_to).unwrap_or_default();
+            let started = prompts(&written);
+
+            (started.len() > 1).then(|| started[1].to_owned())
+        })
+        .await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/following-up/SKILL.md"),
+        "the press starts the follow-up again rather than anything else: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("# What I want to follow up on")
+            && relaunched.contains("The API has none."),
+        "on the Brief, which is what a Tinker's follow-up is about: \
+         {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("What you have already asked, and what I said"),
+        "with what has already been said under it: {relaunched:?}",
+    );
+    assert!(
+        relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
+        "which is the round it asked before it went: {relaunched:?}",
+    );
+}
+
+/// A Tinker whose round commits, waits to be answered, says it is done and
+/// idles — and, once the ending sends for the pull request its branch is on none
+/// of, a session that pushes and opens one.
+///
+/// `opened` is the pull request appearing on GitHub, as in [`gh_opened_by_hand`]:
+/// the `submitting` session writing it is what turns the stub's *no pull request*
+/// into one, which is exactly what the real session's push and `gh pr create` do.
+///
+/// The review is a session that never stops talking, because it is not what these
+/// are about: a wrap-up under way is what they read, and a review session going
+/// quiet with nothing open would be rescued and put a Notice on the Timeline over
+/// the fixture rather than over the work.
+fn a_tinker_that_commits_and_then_submits(opened: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'the branch is pushed and the pull request is open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    printf 'a limiter\n' >> limiter.md
+    git add -A
+    git commit --quiet -m 'feat: count what the limiter rejects'
+    SAYING='following it up'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// The same, except that the commit is the first session's and the session that
+/// ends on the mark commits nothing at all.
+///
+/// Which is the reading the `pushed` flag gets wrong. `pushed` is *more commits
+/// than when this session launched*, and a relaunched follow-up reads that
+/// baseline afresh — so this Tinker's ending reads `pushed: false` and would land
+/// Done with the first session's work on a branch nothing is watching.
+///
+/// Told apart by the round the first session left answered: a relaunch finds
+/// `again` there, having been answered before it went.
+fn a_tinker_that_commits_then_loses_its_session(opened: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'the branch is pushed and the pull request is open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    if [ -f /tmp/verkstead/again ]; then
+        SAYING='picking it up again'
+        printf '%s\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+        printf 'nothing else then\n'
+        : > /tmp/verkstead/done
+        sleep 300
+    else
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while [ ! -f /tmp/verkstead/again ]; do sleep 0.1; done
+        printf 'that is that, then\n'
+    fi
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// And one whose rounds are questions and answers and nothing else: it asks,
+/// is answered with the mark, says it is done and idles, and the branch is
+/// exactly where the start left it.
+fn a_tinker_that_builds_nothing() -> String {
+    format!(
+        "SAYING='following it up'\n\
+         printf '%s\\n' \"$SAYING\"\n\
+         {WHILE_NOBODY_HAS_ASKED}\n\
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n\
+         printf 'it counts them, yes\\n'\n\
+         : > /tmp/verkstead/done\n\
+         sleep 300\n",
+    )
+}
+
+/// A Tinker that committed and was marked **Nothing else** lands in Wrapping,
+/// with the pull request its ending sent for opened and recorded against it and
+/// the wrap-up running over what was opened.
+///
+/// The whole of the ending's first half. A Tinker's branch is on no pull request
+/// — nothing in its rounds opens one, and nothing told the session to — so what
+/// is left when the human is finished is work that is committed and unreviewable
+/// by anybody. Which is the run's own *no pull request* situation, and it takes
+/// the path the run already has for it: one session on the `submitting` skill,
+/// sent to push and open one, and then the ordinary wrap-up over what it opened.
+/// Recording that pull request is the move, which is why nothing writes a second
+/// wrap-up entry beside this.
+#[tokio::test]
+async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_tinker_that_commits_and_then_submits(&opened),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    // The round, once the commit behind it is on the Timeline: what lands the
+    // Conversation in Wrapping is that commit, so a mark answered before it
+    // existed would be reading the fixture rather than the rule.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "the branch is on none while the rounds run: {:?}",
+        view.pinned,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    let found = pull_request(&view).expect("the wrap-up has its pull request pinned");
+
+    assert_eq!(
+        found.number, 41,
+        "the pull request the session opened is the one it wraps up",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull request and nothing else",
+    );
+
+    // And the wrap-up is running over it, which the review is the visible half of:
+    // a Review Pairing was picked, so the branch is read.
+    let deadline = Instant::now() + *PATIENCE;
+    while sessions_on(&fixture, "reviewing/SKILL.md").await == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up the pull request started never read the branch",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped anywhere along it: a Tinker that ends is not a run \
+         that stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A Tinker whose round commits, and whose `submitting` session stops short of the
+/// pull request until `opened` is there — the second go being the one that pushes.
+///
+/// Which is what a Resume over a stop is: the human logs `gh` in, presses, and the
+/// one thing still owed is asked for again.
+fn a_tinker_whose_submit_stops_short_once(opened: &Path, asked_twice: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    if [ -f {asked_twice} ]; then
+        printf 'the branch is pushed and the pull request is open\n'
+        printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+        exit 0
+    fi
+    : > {asked_twice}
+    printf 'gh is not logged in, so I have pushed nothing\n'
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    printf 'a limiter\n' >> limiter.md
+    git add -A
+    git commit --quiet -m 'feat: count what the limiter rejects'
+    SAYING='following it up'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        asked_twice = quoted(asked_twice),
+    )
+}
+
+/// Resume on a Tinker whose ending left no pull request asks for the pull request
+/// again rather than starting another round.
+///
+/// **The state alone cannot say which of the two this is.** A Tinker stays in
+/// Follow-up until the pull request its ending sent for is recorded, so a press
+/// that read only the state would start a fresh follow-up session over a
+/// Conversation the human has already ticked **Nothing else** on — and the one
+/// thing actually missing would go on missing. The mark, the absent pull request
+/// and the commits on the branch are what tell them apart, which is the ending's
+/// own reading asked again.
+///
+/// Which is also the promise the run makes about a finish that stopped short of
+/// its push: what the human has then is Resume, and a press is another go at the
+/// one thing left. This is that promise kept for the one ending that sends for a
+/// pull request from outside a wrap-up.
+#[tokio::test]
+async fn resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_another_round() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let asked_twice = spill.path().join("asked-once-already");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The ending sends for the pull request, that session leaves none, and the run
+    // stops where it stands — which is still Follow-up, the move being the
+    // recording of a pull request that never happened.
+    let view = fixture
+        .until(|view| (!notices(view).is_empty()).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "a stop leaves the Conversation where it is, and the ending had not moved it yet",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session asked for so far, and it got nowhere",
+    );
+
+    // Nobody is asking as the next session starts, which is what keeps a follow-up
+    // session talking until the test puts its round up — so a press that wrongly
+    // started one would be plain to see rather than hanging.
+    fixture.asked_nothing();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the press asked for the one thing that was missing, and got it",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        2,
+        "which is a second go at the pull request rather than a second follow-up",
+    );
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "and no round was put to the human over a follow-up they had already \
+         finished: {:?}",
+        sets(&view).len(),
+    );
+}
+
+/// And one that committed in an earlier session and nothing at all in the session
+/// that ended lands in Wrapping too.
+///
+/// Which is the whole reason the ending asks git rather than reading the
+/// follow-up's `pushed` flag. `pushed` is worked out as *more commits than when
+/// this session launched*, and a follow-up picked up again reads that baseline
+/// afresh — so this Tinker reads `pushed: false`, and an ending built on it would
+/// land Done with the first session's commit on a branch that has no pull request
+/// and nothing watching it. The branch is asked instead, against the commit it was
+/// cut from, and that answer is the same whichever session did the committing.
+#[tokio::test]
+async fn a_tinker_that_committed_before_it_lost_its_session_lands_in_wrapping_too() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_tinker_that_commits_then_loses_its_session(&opened),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    // One round, committed and answered without the mark: the human has more to
+    // say, and the session goes away before they get to say it.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
+
+    fixture.stopped().await;
+
+    // Nobody is asking as the next session starts, which is what keeps it talking
+    // until the test puts its round up — see [`Grilling::asked_nothing`].
+    fixture.asked_nothing();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The relaunched session's own round, which it commits nothing behind.
+    let landed = commits(&fixture.view().await).len();
+    let again = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(again).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        commits(&view).len(),
+        landed,
+        "the session that ended committed nothing, so what carried this to a \
+         wrap-up is what stands on the branch rather than what it pushed",
+    );
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "and the work is on the pull request its ending sent for",
+    );
+}
+
+/// And a Tinker that never committed lands Done, with the move on its Timeline,
+/// nothing dispatched and no pull request asked for.
+///
+/// The other half of the ending. A Tinker whose rounds were questions and answers
+/// is a Conversation with nothing built: there is nothing to open a pull request
+/// over and nothing for a wrap-up to be about, so the move is the whole of it. The
+/// Worktree stays as it is, as it does for any Done Conversation.
+#[tokio::test]
+async fn a_tinker_that_built_nothing_lands_done_with_nothing_dispatched() {
+    let spill = tempfile::tempdir().unwrap();
+
+    // A `gh` that says there is no pull request, whatever it is asked: nothing
+    // here should ask it anything, and a stub that answered would hide one that
+    // did.
+    let fixture = tinkering_asking(spill, &a_tinker_that_builds_nothing(), NO_PULL_REQUEST).await;
+
+    fixture.running().await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        commits(&view).is_empty(),
+        "nothing was built, which is what sent it here: {:?}",
+        commits(&view),
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "so nothing asked GitHub for one, and nothing recorded one: {:?}",
+        view.pinned,
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "and no session was sent for one either: there is nothing to open one over",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "reviewing/SKILL.md").await,
+        0,
+        "nor any review: there is no wrap-up here to run one",
+    );
+    assert!(
+        !view.working,
+        "the session was ended as the follow-up ended, so the Worktree is nobody's",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: a Conversation that finished is not one that halted: \
+         {:?}",
+        notices(&view),
+    );
+}
+
+/// A `gh` that answers for the Conversation's own repository and for the
+/// companion beside it, each finding nothing until its own marker is written.
+///
+/// [`gh_alongside`]'s directory switch and [`gh_opened_by_hand`]'s marker in one:
+/// the test needs *no pull request anywhere* while the rounds run, and both of
+/// them once the `submitting` session has pushed — the Conversation's own to make
+/// a wrap-up, and the companion's because the Done signal is refused while one
+/// the work committed in is uncovered.
+fn gh_alongside_opened_when_asked(opened: &Path, companion: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$(pwd -P)" in
+*/askance)
+    if [ ! -f {companion} ]; then
+        printf 'no pull requests found for branch "%s"\n' "$3" >&2
+        exit 1
+    fi
+    printf '{{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+    exit 0
+    ;;
+esac
+if [ ! -f {opened} ]; then
+    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1
+fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        companion = quoted(companion),
+    )
+}
+
+/// A Tinker whose round commits in the companion and nowhere else, and then a
+/// `submitting` session that pushes both halves.
+///
+/// Its own branch is left exactly as the press cut it, which is the whole point:
+/// nothing stands on it for the ending to read, so the companion is the only
+/// thing that says work was done.
+fn a_tinker_that_commits_in_the_companion_alone(opened: &Path, companion: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'both branches are pushed and both pull requests are open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    printf 'https://github.com/tobico/askance/pull/7\n' > {companion}
+    exit 0
+    ;;
+*reviewing/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    while :; do printf 'reading the branch\n'; sleep 0.1; done
+    ;;
+*)
+    (cd ../askance-* && printf 'the other half\n' >> halves.md && git add -A \
+        && git commit --quiet -m 'feat: count what the other half rejects')
+    SAYING='following it up'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+        companion = quoted(companion),
+    )
+}
+
+/// And a Tinker that committed in a companion and nowhere else lands in Wrapping
+/// too, rather than being finished with.
+///
+/// The ending asks every branch the work reaches rather than the Conversation's
+/// own alone. A round that changed only a companion leaves this branch exactly as
+/// the press cut it, so reading it by itself would say *nothing built* — and land
+/// Done with the companion's commits on a branch that has no pull request, no
+/// checks and nothing sent to open one. Which is the one reading the rest of the
+/// run does not take: the sweep puts those commits on the Timeline, the wrap-up
+/// stops over a companion left without a pull request, and the `submitting`
+/// session's own Done signal is refused while one is uncovered.
+#[tokio::test]
+async fn a_tinker_that_committed_only_in_a_companion_lands_in_wrapping_too() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let alongside = spill.path().join("companion-opened-when-asked");
+
+    let fixture = tinkering_alongside(
+        spill,
+        &a_tinker_that_commits_in_the_companion_alone(&opened, &alongside),
+        &gh_alongside_opened_when_asked(&opened, &alongside),
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // The companion's commit, once the sweep has it: what lands this Conversation
+    // in Wrapping is that commit, so a mark answered before it existed would be
+    // reading the fixture rather than the rule.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| {
+                    commit
+                        .subject
+                        .starts_with("feat: count what the other half")
+                })
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_requests(view).len() == 2)
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull requests the work was owed",
+    );
+    assert!(
+        pull_requests(&view).iter().any(|opened| opened.number == 7),
+        "and the companion's is pinned beside the Conversation's own, which is the \
+         wrap-up covering it: {:?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped along the way: {:?}",
+        notices(&view),
+    );
+}
 
 /// Steering a Conversation Verkstead has finished with into Follow-up starts a
 /// session inside the follow-up skill, on the brief the human wrote — and the
@@ -30374,189 +31321,6 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
-    );
-}
-
-/// The stub a Conversation started with *No grilling* runs: one session, on the
-/// implementation skill, which writes down what it was told and does the work.
-///
-/// Cased on the skill for the sake of what comes after it — the wrap-up's review
-/// session runs on this stub too, and a second `git commit` with nothing to
-/// commit would be a failure inside the thing under test.
-fn an_ungrilled_run(prompts: &Path) -> String {
-    format!(
-        r#"
-case "$2" in
-*implementing/SKILL.md*)
-    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
-    printf 'building it\n'
-    printf 'a limiter\n' > limiter.md
-    git add limiter.md
-    git commit --quiet -m 'feat: rate limiting'
-    : > /tmp/verkstead/done
-    ;;
-*)
-    printf 'nothing to do\n'
-    sleep 300
-    ;;
-esac
-"#,
-        prompts = quoted(prompts),
-    )
-}
-
-/// A Conversation whose human picked *No grilling*, end to end: the press makes
-/// the branch and the worktree as it always does and lands the Conversation
-/// Implementing, and what runs is one session under the Implementation Pairing,
-/// inside the implementation skill, primed with the Brief and told there was no
-/// interview.
-///
-/// The run from there is an inline implementation and nothing else: the session
-/// commits, carries the branch to a pull request on its way out, and the
-/// Conversation wraps that up exactly as a run the human picked *inline* on at
-/// the end of a grilling does.
-#[tokio::test]
-async fn no_grilling_builds_from_the_brief_alone_and_carries_it_to_a_pull_request() {
-    let spill = tempfile::tempdir().unwrap();
-    let prompts = spill.path().join("implementing-prompts");
-
-    let fixture = building_ungrilled(spill, &an_ungrilled_run(&prompts), PULL_REQUEST).await;
-
-    let worktree = PathBuf::from(fixture.until(|view| view.worktree.clone()).await.path);
-
-    let sent = until_written(&prompts).await;
-
-    assert!(
-        sent.contains("model=claude-implementation-5"),
-        "the work runs under the Implementation Pairing, there being no other: {sent}",
-    );
-    assert!(
-        sent.contains("implementing/SKILL.md"),
-        "and inside the bundled implementation skill: {sent}",
-    );
-    assert!(
-        sent.contains(BRIEF),
-        "primed with the Brief, which is the whole of the plan: {sent}",
-    );
-    assert!(
-        sent.contains("Nothing was grilled"),
-        "and told so, rather than left to infer it from a handoff that is not \
-         there: {sent}",
-    );
-    assert!(
-        sent.contains("ordinary ask"),
-        "with what to do about what the Brief leaves open: {sent}",
-    );
-
-    let opened = fixture
-        .until(|view| {
-            (view.state == Lifecycle::Wrapping)
-                .then(|| pull_request(view).cloned())
-                .flatten()
-        })
-        .await;
-
-    assert_eq!(opened.number, 41);
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        view.timeline
-            .iter()
-            .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
-                _ => None,
-            })
-            .collect::<Vec<_>>(),
-        [Lifecycle::Implementing, Lifecycle::Wrapping],
-        "with no Grilling on the way at all: the press that would have started \
-         an interview started the work",
-    );
-    assert!(
-        git(&worktree, &["log", "--oneline"]).contains("feat: rate limiting"),
-        "which committed what it built",
-    );
-    assert!(
-        notices(&view).is_empty(),
-        "and nothing stopped on the way: {:?}",
-        notices(&view),
-    );
-}
-
-/// The stub for the ask: a session that builds, then waits on the human the way
-/// one holding a Blocking Ask does.
-fn an_ungrilled_run_that_asks(prompts: &Path) -> String {
-    format!(
-        r#"
-case "$2" in
-*implementing/SKILL.md*)
-    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
-    printf 'reading the brief\n'
-    while [ ! -f /tmp/verkstead/asked ]; do sleep 0.1; done
-    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
-    sleep 300
-    ;;
-*)
-    sleep 300
-    ;;
-esac
-"#,
-        prompts = quoted(prompts),
-    )
-}
-
-/// And a Blocking Ask works from such a session, which is what the prompt tells
-/// it to do with a decision the Brief left open.
-///
-/// The Set lands on this Conversation's Timeline and waits there, and the
-/// session holding it is left alone for as long as it takes — the same condition
-/// a step session's ask puts a run in, which is the point: nothing downstream of
-/// the press knows the interview was skipped.
-#[tokio::test]
-async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
-    let spill = tempfile::tempdir().unwrap();
-    let prompts = spill.path().join("implementing-prompts");
-
-    let fixture =
-        building_ungrilled(spill, &an_ungrilled_run_that_asks(&prompts), PULL_REQUEST).await;
-
-    until_written(&prompts).await;
-
-    let set = fixture.ask(A_STEP_QUESTION).await;
-
-    fixture
-        .until(|view| (!sets(view).is_empty()).then_some(()))
-        .await;
-
-    // Several of the rescue's graces of silence, which is what waiting on a human
-    // looks like from outside — and the session is neither spoken to nor ended.
-    tokio::time::sleep(BRISKLY.proposing * 4).await;
-
-    assert!(
-        anything_told(&fixture).is_empty(),
-        "nothing was typed into a session waiting on the human: {:?}",
-        anything_told(&fixture),
-    );
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
-        "the run is where the press left it, with the ask open on it",
-    );
-    assert!(
-        notices(&view).is_empty(),
-        "and nothing stopped over it: {:?}",
-        notices(&view),
-    );
-
-    assert_eq!(
-        fixture
-            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
-            .await,
-        Submitted::Accepted,
-        "and the human answers it the way they answer any other",
     );
 }
 

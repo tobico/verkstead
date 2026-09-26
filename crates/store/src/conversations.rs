@@ -297,10 +297,11 @@ pub struct Conversation {
     /// The Profile and model the grilling session runs under, once they are
     /// chosen.
     ///
-    /// One of the two roles that can be picked away altogether — see
-    /// [`super::Picked`]. A Conversation whose human picked *no grilling* is
-    /// never grilled: its Brief goes straight to an inline implementation.
-    pub grilling_pairing: super::Picked,
+    /// A Pairing or nothing, there being no row to pick this role away with:
+    /// *No grilling* is retired, and a record written while it was there is read
+    /// as nothing chosen — exactly as a Repo's remembered skip is. Which is the
+    /// only way a skip can still be on one, nothing having written one since.
+    pub grilling_pairing: Option<super::Pairing>,
 
     /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
@@ -895,7 +896,11 @@ pub enum Chosen {
     NotDrafting,
 }
 
-/// What became of starting a Conversation grilling.
+/// What became of starting a Conversation's work — grilling it, or, on a
+/// **Tinker**, landing it in Follow-up.
+///
+/// One answer for both landings, because the two are the same record written
+/// with one word different: see [`start_grilling`] and [`start_tinkering`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -1011,13 +1016,23 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
-/// What became of landing a follow-up back in the wrap-up it was opened over.
+/// What became of landing a follow-up, which is one of two places.
+///
+/// Two of them because a follow-up is reached two ways. One steered into is
+/// something taken up about work that is already on a pull request, and it goes
+/// back to the wrap-up it was opened over; a **Tinker** starts straight into one
+/// on a branch nobody has opened anything on, and there what the branch holds is
+/// what decides. See [`follow_up_over`] and [`follow_up_done`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
     /// Landed: the Conversation is wrapping up again and the move is on its
     /// Timeline, with the checks put back to waiting where the follow-up
     /// pushed anything.
     Wrapped,
+
+    /// Landed the other way: the Conversation is Done and the move is on its
+    /// Timeline, nothing having been built for a wrap-up to be about.
+    Finished,
 
     /// It is not following anything up, so there is no follow-up here to end —
     /// closed out from under the session, or steered somewhere else while this
@@ -2033,7 +2048,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         base_ref: base_ref.filter(|named| !named.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
+        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
         review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
@@ -2530,16 +2545,6 @@ pub async fn set_review_pairing(
 /// will launch.
 pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
     skip(pool, id, Role::Review).await
-}
-
-/// And the row that says there is to be no grilling at all.
-///
-/// The same choice one role along, and it says more than the review one does:
-/// what a Conversation that picked it starts is an inline implementation on the
-/// Brief, so the press that would have begun an interview begins the work — see
-/// [`start_building`].
-pub async fn skip_grilling(pool: &SqlitePool, id: i64) -> Result<Chosen> {
-    skip(pool, id, Role::Grilling).await
 }
 
 /// Record that a role runs no session at all.
@@ -3720,31 +3725,12 @@ impl<'a> From<&'a String> for Base<'a> {
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
+///
+/// **Two landings, and which of them is the Conversation's Process's** — see
+/// [`start_tinkering`] below, which writes this same transaction and leaves the
+/// Conversation in Follow-up. Everything the server did against git before
+/// calling either is the same work, so the record of it is the same record.
 pub async fn start_grilling<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(pool, id, base.into(), worktree, companions, None).await
-}
-
-/// And the same start on a Conversation whose human picked *no grilling*: the
-/// branch, the worktree, the base commit and the memory exactly as above, and
-/// the Conversation lands Implementing rather than Grilling.
-///
-/// One press, two landings, and which of them is a fact about what was picked
-/// rather than a second kind of start — see [`skip_grilling`]. Everything the
-/// server did against git before calling either is the same work, so the record
-/// of it is the same record.
-///
-/// The direction goes down with the move, because there is no grilling left to
-/// propose one: what a Brief taken straight to the work is, is an inline
-/// implementation, and a Conversation implementing with no direction is a record
-/// nothing could resume — see [`pick_direction`], which is how the other way in
-/// writes the same row.
-pub async fn start_building<'a>(
     pool: &SqlitePool,
     id: i64,
     base: impl Into<Base<'a>>,
@@ -3754,10 +3740,36 @@ pub async fn start_building<'a>(
     start(
         pool,
         id,
+        Lifecycle::Grilling,
         base.into(),
         worktree,
         companions,
-        Some(Direction::Inline),
+    )
+    .await
+}
+
+/// And the same start on a **Tinker** Conversation, which lands in Follow-up.
+///
+/// One press, two landings, and which of them is a fact about the Process
+/// rather than a second kind of start: the base commit, the worktree, the
+/// companions, the naming and the Repo's memory are written exactly as they are
+/// above. What differs is the state it comes out in — a Tinker is never
+/// interviewed, so there is no grilling for it to land in — and the session the
+/// server starts once this has been written.
+pub async fn start_tinkering<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::FollowUp,
+        base.into(),
+        worktree,
+        companions,
     )
     .await
 }
@@ -3765,23 +3777,18 @@ pub async fn start_building<'a>(
 /// What the two of them do, which is the same thing but for where it leaves the
 /// Conversation.
 ///
-/// `building` is the direction a start that skips the grilling records, and its
-/// being there is also what says which state to land in: a start with a
-/// direction has nothing to grill and is already building.
+/// `landing` is the whole of what the Process decides here. Everything else is
+/// written the same way whichever press asked, because it is the same work being
+/// recorded.
 async fn start(
     pool: &SqlitePool,
     id: i64,
+    landing: Lifecycle,
     base: Base<'_>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
-    building: Option<Direction>,
 ) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
-
-    let landing = match building {
-        Some(_) => Lifecycle::Implementing,
-        None => Lifecycle::Grilling,
-    };
 
     let mut tx = super::writing(pool, "starting a Conversation's work").await?;
 
@@ -3815,19 +3822,7 @@ async fn start(
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("moving Conversation {id} to {landing:?}"))?;
-
-    if let Some(direction) = building {
-        sqlx::query(
-            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
-             ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
-        )
-        .bind(id)
-        .bind(direction_stored(direction))
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("recording how Conversation {id}'s work is being built"))?;
-    }
+    .with_context(|| format!("moving Conversation {id} to {}", landing.stored()))?;
 
     // Written over whatever is there rather than inserted: a record that somehow
     // holds a worktree already is corrected to the one just made, where an
@@ -4125,11 +4120,12 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// Land a follow-up back in the wrap-up it was opened over, because the human
 /// has said there is nothing else.
 ///
-/// The way out of Follow-up, and the only one there is short of a steer. A
-/// follow-up is something taken up about work that is already on a pull request,
-/// so where it ends is where it started: the wrap-up carries on over whatever
-/// the branch now holds, and *back to Done* is that wrap-up's own settling rule
-/// rather than anything decided here — see [`finish_wrap_up`].
+/// One of the two ways out of Follow-up short of a steer, and the one a
+/// follow-up steered into takes. It is something taken up about work that is
+/// already on a pull request, so where it ends is where it started: the wrap-up
+/// carries on over whatever the branch now holds, and *back to Done* is that
+/// wrap-up's own settling rule rather than anything decided here — see
+/// [`finish_wrap_up`]. The other way is [`follow_up_done`].
 ///
 /// Refused for anything but Follow-up, as every move here is refused outside the
 /// state it leaves: a Conversation closed or steered out from under the session
@@ -4154,6 +4150,42 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// One transaction, as every move is: a Conversation that says Wrapping always
 /// has the move on its Timeline to say when it got there.
 pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Wrapping, pushed).await
+}
+
+/// And land one in Done, because the branch it was following up on holds nothing.
+///
+/// The second way out of Follow-up, and a **Tinker**'s where its rounds built
+/// nothing at all: there is no pull request to carry the work to and no work to
+/// carry, so there is nothing for a wrap-up to be about. The Worktree stays as it
+/// is, as it does for any Done Conversation.
+///
+/// Which of the two a Tinker takes is read off its branch at the ending rather
+/// than off anything in the record — see `crate::runner`, which asks git once and
+/// calls the one that fits. Nothing here decides it, exactly as nothing here
+/// decides which state a start lands in.
+///
+/// No `pushed`, because there is nothing to have pushed to: a Conversation that
+/// gets here is on no pull request, so there are no checks to put back to
+/// waiting.
+///
+/// Refused for anything but Follow-up, and one transaction, for
+/// [`follow_up_over`]'s reasons.
+pub async fn follow_up_done(pool: &SqlitePool, id: i64) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Done, false).await
+}
+
+/// What the two of them do, which is the same move to different states.
+///
+/// `landing` is the whole of what the caller decides here, as it is for a start
+/// — see [`start`]. `pushed` only ever means anything on the way to Wrapping,
+/// there being no settle to unsettle anywhere else.
+async fn out_of_follow_up(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+    pushed: bool,
+) -> Result<Ending> {
     let mut tx = super::writing(pool, "ending a follow-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -4189,17 +4221,20 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Wrapping.stored())
+        .bind(landing.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+        .with_context(|| format!("moving Conversation {id} out of following up"))?;
 
-    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    moved(&mut tx, id, landing).await?;
 
     tx.commit().await.context("ending a follow-up")?;
 
-    Ok(Ending::Wrapped)
+    Ok(match landing {
+        Lifecycle::Wrapping => Ending::Wrapped,
+        _ => Ending::Finished,
+    })
 }
 
 /// Send a Done Conversation back to wrapping up, because the human pressed

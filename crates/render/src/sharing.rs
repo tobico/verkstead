@@ -288,7 +288,7 @@ pub fn shared(
             repo,
             companions,
             worktree: None,
-            grilling_pairing: PickedView::Nothing,
+            grilling_pairing: None,
             implementation_pairing: None,
             review_pairing: PickedView::Nothing,
 

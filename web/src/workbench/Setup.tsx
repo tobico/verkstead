@@ -859,7 +859,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
           // reads — the record's own choices, read exactly as the pickers below
           // read them.
           picked={{
-            grilling: pairing.settled(props.conversation.grilling_pairing),
+            grilling: pairing.chosen(props.conversation.grilling_pairing),
             implementation: pairing.chosen(
               props.conversation.implementation_pairing,
             ),
@@ -868,20 +868,18 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
         >
           {() => (
             <>
-              {/* One of the two pickers with a row that is not an account: a
-                  brief can go straight to the work, with no interview between
-                  the two. */}
+              {/* An account and nothing else: *No grilling* is retired, and a
+                  Brief that wants no interview is a Tinker. */}
               <Show when={uses(props.conversation.process, "grilling")}>
                 <PairingPicker
                   conversation={props.conversation}
                   saved={saved()}
                   role="grilling"
                   label={label(props.conversation.process, "grilling")}
-                  away={away(props.conversation.process, "grilling")}
-                  chosen={pairing.settled(props.conversation.grilling_pairing)}
-                  pairing={pairing.under(props.conversation.grilling_pairing)}
+                  chosen={pairing.chosen(props.conversation.grilling_pairing)}
+                  pairing={props.conversation.grilling_pairing}
                   choose={(id, picked) =>
-                    chooseGrillingPairing(id, pairing.role(picked))
+                    chooseGrillingPairing(id, pairing.choice(picked))
                   }
                 />
               </Show>

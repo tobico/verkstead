@@ -216,14 +216,7 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
     let prefill = pairing_prefill(state, repo_id).await?;
 
-    // A Repo last started with no grilling is prefilled with no grilling, which
-    // is the memory doing exactly what it does for a Pairing: what the human
-    // last picked, ready to be changed. Nothing is judged about the row that
-    // runs nothing — there is no Profile to have gone — so it is applied
-    // wherever it was remembered.
-    if prefill.grilling.skipped() {
-        store::skip_grilling(&state.pool, id).await?;
-    } else if let Some(pairing) = prefill.grilling.pairing() {
+    if let Some(pairing) = &prefill.grilling {
         store::set_grilling_pairing(
             &state.pool,
             id,
@@ -286,7 +279,11 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
     }
 
     Ok(RepoPairingsView {
-        grilling: prefilled(remembered.grilling).await?,
+        // A skip is read and not applied, which is [`usable`]'s answer to one:
+        // the grilling picker has no row to prefill onto since *No grilling*
+        // retired, so a Repo remembering one arrives exactly as a Repo with
+        // nothing remembered for the role does.
+        grilling: usable(remembered.grilling).await?,
         implementation: usable(remembered.implementation).await?,
         review: prefilled(remembered.review).await?,
     })
@@ -304,10 +301,10 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 /// **Composed role by role.** Each of the three takes the last start's Pairing
 /// where it is still usable, and the platform default where it is not — and
 /// where there was no last start at all, or it left that role empty. A role it
-/// picked away is one of those: *No grilling* is a pick about that piece of
-/// work, and a brand-new Repo silently skipping its interview on the strength of
+/// picked away is one of those: *No review* is a pick about that piece of work,
+/// and a brand-new Repo silently wrapping up unreviewed on the strength of
 /// another Repo's would be a surprise, so the skip is not carried across. The
-/// Repo's own memory carries skips as it always has; only this copy drops them.
+/// Repo's own memory carries it as it always has; only this copy drops it.
 ///
 /// Both candidates go through [`usable`], so neither is trusted any further than
 /// a remembered Pairing is. One candidate a source: a last start that does not
@@ -323,7 +320,7 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: under(filled(last.grilling, &profiles, store::Role::Grilling).await?),
+        grilling: filled(last.grilling, &profiles, store::Role::Grilling).await?,
         implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
         review: under(filled(last.review, &profiles, store::Role::Review).await?),
     })
@@ -343,7 +340,7 @@ async fn filled(
     usable(crate::pairing_defaults::platform_default(profiles, role)).await
 }
 
-/// One role's memory as a picker would show it, for the two roles that can
+/// One role's memory as a picker would show it, for the one role that can
 /// remember the row that runs no session.
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
@@ -369,7 +366,9 @@ async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
 /// Profile's own list.
 ///
 /// A remembered role that was picked away is `None` here too — it is nothing to
-/// prefill a *Pairing* with, and its caller applies it on its own account.
+/// prefill a *Pairing* with. The review's caller applies that on its own
+/// account, and the grilling's does not: the row it would have prefilled onto
+/// retired with *No grilling*, so this is the whole of that role's reading.
 ///
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
@@ -986,10 +985,10 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
 /// accept, and that is what the human is offered. A stage that brings a Process
 /// to life adds to both, and each of them is written knowing the other is there.
 ///
-/// One for now. The record reads and writes all five — see [`store::Process`] —
-/// so this list is the whole of what holds the other four back, and nothing
+/// Two for now. The record reads and writes all five — see [`store::Process`] —
+/// so this list is the whole of what holds the other three back, and nothing
 /// about them has to be added when one of them arrives.
-const LANDED: &[Process] = &[Process::Develop];
+const LANDED: &[Process] = &[Process::Develop, Process::Tinker];
 
 /// Say what kind of work a drafting Conversation is for.
 ///
@@ -1176,14 +1175,18 @@ pub(crate) async fn rename_companion_branch(
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
-/// **Two landings, and which of them is what the human picked.** A Conversation
-/// with a grilling Pairing is grilled: the session that starts is the interview,
-/// and what the work becomes is settled through it. One whose human picked *no
-/// grilling* has settled it already — the Brief is the whole plan — so the same
-/// branch, the same worktree, the same frozen Brief and the same fixed Pairings
-/// leave the Conversation Implementing, with an inline session building from the
-/// Brief alone. Everything above this line is the same work either way, which is
-/// why it is one press and one function rather than two.
+/// **Two landings, and the Conversation's Process is what says which.** A
+/// **Develop** one is grilled, and the session that starts is the interview
+/// through which what the work becomes is settled. A **Tinker** lands in
+/// Follow-up instead, and the session that starts is the follow-up's own, primed
+/// with the Brief as the thing to follow up on. Everything between the press and
+/// those two lines is the same work — the fetch, the base, the branch, the
+/// checkouts, the freeze and the memory — which is why it is one function rather
+/// than two beside each other.
+///
+/// Which roles it waits on is the Process's too: Develop wants all three, and a
+/// Tinker is never interviewed, so it wants the two a wrap-up wants and the
+/// Grilling picker is drawn for it nowhere.
 ///
 /// Everything that has to be true is checked here, each refused by its own name,
 /// because each is something different for the human to go and do. They are
@@ -1268,19 +1271,29 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
+    // What kind of work this is, which decides three things below: which roles
+    // the press waits on, where it lands the Conversation, and which session it
+    // starts in the Worktree.
+    let process = conversation.process;
+
+    // A Tinker asks exactly what a take-up asks — the Profile the work runs
+    // under and the Profile the review reads under — because it is never
+    // interviewed and no Grilling picker is drawn for one to have been chosen
+    // on. Reused rather than written again beside it: it is the same question,
+    // so it is the same answer.
+    let unready = match process {
+        store::Process::Tinker => unready_to_wrap(implementation.as_ref(), &review),
+        _ => unready(grilling.as_ref(), implementation.as_ref(), &review),
+    };
+
+    if let Some(refusal) = unready {
         return Ok(refusal.grilling());
     }
-
-    // Which of the two this press is, decided once and before anything is made:
-    // what it changes is where the Conversation lands and what is launched into
-    // the worktree, and neither of those is a question git has to be asked.
-    let grilled = !grilling.skipped();
 
     // Kept rather than only judged: it is what the session about to start is
     // primed with, and it is frozen from the moment the Conversation moves.
@@ -1505,9 +1518,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         named: Some(&named),
     };
 
-    let moved = match grilled {
-        true => store::start_grilling(pool, id, base, &path, &checkouts).await?,
-        false => store::start_building(pool, id, base, &path, &checkouts).await?,
+    // And where the press lands it, which is the one thing about the record
+    // that the Process decides: the same transaction either way, with the state
+    // it comes out in as the word that differs.
+    let moved = match process {
+        store::Process::Tinker => store::start_tinkering(pool, id, base, &path, &checkouts).await?,
+        _ => store::start_grilling(pool, id, base, &path, &checkouts).await?,
     };
 
     match moved {
@@ -1547,19 +1563,32 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // end of this rather than handed on — what drives a grilling from there is
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
-    let _driving = state.drivers.driving(id);
+    //
+    // A Tinker hands it on instead, to the run that is about to drive its
+    // follow-up: that one is a loop rather than a launch, and it holds the
+    // registration for as long as it is driving.
+    let driving = state.drivers.driving(id);
 
-    // A start with no grilling in it is a run rather than an interview, so what
-    // follows is the runner's: a session on the implementation skill, watched out
-    // to the pull request and the wrap-up exactly as an inline implementation
-    // picked at the end of a grilling is. It takes a registration of its own —
-    // see [`crate::runner::build_the_ungrilled`] — so the one above can go when
-    // this press does.
-    if !grilled {
-        crate::runner::build_the_ungrilled(state, id);
+    // A Tinker's own session, which is the follow-up's: the same skill, the same
+    // rounds and the same ending, opened on the Brief as the thing to follow up
+    // on. Spawned rather than awaited, exactly as a steer into Follow-up spawns
+    // it — what drives the Conversation from here is that run, and the human is
+    // standing at the button this is answering. See
+    // [`crate::runner::following_up`].
+    if process == store::Process::Tinker {
+        tokio::spawn(crate::runner::following_up(
+            state.clone(),
+            id,
+            crate::follow_ups::FollowUp::priming(brief),
+            driving,
+        ));
 
         return Ok(GrillingStarted::Started);
     }
+
+    // And a grilling keeps it here, for the paragraph above's reason: what
+    // drives one from here is the session this is about to launch.
+    let _driving = driving;
 
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
@@ -1569,7 +1598,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NoSuchConversation);
     };
 
-    // Only the grilling Profile. The implementation one is fixed before starting
+    // The grilling Profile is what this session runs under. The implementation
+    // one is fixed before starting
     // because the grilling ends by handing over to it — that hand-over is a
     // later stage's, and this session is not run under it.
     //
@@ -1581,7 +1611,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: nothing in a sandbox says what a session is for —
     // a global instructions file there holds the human's own text and never
     // Verkstead's — so the prompt is where it is said — see [`crate::skills`].
-    if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
+    if let Some(pairing) = conversation.grilling_pairing.clone()
         && let Some(prompt) = state
             .sessions
             .skills()
@@ -2038,12 +2068,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
     }
 
@@ -2990,16 +3020,14 @@ async fn read(state: &AppState, id: i64) {
 /// they will do anything, and each says so in its own words — see
 /// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
-    grilling: &PickedView,
+    grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
 ) -> Option<Unready> {
-    // The row that runs no session is a choice made, so it passes here as a
-    // Pairing does — and leaves nothing to be broken, there being no Profile.
-    let grilling = match grilling {
-        PickedView::Skipped => None,
-        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
-        _ => return Some(Unready::NoGrillingProfile),
+    // An account or nothing, this role having no row to be picked away with:
+    // a Pairing is what answers it, and anything else is a picker to go back to.
+    let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoGrillingProfile);
     };
 
     let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
@@ -3012,7 +3040,7 @@ fn unready(
         _ => return Some(Unready::NoReviewProfile),
     };
 
-    [grilling, Some(implementation), review]
+    [Some(grilling), Some(implementation), review]
         .into_iter()
         .flatten()
         .any(|pairing| pairing.profile.broken.is_some())
@@ -3170,21 +3198,31 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 }
 
 /// Whether everything needed before the work starts is settled, as the pane
-/// reads it: the three roles, and a Brief with something in it.
+/// reads it: the roles the Process uses, and a Brief with something in it.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
 /// the base commit, which are decided against git when the button is pressed.
+///
+/// **The same reading the press takes**, one Process at a time: a **Tinker** is
+/// never interviewed, so the Grilling picker is drawn for it nowhere and the
+/// button waits on the two roles a wrap-up waits on. The press asks exactly this
+/// again when it is pressed — see [`start_grilling`], where the pair of readings
+/// stand side by side.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    grilling: &PickedView,
+    process: store::Process,
+    grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
     brief: &str,
 ) -> bool {
-    state == store::Lifecycle::Draft
-        && !brief.trim().is_empty()
-        && crate::profiles::ready_to_grill(grilling, implementation, review)
+    let roles = match process {
+        store::Process::Tinker => crate::profiles::ready_to_wrap(implementation, review),
+        _ => crate::profiles::ready_to_grill(grilling, implementation, review),
+    };
+
+    state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles
 }
 
 /// Whether git would take this as a branch name.

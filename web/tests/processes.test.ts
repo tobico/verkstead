@@ -42,14 +42,13 @@ describe("the roles a process is run under", () => {
   });
 
   /// And which of them the human may answer with nobody at all, which is what
-  /// each picker's own rows are drawn from — so these are the rows offered
-  /// today rather than the rows the ADR ends with. Two of them are on their way
-  /// out and go from here in the stage that takes them out of the app: *No
-  /// grilling* when Tinker lands, and *No review* on a Review when that stage
-  /// does, a Review without a review being Fix Merge Issues with the comments
-  /// answered.
+  /// each picker's own rows are drawn from — so these are the rows offered today
+  /// rather than the rows the ADR ends with. One of them is still on its way out
+  /// and goes from here in the stage that takes it out of the app: *No review* on
+  /// a Review, a Review without a review being Fix Merge Issues with the
+  /// comments answered. *No grilling* has gone already.
   it("says which of them may be picked away", () => {
-    expect(ROLES.Develop.away).toEqual(["grilling", "review"]);
+    expect(ROLES.Develop.away).toEqual(["review"]);
     expect(ROLES.Tinker.away).toEqual(["review"]);
     expect(ROLES.Review.away).toEqual(["review"]);
     expect(ROLES.Investigate.away).toEqual([]);
@@ -69,15 +68,16 @@ describe("the roles a process is run under", () => {
   /// than writing them in itself: a row a picker spelled by hand would go on
   /// being offered through the stage that retired it.
   it("says the words each row that runs nothing is offered in", () => {
-    expect(away("Develop", "grilling")).toBe("No grilling");
     expect(away("Develop", "review")).toBe("No review");
     expect(away("Review", "review")).toBe("No review");
   });
 
-  /// And nothing where the role has to be answered with an account.
+  /// And nothing where the role has to be answered with an account — the
+  /// grilling role on every Process that uses it, *No grilling* being retired.
   it("offers no row where the table does not name the role", () => {
     expect(away("Investigate", "review")).toBeUndefined();
     expect(away("FixMergeIssues", "review")).toBeUndefined();
+    expect(away("Develop", "grilling")).toBeUndefined();
     expect(away("Tinker", "grilling")).toBeUndefined();
   });
 
@@ -101,9 +101,11 @@ describe("the roles a process is run under", () => {
       );
     }
 
-    // With only Develop landed, the panel is the shape every draft gets.
-    expect(OFFERED).toEqual(["Develop"]);
+    // Both the landed ones are run under several roles, so the panel is the
+    // shape every draft gets.
+    expect(OFFERED).toEqual(["Develop", "Tinker"]);
     expect(ROLES.Develop.control).toBe("panel");
+    expect(ROLES.Tinker.control).toBe("panel");
   });
 
   /// Every Process the wire carries has a row, for the reason all five are

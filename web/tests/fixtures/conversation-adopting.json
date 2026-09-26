@@ -20,7 +20,7 @@
   "compiles_uncached": false,
   "direction": null,
   "driven": false,
-  "grilling_pairing": "Nothing",
+  "grilling_pairing": null,
   "id": 1,
   "implementation_pairing": null,
   "naming": false,

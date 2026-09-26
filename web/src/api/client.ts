@@ -1309,16 +1309,15 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 
 /// Choose which account and model a conversation's grilling session runs under.
 ///
-/// `null` is the picker's own "No grilling" row, which is a choice like any
-/// other rather than the absence of one: the brief goes straight to an inline
-/// implementation.
+/// An account and nothing else: the picker has no row that is not one, *No
+/// grilling* having retired in favour of the Tinker process.
 export function chooseGrillingPairing(
   id: number,
-  choice: RoleChoice,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/grilling-pairing`,
-    choice,
+    pairing,
   );
 }
 
