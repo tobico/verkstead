@@ -367,6 +367,15 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     case "devices":
       return [["devices"]];
 
+    // And what is *out there* moving, which is a different list and a different
+    // question: a device nobody has typed an address for was heard advertising
+    // itself, or one that had been heard stopped. The cluster has not changed for
+    // it — the rows the pane drew of the membership are not re-read, which is the
+    // whole reason the Discovered list is a read of its own — and the browse
+    // behind it is held open by this read rather than by anything the page says.
+    case "discovered":
+      return [["discovered"]];
+
     case "profiles":
       return [["profiles"]];
 

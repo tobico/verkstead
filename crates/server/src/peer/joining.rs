@@ -392,6 +392,32 @@ impl Joins {
             })
             .collect())
     }
+
+    /// And the devices those rows name, by Device Id, which is what a
+    /// **Discovered** row is left out for — see
+    /// [`crate::device::Devices::discovered`].
+    ///
+    /// **Every row rather than the ones still inside their ten minutes.** One
+    /// that was refused or ran out is still drawn under the list until somebody
+    /// dismisses it, and a discovered row for the same device beside it would be
+    /// two things to press about one machine — so what says a device is left out
+    /// is that this one is holding a row about it at all.
+    ///
+    /// The ids rather than the rows: what the caller does with them is ask
+    /// whether a device it heard of is among them, and a **pending row** is the
+    /// other reading's — see [`Joins::pending`].
+    pub(crate) async fn awaiting(&self) -> Result<Vec<String>> {
+        let Some(pool) = self.kept.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        Ok(verkstead_store::asked_joins(pool)
+            .await
+            .context("reading the devices this one is waiting on an answer from")?
+            .into_iter()
+            .map(|asked| asked.device)
+            .collect())
+    }
 }
 
 /// `POST /api/peer/v1/join` — a device asking to be let into this one's

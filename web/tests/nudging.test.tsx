@@ -513,6 +513,12 @@ const ABOUT: Record<string, readonly string[]> = {
   // same Devices section and nothing else — a settings pane this sweep never
   // opens either.
   devices: [],
+  // And what is out there rather than in the cluster: a device nobody has typed
+  // an address for was heard advertising itself, or one that had been heard
+  // stopped. It names the Discovered list under that same section — not the
+  // membership beside it, the two being two readings — and that pane is one this
+  // sweep never opens either.
+  discovered: [],
 };
 
 describe("what a Nudge is about", () => {

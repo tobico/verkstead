@@ -1,5 +1,6 @@
-//! How a device is found by one nobody has typed an address into: this one
-//! says what it is on the LAN, and says it over mDNS (ADR-0020, *Discovery*).
+//! How a device is found by one nobody has typed an address into: this one says
+//! what it is on the LAN and listens for the others saying the same, both over
+//! mDNS (ADR-0020, *Discovery*).
 //!
 //! **Because the setup cluster mode was written for is a human with two or
 //! three machines**, and asking them for an address apiece is asking them for
@@ -36,6 +37,23 @@
 //! feature that silently does not work, with nothing on either machine saying
 //! why.
 //!
+//! **And the other half of it is the browse** — see [`Browse`] and [`Found`],
+//! which is what the **Discovered** list is drawn from: the same service read
+//! rather than written, keyed by device id, and held while somebody is looking
+//! rather than for the life of the server. What the rows say is the name, the
+//! mark for the OS, the addresses the advertisement named with the port it
+//! landed on, and where it was found. What is *not* in them is the three kinds
+//! of device left out — a member, this device, and one a join is already pending
+//! for — which is [`crate::device::Devices::discovered`], the answer being where
+//! a membership is known.
+//!
+//! **A browse finds things after the fact**, so the first read of that list is
+//! empty or short and the rows arrive over the seconds after it. What draws them
+//! is [`Nudge::Discovered`], announced as the found list moves: a device
+//! appearing, and one that stopped advertising — its goodbye, or its records
+//! running out on their TTL, which is a machine whose lid shut and arrives as
+//! the same event. Nothing polls (ADR-0009).
+//!
 //! **And it is withdrawn on the way out**, which is the one ordered stop this
 //! server has — see [`ToldToStop`] and [`Advertisement::withdrawn`]. A signal
 //! this process is asked to stop on sends the goodbye that takes the row off
@@ -46,12 +64,19 @@
 //! the withdrawal is what makes a restart tidy rather than what makes a stale
 //! row impossible.
 
-use std::time::Duration;
+use std::collections::BTreeMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use mdns_sd::{ServiceDaemon, ServiceInfo, UnregisterStatus};
+use mdns_sd::{
+    Receiver, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo, UnregisterStatus,
+};
+use verkstead_schema::Nudge;
 
 use crate::device::Device;
 use crate::device::reading::Reading;
+use crate::nudge::Nudges;
 
 /// What two Verksteads on one LAN find each other under, browsed and
 /// advertised as spelled here.
@@ -101,6 +126,30 @@ const PORT: &str = "port";
 /// machines runs out on its TTL the way a killed server's does, and the process
 /// ends either way.
 const WITHDRAWING: Duration = Duration::from_secs(2);
+
+/// How long a browse outlives the last read of the Discovered list: **five
+/// minutes**.
+///
+/// **A spell rather than a pane saying it has closed**, because a pane cannot:
+/// a phone that locks, a tab that is closed and a laptop whose lid shut all say
+/// nothing at all, and a browse held until somebody announced they had stopped
+/// looking would be one held for ever. So what keeps it alive is the reading
+/// being read — the pane's first draw, every announcement the browse itself
+/// makes, and the re-read the viewer does on coming back to a page.
+///
+/// Five minutes because the cost of being wrong is lopsided. Held too long, a
+/// browse nobody is reading costs a multicast group and a thread; dropped too
+/// soon, a pane somebody is still looking at stops hearing about the machine
+/// they are waiting to appear. The next read starts another either way.
+const SPELL: Duration = Duration::from_secs(5 * 60);
+
+/// And how long the browse waits on the wire before looking at the clock.
+///
+/// The spell has to be noticed on a LAN where nothing is happening, and nothing
+/// wakes a browse but an event: this is what makes the wait for one bounded.
+/// Fifteen seconds, which is a fifth of a minute's worth of doing nothing and
+/// well inside [`SPELL`].
+const LOOKING: Duration = Duration::from_secs(15);
 
 /// What this device says about itself on the wire: the four things a row on
 /// somebody else's **Discovered** list is drawn from.
@@ -346,6 +395,460 @@ fn announced(mdns: u16, announcement: &Announcement) -> Option<Announced> {
     );
 
     Some(Announced { daemon, fullname })
+}
+
+/// One device this one has heard of on the LAN, as its advertisement said it.
+///
+/// **What a row on the Discovered list is drawn from, and nothing more.** There
+/// has been no handshake and nothing has been asked: an advertisement says a
+/// device is somewhere and proves nothing at all about it, which is why there is
+/// no fingerprint here and why an **Add** on the row is a **Join** like any
+/// other rather than a link being made.
+///
+/// Compared whole — see [`Browsing::resolved`], where a re-resolution of a
+/// device already held is the browse hearing the same thing twice rather than
+/// news for the open pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// The Device Id out of the TXT record, which is what this is keyed by:
+    /// two Verksteads on one machine share a hostname and an address, and the
+    /// id is the one thing about either that is nobody else's.
+    pub device: String,
+
+    /// The name it is shown under.
+    pub name: String,
+
+    /// The word for its operating system.
+    pub os: String,
+
+    /// And where to find it: every address it advertised with the port its own
+    /// listener landed on, in the order to try them.
+    ///
+    /// **The port on every one of them**, because that is what makes each of
+    /// these a thing a dial can be made to as written — see
+    /// [`crate::peer::dialling`], which takes an address with a port on it as
+    /// the address it was given.
+    pub addresses: Vec<String>,
+}
+
+/// What this device has heard of the others, and the browse it hears them over
+/// (ADR-0020, *Discovery*).
+///
+/// **Held while somebody is looking rather than for the life of the server.**
+/// The browse starts when the Discovered reading is first asked for and is
+/// dropped once nothing has asked for it in [`SPELL`] — a phone that closes a
+/// tab says nothing, so what keeps it alive is the reading being read rather
+/// than a pane announcing itself. What it costs while it is running is a
+/// multicast group and a thread; what it costs when it is not is nothing.
+///
+/// **And a browse finds things after the fact.** A cold one has heard nothing,
+/// so the first read is empty or short and the rows arrive over the seconds
+/// after it: what draws them is [`Nudge::Discovered`], announced as the found
+/// list moves, which is the arrangement ADR-0009 put every other list in this
+/// viewer on. Nothing polls.
+#[derive(Debug, Clone)]
+pub struct Browse {
+    heard: Heard,
+}
+
+/// Where the Discovered list's rows come from.
+#[derive(Debug, Clone)]
+enum Heard {
+    /// A real browse of [`SERVICE`] over a multicast, held while the reading is
+    /// being read. Which is every running server.
+    OverTheLan(Arc<Browsing>),
+
+    /// And what a fixture says it heard, which is heard from nowhere.
+    ///
+    /// Here for the reason [`Reading::stated`] and `Device::stated` are: what a
+    /// suite about the three exclusions is asking is which rows an answer leaves
+    /// out, and standing a multicast up to ask it would be a test whose subject
+    /// was the LAN the runner happened to be on. It is also what the committed
+    /// fixtures of this list are written through — a golden file cannot be
+    /// written off whatever is advertising on a build machine.
+    Stated(Vec<Found>),
+}
+
+impl Browse {
+    /// A browse of the multicast every other implementation is on, ready to
+    /// start when the reading is first asked for.
+    pub fn of_this_device(nudges: Nudges) -> Browse {
+        Browse::of_this_device_on(MDNS_PORT, nudges)
+    }
+
+    /// The same, spoken over `mdns` rather than [`MDNS_PORT`] — for a suite, and
+    /// for [`Advertisement::of_this_device_on`]'s reason: both halves of a
+    /// discovery have to be on one port to hear each other, and a test on 5353
+    /// would be reading whatever real Verksteads are on the runner's LAN.
+    pub fn of_this_device_on(mdns: u16, nudges: Nudges) -> Browse {
+        Browse {
+            heard: Heard::OverTheLan(Arc::new(Browsing {
+                mdns,
+                nudges,
+                listening: Mutex::new(Listening::default()),
+            })),
+        }
+    }
+
+    /// What a fixture states it heard, browsing nothing — see [`Heard::Stated`].
+    pub fn stated(found: Vec<Found>) -> Browse {
+        Browse {
+            heard: Heard::Stated(found),
+        }
+    }
+
+    /// And a device that has heard nothing and never will, which is every
+    /// router stood up without one.
+    pub fn heard_nothing() -> Browse {
+        Browse::stated(Vec::new())
+    }
+
+    /// What is held now, and the browse started or kept alive by the asking.
+    ///
+    /// **The read is what says somebody is looking**, which is the whole of how
+    /// the browse is governed: this is called once per answer of the Discovered
+    /// reading, and [`SPELL`] is measured from the last of them.
+    pub(crate) fn found(&self) -> Vec<Found> {
+        match &self.heard {
+            Heard::Stated(found) => found.clone(),
+            Heard::OverTheLan(browsing) => browsing.asked(),
+        }
+    }
+}
+
+/// A browse of [`SERVICE`], and what it has heard.
+struct Browsing {
+    /// The port the multicast is spoken over, which is [`MDNS_PORT`] anywhere
+    /// but a suite.
+    mdns: u16,
+
+    /// Word to the open pages that the found list moved, which is what draws a
+    /// device that appeared without a reload and without a poll.
+    nudges: Nudges,
+
+    /// And what is held: the rows, and when the reading was last asked for.
+    listening: Mutex<Listening>,
+}
+
+/// What a browse holds between the reads of it.
+#[derive(Debug, Default)]
+struct Listening {
+    /// Whether one is running, which is what says a read has to start one.
+    ///
+    /// Written here rather than read off the task, because what a read has to
+    /// know is whether to spawn: a flag under the same lock as the rows cannot
+    /// disagree with them, and two reads arriving together start one browse.
+    browsing: bool,
+
+    /// What it has heard, by Device Id — see [`Found`].
+    ///
+    /// Ordered, so that two reads a moment apart are the same rows in the same
+    /// order: the list is drawn under a heading rather than sorted by the page,
+    /// and an order that came out of a hash would move a row under a thumb.
+    found: BTreeMap<String, Found>,
+
+    /// And when the reading was last asked for, which [`SPELL`] is measured
+    /// from. `None` is a browse nobody has asked for yet.
+    asked: Option<Instant>,
+}
+
+impl Browsing {
+    /// The rows, the ask noted, and a browse started where none is running.
+    fn asked(self: &Arc<Browsing>) -> Vec<Found> {
+        let (found, start) = {
+            let mut listening = self.listening();
+
+            listening.asked = Some(Instant::now());
+
+            let start = !listening.browsing;
+            listening.browsing = true;
+
+            (listening.found.values().cloned().collect(), start)
+        };
+
+        // Spawned once the lock has been let go of: the browse takes it as it hears
+        // things, and has nothing to wait on the read that started it for.
+        if start {
+            tokio::spawn(browsing(Arc::clone(self)));
+        }
+
+        found
+    }
+
+    /// One event off the browse, and the open pages told where it moved the
+    /// list.
+    fn hearing(&self, event: ServiceEvent) {
+        match event {
+            ServiceEvent::ServiceResolved(service) => self.resolved(&service),
+            ServiceEvent::ServiceRemoved(_, fullname) => self.gone(&fullname),
+
+            // A search started or stopped, and an instance found before it
+            // resolved: each of them is this browse describing itself rather
+            // than a device to draw a row for.
+            _ => {}
+        }
+    }
+
+    /// A device heard whole: held under its id, and announced where that is news.
+    ///
+    /// **A re-resolution of what is already held is not news.** A browse
+    /// re-resolves as records are refreshed, and an announcement apiece would be
+    /// the open pane re-reading this list every couple of minutes for an answer
+    /// that had not moved.
+    ///
+    /// And an advertisement this build cannot read a row out of is left alone:
+    /// something on the wire under this service name that names no device is
+    /// either not a Verkstead or one from a future that says more than this one
+    /// knows how to draw.
+    fn resolved(&self, service: &ResolvedService) {
+        let Some(found) = row(service) else {
+            tracing::debug!(
+                fullname = service.get_fullname(),
+                "something advertising this service said too little about itself to draw a \
+                 row for, so it is left off the Discovered list",
+            );
+
+            return;
+        };
+
+        {
+            let mut listening = self.listening();
+
+            if listening.found.get(&found.device) == Some(&found) {
+                return;
+            }
+
+            tracing::debug!(
+                device = %found.device,
+                name = %found.name,
+                addresses = ?found.addresses,
+                "a device was heard advertising itself on the LAN",
+            );
+
+            listening.found.insert(found.device.clone(), found);
+        }
+
+        self.nudges.announce(Nudge::Discovered);
+    }
+
+    /// And one that is gone: the goodbye a device told to stop sends, or its
+    /// records running out on their TTL — which is a machine whose lid shut, and
+    /// arrives here as the same event.
+    ///
+    /// The instance is named by the Device Id, so what a removal names is the
+    /// row to take away. One this device is not holding is one it never heard,
+    /// which is a browse that started after a goodbye rather than anything to
+    /// say.
+    fn gone(&self, fullname: &str) {
+        let Some(device) = fullname.strip_suffix(&format!(".{SERVICE}")) else {
+            return;
+        };
+
+        {
+            let mut listening = self.listening();
+
+            if listening.found.remove(device).is_none() {
+                return;
+            }
+
+            tracing::debug!(device, "a device stopped advertising itself on the LAN");
+        }
+
+        self.nudges.announce(Nudge::Discovered);
+    }
+
+    /// Whether nobody has asked for the reading in [`SPELL`], which is what ends
+    /// a browse.
+    fn abandoned(&self) -> bool {
+        self.listening()
+            .asked
+            .is_none_or(|asked| asked.elapsed() > SPELL)
+    }
+
+    /// And the browse over: nothing held, and the next read free to start
+    /// another.
+    ///
+    /// **What was heard goes with it**, rather than being kept for a reader who
+    /// may come back: what a stopped browse holds is what was on the LAN when
+    /// somebody was last looking, and a machine switched off in the meantime
+    /// would be drawn as a device to press Add on. The read that starts the next
+    /// browse is answered short and the rows arrive over the seconds after it,
+    /// which is what every first read of this list does.
+    ///
+    /// **And nothing is announced.** A list emptied because nobody has read it
+    /// in five minutes is a change with nobody to tell.
+    fn stopped(&self) {
+        let mut listening = self.listening();
+
+        listening.browsing = false;
+        listening.found.clear();
+    }
+
+    /// What is held, locked.
+    fn listening(&self) -> MutexGuard<'_, Listening> {
+        self.listening
+            .lock()
+            .expect("what a browse has heard is not poisoned")
+    }
+}
+
+impl std::fmt::Debug for Browsing {
+    /// Said as the port and what is held, the [`Nudges`] in it being a channel
+    /// with nothing to say about itself.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Browsing")
+            .field("mdns", &self.mdns)
+            .field("listening", &self.listening)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The browse itself: held while the reading is being read, and let go of once
+/// it has not been for [`SPELL`].
+///
+/// **The daemon is this task's own**, rather than the one an advertisement
+/// registered through: a server may be advertising or not — the switch is the
+/// advertising half alone — and a browse that borrowed that daemon would be a
+/// discovery turned off by the switch that is there to stop this machine
+/// *saying* anything.
+///
+/// A daemon that will not start is a warning and no rows, which is the stance
+/// the advertisement takes for its reason: a machine with no multicast to speak
+/// over still serves a workbench and still answers a typed address.
+async fn browsing(browse: Arc<Browsing>) {
+    let Some((daemon, events)) = looking(browse.mdns) else {
+        browse.stopped();
+
+        return;
+    };
+
+    loop {
+        // The wire, or the clock: what is waited on is an event, and the
+        // timeout is what makes the spell something this task notices on a LAN
+        // where nothing at all is happening.
+        match tokio::time::timeout(LOOKING, events.recv_async()).await {
+            Ok(Ok(event)) => browse.hearing(event),
+
+            // The daemon has let go of this browse, which is not something
+            // anything here asks for: what is left is to stop holding rows off
+            // a browse that is not running.
+            Ok(Err(gone)) => {
+                tracing::debug!(%gone, "the browse of the LAN ended, so nothing is being heard");
+
+                break;
+            }
+
+            Err(_quiet) => {}
+        }
+
+        if browse.abandoned() {
+            tracing::debug!(
+                "nothing has read the Discovered list for a while, so this device has \
+                 stopped browsing the LAN",
+            );
+
+            break;
+        }
+    }
+
+    let _ = daemon.stop_browse(SERVICE);
+    let _ = daemon.shutdown();
+
+    browse.stopped();
+}
+
+/// A daemon on `mdns` with a browse of [`SERVICE`] running, or a warning saying
+/// which of the two would not happen.
+fn looking(mdns: u16) -> Option<(ServiceDaemon, Receiver<ServiceEvent>)> {
+    let daemon = match ServiceDaemon::new_with_port(mdns) {
+        Ok(daemon) => daemon,
+        Err(why) => {
+            tracing::warn!(
+                why = %why,
+                "no mDNS daemon could be started, so this device cannot hear the others on \
+                 the LAN and they are linked by an address somebody types",
+            );
+
+            return None;
+        }
+    };
+
+    match daemon.browse(SERVICE) {
+        Ok(events) => {
+            tracing::debug!("this device is browsing the LAN for the others");
+
+            Some((daemon, events))
+        }
+
+        Err(why) => {
+            tracing::warn!(
+                why = %why,
+                "this device's own mDNS daemon refused to browse for the others, so they \
+                 are linked by an address somebody types",
+            );
+
+            let _ = daemon.shutdown();
+
+            None
+        }
+    }
+}
+
+/// The row an advertisement is worth, or nothing where it said too little to
+/// draw one.
+///
+/// **The three words out of the TXT record and the port out of the SRV**, which
+/// is the record the resolution answers with: the two carry the same number and
+/// the one that cannot be a string that is not a number is the one to stand on.
+///
+/// Nothing at all where the id, the name or the OS word is missing: a row with
+/// no id cannot be keyed, excluded or pressed, and one with no name or mark is a
+/// row that says nothing to the person reading it.
+fn row(service: &ResolvedService) -> Option<Found> {
+    let device = service.get_property_val_str(ID)?;
+    let name = service.get_property_val_str(NAME)?;
+    let os = service.get_property_val_str(OS)?;
+
+    // Sorted, the resolution answering a set: IPv4 before IPv6 and each of them
+    // in order, so that the addresses a row draws are the same two reads running
+    // and the order a dial works down is settled here rather than by a hash.
+    let mut addresses: Vec<IpAddr> = service
+        .get_addresses()
+        .iter()
+        .map(ScopedIp::to_ip_addr)
+        .filter(dialable)
+        .collect();
+
+    addresses.sort_unstable();
+
+    if addresses.is_empty() {
+        return None;
+    }
+
+    Some(Found {
+        device: device.to_owned(),
+        name: name.to_owned(),
+        os: os.to_owned(),
+        addresses: addresses
+            .into_iter()
+            .map(|address| SocketAddr::new(address, service.get_port()).to_string())
+            .collect(),
+    })
+}
+
+/// Whether an address a device advertised is one a dial could be made to as it
+/// is written.
+///
+/// **Which a link-local IPv6 address is not.** It means nothing without the
+/// interface it was heard on, and what carries that is a scope nothing on the
+/// dialling side of this takes — so a row drawn with one would be an Add that
+/// could only fail. Everything else is kept, the loopback included: two
+/// Verksteads on one machine really do reach each other there.
+fn dialable(address: &IpAddr) -> bool {
+    match address {
+        IpAddr::V4(_) => true,
+        IpAddr::V6(address) => address.segments()[0] & 0xffc0 != 0xfe80,
+    }
 }
 
 /// What says this process has been told to stop, which is the one thing this
