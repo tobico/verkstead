@@ -514,7 +514,9 @@ $ cargo fmt
 $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
-$ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
+$ blender -b tools/hammer/verkstead-hammer.blend \
+    --python tools/hammer/render.py   # the artwork, from the blend file it is modelled in
+$ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
 $ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
 $ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
@@ -724,26 +726,82 @@ human than a failure to load.
 
 The icons are all downscaled by the script above (using ImageMagick from the dev
 shell) to the sizes the favicon, the manifest and iOS ask for. The smaller PNGs
-are committed so a build needs nothing but cargo — replace the artwork and
-re-run the script rather than touching them.
+are committed so a build needs nothing but cargo — re-render the artwork and
+re-run the two cut scripts rather than touching them.
 
-There are three pieces of artwork, because one square does not serve every size
-and every platform:
+There is one piece of artwork, and every icon in the repository is a downscale
+of it:
 
-| Artwork | Cut into | Why it is its own file |
+| Artwork | Cut into | Where it comes from |
 | --- | --- | --- |
-| `icons/verkstead.png` | `icon-192`, `icon-512` | The full mark on a transparent field: the manifest's icons, and the sidebar's at `3rem` |
-| `icons/verkstead-hammer.png` | `icon-32`, and every icon under `packaging/` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
-| `icons/verkstead-bg.jpg` | `apple-touch-icon.png` | The only one drawn with a field of its own, because iOS composites a transparent icon onto black |
+| `tools/hammer/verkstead-hammer.png` | `icon-32`, `icon-192`, `icon-512`, `apple-touch-icon`, and every icon under `packaging/` | A 1024 square rendered out of [`tools/hammer/verkstead-hammer.blend`](../tools/hammer/verkstead-hammer.blend) by [`tools/hammer/render.py`](../tools/hammer/render.py). The blend file is the mark's source of truth; the render is what the two cut scripts read. Blender comes from the machine rather than the dev shell — see below, where `uv` does too |
 
-The iOS icon used to be the full mark flattened onto the manifest's
-`theme_color`; now it carries its own field, so the browser chrome's colour and
-the icon's are no longer the same value and nothing keeps them in step.
+It sits in `tools/hammer/` rather than beside the icons it is cut into, because
+`assets/` is vite's `publicDir`: everything under it is served at the site root
+and, the viewer being embedded, carried inside every binary including the
+headless CLI. Nothing serves the 1024 square — only the two cut scripts read
+it, and they read it from the repository — so a copy of it in every binary
+would be over 600 KB nobody ever asks for. It was under `assets/icons` while it was
+the mark's source and had a claim to be the viewer's too; the blend file is
+that now, and the render is an intermediate like the cut icons are.
+
+The iOS icon is the only output with a field under it and the only one with a
+margin: iOS ignores transparency and composites whatever it is given onto
+black, so `tools/generate-icons.sh` flattens the render onto the chrome's own
+`#21201e` — the manifest's `theme_color` and the document's `theme-color` tag,
+so the tile reads as the app's rather than as a third colour — and draws it at
+160 inside a 180 square, because iOS rounds the tile's corners itself and the
+head and the handle both run to the edge of the artwork. That colour is a
+literal in the script; move `theme_color` and it has to move too.
 
 The manifest asks for `any` rather than `any maskable`: the artwork runs to the
-edges of its square, and a launcher masking it to a circle would cut the hammer
-and the anvil's horn off. Art with a margin inside it could claim `maskable`
+edges of its square, and a launcher masking it to a circle would cut the head
+and the handle's end off. Art with a margin inside it could claim `maskable`
 back.
+
+A session working on that artwork drives Blender over the MCP rather than by
+writing scripts at it, and two committed files are what put that server in
+front of it. [`.mcp.json`](../.mcp.json) names it — `uvx blender-mcp`, with
+`DISABLE_TELEMETRY=1` because the package phones home unless it is told not to,
+and the loopback address and port it dials at the other end — and
+[`.claude/settings.json`](../.claude/settings.json) approves that one server by
+name, an unapproved project server being one a session is prompted about and a
+session having nobody to prompt. They are approved by name rather than with the
+blanket key, so a server somebody adds later is not approved by accident.
+
+Both are committed for good. A session reads them when it starts and never
+again, and Verkstead hands a sandboxed session a copy of the account's
+configuration with its own servers taken out
+([ADR 0011](adr/0011-agent-backends.md)), so the repository's own files are
+the only route: drop them and the next session that has to re-render the icon
+has no Blender.
+
+**Two tools here come from the machine rather than the dev shell**, and
+`flake.nix` carries neither: `blender`, which renders, and `uv`, which
+`.mcp.json` runs the server through as `uvx` and which
+[`tools/hammer/serve.py`](../tools/hammer/serve.py) shells out to again for the
+bundled addon. A `nix develop` with Blender installed and no `uv` gets an MCP
+server that never connects and a `serve.py` that dies in `subprocess.run` —
+which is a confusing way to find out, so it is said here rather than left to be
+discovered. Neither is in the shell because neither is wanted by a build or a
+test: the icons are committed, and only a session re-cutting the artwork needs
+either.
+
+The server connects to Blender lazily, on the first tool call, and what it
+connects to is [`tools/hammer/serve.py`](../tools/hammer/serve.py) — the addon
+the same package bundles, running inside a Blender and listening on that port.
+Start it before the first tool call and leave it running:
+
+```console
+$ blender -b --python tools/hammer/serve.py &   # 9876, unless -- --port says otherwise
+$ kill %1                                       # closes the socket and unregisters the addon
+```
+
+It is a script rather than an addon installed into a Blender profile because
+Blender here has no window and the bundled addon refuses to start without one —
+its commands run from a timer callback and a background Blender runs no timers.
+The script supplies that timer itself; its own header says the rest, including
+why the virtual display the addon suggests is not an option in a Sandbox.
 
 `packaging/` is the second tree of generated assets, and it sits outside
 `assets/` deliberately. Everything under that directory is `publicDir` — served

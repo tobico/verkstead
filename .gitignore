@@ -8,3 +8,6 @@
 /web/dist-share
 .direnv
 /.pnpm-store
+
+# Blender writes one of these beside a file every time it saves over it.
+*.blend1
