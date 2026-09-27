@@ -168,17 +168,19 @@ plus this build directory, which breaks the next time either moves — so the
 whole path is written and under vitest, and the writing is what is refused. Its
 account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 
-**And the Rust tray app is still what a release carries**, on each platform
-until the stage that takes that platform's release leg: the packaging section
-below builds it, `crates/desktop` is its tray half behind the CLI's default-on
-`desktop` feature — a build that says nothing gets both halves, which is what
-makes every image that can serve one that can also `ask`, and
-`--no-default-features` is the headless build the musl CLI and the nix package
-take — and it is the one crate here that links a system toolkit, GTK on Linux,
-which is why the workspace builds in the dev shell and nowhere else here.
-Its own account is [ADR 0012](adr/0012-desktop-tray-binary.md) and CONTEXT.md's
-**Startup Registration**, which is where **Launch on Startup** is written down;
-nothing in this section starts it.
+**No release carries the Rust tray app any longer**, Windows having been the
+last platform whose release leg went over to the packed Electron app: nothing
+the packaging section below builds is that app. `crates/desktop` is still here
+all the same — its tray half behind the CLI's default-on `desktop` feature, a
+build that says nothing getting both halves, and `--no-default-features` the
+headless build the musl CLI, the nix package and every desktop artifact's
+sidecar take — and it is the one crate here that links a system toolkit, GTK
+on Linux, which is why the workspace builds in the dev shell and nowhere else
+here. Taking it away is the last stage of
+[the Electron roadmap](roadmaps/electron-desktop/ROADMAP.md); its account until
+then is [ADR 0012](adr/0012-desktop-tray-binary.md) and CONTEXT.md's **Startup
+Registration**, which is where **Launch on Startup** is written down; nothing
+in this section starts it.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -595,13 +597,11 @@ $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering th
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the menu bar template, the icns and the ico
 ```
 
-The last is the Windows desktop artifact a release ships — the Linux and macOS
-ones are the packed Electron app, which is `pnpm run pack` in `desktop/` rather
-than a script here. It takes everything from the working tree and leaves one
-file under `target/`, and it wants `web/dist` already built, because the viewer
-is compiled into the binary it wraps. It also runs only where its artifact does:
-the msi wants Windows for the WiX toolset and the MSVC build under it, so the
-dev shell has not got it.
+None of the three desktop artifacts a release ships is a script here. All
+three are the packed Electron app, which is `pnpm run pack` in `desktop/` —
+one configuration and one command, handed the `verkstead` the artifact is
+to carry, and each of them packing only on the platform it is for. The three
+paragraphs below are what that comes to on each.
 
 The AppImage is the Electron app with a `verkstead` packed inside it as its
 sidecar, and which binary that is is the one thing
@@ -619,8 +619,8 @@ same variable the static musl one the CLI matrix published. What comes out is
 `desktop/package.json` pins — fetched by the pack rather than taken from the dev
 shell, whose Electron is a different patch version. The viewer is inside the CLI
 rather than beside it, so `web/dist` is that build's business rather than the
-pack's; one configuration serves all three platforms, with the Linux and macOS
-targets filled in and Windows still the script below.
+pack's; and one configuration serves all three platforms, the Linux, macOS
+and Windows targets all filled in.
 
 The dmg is the same pack on a Mac, and the one place `pnpm run pack` is given
 two paths rather than one: the download there is a universal app for both Apple
@@ -662,16 +662,34 @@ pre-signed Electron framework for carrying another Team ID. It packs on a Mac
 only: `lipo`, `codesign` and `hdiutil` are the operating system's own tools, and
 there is no cross build of it from here.
 
-The msi is the two files a Windows install is — the unified `verkstead` and the
-windows-subsystem shim that opens it from an icon — wrapped in an installer,
-because two files beside each other are not a portable download. What goes where
-is [`tools/verkstead.wxs`](../tools/verkstead.wxs), and all of it goes into the
-profile: `%LOCALAPPDATA%\Programs\Verkstead`, the user's own Start menu, and
-the user's own `PATH`, so that `verkstead ask` works in a terminal opened
-afterwards. Per-user because the package is unsigned, and asking for
-administrator would be an unsigned program asking for the machine. It runs on
-Windows only: the WiX toolset's `candle` and `light` compile the package, and
-MSVC and the Windows SDK build what goes in it.
+The msi is the same pack on Windows, and the one artifact of the three that is
+an installer rather than a file to keep wherever you like: an app whose two
+ways in are a Start-menu entry and a directory on the user's `PATH` has to be
+put somewhere before either of them exists.
+
+```console
+$ cargo build --release -p verkstead-cli --no-default-features
+$ cd desktop && pnpm run pack ../target/release/verkstead.exe
+```
+
+What comes out is `target/electron/out/Verkstead-x86_64.msi`, and what it
+installs goes into the profile: `%LOCALAPPDATA%\Programs\Verkstead`, with the
+launcher `Verkstead.exe` at its root and the sidecar under `resources\cli`; an
+entry in the user's own Start menu; and `resources\cli` on the user's own
+`PATH`, so that `verkstead ask` works in a terminal opened afterwards. The
+CLI's own directory rather than the install root, because the root is where
+the launcher stands and Windows resolves a `PATH` lookup without regard to
+case ([ADR-0020](adr/0020-electron-desktop.md)). Per-user because the package
+is unsigned, and asking for administrator would be an unsigned program asking
+for the machine. That `PATH` entry and the install directory's name are the two
+things electron-builder's msi target cannot be told, so
+[`desktop/scripts/msi.mjs`](../desktop/scripts/msi.mjs) patches them into the
+generated WiX project through the target's `msiProjectCreated` hook — string
+surgery on a generated file, so every patch has to match exactly once or the
+pack stops rather than writing an installer with no `PATH` entry in it. It
+packs on Windows only: the WiX toolset that compiles the package is a set of
+Windows programs, fetched by electron-builder rather than carried by the dev
+shell, and MSVC builds what goes inside.
 
 ### The sessions suite, and the machine under it
 
@@ -934,11 +952,12 @@ the 22 points the bar lays out, and the `Template` at the end of the name is the
 whole of how it is asked for: Electron reads the suffix off the file name. Then
 `net.tobico.Verkstead.icns`, which `pack.mjs` stages beside the icon directory
 for electron-builder to copy into the Mac bundle and name in its `Info.plist`,
-and `net.tobico.Verkstead.ico`, which Windows wants twice:
-`crates/desktop/build.rs` compiles it into the shim as a resource, nothing
-installed beside an exe being what Alt-Tab and the taskbar draw it with, and
-`tools/verkstead.wxs` names it again for the entry the msi leaves in Apps &
-Features. It is written by
+and `net.tobico.Verkstead.ico`, staged beside it for the platform
+that wants one picture three times over: electron-builder edits it into
+`Verkstead.exe` as the launcher's own resource, nothing installed beside an exe
+being what Alt-Tab and the taskbar draw it with; the msi names it as
+`ARPPRODUCTICON`, so the row in **Installed apps** is drawn with it; and the
+Start-menu shortcut is advertised against it. It is written by
 [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
 hammer, and committed for the same reason the viewer's icons are. That script
 rewrites the whole directory from nothing on every run — so a size that stops

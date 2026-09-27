@@ -532,19 +532,18 @@ until something replaces them.
 ### The desktop app, on Windows
 
 `Verkstead-x86_64.msi` is the download, and it is an installer rather than a
-file to keep wherever you like: a Windows install is two files — the whole
-`verkstead`, and a small windows-subsystem shim beside it that supplies the
-`desktop` verb a Start-menu shortcut has nowhere to write
-([ADR-0012](adr/0012-desktop-tray-binary.md), as amended) — and two files
-beside each other are not a portable download. x86_64 only, which is every
+file to keep wherever you like: it holds the app, the server it starts and the
+viewer the two of them draw between them, with Electron's own browser runtime
+beside them, and what an install adds is the two doors Windows has — an entry
+in the Start menu, and a directory on your `PATH`. x86_64 only, which is every
 Intel and AMD machine, and an arm64 one runs it under the emulation Windows
 does for exactly this.
 
 **Opening it is stopped the first time, and that is expected.** The package is
 unsigned — there is no code-signing certificate behind it, which is
-[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
-— and Windows marks a file that arrived from the internet, so SmartScreen puts
-a blue **Windows protected your PC** window in front of it with a **Don't run**
+[ADR-0020](adr/0020-electron-desktop.md)'s decision rather than an oversight —
+and Windows marks a file that arrived from the internet, so SmartScreen puts a
+blue **Windows protected your PC** window in front of it with a **Don't run**
 button and nothing else that looks like a way on. There is a way on, and it is
 two clicks:
 
@@ -565,28 +564,122 @@ asking for the machine, and elevation buys a downloader nothing they wanted.
 There is one elevated step on this platform and it is below, after the install
 rather than inside it: one you take once, having already decided to trust this,
 rather than a package you hand the machine to before you have seen it.
-Everything therefore lands in the profile: the two exes under
+Everything therefore lands in the profile: the app under
 `%LOCALAPPDATA%\Programs\Verkstead`, a **Verkstead** entry in your own Start
 menu, and the uninstall entry in **Installed apps** beside everything else you
-installed. A newer msi replaces the copy that is there rather than standing
-beside it.
+installed. There is nothing to choose on the way through — a progress window,
+and then Verkstead itself, which the installer starts as it finishes. A newer
+msi replaces the copy that is there rather than standing beside it.
 
-**One thing about that install lands in the wrong list, and it is known.** On a
-fresh machine the uninstall entry was registered under the machine's own
-`HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall` rather than under
-your `HKCU`, so **Installed apps** offers it to everybody who signs in to this
-machine instead of only to you. Nothing else moved with it: the files, the Start
-menu entry and the `PATH` entry are all in your profile, and the install still
-asked nobody for anything. It is **parked rather than fixed** — finding what
-makes Windows Installer register it there wants a Windows machine to work on,
-and what it costs is an entry in the wrong list rather than an install that
-touched the machine. Uninstalling from **Installed apps** works either way.
+**One thing about that install may land in the wrong list.** The row in
+**Installed apps** is Windows Installer's own to write and the hive it writes
+it in is not something a package chooses: the msi this one replaces had it
+under the machine's `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall`
+rather than under your `HKCU`, so **Installed apps** offered it to everybody
+who signs in to this machine instead of only to you, and this package may yet
+do the same. What that row cannot say is where the install went. That is
+written under your own `HKCU\Software\Microsoft\Installer\Products` and nowhere
+machine-wide, and the files, the Start-menu entry and the `PATH` entry are all
+in your profile — so what a row in the wrong list costs is an entry somebody
+else can see rather than an install that touched the machine. Uninstalling from
+**Installed apps** works either way.
 
-**And the install directory goes on your `PATH`**, which is the half of this
-download that is not the icon at all: `verkstead ask`, `verkstead guide` and
-the rest work in a terminal opened *after* the install. One that was already
-open never read the entry — closing it and opening another is the whole of the
-fix — and the uninstall takes the entry away with the files.
+**And a directory inside the install goes on your `PATH`**, which is the half
+of this download that is not the window at all: `verkstead ask`, `verkstead
+guide` and the rest work in a terminal opened *after* the install. What goes on
+it is `resources\cli` under `%LOCALAPPDATA%\Programs\Verkstead` — the CLI's own
+directory rather than the install root, because the root is where the launcher
+`Verkstead.exe` stands and Windows resolves a `PATH` lookup without regard to
+case, so a root on it would answer `verkstead guide` with a window instead of
+the Guide. A terminal that was already open never read the entry — closing it
+and opening another is the whole of the fix — and the uninstall takes the entry
+away with the files.
+
+**What is on the screen once Verkstead is opened from the Start menu is a
+window**, with a button on the taskbar and an icon in the notification area.
+The window is the workbench itself, loaded off `127.0.0.1:8422` with nothing
+about the viewer changed to draw inside it, and the menu on the icon is three
+items: **Open** brings the window back, and is what a click on the icon does;
+**View Logs** opens the file under `%LOCALAPPDATA%\Verkstead` that this run's
+logging goes to when there is no console to print it in; and **Quit** stops the
+app and the server with it. Closing the window leaves Verkstead running with
+that icon to bring it back, which is what **When the window is closed** says
+until you say otherwise. **Windows hides an icon it has not seen before**, in
+the flyout the `^` on the taskbar opens — dragging it out of there onto the
+taskbar is what pins it, and until you do, the app is running with its icon one
+click further away than this describes.
+
+**The window has no title bar**, as on Linux and a Mac. The workbench's own
+heads are the top of it, and what stands where a title bar would have been is
+Windows' own minimise, maximise and close, inset at the top-right corner and
+drawn on the paper a pane head is drawn on with their symbols in the head's
+ink. A machine in the dark scheme gets the dark paper, and a flip while the app
+is running recolours them in that run rather than at the next launch. They are
+the platform's own rather than something the page drew, which is what keeps
+**snap layouts** on a hover of the maximise button. Nothing of the page's is
+ever under them: the head at each edge of the window is padded by what the
+controls took, read again whenever the window changes shape. The gestures
+either side of them are the app's: a double-click on any pane head maximises
+the window and a second one restores it, and `Ctrl+M` puts it away. The menu
+bar is hidden and Alt is what brings it down, with that same **Minimize** under
+**Window** where a keystroke was not what you wanted.
+
+**There is nothing to learn about starting it.** The app takes one flag,
+`--hidden`, and its own startup registration is what writes that rather than
+anybody typing it; what it reads instead is the server's own environment, so
+`VERKSTEAD_DATA_DIR` moves the Data Directory off `%APPDATA%\Verkstead` exactly
+as it does for a `verkstead serve` run by hand. Everything else about this
+machine is set rather than typed, on the **Desktop** section of the settings
+page: **Launch on Startup**, **When the window is closed** — keep running in
+the tray, ask first, or quit — and **Show tray icon**, with **View Logs**
+beside them for the machine where that icon is switched off.
+
+**The window it opens is logged in.** Every page of the workbench answers 401
+without the **Workbench Key**, the secret Verkstead keeps in its Data Directory
+where no session can reach it — and the app reads that file itself, before
+there is a server to ask one of, so the window comes up on the address with the
+key on the end of it. There is nothing to keep anywhere and nothing to type:
+**Open** is that same window brought forward rather than a login handed over
+again. The app's own startup line names the address and no key, because **View
+Logs** opens a file under your own `%LOCALAPPDATA%` that anybody at the screen
+can read.
+
+**Launch on Startup is a value under the Run key**, `Verkstead` under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, naming the app where it
+is installed with `--hidden` after it. The box is that value read: ticking it
+writes it, unticking it takes it away, and there is no copy of the answer
+anywhere for the two to disagree about. A login start comes up with no window
+on the screen while there is an icon in the notification area to reach it by,
+and with a window where that icon is switched off. **Windows' own second
+opinion is read as well**: the **Startup apps** tab in Task Manager keeps its
+switch in a key of its own that the value knows nothing about, so a Verkstead
+switched off there reads as off here — Verkstead agrees with you rather than
+putting back what you took away — and ticking the box again is what turns it
+on. **And an upgrade from the old tray app takes its registration over once**:
+that app wrote a value of its own beside this one, named
+`net.tobico.Verkstead` after the application rather than after the product, so
+the first launch of this one reads whether it said start at login, carries that
+into the registration and removes it. Once, at a launch, and nothing you are
+asked about: it is this app's own registration under an older name rather than
+a second setting.
+
+**Answering from your phone is the settings page's Remote access section**, as
+it is on the other two, and Tailscale itself is the machine's own. What differs
+is the elevation prompt behind the serve checkbox: serving to a tailnet is
+refused for a process that is not the tailnet's operator, and here the press
+comes up as a **User Account Control** dialog.
+
+**What is inside is the app and the released `verkstead` beside it**, rather
+than one binary whose entry point supplies a verb. The CLI sits in a directory
+of its own under the app's resources — `resources\cli`, which is the directory
+the install put on your `PATH` — and it is the very build a Release publishes,
+the Windows exe the same run's CLI leg made, downloaded into the package rather
+than compiled a second time ([ADR-0020](adr/0020-electron-desktop.md)). It is
+what a session started here is handed to ask with, so the two halves of an ask
+are one build. It is an ordinary console program, which is what a terminal, a
+session and a test all want of it; the Start-menu entry opens `Verkstead.exe`
+at the install root instead, and that is what keeps a black window off the
+screen when somebody clicks it.
 
 **Then one elevated step, once — and the wizard takes it for you.** Sessions on
 this machine run as a local account of Verkstead's own rather than as you —
@@ -632,55 +725,6 @@ uninstall, because the msi knows about none of the three — a machine that has
 run Verkstead and then had it taken off should look as it did. Nothing there is
 a failure for not having been found, so it is also how a half-finished install
 is tidied up.
-
-What is on the screen once **Verkstead** is opened from the Start menu is an
-icon in the notification area, and the menu on it is four items: **Open** brings
-the viewer back, and is what a double-click on the icon does;
-**View Logs** opens the file under `%LOCALAPPDATA%\Verkstead` that the server's
-logging goes to when there is no console to print it in; **Launch on Startup**
-is a checkbox over a `net.tobico.Verkstead` value under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; and **Exit** stops the
-server. **Windows hides an icon it has not seen before**, in the flyout the `^`
-on the taskbar opens — dragging it out of there onto the taskbar is what pins
-it, and until you do, the app is running with its icon one click further away
-than this describes.
-
-**The browser it opens is logged in**, as on the other two: what the app opens
-is the login link rather than the bare address, and **Open** composes it afresh
-at every press, which is what a browser that has forgotten the cookie wants.
-Started from a terminal with `--no-open`, **Open** is the whole of it: the
-app's own startup line names the address and no key, **View Logs** opening a
-file under your own `%LOCALAPPDATA%` that anybody at the screen can read.
-
-**Answering from your phone is the settings page's Remote access section**, as
-it is on the other two, and Tailscale itself is the machine's own. What differs
-is the elevation prompt behind the serve checkbox: serving to a tailnet is
-refused for a process that is not the tailnet's operator, and here the press
-comes up as a **User Account Control** dialog.
-
-**The shortcut opens the shim rather than the binary**, and that is what keeps
-a console window off the screen: `verkstead.exe` is an ordinary console program
-on every platform, because that is what a terminal, a session and a test all
-want of it, so a shortcut naming it would put a black window in front of
-whoever clicked. The shim is the windows-subsystem exe that starts the binary
-beside it and exits with what it exited with, and there is nothing else about
-the two files to keep track of.
-
-**The startup registration is rewritten at every launch while it is there**,
-with the path of what is running and the `desktop` verb behind it, so a
-Verkstead installed somewhere else — a newer package, a profile that moved —
-heals the entry the next time you start it by hand, and a machine that never
-ticked the box is never registered. What the box cannot see is Windows' own
-second opinion: the **Startup apps** tab in Task Manager, which Explorer
-records separately, so switching Verkstead off there leaves the box ticked and
-the value where it was.
-
-`--no-open` starts it without the browser and `--data-dir` moves the Data
-Directory off `%APPDATA%\Verkstead`, both of them for `verkstead desktop` run
-from a terminal — an app started from the Start menu is started with no
-arguments at all. Started that way there is no console to print in, so the log
-file is the whole account of the run; started from a terminal, whatever stops
-it is said there as well.
 
 **Sessions run on Windows**, and what one may reach is the same description as
 on Linux and a Mac rendered over the **local account** the elevated command

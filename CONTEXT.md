@@ -542,7 +542,12 @@ toplevel advertised all four window capabilities, and moved by neither the
 compositor's own toolkit settings nor a decoration layout written into the app's
 config. So the pair that is missing follows the platform Chromium picked rather
 than a desktop refusing anything, and what answers it is the app's own chrome
-rather than a control the page draws — which stays rejected. A double-click on any
+rather than a control the page draws — which stays rejected. **Windows draws
+all three, and offers its snap layouts off the middle one**: hit-testing the
+band a point at a time there answers `MAXBUTTON` under the maximise button,
+which is what that platform asks a window before it offers them — measured on
+a real one rather than taken on trust from having kept the platform's
+controls. A double-click on any
 pane head maximises the window and a second one restores it; and **Minimize** is
 on the hidden menu bar under **Window**, on the platform's own
 `CommandOrControl+M`, because that desktop binds no minimise of its own out of the
@@ -583,9 +588,12 @@ answers with the strip across the top that is still the page's, so what they
 took is the slivers either side of it — hands both insets to the frame, and the
 header at each edge is padded by that much. One sum and no platform in it, a
 Mac's traffic lights coming out as a left inset and the other two platforms'
-controls as a right one. Read again whenever the window changes shape, because
-the rectangle at load can disagree with the window it is in; and the one pane a
-narrow window shows is at both edges at once.
+controls as a right one. **Read again on both of the events that move it**,
+the overlay's own and the window's resize: the sum is the window's width less
+the strip the page was left, and Windows delivers those two a moment apart —
+so a reading taken on either event alone pairs a rectangle that has moved with
+a window that has not, and pads the head by the difference or by nothing at
+all. And the one pane a narrow window shows is at both edges at once.
 **A page with no header gets a bare drag bar** of the same band: the onboarding
 wizard, the no-such-page, and the moment before the verdict about this machine
 lands. A window that cannot be moved for the length of any of them is the same

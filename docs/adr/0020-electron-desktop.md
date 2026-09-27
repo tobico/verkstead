@@ -165,6 +165,18 @@ tray came up. The main process's pure parts are under vitest, and so is the
 page with a stubbed bridge. nixpkgs' Electron joins the dev shell for running
 the app locally; the flake stays daemon-only.
 
+Amended: **the `PATH` entry is the msi target's `msiProjectCreated` hook
+rather than a fragment of our own.** There is nowhere for a second WiX source
+to go — the target reads its template out of `app-builder-lib`, hands candle
+one `project.wxs` and light one `project.wixobj`, and takes no override for
+either. What it does take is that key, naming a JS file it runs after the
+project is written and before candle compiles it, so the entry and the install
+directory's name beside it are patches of the generated project instead —
+`desktop/scripts/msi.mjs`. String surgery on a generated file, so each patch
+has to match exactly once or the pack stops rather than writing an installer
+with no `PATH` entry in it. What goes on the `PATH` and why is unchanged; the
+mechanism this paragraph named for it was one electron-builder has not got.
+
 ## Considered Options
 
 - **Keeping `verkstead desktop` beside Electron**, or shrinking the crate to

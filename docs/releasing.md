@@ -38,10 +38,12 @@ Each of these waits on the one above it.
    nothing.
 2. **Prepare.** The workspace version in [`Cargo.toml`](../Cargo.toml) is set
    to the release's — `Cargo.lock` with it, which carries a version per
-   workspace crate — and committed to `main` by `github-actions[bot]` as
-   `chore: version <version>`. Everything below is built from that commit by
-   sha rather than from `main`, so an hour-long release and a branch that moves
-   under it are not the same thing.
+   workspace crate, and [`desktop/package.json`](../desktop/package.json)
+   beside them, that being where electron-builder reads the msi's product
+   version and nothing else bumps it — and committed to `main` by
+   `github-actions[bot]` as `chore: version <version>`. Everything below is
+   built from that commit by sha rather than from `main`, so an hour-long
+   release and a branch that moves under it are not the same thing.
 3. **The viewer**, built once. `rust-embed` reads `web/dist` at compile time
    and what vite writes does not vary by platform, so building it per leg would
    cost eight times over and let the legs disagree about what they embedded.
@@ -113,27 +115,33 @@ runner — `LSMinimumSystemVersion`, 12.0, which is Electron's own where the Rus
 bundle's was the Apple silicon half's 11.0 — and it is the number
 [adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
 
-The Windows desktop leg is the one with an installer in it, and it is an
-installer because a Windows install became two files:
-[`tools/build-windows-msi.sh`](../tools/build-windows-msi.sh) builds the unified
-`verkstead` with the `desktop` feature its default leaves on, and beside it the
-windows-subsystem shim that supplies the `desktop` verb a Start-menu shortcut
-has nowhere to write. Two files beside each other are not a portable download,
-so [`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them in
-`Verkstead-x86_64.msi` (ADR-0012, as amended). That package is per-user
-throughout — the binaries under `%LOCALAPPDATA%\Programs\Verkstead`, the
-shortcut in the user's own Start menu, the install directory appended to the
-user's `PATH` — because the app is unsigned and elevation would buy a downloader
-nothing they wanted. The WiX toolset that compiles it is the runner image's own.
-There is no floor to hold any of it to: what an AppImage promises about glibc
-and a bundle about macOS 12, an exe gets from the C runtime Windows itself
-ships.
+The Windows desktop leg compiles nothing either, and it is the one with an
+installer in it. It waits on the whole of the matrix above and downloads
+`verkstead-windows-x64.exe` — the binary that matrix built and ran — then hands
+it to `pnpm run pack`, which packs the Electron app around that sidecar and
+wraps the result in `Verkstead-x86_64.msi` through electron-builder's WiX
+target ([ADR-0020](adr/0020-electron-desktop.md)). It stays on `windows-2025`
+all the same: the install and every assertion after it want a real Windows to
+happen on. That package is per-user throughout — the app under
+`%LOCALAPPDATA%\Programs\Verkstead`, the shortcut in the user's own Start menu,
+and the CLI's own directory inside the install appended to the user's `PATH` —
+because the app is unsigned and elevation would buy a downloader nothing they
+wanted. That directory rather than the install root, which holds a launcher
+named for the product: Windows resolves a lookup without regard to case, and a
+root on `PATH` would answer `verkstead guide` with a window. Nothing here
+installs a WiX toolset either — electron-builder fetches its own, which is one
+fewer unpinned tool than the leg that compiled Rust on this runner had. There
+is no floor to hold any of it to: what an AppImage promises about glibc and a
+bundle about macOS 12, an exe gets from the C runtime Windows itself ships.
 
 One thing about that package cannot say what the tag says. A Windows Installer
-version is three numbers and nothing after them, so `v0.1.0-rc.1` and
-`v0.1.0-rc.2` both arrive in Apps & Features as `0.1.0` — which is why the
-package allows an upgrade from a version reading the same as its own, and the
-second rc replaces the first rather than standing beside it.
+version is four numbers and only the first three of them are ever compared —
+electron-builder writes `major.minor.patch.0` out of `desktop/package.json`,
+which `prepare` gives the release's version with its pre-release suffix taken
+off — so `v0.1.0-rc.1` and `v0.1.0-rc.2` both arrive in **Installed apps** as
+`0.1.0`. Which is why the package allows an upgrade from a version reading the
+same as its own, and the second rc replaces the first rather than standing
+beside it.
 
 Each desktop leg then asserts the artifact itself rather than what was lying
 beside it: the AppImage is run as the file that is uploaded, the dmg is mounted
@@ -153,11 +161,19 @@ bundle that is the binary inside the artifact, run by path and asked for `ask`;
 on Windows it is `verkstead guide` in a terminal opened after the install, which
 is the same claim through the door an msi has — the `PATH` entry it wrote. An
 artifact carrying the app alone would pass every assertion above it and hand
-each session it spawned a binary with no `ask` in it. The Windows leg checks two
-more that are the installer's own: the install is in the user's profile with its
-record under `HKCU`, and the Start-menu entry opens the shim rather than the
-console program beside it. The dmg's leg adds four of its own, and every one of
-them is about something a run of the app cannot report.
+each session it spawned a binary with no `ask` in it. The Windows leg checks
+three more that are the installer's own. The install is in the user's profile
+with its record under `HKCU`. The Start-menu entry opens the launcher at the
+install root rather than the console program inside it, and opens no console
+with it — a subsystem being a fact about the file, read out of its PE header
+rather than off a run. **And an msi installed over an msi leaves one product,
+one `PATH` entry and one Start-menu entry**, which is the assertion no other
+leg has an equivalent of: over itself, which exercises the same-version rule
+above deterministically, and over the last Release's msi, which is what tests
+the UpgradeCode carried over from the package this one replaces. Where there
+is no Release to fetch that second half is skipped, with a warning saying in
+as many words that the upgrade went unchecked. The dmg's leg adds four of its
+own, and every one of them is about something a run of the app cannot report.
 
 That the app comes back out of the image sealed, over the bundle and over the
 sidecar inside it: the reason that was first written is gone — the bundle's
@@ -277,13 +293,20 @@ newcomer actually follows.
    the one part of this install no workflow can rehearse.
 
    Walk past it the way
-   [a downloader is told](adoption.md#the-desktop-app-on-windows), then open
-   Verkstead from the Start menu. The viewer opens in the browser and the icon
-   lands in the notification area — inside the flyout the `^` opens, until it
-   is dragged out onto the taskbar. Then, in a terminal opened after the install
-   rather than one that was already up, `verkstead --version`: the `PATH` entry
-   is the half of this download a human at a terminal uses, and a terminal that
-   was already open never read it.
+   [a downloader is told](adoption.md#the-desktop-app-on-windows). The install
+   ends with Verkstead already running: the workbench in a window of its own,
+   with a button on the taskbar and an icon in the notification area — inside
+   the flyout the `^` opens, until it is dragged out onto the taskbar. Then, in
+   a terminal opened after the install rather than one that was already up,
+   `verkstead --version`: the `PATH` entry is the half of this download a human
+   at a terminal uses, and a terminal that was already open never read it.
+
+   Then tick **Launch on Startup** on the settings page's **Desktop** section,
+   sign out and back in: Verkstead comes back with the icon in the notification
+   area and no window over what you were doing, and **Open** on that icon is the
+   way to one. That is the reading no runner can take: the value under the
+   Run key is read back where it is written, and what nothing tests until
+   somebody signs in is Windows running the command line it holds.
 
 6. **The flake, refreshed past nix's cache** — after the manifest commit has
    landed on `main`, which is a job later than the Release itself:
