@@ -1478,9 +1478,23 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 ///
 /// **The registry is per worktree**, and this Conversation's was made minutes
 /// ago by the take-up, so there may be nothing in it: the session is told to
-/// adopt the chain with `gh stack init` where `gh stack view` finds none. The
-/// branches are named in order from the bottom, which is the order `init`
-/// wants and the order a human checks it against.
+/// adopt the chain where `gh stack view` finds none. The branches are named in
+/// order from the bottom, which is the order a chain is adopted in and the
+/// order a human checks it against — but which command adopts them is left to
+/// the session. `docs/agents/git-workflow.md` documents `gh stack init` taking
+/// a predecessor and one new branch rather than a chain of any depth, and a
+/// prompt spelling out an argument list the extension may not take would be a
+/// session sent to run something that cannot work.
+///
+/// **And what this checkout holds is what an adoption adopts.** The take-up cut
+/// its Worktree on the Conversation's own branch, and the rest of the chain may
+/// be nowhere but `origin/…`: adopting a branch that is not here *creates* it
+/// rather than refusing, and the sync force-pushes whatever was adopted — so a
+/// branch invented empty here is the real one on origin overwritten, and in
+/// this workbench that branch is another Conversation's work. So the session is
+/// told to fetch and have every branch of the chain locally at origin's commit
+/// before it adopts anything, and to read the adopted chain back before it
+/// syncs.
 ///
 /// **And what the sync backs out on is the session's to resolve.** `gh stack
 /// sync` refuses rather than half-rebases when a branch conflicts, and `gh
@@ -1511,9 +1525,17 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          Sync the stack with the `gh {extension}` extension rather than merging or rebasing \
          by hand: it cascade-rebases each branch onto its updated parent and force-pushes \
          them atomically, which is what keeps the chain a chain. Its registry is kept per \
-         worktree and this worktree is new, so run `gh stack view` first and, where it \
-         knows of no stack, adopt the chain with `gh stack init {init}` — the branches in \
-         that order, bottom first.\n\n\
+         worktree and this worktree is new, so run `gh {extension} view` first.\n\n\
+         Where it knows of no stack, the chain is yours to adopt — and what this checkout \
+         holds is what gets adopted. Run `git fetch origin`, and make sure there is a \
+         local branch at origin's commit for every one of {init}, bottom first, before \
+         you adopt anything: adopting a branch this checkout has not got creates it empty \
+         rather than refusing, and the sync below force-pushes whatever was adopted, so a \
+         branch invented here is the real one on origin overwritten — and these branches \
+         are other people's work. Then adopt them in that order, the way \
+         `gh {extension} --help` says a chain that already exists is adopted, and read it \
+         back with `gh {extension} view` before you sync anything: a chain that came back \
+         wrong is one to stop at rather than to force-push.\n\n\
          Then `gh stack sync`. Where it reports a conflict it backs out rather than leaving \
          a branch half-rebased, and `gh stack rebase` is what walks the chain again and \
          stops in the conflict for you to resolve. Resolving it is the job: a conflict is \
@@ -1527,7 +1549,11 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
         listed = listed.join(", "),
         worktree = watched.worktree.display(),
         extension = crate::stacks::EXTENSION,
-        init = branches.join(" "),
+        init = branches
+            .iter()
+            .map(|branch| format!("`{branch}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
     )
 }
 
@@ -1892,9 +1918,21 @@ mod tests {
             "synced rather than merged into branch by branch: {told}",
         );
         assert!(
-            told.contains("gh stack init stage-01 stage-02 rate-limiting"),
-            "adopted first where the worktree's registry is empty, bottom branch \
+            told.contains("`stage-01`, `stage-02`, `rate-limiting`")
+                && told.contains("bottom first"),
+            "the chain is named in the order it is adopted in, bottom branch \
              first: {told}",
+        );
+        assert!(
+            told.contains("git fetch origin") && told.contains("origin's commit"),
+            "and this checkout is made to hold every branch of it before \
+             anything is adopted, an adoption creating what it cannot find: \
+             {told}",
+        );
+        assert!(
+            !told.contains("gh stack init stage-01"),
+            "and no argument list is spelled out for a form of the command \
+             nothing here has checked the extension takes: {told}",
         );
         assert!(
             told.contains("gh stack rebase"),

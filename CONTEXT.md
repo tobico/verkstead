@@ -2470,11 +2470,15 @@ the ordered list from the bottom — a fix low in a stack changing everything
 above it — with the goes counted per stack rather than per pull request, and `gh
 stack sync` doing the work whatever the resolution strategy says. What that
 session is told is the chain, the one worktree every branch of it is reached
-through, `gh stack init` over those branches where the worktree holds no
-registry of its own, `gh stack sync`, and `gh stack rebase` for whatever the
-sync backs out on — then the repository's tests, and every branch pushed. Every
-other Conversation holds one pull request per repository and is the paragraph
-above.
+through, a `git fetch` and a local branch at origin's commit for each of them
+before the chain is adopted where the worktree holds no registry of its own —
+an adoption creating a branch it cannot find, and the sync force-pushing what
+it adopted over the real one — then `gh stack sync`, and `gh stack rebase` for
+whatever the sync backs out on, the repository's tests, and every branch
+pushed. Which command adopts the chain is the session's: `gh stack init` is
+documented for one branch onto its predecessor, and Verkstead does not spell
+out an argument list the extension may not take. Every other Conversation holds
+one pull request per repository and is the paragraph above.
 
 **And the extension is asked for before anything is sent at a stack.** `gh
 stack` is a separate install and a session's `gh` runs under a home of

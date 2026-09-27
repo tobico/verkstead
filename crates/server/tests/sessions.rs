@@ -22430,9 +22430,16 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     );
     assert!(
         prompt.contains("gh stack sync")
-            && prompt.contains("gh stack init stage-01 rate-limiting stage-03"),
-        "told to adopt the chain where this worktree has no registry and then to \
-         sync it: {prompt}",
+            && prompt.contains("`stage-01`, `rate-limiting`, `stage-03`")
+            && prompt.contains("bottom first"),
+        "told to adopt the chain, in order, where this worktree has no registry \
+         and then to sync it: {prompt}",
+    );
+    assert!(
+        prompt.contains("git fetch origin") && prompt.contains("origin's commit"),
+        "and to hold every branch of the chain locally first, an adoption \
+         creating what this checkout has not got and the sync force-pushing it \
+         over the real one: {prompt}",
     );
     assert!(
         !prompt.contains("Merge the pull request's base branch"),
