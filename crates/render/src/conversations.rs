@@ -1513,8 +1513,12 @@ pub struct StageDocument {
     pub done: bool,
 
     /// What the stage stands on, by the labels its line names — `["01", "03"]`
-    /// of `after 01, 03` — or `null` where its line declares nothing, which is
-    /// every line of every roadmap written before any of this.
+    /// of `after 01, 03` — or `null` where nothing was declared, which is every
+    /// line of every roadmap written before any of this.
+    ///
+    /// Null on every line of a roadmap that declares on none of them, whatever
+    /// prose its tails hold: what a line says is only a declaration where the
+    /// whole file declares, so an old roadmap is drawn exactly as it always was.
     ///
     /// Empty is the root: `no dependencies`, the human's own wording. An `after`
     /// naming nobody is the same empty list, and is a roadmap the judging
@@ -1522,13 +1526,15 @@ pub struct StageDocument {
     pub stands_on: Option<Vec<String>>,
 
     /// The platform its line names, as the line names it — `windows` of `on
-    /// windows` — or `null` where it names none.
+    /// windows` — or `null` where it names none, and null throughout a roadmap
+    /// that declares on no line at all, for the reason above.
     ///
     /// Shown beside what the stage stands on and acted on by nothing: placing a
     /// stage on a device that matches is a follow-up once cluster mode has
-    /// landed. Independent of the line above it — a line whose whole tail is a
-    /// platform is undeclared with a platform, because a forgotten declaration
-    /// hiding behind one is what the all-or-nothing rule is for.
+    /// landed. Independent of the line above it — a line of a declaring roadmap
+    /// whose whole tail is a platform is undeclared with a platform, because a
+    /// forgotten declaration hiding behind one is what the all-or-nothing rule
+    /// is for.
     pub platform: Option<String>,
 
     /// The brief rendered and sanitized, or `null` where there is nothing to

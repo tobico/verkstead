@@ -39,10 +39,13 @@ function anchor(stage: StageDocument): string {
 /// on, and the platform it wants where it names one.
 ///
 /// Nothing at all where the line declared neither, which is every line of every
-/// roadmap written before there was anything to declare — so such a roadmap's
-/// pane reads exactly as it always did. A platform on its own is drawn on its
-/// own: the line is undeclared, and saying so is the refusal's business rather
-/// than this pane's.
+/// roadmap written before there was anything to declare — the server judges the
+/// whole file before it reads a line of it, so such a roadmap arrives with
+/// nothing declared on any line and its pane reads exactly as it always did.
+///
+/// A platform on its own is drawn on its own: within a roadmap that declares,
+/// such a line is undeclared, and saying so is the refusal's business rather than
+/// this pane's.
 function declares(stage: StageDocument): string | undefined {
   const said: string[] = [];
 

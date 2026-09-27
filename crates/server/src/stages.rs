@@ -647,6 +647,19 @@ fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
 
     let files = briefs(&directory);
 
+    // Whether this roadmap declares at all, which is a fact about the whole file
+    // rather than about a line — see [`declarations::judge`], which is asked here
+    // for the same reason it refuses over the file at once. A roadmap written
+    // before there was anything to declare has prose after its link, and a word
+    // following an `on` in it is not a platform somebody typed wrong: such a
+    // roadmap is drawn exactly as it always was, which is the promise every part
+    // of this makes. A roadmap that declares badly still shows what its lines
+    // say, that being what the human has to go and fix.
+    let declaring = !matches!(
+        declarations::judge(name, &list),
+        declarations::Judgement::Undeclared
+    );
+
     let stages: Vec<StageSource> = list
         .lines()
         .filter_map(checklist::entry)
@@ -654,7 +667,7 @@ fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
             // What its line declares, read off the same tail the in-flight
             // annotation lives in: the two share it in either order and neither
             // reading trips on the other.
-            let declared = declarations::read(entry.after);
+            let declared = declaring.then(|| declarations::read(entry.after));
 
             StageSource {
                 number: entry.label.to_owned(),
@@ -666,13 +679,19 @@ fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
                 done: entry.checked,
                 // The root comes over as the empty list, which is what the pane
                 // draws it as: *stands on nothing*.
-                stands_on: declared.stands_on.map(|stands_on| match stands_on {
-                    declarations::StandsOn::Nothing => Vec::new(),
-                    declarations::StandsOn::Stages(stages) => {
-                        stages.into_iter().map(str::to_owned).collect()
-                    }
-                }),
-                platform: declared.platform.map(str::to_owned),
+                stands_on: declared
+                    .as_ref()
+                    .and_then(|declared| declared.stands_on.as_ref())
+                    .map(|stands_on| match stands_on {
+                        declarations::StandsOn::Nothing => Vec::new(),
+                        declarations::StandsOn::Stages(stages) => {
+                            stages.iter().map(|named| (*named).to_owned()).collect()
+                        }
+                    }),
+                platform: declared
+                    .as_ref()
+                    .and_then(|declared| declared.platform)
+                    .map(str::to_owned),
                 // Absent only where the roadmap names a brief nobody wrote, or
                 // one that will not be read. Both are the same nothing to draw,
                 // and the pane says so in words.
@@ -1699,6 +1718,50 @@ Turns this askance clone into Verkstead.
             "a file left behind with nothing in it is the same as no file",
         );
         assert_eq!(pane.stages[2].html, None, "and one that was never written");
+    }
+
+    /// What each line declares, drawn only where the roadmap declares at all.
+    ///
+    /// A roadmap written before there was anything to declare has prose after
+    /// the link — `— landed, and replaced by 04` is in this repository — and a
+    /// word following an `on` in prose is not a platform somebody typed wrong.
+    /// So the file is judged before any line of it is read for a declaration,
+    /// and such a roadmap is drawn exactly as it always was.
+    #[test]
+    fn an_undeclared_roadmaps_prose_is_not_read_as_a_declaration() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — waits on the API landing\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+        );
+
+        let pane = repo.opened("mvp").unwrap();
+
+        assert!(
+            pane.stages
+                .iter()
+                .all(|stage| stage.stands_on.is_none() && stage.platform.is_none()),
+            "not one line of it declares, so none of it is read as one: {:?}",
+            pane.stages,
+        );
+
+        // And a roadmap that declares badly still shows what its lines say: the
+        // refusal is what names the fault, and the pane is where the human goes
+        // to see the line that holds it.
+        let declaring = Repo::with(&[]);
+        declaring.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on freebsd\n",
+        );
+
+        let pane = declaring.opened("mvp").unwrap();
+
+        assert_eq!(pane.stages[0].stands_on, Some(Vec::new()));
+        assert_eq!(pane.stages[1].platform.as_deref(), Some("freebsd"));
     }
 
     /// The renderer in the page is loaded for the pane rather than for a stage,
