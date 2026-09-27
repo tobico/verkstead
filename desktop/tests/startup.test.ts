@@ -502,13 +502,13 @@ describe("the login-item arm", () => {
 });
 
 describe("a registration macOS is holding", () => {
-  /// What `SMAppService` leaves behind when a human switches Verkstead off
-  /// under Login Items in System Settings: the registration is still there and
-  /// `openAtLogin` alone does not say that starting it needs their approval.
-  /// So the box is greyed with the one place that can be put right named under
-  /// it, rather than one that ticks and writes a registration the system is
-  /// already ignoring.
-  it("is a box that cannot be ticked, and says where to turn it on", () => {
+  /// The state `SMAppService` reports beside `openAtLogin`: the registration is
+  /// still there, and `requires-approval` is the platform saying it will not
+  /// start Verkstead until somebody approves it. So the box is greyed with what
+  /// the human can actually do named under it — the row under *Open at Login*
+  /// and its minus button, which is what a real Mac had on it — rather than a
+  /// tick that writes a registration the system is already ignoring.
+  it("is a box that cannot be ticked, and says what to do about it", () => {
     const standing = startup(
       packed(dir, { platform: "darwin" }),
       loginItem(false, [...ARGS], false, "requires-approval"),
@@ -516,7 +516,10 @@ describe("a registration macOS is holding", () => {
 
     expect(standing.possible).toBe(false);
     expect(standing.on).toBe(false);
+    // Both halves of the note, because the pane on its own is where the first
+    // wording sent a human to look for a switch that is not on that row.
     expect(standing.why).toMatch(/System Settings/);
+    expect(standing.why).toMatch(/minus button/);
   });
 
   /// And every other thing that status says is the ordinary reading: a

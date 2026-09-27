@@ -447,11 +447,15 @@ by — registers through the API where it said on, registers nothing where it sa
 off, and removes it either way. Read at a launch rather than offered as a
 control: it is a registration this app made another way, not a second setting.
 **And a Mac can hold a registration that is there off.** The login item is
-`SMAppService` from macOS 13, so a human who switches Verkstead off under Login
-Items in System Settings leaves one registered and not running, which nothing
-Verkstead can call puts back — the box is greyed there with that place named
-under it, the third of the three reasons it is greyed at all beside a run from a
-checkout and a machine with nowhere to keep an entry.
+`SMAppService` from macOS 13, which reports a `status` beside it: a
+`requires-approval` registration is in place, is not starting Verkstead, and is
+not made to start it by registering again — so the box is greyed there, the third
+of the three reasons it is greyed at all beside a run from a checkout and a
+machine with nowhere to keep an entry. **Not a switch somebody flipped**: on
+macOS 15 the registration is an *Application* row under *Open at Login* in System
+Settings with no switch beside it, and the control on that row is the minus
+button, so what the greyed box names is where to remove the row rather than
+somewhere to turn it back on.
 _Avoid_: autostart setting, startup preference, run at login option
 
 **Desktop Settings**:

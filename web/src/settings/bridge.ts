@@ -85,8 +85,8 @@ export interface Registration {
   /// than one that ticks and does nothing — an unpackaged run is the case a
   /// developer meets, a machine with nowhere to keep an entry is the second,
   /// and a Mac holding Verkstead's login item for the human's approval is the
-  /// third: there, the registration is made and System Settings is the only
-  /// place it can be turned on.
+  /// third: there, the registration is made and inert, and System Settings is
+  /// where the row it made is removed so that this box can write a fresh one.
   readonly possible: boolean;
 
   /// Whether Verkstead comes up when the desktop session does.

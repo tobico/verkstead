@@ -30,12 +30,21 @@
 //! is a file at all.
 //!
 //! **And on a Mac the platform can hold a registration that is there off.**
-//! `setLoginItemSettings` is `SMAppService` on macOS 13 and up, so a human who
-//! switches Verkstead off under Login Items in System Settings leaves a
-//! registration whose `status` reads `requires-approval` — off, and off in a way
-//! nothing this app can call puts back. That is [`HELD`]: the box greyed with
-//! the one place it can be turned on again named under it, rather than a tick
-//! that would write a registration the system is already ignoring.
+//! `setLoginItemSettings` is `SMAppService` on macOS 13 and up, which carries a
+//! `status` beside `openAtLogin`: `requires-approval` is a registration that is
+//! in place, is not starting Verkstead, and is not made to start it by
+//! registering again. That is [`HELD`] — the box greyed rather than a tick that
+//! would write a registration the system is already ignoring.
+//!
+//! **What it is not is a switch somebody flipped.** Driven through the
+//! accessibility API on macOS 15, a registration made this way is an
+//! *Application* row under *Open at Login* in System Settings with **no switch
+//! beside it** — the switches in that pane belong to *Allow in the Background* —
+//! so what a human has on that row is the minus button, which removes the
+//! registration rather than holding it, and nothing on the command line writes
+//! that database either. So this arm takes the platform at its word about a
+//! state nothing here was able to reach, and what [`HELD`] tells the human is
+//! where that row is and that removing it lets the box write a fresh one.
 //!
 //! **And nowhere at all on an unpackaged run**, whatever the platform (Q2). What
 //! a registration could name from a checkout is the dev shell's Electron in the
@@ -113,17 +122,20 @@ const UNPACKAGED =
   "checkout, and a registration made here would name a build that will not be " +
   "there the next time the machine starts.";
 
-/// Why a registration that is there starts nothing, on a Mac where the human
-/// has switched it off in System Settings.
+/// Why a registration that is there starts nothing, on a Mac whose platform is
+/// holding it for the human's approval.
 ///
-/// Worded for the human reading it under a greyed box, and naming the one place
-/// it can be put right: the registration exists and `SMAppService` is holding it
-/// for the human's approval, so there is nothing for a tick here to write that
-/// the system is not already ignoring.
+/// Worded for the human reading it under a greyed box, and naming what they can
+/// actually do about it: the registration exists and `SMAppService` is holding
+/// it, so there is nothing for a tick here to write that the system is not
+/// already ignoring — while removing the row leaves a machine this box can
+/// register afresh. **The row rather than a switch**, because that is what was
+/// found on a real Mac: see the note at the top of this file.
 const HELD =
   "macOS is holding Verkstead's login item for your approval, so it will not " +
-  "start with your session. Switch Verkstead on under Login Items in System " +
-  "Settings to start it there.";
+  "start with your session. Verkstead is listed under Open at Login in System " +
+  "Settings, where the minus button removes it — and this box can register it " +
+  "again once it is gone.";
 
 /// And why a machine may have nowhere to keep one — the tray app's own wording,
 /// for the same situation.
@@ -251,10 +263,10 @@ export interface LoginItem {
   ///
   /// **A Mac's question, and macOS 13's.** `setLoginItemSettings` is
   /// `SMAppService` there, which has states `openAtLogin` alone cannot describe:
-  /// a human who switches Verkstead off under Login Items in System Settings
-  /// leaves the registration in place and `requires-approval` behind it, which
-  /// is a Verkstead that will not start and will not be made to start by
-  /// registering again. [`HELD`] is what the box says then.
+  /// `requires-approval` is a registration that is in place, is not starting
+  /// Verkstead, and is not made to start it by registering again. [`HELD`] is
+  /// what the box says then, and the note at the top of this file is what a real
+  /// Mac had to say about how a human meets it.
   ///
   /// `undefined` where the platform says nothing — Windows, whose registration
   /// is a Run key, and a Mac before 13.

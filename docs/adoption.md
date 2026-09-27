@@ -411,10 +411,13 @@ Verkstead there, unticking it takes the registration away, and there is no copy
 of the answer anywhere for the two to disagree about. A login start comes up
 with no window on the screen while there is an icon in the menu bar to reach it
 by, and with a window where that icon is switched off. **A Mac can also hold a
-registration that is there and will not start**: switching Verkstead off under
-Login Items rather than removing it there leaves one registered and inert, and
-nothing Verkstead can call puts it back — so the box is greyed, with that pane
-named underneath it as the one place it can be turned on again. **And an upgrade
+registration that is there and will not start**: macOS can report Verkstead's
+login item as waiting on your approval, which is registered and inert, and
+nothing Verkstead can call puts it back — so the box is greyed, and what it names
+underneath is what to do about it. Verkstead is an **Application** row under
+**Open at Login** in that pane rather than one of the switches beside it, so the
+control on that row is the minus button: remove it there, and the box here
+registers a fresh one. **And an upgrade
 from the old menu bar app takes its registration over once**: that app wrote a
 launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` by hand,
 which the login item list knows nothing about, so the first launch of this one
