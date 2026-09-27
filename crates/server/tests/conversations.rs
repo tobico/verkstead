@@ -8557,7 +8557,8 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 
 /// The whole of what pressing Adopt does: the stage's own branch off the base
 /// commit, a worktree with it, the stage brief as the Brief, and a Conversation
-/// that is implementing the stage.
+/// that is implementing the stage — with which stage of which roadmap it is on
+/// the record, which is the fact the human settled by pressing this.
 #[tokio::test]
 async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
@@ -8608,6 +8609,21 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
             .exists()
+    );
+
+    // And the record says which stage of which roadmap this is — the label as
+    // the roadmap's own line writes it, rather than anything read back off the
+    // branch above.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("03".to_owned()),
+        }),
     );
 }
 

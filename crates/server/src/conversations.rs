@@ -2390,16 +2390,19 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         named: Some(&named),
     };
 
-    // The roadmap goes in with it, which is what makes this adoption stick: the
-    // human picked it here, and every wrap-up from here reads that name rather
-    // than working one out from the branch.
+    // The roadmap goes in with it, and which stage of it this is, which is what
+    // makes this adoption stick: the human picked it here, and every wrap-up from
+    // here reads those rather than working anything out from the branch.
     match store::start_stage(
         pool,
         id,
         base,
         &path,
         stacks_on.as_deref(),
-        &stage.roadmap,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
         &checkouts,
     )
     .await?

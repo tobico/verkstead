@@ -128,7 +128,10 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         }
     };
 
-    let Some(roadmap) = recorded else {
+    // Which stage of it comes back beside the name and nothing here asks it yet:
+    // what a roadmap has left is still the boxes' answer, read off the Worktree
+    // below. See [`store::StageOf`].
+    let Some(store::StageOf { roadmap, .. }) = recorded else {
         return unrecorded(&state, &conversation, conversation_id).await;
     };
 
@@ -578,7 +581,10 @@ async fn start(
         },
         &path,
         stacked_on.as_deref(),
-        &stage.roadmap,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
         &checkouts,
     )
     .await

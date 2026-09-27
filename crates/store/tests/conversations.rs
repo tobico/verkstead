@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
-    ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
-    any_archived, archive_conversation, archived, close_conversation, conversation_branch,
-    conversations, create_profile, follow_branch, hold_pull_request, load_conversation,
-    open_database, register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
-    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
-    start_adoption, start_conversation, start_grilling, start_tinkering,
-    start_unnamed_conversation, state, switch_repo, target, timeline, unarchive_conversation,
+    ProfileFacts, RoadmapStage, RowState, StageOf, Staged, Switched, Unarchiving, add_companion,
+    adopted_pull_request, adopting, any_archived, archive_conversation, archived,
+    close_conversation, conversation_branch, conversations, create_profile, follow_branch,
+    hold_pull_request, load_conversation, open_database, register_repo, reinvent_branch,
+    rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
+    settle_naming, show_archived, showing_archived, stacks_on, stage_roadmap, start_adoption,
+    start_conversation, start_grilling, start_stage, start_tinkering, start_unnamed_conversation,
+    state, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1718,4 +1719,114 @@ async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
         adopting(&reopened, id).await.unwrap().as_deref(),
         Some("mvp")
     );
+}
+
+/// Starting a stage records which roadmap it is a stage of **and which stage of
+/// it**, in the one transaction that makes it a stage.
+///
+/// Both halves of one fact, on the one row — the label as the roadmap's own line
+/// labels it, zero-padding kept, because that is the form everything else about a
+/// roadmap names a stage in. Nothing derives it from the branch, which is why the
+/// branch here is named for a stage the label does not match: what is stored is
+/// what the caller read off the roadmap.
+#[tokio::test]
+async fn starting_a_stage_records_which_stage_of_which_roadmap_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        start_stage(
+            &pool,
+            id,
+            "c0ffee",
+            Path::new("/data/worktrees/stage"),
+            Some("roadmaps/mvp/04-wrap-up"),
+            RoadmapStage {
+                roadmap: "mvp",
+                label: "05",
+            },
+            &[],
+        )
+        .await
+        .unwrap(),
+        Staged::Started,
+    );
+
+    assert_eq!(
+        stage_roadmap(&pool, id).await.unwrap(),
+        Some(StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("05".to_owned()),
+        }),
+    );
+}
+
+/// A row holding a roadmap and no stage is not the same answer as no row at all,
+/// and the read says which.
+///
+/// Three shapes and all three are told apart here: a stage Verkstead recorded
+/// the label for, a stage from between the two changes whose row holds the
+/// roadmap alone, and a Conversation nothing ever recorded a roadmap against.
+/// Which of the middle one's two meanings it carries — a stage from before, or
+/// the Conversation that wrote the roadmap — is read from what is stored beside
+/// it, and [`stacks_on`] is that reading's first half.
+#[tokio::test]
+async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let before = start_conversation(&pool, repo_id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_stage(
+        &pool,
+        before,
+        "c0ffee",
+        Path::new("/data/worktrees/before"),
+        None,
+        RoadmapStage {
+            roadmap: "mvp",
+            label: "03",
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Which is what a stage started between ADR-0017 and the label looks like:
+    // the roadmap on the record and nothing said about which stage.
+    sqlx::query("UPDATE stage_roadmaps SET stage = NULL WHERE conversation_id = ?")
+        .bind(before)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, before).await.unwrap(),
+        Some(StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: None,
+        }),
+        "a roadmap and no label, which is a row rather than nothing",
+    );
+    assert_eq!(
+        stacks_on(&pool, before).await.unwrap(),
+        Some(None),
+        "and a stage all the same, which is what says the empty label is a \
+         stage's rather than a roadmap-writer's",
+    );
+
+    let never = start_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, never).await.unwrap(),
+        None,
+        "and a Conversation nothing recorded a roadmap against has no row at all",
+    );
+    assert_eq!(stacks_on(&pool, never).await.unwrap(), None);
 }

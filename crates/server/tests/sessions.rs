@@ -86,7 +86,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
-use verkstead_store::Decision;
+use verkstead_store::{Decision, StageOf, stage_roadmap};
 
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
@@ -18291,6 +18291,21 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         said.contains("Stage 01") && said.contains("rate-limiting"),
         "the stage says which stage of which roadmap it is: {said:?}",
     );
+
+    // And so does the record, which is where every reading of it starts from
+    // here: the roadmap the branch wrote, and stage 01 of it as the roadmap's own
+    // line labels it. Nothing derives either from the branch above.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, stage.id).await.unwrap(),
+        Some(StageOf {
+            roadmap: "rate-limiting".to_owned(),
+            stage: Some("01".to_owned()),
+        }),
+    );
+
+    pool.close().await;
     assert!(
         said.contains(&format!("<code>{roadmap_branch}</code>")),
         "and that its branch stacks on the one the stage before it was worked on: {said:?}",
