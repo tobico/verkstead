@@ -156,16 +156,28 @@ artifact carrying the app alone would pass every assertion above it and hand
 each session it spawned a binary with no `ask` in it. The Windows leg checks two
 more that are the installer's own: the install is in the user's profile with its
 record under `HKCU`, and the Start-menu entry opens the shim rather than the
-console program beside it. The dmg's leg adds two of its own. That the app comes
-back out of the image sealed, over the bundle and over the sidecar inside it:
-the reason that was first written is gone — the bundle's executable was a shell
-script, whose signature lives in an extended attribute a copy can drop, and it
-is a real Mach-O again — but an Apple silicon Mac refuses to execute a Mach-O
-carrying no signature at all, so a seal the pack or the image broke is the
-"damaged" a Mac will not open rather than the "unidentified developer" it offers
-a way past. And that the icon resolves: `CFBundleIconFile` read off the mounted
-plist and `iconutil` opened on the file it names, the Finder icon being the one
-thing about a bundle that nothing running the app can tell you about.
+console program beside it. The dmg's leg adds four of its own, and every one of
+them is about something a run of the app cannot report.
+
+That the app comes back out of the image sealed, over the bundle and over the
+sidecar inside it: the reason that was first written is gone — the bundle's
+executable was a shell script, whose signature lives in an extended attribute a
+copy can drop, and it is a real Mach-O again — but an Apple silicon Mac refuses
+to execute a Mach-O carrying no signature at all, so a seal the pack or the
+image broke is the "damaged" a Mac will not open rather than the "unidentified
+developer" it offers a way past. That the icon resolves: `CFBundleIconFile` read
+off the mounted plist and `iconutil` opened on the file it names, the Finder
+icon being what a downloader drags into Applications rather than anything the
+process draws. That the bundle is still a Dock app and still promises the macOS
+the words do: `LSUIElement` read back for its *absence*, which is the whole of
+what closing the window to the Dock rests on, and `LSMinimumSystemVersion` read
+back against the floor [adoption.md](adoption.md#the-desktop-app-on-a-mac)
+gives — the same shape as the AppImage's glibc ceiling above, and moving
+Electron moves both numbers. And that the menu bar's artwork came along at both
+scales: the app hands Electron the one-times path and AppKit finds the `@2x`
+beside it, so a Retina Mac is the only place a missing second file shows, and a
+missing file of either size is an empty status item behind a log line still
+saying the icon went up.
 
 The manifest is the nix systems alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the

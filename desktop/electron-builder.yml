@@ -91,7 +91,11 @@ extraResources:
   # few hundred bytes are cheaper than a configuration that differs by platform.
   #
   # The `@2x` is named here and nowhere else: the app hands Electron the
-  # one-times path and the platform finds this beside it.
+  # one-times path and the platform finds this beside it. Which is why both are
+  # read back off the mounted bundle by the dmg leg in `.github/workflows/
+  # release.yml`: a file the app never names is one whose absence shows on a
+  # Retina Mac and nowhere a runner can look, and a missing template is a `Tray`
+  # holding an empty image over a log line still saying the icon went up.
   - from: ../packaging/menubarTemplate.png
     to: menubarTemplate.png
   - from: ../packaging/menubarTemplate@2x.png
@@ -196,13 +200,16 @@ mac:
   # made the Rust bundle a menu-bar app with no Dock tile, and ADR-0020 retires
   # it: this is a regular Dock app, closing the window hides it and the Dock is
   # the way back. electron-builder writes no such key, so there is nothing to
-  # turn off — and the packed `Info.plist` is read back for its absence, that
-  # absence being the whole of what the Dock behaviour rests on.
+  # turn off — and the dmg leg in `.github/workflows/release.yml` reads the packed
+  # `Info.plist` back for its absence, that absence being the whole of what the
+  # Dock behaviour rests on.
   #
   # `LSMinimumSystemVersion` is left unsaid for the opposite reason: it is
-  # Electron's own floor rather than a number this repository has an opinion
-  # about, and what `docs/adoption.md` promises a downloader is read off the
-  # packed bundle.
+  # Electron's own floor, out of the runtime electron-builder fetched, rather
+  # than a number written here. What is written down is the promise
+  # `docs/adoption.md` makes a downloader, and that same leg reads the key off
+  # the packed bundle and refuses anything above it — so the promise and the
+  # floor are one number, and moving Electron moves both.
 
   target:
     - target: dmg

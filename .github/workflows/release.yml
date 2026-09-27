@@ -1065,6 +1065,95 @@ jobs:
           }
           ls -l "$iconset"
 
+      # **And the two things the plist says about this app that nothing running
+      # it can tell you**, read back off the mounted bundle the way the icon's
+      # name is and for the reason the AppImage's glibc floor is: both are
+      # promises `docs/adoption.md` makes to a downloader rather than facts about
+      # a runner, and `desktop/electron-builder.yml` says of each that it is read
+      # off what was packed.
+      #
+      # **`LSUIElement` by its absence**, which is the whole of what makes this a
+      # regular Dock app: that key is what made the Rust bundle a menu-bar app
+      # with no Dock tile, ADR-0020 retires it, and electron-builder writes no
+      # such key — so there is nothing here to turn off and nothing but this to
+      # notice one arriving. An app that grew one back would come up, serve, draw
+      # its icon and pass every other assertion in this leg, and the close that
+      # ADR-0020 made a hide would leave a Verkstead with no way back.
+      #
+      # **And the floor as a number said here**, not as whatever the bundle
+      # happens to carry: it is Electron's own, out of the runtime
+      # electron-builder fetched, and the promise and the check are one number —
+      # move Electron and both move. Over it is a download that starts on fewer
+      # Macs than the words say, months after a tag.
+      - name: The bundle is a Dock app and asks for no macOS newer than 12
+        env:
+          FLOOR: "12.0"
+        run: |
+          plist="$APP/Contents/Info.plist"
+
+          # Extracting a key that is not there exits non-zero, which is the
+          # answer wanted here: absent is right, and any value at all is wrong.
+          if ui=$(plutil -extract LSUIElement raw -o - "$plist" 2> /dev/null); then
+            echo "::error::The bundle's Info.plist has LSUIElement set to $ui," \
+              "which is a menu-bar app with no Dock tile."
+            exit 1
+          fi
+          echo "There is no LSUIElement, so the app has a Dock tile."
+
+          asked=$(plutil -extract LSMinimumSystemVersion raw -o - "$plist") || {
+            echo "::error::The bundle's Info.plist names no LSMinimumSystemVersion," \
+              "so nothing says which Macs it starts on."
+            exit 1
+          }
+          echo "LSMinimumSystemVersion is $asked."
+          # Over the floor is the only failure — a bundle that starts on more
+          # Macs than the words promise is the words being cautious. Compared
+          # component by component in `awk` rather than with `sort -V`, which is
+          # how the AppImage's floor is read: that leg runs on Linux and this one
+          # on a Mac, whose `sort` is another implementation, and a version is
+          # not a number to hand to `-gt` either way.
+          if ! awk -v asked="$asked" -v floor="$FLOOR" '
+            BEGIN {
+              n = split(asked, a, "."); m = split(floor, f, ".");
+              for (i = 1; i <= (n > m ? n : m); i++) {
+                if ((a[i] + 0) > (f[i] + 0)) exit 1;
+                if ((a[i] + 0) < (f[i] + 0)) exit 0;
+              }
+              exit 0;
+            }'; then
+            echo "::error::The bundle asks for macOS $asked," \
+              "above the $FLOOR the documentation promises."
+            exit 1
+          fi
+
+      # **And that the menu bar's own artwork came along.** It is the one thing
+      # this app ships that nothing running it ever names by its full set: the
+      # app hands Electron the one-times path and AppKit finds the `@2x` beside
+      # it, so a Retina Mac is the only place a missing second file shows and
+      # there is no Retina display on a runner. A missing file of either size is
+      # a `Tray` holding an empty image — an icon that is not there, over a log
+      # line still saying it is — which is the failure the assertions below
+      # cannot see.
+      #
+      # Against the directory listing rather than with `[ -f ]`, for the reason
+      # the icon's name is read that way: the volume is case-insensitive, and
+      # `Template` at the end of the name is the whole of how Electron is asked
+      # for a template image, so a file the loader would open under a different
+      # case is not a file that draws.
+      - name: The menu bar's artwork is inside
+        run: |
+          resources="$APP/Contents/Resources"
+
+          for artwork in menubarTemplate.png menubarTemplate@2x.png; do
+            if ! ls "$resources" | grep -qxF "$artwork"; then
+              echo "::error::$artwork is not in Contents/Resources," \
+                "so the menu bar icon would be drawn from nothing."
+              ls -l "$resources"
+              exit 1
+            fi
+          done
+          echo "Both menu bar template files are in $resources."
+
       # What a human downloads this file for, asserted on one run of the app out
       # of the mount: a window, an icon in the menu bar, and the viewer behind
       # both.
