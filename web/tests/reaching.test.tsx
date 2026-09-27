@@ -32,6 +32,7 @@ import type {
   ConversationArchived,
   ConversationEntry,
   ConversationView,
+  DevicesView,
   QuestionSetEvent,
   RepoEntry,
   Submitted,
@@ -41,6 +42,7 @@ import {
   loadConversation,
   retrying,
 } from "../src/api/client";
+import { osIcon } from "../src/devices";
 import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -363,6 +365,32 @@ describe("the merged sidebar", () => {
     })),
   ];
 
+  /// And the two devices as the membership says them, which is the other
+  /// reading the same two facts arrive in: the rows carry the name and the
+  /// mark on them, and the pane header looks one up by the id in its URL.
+  const LINKED: DevicesView = {
+    this: {
+      device: "aa00bb11cc22dd33ee44ff5566778899",
+      fingerprint: "AA:BB",
+      name: "the-desk",
+      os: "Linux",
+      addresses: [],
+    },
+    members: [
+      {
+        identity: {
+          device: MEMBER,
+          fingerprint: "CC:DD",
+          name: "the-laptop",
+          os: "macOS 15.1",
+          addresses: [],
+        },
+        reachable: true,
+      },
+    ],
+    pending: [],
+  };
+
   /// The member's Conversation under the id it shares with this device's first
   /// row, which is what the menu below reads.
   ///
@@ -380,6 +408,9 @@ describe("the merged sidebar", () => {
   function theCluster(...answers: Answer[]) {
     return serving(
       whenever("/api/ui/conversations", json(MERGED)),
+      // The membership, which is what the header of an open Conversation
+      // reads a device's name and mark out of — the rows carry their own.
+      whenever("/api/ui/devices", json(LINKED)),
       whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/onboarding", json(SET_UP)),
       whenever("/api/ui/repos", json(REPOS)),
@@ -505,6 +536,205 @@ describe("the merged sidebar", () => {
     expect(
       askedFor(fetching, `/api/ui/conversations/${SHARED.id}/archive`),
     ).toBe(0);
+  });
+
+  /// And the row says which machine, which is the other half of one list: a
+  /// merged sidebar whose rows did not say whose they were would be this
+  /// device's work with somebody else's mixed into it.
+  ///
+  /// The second line, under the branch: the mark for that device's OS, its
+  /// name, and the Repo after them. On every row there is a device on, which
+  /// in a cluster is every row — this device's own the same as a member's.
+  it("says the device and the repo under the name, on every row", async () => {
+    theCluster();
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+
+    expect(
+      drawnRows.map(
+        (row) => row.querySelector(`.${sidebar.meta}`)?.textContent ?? "",
+      ),
+    ).toEqual(MERGED.map((row) => `${row.device!.name}${row.repo}`));
+  });
+
+  /// And the mark beside the name is the one that device wears wherever it is
+  /// drawn — so the member's macOS row draws the Apple mark and this device's
+  /// Linux row the Linux one, off the OS word the row itself carries.
+  it("draws each device's own mark beside its name", async () => {
+    theCluster();
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+
+    expect(
+      drawnRows.map((row) =>
+        row.querySelector(`.${sidebar.device} svg path`)?.getAttribute("d"),
+      ),
+    ).toEqual(MERGED.map((row) => [osIcon(row.device!.os).icon[4]].flat()[0]));
+  });
+
+  /// A mark is nothing to a screen reader, so what the card says in one is in
+  /// the sentence the row is read aloud by: the device, where the row draws
+  /// it, in the place the eye finds it.
+  it("names the device in the row read aloud", async () => {
+    theCluster();
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+    const label = drawnRows[0]!
+      .querySelector(`.${sidebar.open}`)!
+      .getAttribute("aria-label");
+
+    expect(label).toBe(
+      "over-on-the-member, the-laptop, verkstead, Implementing",
+    );
+  });
+
+  /// A member that has stopped answering keeps its rows, from the last list
+  /// this device held of it: everything they had, dimmed, and saying so when
+  /// they are read aloud. The fade is the one a finished Conversation wears,
+  /// which is why the word is in the label — the two are told apart by ear
+  /// rather than by eye.
+  describe("a member that has stopped answering", () => {
+    const AWAY: ConversationEntry[] = MERGED.map((row) => ({
+      ...row,
+      device: { ...row.device!, reachable: row.device!.id === null },
+    }));
+
+    function unreached() {
+      return serving(
+        whenever("/api/ui/conversations", json(AWAY)),
+        whenever("/api/ui/devices", json(LINKED)),
+        whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+        whenever("/api/ui/onboarding", json(SET_UP)),
+        json({ error: "nothing serves that" }, 404),
+      );
+    }
+
+    it("dims its rows and leaves this device's own alone", async () => {
+      unreached();
+      const { container } = mount("/");
+
+      const drawnRows = await rows(container);
+
+      expect(
+        drawnRows.map((row) => row.classList.contains(sidebar.unreachable!)),
+      ).toEqual(AWAY.map((row) => !row.device!.reachable));
+    });
+
+    it("says unreachable beside the device it names", async () => {
+      unreached();
+      const { container } = mount("/");
+
+      const drawnRows = await rows(container);
+      const label = drawnRows[0]!
+        .querySelector(`.${sidebar.open}`)!
+        .getAttribute("aria-label");
+
+      expect(label).toBe(
+        "over-on-the-member, the-laptop, unreachable, verkstead, Implementing",
+      );
+    });
+  });
+
+  /// And the pane a row opens says it too, beside the branch where the Repo
+  /// already stands: the card and the header are the one name said twice, and
+  /// a header that did not say which machine would leave the one pane the work
+  /// is actually read in as the only place in the app that could not.
+  ///
+  /// Looked up rather than carried: the URL says which device, and the Devices
+  /// reading says its name and its mark.
+  it("carries the device on the header of the pane a row opens", async () => {
+    theCluster();
+    const { container } = mount(on(`/conversations/${SHARED.id}`));
+
+    const named = await drawn(
+      container,
+      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
+    );
+
+    // Trimmed: the space between the mark and the name is written out, the
+    // heading being read out of its own contents run together.
+    expect(named.textContent?.trim()).toBe("the-laptop");
+    expect(named.querySelector("svg path")?.getAttribute("d")).toBe(
+      [osIcon("macOS 15.1").icon[4]].flat()[0],
+    );
+  });
+
+  /// And this device's own Conversation says this device, which is the same
+  /// rule the rows are drawn under: in a cluster the header names the machine
+  /// whatever machine it is, so that one header does not read differently from
+  /// the next.
+  it("carries this device on this device's own header", async () => {
+    theCluster();
+    const { container } = mount(`/conversations/${SIDEBAR[0]!.id}`);
+
+    const named = await drawn(
+      container,
+      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
+    );
+
+    expect(named.textContent?.trim()).toBe("the-desk");
+  });
+});
+
+/// And the whole of it taken back off a Verkstead that is in no cluster, which
+/// is what nearly every one of them is: nothing on the page says a device,
+/// because there is no second machine for a name to be telling it from.
+///
+/// The server's call rather than the page's — the rows come back carrying no
+/// device at all — and the header's own, which reads the membership and finds
+/// nobody in it.
+describe("a device with no cluster", () => {
+  const ALONE: DevicesView = {
+    this: {
+      device: "aa00bb11cc22dd33ee44ff5566778899",
+      fingerprint: "AA:BB",
+      name: "the-desk",
+      os: "Linux",
+      addresses: [],
+    },
+    members: [],
+    pending: [],
+  };
+
+  function alone() {
+    return serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/devices", json(ALONE)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/onboarding", json(SET_UP)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${HERE.id}`, json(HERE)),
+      json({ error: "nothing serves that" }, 404),
+    );
+  }
+
+  it("draws no device and no mark on any row", async () => {
+    alone();
+    const { container } = mount("/");
+
+    await drawn(container, `.${sidebar.conversationRow}`);
+
+    expect(container.querySelectorAll(`.${sidebar.device}`)).toHaveLength(0);
+    expect(
+      [...container.querySelectorAll(`.${sidebar.meta}`)].map(
+        (line) => line.textContent,
+      ),
+    ).toEqual(SIDEBAR.map((row) => row.repo));
+  });
+
+  it("draws none on the pane header either", async () => {
+    alone();
+    const { container } = mount(`/conversations/${HERE.id}`);
+
+    await waitFor(async () => expect(await titled(container)).toBe(HERE.branch));
+
+    expect(
+      container.querySelectorAll(`.${timeline.paneDevice}`),
+    ).toHaveLength(0);
   });
 });
 

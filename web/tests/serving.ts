@@ -6,11 +6,21 @@
 
 import { vi } from "vitest";
 
-import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
+import type {
+  DevicesView,
+  SetReading,
+  SetView,
+  UnreadableSet,
+} from "../src/api/types";
+import devices from "./fixtures/devices.json" with { type: "json" };
 
 /// Where the shell asks whether another device is asking to link — see the
 /// default [`serving`] holds for it.
 const ASKING = "/api/ui/devices/asking";
+
+/// And where this machine says what it is and who it is linked to, which is
+/// the other read that belongs to no one page — see the default below.
+const DEVICES = "/api/ui/devices";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -35,6 +45,14 @@ export function serving(...answers: Array<Answer>) {
   // naturally carry it, and a file that forgot it would be one whose mounts
   // fell through to the positional answers meant for something else.
   held.set(`GET ${ASKING}`, json([]));
+
+  // And what this machine is and who it is linked to, which the header of an
+  // open Conversation reads to say which device the work is on — see
+  // `PaneName` in `src/workbench/Timeline.tsx`. Seeded here for the reason
+  // above and answered as the golden fixture has it: a device in no cluster,
+  // which draws no device anywhere and is what every test that has not said
+  // otherwise is about.
+  held.set(`GET ${DEVICES}`, json(devices as DevicesView));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

@@ -1540,9 +1540,23 @@ of that machine beside it, so the viewer draws a row without joining it against
 the **Devices** section. Whether a row says anything at all is the server's call
 and the membership decides it: a device linked to nothing draws the sidebar it
 always drew.
+**And it is said in the three places a Conversation is named**: under the
+branch on the sidebar row, beside the branch on the header of the pane that row
+opens, and in the sentence the row is read aloud by. The row's second line is
+the mark for that machine's OS, its name, and then the Repo — on every row
+there is a device on, this device's own included, which is what makes it one
+list rather than this device's list with visitors on it. The mark is the one a
+device wears wherever it is drawn, off the OS word the row carries, so a WSL
+wears the Linux mark here as it does on the Devices section. Where there is no
+cluster none of the three says anything at all, which is the sidebar nearly
+every Verkstead draws. The header looks its device up rather than being handed
+one — the URL says which machine and the **Devices** reading says its name — and
+the spoken row names it because the mark is nothing to a screen reader.
 **A member that stops answering keeps its rows**, from the last list held and
 drawn dimmed, the row's own flag saying the device is not there — while a member
-never reached holds nothing and contributes nothing.
+never reached holds nothing and contributes nothing. The dimming is the one a
+finished Conversation wears, so what tells the two apart is the label read
+aloud, which says *unreachable* beside the device it names.
 **And a row is addressed by its device everywhere in the sidebar**, ids being
 each device's own and colliding by construction: which row is selected, which
 one a press was on, what a drag is holding and what the DOM carries are each a

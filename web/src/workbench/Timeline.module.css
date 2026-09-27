@@ -31,12 +31,12 @@
    stands on a card, and the events that are not one: the moves and steers drawn
    as lines between the cards, and the manual task nothing writes another of. */
 
-/* What the pane is called: the branch, and the Repo the work is in understated
-   beside it. The title/subtitle pattern the sidebar's card draws the same two
-   facts in — see `.conversationRow .title` and `.meta` in
-   `Conversations.module.css` — so the card and the header of the pane it opens
-   read as the one name said twice, and the status button at the foot of the
-   block says its own line in the same voice.
+/* What the pane is called: the branch, and understated beside it the machine
+   the work is on and the Repo it is in. The title/subtitle pattern the
+   sidebar's card draws the same facts in — see `.conversationRow .title` and
+   `.meta` in `Conversations.module.css` — so the card and the header of the
+   pane it opens read as the one name said twice, and the status button at the
+   foot of the block says its own line in the same voice.
 
    Inside the `<h1>` rather than under it, because the Repo is part of what this
    pane is called rather than a caption on it: on a Draft the title is the word
@@ -78,6 +78,36 @@
   font-weight: 400;
   color: var(--ink-soft);
   white-space: nowrap;
+}
+
+/* And which machine the work is on, set exactly as the Repo beside it and for
+   the same reason: the two are one line of provenance under a name, said here
+   along the heading rather than under it. Ahead of the Repo, which is the
+   order the sidebar's card says the same two facts in.
+
+   Its own box so that the mark and the name are one item the flex row cannot
+   break apart, and `flex: none` so that what gives way when the header is
+   narrow is the branch — a hostname is a short word and the branch is the long
+   one. */
+.paneName .paneDevice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex: none;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* The mark for its OS, sized against the line it stands in: this line is a
+   step down from the title, and a mark written down in rem would be the one
+   thing on it that did not step down with it. Nudged onto the baseline the
+   words sit on, an SVG having none of its own. */
+.paneName .paneOs {
+  width: 1em;
+  height: 1em;
+  align-self: center;
 }
 
 /* The way on to the next level, which only the timeline has one of: the details

@@ -31,6 +31,16 @@
 //! Verkstead invented, and a draft still carrying one reads *Draft* rather than
 //! a name that says nothing — see `naming.ts`.
 //!
+//! And under the name, which machine the work is on and then the Repo it is in:
+//! the mark for that device's OS, its name, and the Repo after them. On every
+//! row there is a device on, this device's own included, because that is what
+//! makes this one list rather than this device's list with visitors on it —
+//! and on no row at all where there is no cluster, a lone Verkstead drawing
+//! the Repo alone the way it always has. A row whose device has stopped
+//! answering is dimmed, which is the fade a finished Conversation wears, and
+//! says *unreachable* where it is read aloud, which is where the two are told
+//! apart.
+//!
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
 //! sort's — they say it by dragging a card, and what they said is the server's
@@ -89,6 +99,7 @@ import {
 } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Icon } from "../Icon";
 import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
 import {
@@ -97,6 +108,7 @@ import {
   showingArchived,
 } from "../api/client";
 import type { ConversationEntry } from "../api/types";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Reaching, rowKey, whose, type Device } from "../reaching";
@@ -679,6 +691,13 @@ const DISC = {
   unseen: "not looked at yet",
 } as const;
 
+/// And what a row whose device has stopped answering says after the name of it.
+///
+/// The Devices section's own word for the same finding, said in the same
+/// voice: one dial worked down that machine's addresses and reached none of
+/// them, which is a lid shut rather than an error.
+const UNREACHABLE = "unreachable";
+
 /// What a row says when it is read aloud.
 ///
 /// The card says where a Conversation has got to in marks rather than in words —
@@ -707,6 +726,16 @@ const DISC = {
 /// the row says it at all, the ring that marks the quiet being nothing to
 /// anybody reading by ear.
 ///
+/// And the device the work is on, where the row draws one: the card says which
+/// machine in a mark and a name beside the Repo, and of those the mark is
+/// nothing to anybody reading by ear — so the device belongs in this sentence
+/// for the reason everything else in it does, in the place the row draws it.
+///
+/// And *unreachable* beside it where that machine has stopped answering, which
+/// is the other half of what the row says in a fade: the dimming is the same
+/// one a finished Conversation wears, and this is where the two are told
+/// apart.
+///
 /// And a Conversation nobody has named is called a Draft, which is the word its
 /// state is said in as well — so where the name and the state are the one word
 /// it is said once rather than twice over. Whatever is drawn on the card is
@@ -726,6 +755,8 @@ function spoken(entry: ConversationEntry): string {
 
   return [
     name,
+    entry.device?.name ?? null,
+    entry.device && !entry.device.reachable ? UNREACHABLE : null,
     entry.repo,
     name === where ? null : where,
     entry.parked ? parked(entry.parked) : null,
@@ -782,6 +813,18 @@ function ConversationRow(props: {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Closed";
 
+  /// And whether the machine this row's work is on has stopped answering,
+  /// which the row wears the same dimming for.
+  ///
+  /// The same treatment for a different reason: what the fade says on a
+  /// finished Conversation is that there is nothing here to do, and what it
+  /// says here is that there is nothing here that can be done — a press on
+  /// this row is refused by the Relay, by name. Which of the two it is is said
+  /// in the label read aloud, the fade itself being nothing to a screen
+  /// reader. The row keeps everything it had: it is the last list this device
+  /// held of that member, and none of it has stopped being true.
+  const away = (): boolean => props.entry.device?.reachable === false;
+
   return (
     <li
       class={styles.conversationRow}
@@ -796,6 +839,7 @@ function ConversationRow(props: {
         [styles.selected!]: props.selected,
         [styles.draft!]: props.entry.state === "Draft",
         [styles.ended!]: ended(),
+        [styles.unreachable!]: away(),
         [styles.held!]: props.held,
       }}
     >
@@ -828,6 +872,27 @@ function ConversationRow(props: {
               the card above already says the whole sentence. */}
           <Truncated class={styles.title} text={titled(props.entry)} />
           <span class={styles.meta}>
+            {/* Which machine the work is on, ahead of the Repo it is in and
+                drawn on every row there is one on — this device's own
+                included, which is what makes this one list rather than this
+                device's list with visitors on it. Nothing at all where there
+                is no cluster: the row carries no device then, and a Verkstead
+                linked to nothing draws the line it always drew.
+
+                The mark is the one a device wears wherever it is drawn — see
+                `devices.ts` — so a WSL wears the Linux mark here exactly as it
+                does on the Devices section, and a word this build has no mark
+                for still draws a row. Unlabelled, like the mark at the right
+                edge: the label on the card above has already said the whole
+                sentence. */}
+            <Show when={props.entry.device}>
+              {(device) => (
+                <span class={styles.device}>
+                  <Icon of={osIcon(device().os)} class={styles.os} />
+                  {device().name}
+                </span>
+              )}
+            </Show>
             <span>{props.entry.repo}</span>
           </span>
         </span>

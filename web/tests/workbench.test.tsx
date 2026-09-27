@@ -1358,9 +1358,13 @@ describe("how a card says where its conversation has got to", () => {
   /// that being the open one is the fill every pressable card in the app says
   /// it with — `CardButton.module.css`'s, rather than a second answer this
   /// sheet gives to the same question.
+  ///
+  /// One fade with two reasons in front of it: work that has stopped, and a
+  /// row whose device has. They are written as one rule because they are one
+  /// treatment — which of the two it is is said in the label read aloud.
   it("takes a closed card well down, and marks the open one with a fill", () => {
     expect(sidebarCss).toContain(
-      ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
+      ".conversationRow.ended .open,\n.conversationRow.unreachable .open {\n  opacity: 0.45;\n}",
     );
     expect(pressableCss).toContain(
       ".open {\n  background: var(--card);\n}",
@@ -1388,7 +1392,7 @@ describe("how a card says where its conversation has got to", () => {
       ".conversationRow.selected .open {\n  opacity: 1;\n}",
     );
     expect(sidebarCss).toContain(
-      ".conversationRow.selected.ended .open > * {\n  opacity: 0.45;\n}",
+      ".conversationRow.selected.ended .open > *,\n.conversationRow.selected.unreachable .open > * {\n  opacity: 0.45;\n}",
     );
   });
 

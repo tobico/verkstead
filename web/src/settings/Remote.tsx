@@ -193,7 +193,6 @@ import {
   addDevice,
   addFound,
   cancelJoin,
-  loadDevices,
   loadDiscovered,
   loadRemote,
   pressServe,
@@ -210,7 +209,7 @@ import type {
   ServePress,
   ServeView,
 } from "../api/types";
-import { osIcon } from "../devices";
+import { osIcon, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -309,25 +308,6 @@ function useRemote() {
     queryKey: ["remote"],
     queryFn: loadRemote,
     freshness: { reconcile: "tailscale" },
-  }));
-}
-
-/// And what this Verkstead *is*, read for the two panes that draw that too: the
-/// device this machine runs, and every other device in its cluster.
-///
-/// A read of its own beside the one above rather than a field of it, because
-/// they are two different questions about this machine: what Tailscale is doing
-/// changes when somebody runs a command in a terminal, and what device this is
-/// changes when a link is made or an address moves. Neither is a setting, which
-/// is why neither is in the settings query.
-///
-/// Merged by the device id: what says one row from another is the id, so a
-/// re-read that found another device leaves the rows it already drew alone.
-function useDevices() {
-  return useReading(() => ({
-    queryKey: ["devices"],
-    queryFn: loadDevices,
-    freshness: { reconcile: "device" },
   }));
 }
 
