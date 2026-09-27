@@ -47,10 +47,11 @@
 
 import { createSignal } from "solid-js";
 
-// Every call here names no device, and that is not an omission: the compose
-// page composes this device's own work. A Conversation of a member's is made
-// on the member, and what this replay is replaying is a page that had no
-// Conversation at all until a moment ago — see `reaching.ts`.
+// Every call here names no device, so the replay creates on this device and
+// configures what it created — see `reaching.ts`, where a device is what a path
+// and a cache key are composed from. The compose page's own select now reads a
+// member for everything it *offers*; carrying that through to the replay is the
+// next thing this module is owed.
 
 import {
   addCompanion,
@@ -73,9 +74,9 @@ import {
   takeUpPullRequest,
 } from "../api/client";
 import type { CompanionMode, Process, Started } from "../api/types";
-import { forget, read, write } from "../device";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
+import { forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL, SERVER_REFUSAL } from "./Composer";
 import { PROCESS, targeted } from "./processes";
@@ -251,6 +252,37 @@ export function blank(): Composed {
     implementation: null,
     review: null,
     adopting: null,
+  };
+}
+
+/// What is left of a compose page when the work moves to another device.
+///
+/// **Everything that named the machine it came off goes.** A Repo id, a
+/// companion's Repo id and a Pairing's Profile id are each one Verkstead's own
+/// and collide across a cluster by construction, so the repo, the base, the
+/// repos alongside and the three pairings travel nowhere: they would name rows
+/// on the wrong machine. The brief, the branch name and the files being held are
+/// the human's words and stay exactly where they are.
+///
+/// That is the move a Repo switch already makes for the base and for a companion
+/// that has become the work's own Repo, made one level up — see `moveTo` in
+/// `Compose.tsx`. And the pairings going with it is what puts the picked device's
+/// own remembered pairings in front of the human, rather than three pickers
+/// standing on a memory read off somewhere else.
+///
+/// The roadmap or pull request a page is loaded with is not touched here. Either
+/// one is this device's own, so what loading it does is put the work *back* on
+/// this device — which is this move, in the other direction, made by the caller
+/// that loads it.
+export function elsewhere(state: Composed): Composed {
+  return {
+    ...state,
+    repo: null,
+    base: null,
+    companions: [],
+    grilling: null,
+    implementation: null,
+    review: null,
   };
 }
 

@@ -105,7 +105,7 @@ import type {
   RepoRemoved,
   RepoView,
 } from "../api/types";
-import { repoParent, setRepoParent } from "../device";
+import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
@@ -621,7 +621,7 @@ export function OpenRepo(props: {
 /// repository is almost certainly putting it beside the first, and where they
 /// keep their code is a fact about the machine in front of them rather than
 /// something to tell the server — so it is kept where the wrap setting is, in
-/// `device.ts`, and the field opens inside it. Where there is none, which a
+/// `remembered.ts`, and the field opens inside it. Where there is none, which a
 /// first run always is, the field stands empty and browses the server's own
 /// home, which is where an unbounded browse already opens.
 ///

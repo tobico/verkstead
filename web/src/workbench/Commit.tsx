@@ -72,7 +72,7 @@ import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
 import type { CommitEvent, CommitPane, ConversationView } from "../api/types";
-import { setWrapping, wrapping } from "../device";
+import { setWrapping, wrapping } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice } from "../reaching";

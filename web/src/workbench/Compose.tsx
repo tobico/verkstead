@@ -7,6 +7,22 @@
 //! mid-sentence loses nothing, and the first thing that reaches the server is a
 //! button being pressed.
 //!
+//! **And there is one question this page asks that a Conversation's composer
+//! does not**: which device of the cluster will do the work. The select for it
+//! stands at the head of the setup row, drawn only where another device is
+//! linked, and everything under it reads the device it names — the Repo dropdown,
+//! the base picker, the companion rows and the pairing pickers, each of which
+//! already reads which device the page it is drawn on is about. So a pick is one
+//! reading changed over the composer's subtree (see `src/reaching.ts`) and
+//! nothing composed anywhere new, and the pick itself is remembered in this
+//! browser the way the pane widths are — `draftingOn` in `src/remembered.ts`.
+//!
+//! A pick takes with it everything that named the machine it came off: the repo,
+//! the base, the repos alongside and the pairings are each one Verkstead's ids.
+//! The brief, the branch name and the files being held are the human's words and
+//! stay. And the row that loads work from somewhere else puts it back on this
+//! device, that list being this device's own.
+//!
 //! **Two presses rather than one**, because creating and starting are two acts
 //! here where they are one on a Conversation that already exists: *Start work*
 //! makes the Conversation, puts every touched field on it and kicks the work
@@ -118,6 +134,8 @@ import {
 } from "../api/client";
 import type { Process, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
+import { Reaching, keyOf, type Device } from "../reaching";
+import { draftingOn, setDraftingOn } from "../remembered";
 import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
@@ -132,6 +150,7 @@ import {
   BasePicker,
   BranchField,
   CompanionChoice,
+  DeviceSelect,
   ForRepo,
   ProcessPicker,
   ProfileChoices,
@@ -148,6 +167,7 @@ import {
   blank,
   clear,
   create,
+  elsewhere,
   keep,
   leaveRefusals,
   on,
@@ -253,6 +273,33 @@ function Compose(props: {
   // draft somebody left is that draft rather than a blank one.
   const [state, setState] = createSignal<Composed>(stored());
 
+  // And which device of the cluster it is being composed *for*, off this browser
+  // to begin with: the device it last drafted onto, and this one until it has
+  // picked. Its own signal rather than a field of the draft above, for the reason
+  // it is its own key in the browser — see `draftingOn` in `src/remembered.ts`.
+  //
+  // Nothing about the press below has changed with it: the reads under the row
+  // go to the picked device and the replay still creates on this one, so a press
+  // made with a member picked would put a Repo id of that member's on a
+  // Conversation here. Moving the replay is the task after this one, and until it
+  // lands the press is the one thing on this page the select does not reach.
+  const [device, setDevice] = createSignal<Device>(draftingOn());
+
+  /// Moving what is being composed onto another device of the cluster, which is
+  /// the one move that takes the whole of *which code* and *whose account* with
+  /// it: those are each one Verkstead's ids — see [`elsewhere`], where the rule
+  /// is written.
+  ///
+  /// Remembered as it is made, so a reload comes back to the machine the human
+  /// was drafting onto rather than to this one.
+  const onDevice = (picked: Device) => {
+    if (picked === device()) return;
+
+    setDevice(picked);
+    setDraftingOn(picked);
+    setState(elsewhere);
+  };
+
   // The files picked here, which are not part of what is written back: a
   // `File` cannot be stored and read again, so they live for as long as this
   // page does and the press is what sends them.
@@ -285,11 +332,13 @@ function Compose(props: {
   // off one needs the repository it names. Read under the key every other
   // reader of this list uses, so it is the one read.
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    // This device's own, as everything on this page is: a Conversation is
-    // started where the work will be done, and a member's is started over
-    // there.
-    queryFn: () => listRepos(null),
+    // The picked device's, as everything under the select is: a Conversation is
+    // started where the work will be done, so the repository it is started
+    // against is one registered there. Keyed by the device for the reason every
+    // other read of a member's is — ids collide by construction, and one entry
+    // drawn twice would be the wrong repository named in the trigger.
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
     freshness: { reconcile: "id" },
   }));
 
@@ -344,8 +393,8 @@ function Compose(props: {
   // as from a desk, and every judgement about whether a remembered pairing still
   // runs is made where the profiles and the repositories are.
   const remembered = useReading(() => ({
-    queryKey: ["repos", on(state()), "pairings"],
-    queryFn: () => loadRepoPairings(null, on(state())!),
+    queryKey: keyOf(device(), "repos", on(state()), "pairings"),
+    queryFn: () => loadRepoPairings(device(), on(state())!),
     enabled: on(state()) !== null,
 
     // Merged by the id each profile carries, for the pickers below: what a
@@ -530,12 +579,21 @@ function Compose(props: {
   /// has to give all of it back. The one thing that goes is a companion that has
   /// just become the work's own Repo: nothing is ever a companion of itself,
   /// which is what a switch onto another Repo does with one too.
-  const load = (held: Adopting) =>
+  ///
+  /// **And it puts the work back on this device**, where the select had it
+  /// elsewhere. The roadmaps nothing is driving are this device's own reading —
+  /// every one of those rows names a Repo *here* — so a stage loaded while the
+  /// page was drafting onto a member is a stage that can only be adopted on this
+  /// machine. That is a move like any other and takes the same things with it,
+  /// which is [`onDevice`] and nothing written twice.
+  const load = (held: Adopting) => {
+    onDevice(null);
     setState((was) => ({
       ...was,
       adopting: held,
       companions: was.companions.filter((row) => row.repo_id !== held.repo_id),
     }));
+  };
 
   /// And unloaded, which puts the page back to composing work of its own.
   const unload = () => setState((was) => ({ ...was, adopting: null }));
@@ -606,367 +664,396 @@ function Compose(props: {
         </Show>
       </PaneSticky>
 
-      <div class={`${styles.composer} ${shell.paneComposer}`}>
-        {/* The box, and the whole of it a drop target — the same box the
-            composer beside this one draws, taking a drop the same way. */}
-        <div
-          class={styles.box}
-          classList={{ [styles.over!]: attach.over() }}
-          {...attach.dropping}
-        >
-          {/* The field, or the roadmap that has been loaded in place of it: an
-              adopted stage's brief is the repository's own and arrives with the
-              adoption, so there is nothing here to write and the box says which
-              stage instead. */}
-          <Show
-            when={adopting()}
-            fallback={
-              // A copy of what has been typed gives the field its height — see
-              // `.grow` in `App.module.css`, and `.field` in the composer's own
-              // module for the three lines it starts at.
-              <div class={`${app.grow} ${styles.field}`} data-value={state().brief}>
-                <textarea
-                  rows="1"
-                  aria-label="Brief"
-                  placeholder="What is this piece of work?"
-                  value={state().brief}
-                  onInput={(ev) =>
-                    // The box, and the Target filled out of it while it is
-                    // empty: the same rule the server keeps when a Brief is
-                    // saved, kept here because nothing is saved yet.
-                    setState((was) => written(was, ev.currentTarget.value))
-                  }
-                />
-              </div>
-            }
+      {/* And the composer, over the device the select names. Every control in
+          the row below already reads which device the page it is drawn on is
+          about — the Repo dropdown, the base picker, the companion rows, the
+          pairing pickers — so what a pick changes is this one reading rather
+          than anything composed anywhere new. See `src/reaching.ts`.
+
+          Over the composer rather than over the page: the head above it and the
+          switch below are this device's own, and so is the sidebar beside them,
+          which is merged from the whole cluster and carries a device on each of
+          its rows. */}
+      <Reaching.Provider value={device}>
+        <div class={`${styles.composer} ${shell.paneComposer}`}>
+          {/* The box, and the whole of it a drop target — the same box the
+              composer beside this one draws, taking a drop the same way. */}
+          <div
+            class={styles.box}
+            classList={{ [styles.over!]: attach.over() }}
+            {...attach.dropping}
           >
-            {(held) => <Loaded roadmap={held()} clear={() => unload()} />}
-          </Show>
-
-          {/* And the files that will go up with it, drawn exactly as a draft's
-              are — the same row through the same piece, because a file picked
-              before there is a Conversation and a file on one are the same
-              thing to look at. The × drops the held file rather than making a
-              request: there is nothing on the server yet to take anything
-              off.
-
-              The row goes with the box while a roadmap is loaded, because the
-              box is locked to a card then and the files were picked for what it
-              is standing over. Held rather than dropped, the way everything
-              else a roadmap covers is held: clearing it gives them back, and
-              the press sends none of them meanwhile — see `composing.ts`. */}
-          <Show when={adopting() === null}>
-            <attach.Pills class={styles.attachments} />
-          </Show>
-
-          <section class={setup.options} aria-label="Setup">
-            {/* The repository first, because everything under it is a fact
-                about the one this picks — which is why the panel holds nothing
-                else until one is picked, and why there is no panel at all until
-                then: a dropdown while nothing is chosen, the arrangement of what
-                was chosen after it. See `RepoSelect` in `Setup.tsx`. */}
+            {/* The field, or the roadmap that has been loaded in place of it: an
+                adopted stage's brief is the repository's own and arrives with the
+                adoption, so there is nothing here to write and the box says which
+                stage instead. */}
             <Show
-              when={on(state()) !== null}
+              when={adopting()}
               fallback={
-                <RepoSelect
-                  chosen=""
-                  disabled={make.isPending}
-                  pick={(repoId) => moveTo(repoId)}
-                />
+                // A copy of what has been typed gives the field its height — see
+                // `.grow` in `App.module.css`, and `.field` in the composer's own
+                // module for the three lines it starts at.
+                <div class={`${app.grow} ${styles.field}`} data-value={state().brief}>
+                  <textarea
+                    rows="1"
+                    aria-label="Brief"
+                    placeholder="What is this piece of work?"
+                    value={state().brief}
+                    onInput={(ev) =>
+                      // The box, and the Target filled out of it while it is
+                      // empty: the same rule the server keeps when a Brief is
+                      // saved, kept here because nothing is saved yet.
+                      setState((was) => written(was, ev.currentTarget.value))
+                    }
+                  />
+                </div>
               }
             >
-              {/* Named by the repo the id stands for, and by the invitation
-                  where there is no name to be had: the id is what this page
-                  keeps on the device, and the name for it comes off a read
-                  that has not landed yet — or off a repo that has been
-                  deregistered since, which is the picker inside the panel's to
-                  put right. A blank line under the label would say neither. */}
-              <RepoOptions
-                name={repo()?.name ?? adopting()?.repo ?? "Select"}
-                alongside={state().companions.length}
-              >
-                {() => (
-                  <>
-                    <RepoChoice
-                      chosen={on(state()) === null ? "" : String(on(state()))}
-                      // Settled while a roadmap is loaded, the way it is settled
-                      // once a branch has been cut: the stage is in the
-                      // repository the roadmap is written in, so moving the work
-                      // off would be moving it away from what it is adopting.
-                      disabled={make.isPending || adopting() !== null}
-                      pick={(repoId) => moveTo(repoId)}
-                    >
-                      {/* And what the roadmap has settled, where one is loaded:
-                          the two fields that would have asked are not drawn at
-                          all, so this is where they are answered. */}
-                      <Show when={adopting()}>
-                        {(held) => (
-                          <Note class={setup.aside}>
-                            The stage is worked on its own branch, off{" "}
-                            <Show
-                              when={held().base}
-                              fallback={<>this repo's default branch</>}
-                            >
-                              {(base) => <code>{base()}</code>}
-                            </Show>
-                            . Clear the roadmap to compose work of your own.
-                          </Note>
-                        )}
-                      </Show>
-                    </RepoChoice>
-
-                    <Show when={repo()}>
-                      {(chosen) => (
-                        <>
-                          {/* Neither is asked of a page adopting a roadmap: a
-                              stage is worked on its own slug, and the base went
-                              out with the row that loaded it. What a control
-                              cannot do it does not draw. */}
-                          <Show when={adopting() === null}>
-                            <BranchField
-                              id="branch"
-                              label="Branch"
-                              class={setup.branchName!}
-                              placeholder={AUTOMATIC}
-                              value={state().branch}
-                              set={(branch) => change({ branch })}
-                            />
-
-                            {/* And what the work is pointed at, for the
-                                Processes that are pointed at work already
-                                somewhere else — `processes.ts`'s list, so a
-                                Process that gains a target gains the field
-                                here without a line changing. Held on the
-                                device like everything else in this panel, and
-                                filled from the box while it is empty. */}
-                            <Show when={targeted(process())}>
-                              <BranchField
-                                id="target"
-                                label="Target"
-                                class={setup.target!}
-                                placeholder={TARGET}
-                                value={state().target}
-                                set={(target) => change({ target })}
-                              />
-                            </Show>
-
-                            {/* The base, unless what is in that field is a
-                                pull request: GitHub's base is the fact then,
-                                and the take-up records it. A branch keeps the
-                                picker, its pull request being opened against
-                                what is picked here. */}
-                            <Show when={!onAPullRequest()}>
-                              <BasePicker
-                                id="base-branch"
-                                label="Base branch"
-                                repo={chosen()}
-                                chosen={state().base ?? RULE}
-                                pick={(branch) => change({ base: branch })}
-                              />
-                            </Show>
-                          </Show>
-
-                          {/* The invitation goes back to being the
-                              invitation the moment something is picked out of
-                              it: an add is done rather than held, and the row
-                              it makes is under the control. */}
-                          <CompanionChoice
-                            chosen=""
-                            add={(repoId) => alongside(repoId)}
-                          />
-
-                          <Show when={state().companions.length}>
-                            <ul
-                              class={setup.companions}
-                              aria-label="Companion repos"
-                            >
-                              <For each={state().companions}>
-                                {(row) => (
-                                  <Beside
-                                    alongside={row}
-                                    repo={
-                                      (repos.data ?? []).find(
-                                        (entry) => entry.id === row.repo_id,
-                                      ) ?? null
-                                    }
-                                    mirrors={state().branch}
-                                    settle={settle}
-                                    forget={() => forget(row.repo_id)}
-                                  />
-                                )}
-                              </For>
-                            </ul>
-                          </Show>
-                        </>
-                      )}
-                    </Show>
-                  </>
-                )}
-              </RepoOptions>
+              {(held) => <Loaded roadmap={held()} clear={() => unload()} />}
             </Show>
 
-            {/* Then what kind of work it is, which is the same question asked
-                before there is a record for an answer to be about — and the one
-                field in this row that is *not* remembered per repo: the
-                pairings are the same answer most of the time, and a Process is
-                the one thing about a Conversation likeliest to differ from the
-                last. So it stands on Develop for every repo, and a picker left
-                on it sends nothing when this is created. */}
-            <ProcessPicker
-              chosen={process()}
-              disabled={make.isPending}
-              pick={(picked) => change({ process: picked })}
-            />
+            {/* And the files that will go up with it, drawn exactly as a draft's
+                are — the same row through the same piece, because a file picked
+                before there is a Conversation and a file on one are the same
+                thing to look at. The × drops the held file rather than making a
+                request: there is nothing on the server yet to take anything
+                off.
 
-            {/* And who runs it, which is one control: a picker per role the
-                Process uses, in the shape the Process asks for — a panel behind
-                one trigger where there are several, and the one picker itself
-                where there is one. Both of those are [`ROLES`]'s to say and not
-                this page's. The composer's own option drawn over what this
-                device is holding rather than over a record, so the two pages
-                cannot come to ask this question in two shapes.
+                The row goes with the box while a roadmap is loaded, because the
+                box is locked to a card then and the files were picked for what it
+                is standing over. Held rather than dropped, the way everything
+                else a roadmap covers is held: clearing it gives them back, and
+                the press sends none of them meanwhile — see `composing.ts`. */}
+            <Show when={adopting() === null}>
+              <attach.Pills class={styles.attachments} />
+            </Show>
 
-                Each picker stands on what the repo was last grilled with (or
-                its prefill, where nothing has grilled it) until it is touched,
-                which is what a created draft would have arrived showing — and a
-                picker left on it sends nothing when this is created, so the
-                server's own prefill stands. */}
-            <ProfileChoices>
-              {(saved) => (
-                <AgentOptions
-                  process={process()}
-                  saved={saved()}
-                  // Composed off what the pickers are showing rather than off
-                  // what the device is holding, so the trigger and the panel
-                  // read as one thing: a page whose repo memory has not landed
-                  // reads *Not chosen* until it does, and switching repos simply
-                  // reads another memory.
-                  picked={{
-                    grilling: showing("grilling"),
-                    implementation: showing("implementation"),
-                    review: showing("review"),
-                  }}
+            <section class={setup.options} aria-label="Setup">
+              {/* Which device will do the work, ahead of the repository because
+                  the repository is one of that device's: a Repo id is one
+                  Verkstead's own, so the question above the Repo is *whose
+                  registry*. Not drawn at all where there is no cluster, which
+                  leaves the row exactly as it has always been — see
+                  `DeviceSelect` in `Setup.tsx`.
+
+                  Settled while a roadmap is loaded, the way the Repo picker is
+                  settled in that state and for the same reason: that list is this
+                  device's own, so the work is here for as long as the card is over
+                  the box. Loading one is what puts it back here. */}
+              <DeviceSelect
+                chosen={device()}
+                disabled={make.isPending || adopting() !== null}
+                pick={(picked) => onDevice(picked)}
+              />
+
+              {/* The repository first, because everything under it is a fact
+                  about the one this picks — which is why the panel holds nothing
+                  else until one is picked, and why there is no panel at all until
+                  then: a dropdown while nothing is chosen, the arrangement of what
+                  was chosen after it. See `RepoSelect` in `Setup.tsx`. */}
+              <Show
+                when={on(state()) !== null}
+                fallback={
+                  <RepoSelect
+                    chosen=""
+                    disabled={make.isPending}
+                    pick={(repoId) => moveTo(repoId)}
+                  />
+                }
+              >
+                {/* Named by the repo the id stands for, and by the invitation
+                    where there is no name to be had: the id is what this page
+                    keeps on the device, and the name for it comes off a read
+                    that has not landed yet — or off a repo that has been
+                    deregistered since, which is the picker inside the panel's to
+                    put right. A blank line under the label would say neither. */}
+                <RepoOptions
+                  name={repo()?.name ?? adopting()?.repo ?? "Select"}
+                  alongside={state().companions.length}
                 >
                   {() => (
                     <>
-                      {/* Drawn by the table rather than by a test for a Process:
-                          a Review has no round for a grilling to open, and it is
-                          the table that says so. */}
-                      <Show when={uses(process(), "grilling")}>
-                        <RolePicker
-                          saved={saved()}
-                          role="grilling"
-                          label={label(process(), "grilling")}
-                          chosen={showing("grilling")}
-                          pick={(picked) => change({ grilling: picked })}
-                        />
-                      </Show>
-                      <Show when={uses(process(), "implementation")}>
-                        <RolePicker
-                          saved={saved()}
-                          role="implementation"
-                          label={label(process(), "implementation")}
-                          chosen={showing("implementation")}
-                          pick={(picked) => change({ implementation: picked })}
-                        />
-                      </Show>
-                      <Show when={uses(process(), "review")}>
-                        <RolePicker
-                          saved={saved()}
-                          role="review"
-                          label={label(process(), "review")}
-                          away={away(process(), "review")}
-                          chosen={showing("review")}
-                          pick={(picked) => change({ review: picked })}
-                        />
+                      <RepoChoice
+                        chosen={on(state()) === null ? "" : String(on(state()))}
+                        // Settled while a roadmap is loaded, the way it is settled
+                        // once a branch has been cut: the stage is in the
+                        // repository the roadmap is written in, so moving the work
+                        // off would be moving it away from what it is adopting.
+                        disabled={make.isPending || adopting() !== null}
+                        pick={(repoId) => moveTo(repoId)}
+                      >
+                        {/* And what the roadmap has settled, where one is loaded:
+                            the two fields that would have asked are not drawn at
+                            all, so this is where they are answered. */}
+                        <Show when={adopting()}>
+                          {(held) => (
+                            <Note class={setup.aside}>
+                              The stage is worked on its own branch, off{" "}
+                              <Show
+                                when={held().base}
+                                fallback={<>this repo's default branch</>}
+                              >
+                                {(base) => <code>{base()}</code>}
+                              </Show>
+                              . Clear the roadmap to compose work of your own.
+                            </Note>
+                          )}
+                        </Show>
+                      </RepoChoice>
+
+                      <Show when={repo()}>
+                        {(chosen) => (
+                          <>
+                            {/* Neither is asked of a page adopting a roadmap: a
+                                stage is worked on its own slug, and the base went
+                                out with the row that loaded it. What a control
+                                cannot do it does not draw. */}
+                            <Show when={adopting() === null}>
+                              <BranchField
+                                id="branch"
+                                label="Branch"
+                                class={setup.branchName!}
+                                placeholder={AUTOMATIC}
+                                value={state().branch}
+                                set={(branch) => change({ branch })}
+                              />
+
+                              {/* And what the work is pointed at, for the
+                                  Processes that are pointed at work already
+                                  somewhere else — `processes.ts`'s list, so a
+                                  Process that gains a target gains the field
+                                  here without a line changing. Held on the
+                                  device like everything else in this panel, and
+                                  filled from the box while it is empty. */}
+                              <Show when={targeted(process())}>
+                                <BranchField
+                                  id="target"
+                                  label="Target"
+                                  class={setup.target!}
+                                  placeholder={TARGET}
+                                  value={state().target}
+                                  set={(target) => change({ target })}
+                                />
+                              </Show>
+
+                              {/* The base, unless what is in that field is a
+                                  pull request: GitHub's base is the fact then,
+                                  and the take-up records it. A branch keeps the
+                                  picker, its pull request being opened against
+                                  what is picked here. */}
+                              <Show when={!onAPullRequest()}>
+                                <BasePicker
+                                  id="base-branch"
+                                  label="Base branch"
+                                  repo={chosen()}
+                                  chosen={state().base ?? RULE}
+                                  pick={(branch) => change({ base: branch })}
+                                />
+                              </Show>
+                            </Show>
+
+                            {/* The invitation goes back to being the
+                                invitation the moment something is picked out of
+                                it: an add is done rather than held, and the row
+                                it makes is under the control. */}
+                            <CompanionChoice
+                              chosen=""
+                              add={(repoId) => alongside(repoId)}
+                            />
+
+                            <Show when={state().companions.length}>
+                              <ul
+                                class={setup.companions}
+                                aria-label="Companion repos"
+                              >
+                                <For each={state().companions}>
+                                  {(row) => (
+                                    <Beside
+                                      alongside={row}
+                                      repo={
+                                        (repos.data ?? []).find(
+                                          (entry) => entry.id === row.repo_id,
+                                        ) ?? null
+                                      }
+                                      mirrors={state().branch}
+                                      settle={settle}
+                                      forget={() => forget(row.repo_id)}
+                                    />
+                                  )}
+                                </For>
+                              </ul>
+                            </Show>
+                          </>
+                        )}
                       </Show>
                     </>
                   )}
-                </AgentOptions>
-              )}
-            </ProfileChoices>
-          </section>
-        </div>
-
-        {/* And the two presses, under the box and against its far edge: what
-            becomes of what is in the box, which is the whole of why they are
-            the only controls outside it. The quieter one first, because Start
-            is what the page is arranged for. */}
-        <div class={styles.startGrilling}>
-          <div class={styles.presses}>
-            {/* What stands at the near edge of the row the two presses are at
-                the far edge of, and so is plainly not one of them: the
-                paperclip, and the way work gets into the pipeline without being
-                written. Grouped, because one margin has to push both of them
-                over — see `.near`. */}
-            <div class={styles.near}>
-              {/* The paperclip, left of Save as draft — and not offered at all
-                  while a roadmap is loaded: the box is locked to a card then,
-                  and there is nothing being written for a file to be handed
-                  over with. */}
-              <Show when={adopting() === null}>
-                <attach.Clip />
+                </RepoOptions>
               </Show>
 
-              {/* And the work that is already somewhere else, taken up as it
-                  stands. Drawn while the box is empty and nothing is loaded —
-                  what a row loads stands in place of what would have been
-                  written there, and a menu offering to replace a half-written
-                  brief would be offering to lose it. Nothing to take up is a
-                  level greyed rather than a menu gone: what there is to do here
-                  is not a list the human can see, so it should not come and go
-                  with one. */}
-              <Show when={state().brief.trim() === "" && adopting() === null}>
-                <OtherActions roadmaps={roadmaps()} load={load} />
-              </Show>
-            </div>
+              {/* Then what kind of work it is, which is the same question asked
+                  before there is a record for an answer to be about — and the one
+                  field in this row that is *not* remembered per repo: the
+                  pairings are the same answer most of the time, and a Process is
+                  the one thing about a Conversation likeliest to differ from the
+                  last. So it stands on Develop for every repo, and a picker left
+                  on it sends nothing when this is created. */}
+              <ProcessPicker
+                chosen={process()}
+                disabled={make.isPending}
+                pick={(picked) => change({ process: picked })}
+              />
 
-            <button
-              type="button"
-              class={`${styles.draft} secondary`}
-              classList={{ [styles.inert!]: !ready() }}
-              // Truly `disabled` for a press already in flight and nothing
-              // else. Having no repo to create in is the other thing entirely:
-              // it draws inert, answers a press with nothing, and says why in a
-              // `title` — which is the whole reason it is not disabled, a
-              // button a browser will not hover being a button that cannot
-              // explain itself. Exactly as the start beside it works.
-              disabled={make.isPending}
-              aria-disabled={!ready()}
-              title={ready() ? undefined : NO_REPO}
-              onClick={() => ready() && make.mutate(false)}
-            >
-              Save as draft
-            </button>
-            <button
-              type="button"
-              class={styles.start}
-              classList={{ [styles.inert!]: !startable() }}
-              // The same, with one more thing to wait on: creating is all the
-              // press beside it does, and this one grills as well. So a repo is
-              // not the whole of what it needs, and its `title` says whichever
-              // of the two is missing.
-              disabled={make.isPending}
-              aria-disabled={!startable()}
-              title={ready() ? (startable() ? undefined : waiting()) : NO_REPO}
-              onClick={() => startable() && make.mutate(true)}
-            >
-              {make.isPending ? "Starting…" : "Start work"}
-            </button>
+              {/* And who runs it, which is one control: a picker per role the
+                  Process uses, in the shape the Process asks for — a panel behind
+                  one trigger where there are several, and the one picker itself
+                  where there is one. Both of those are [`ROLES`]'s to say and not
+                  this page's. The composer's own option drawn over what this
+                  device is holding rather than over a record, so the two pages
+                  cannot come to ask this question in two shapes.
+
+                  Each picker stands on what the repo was last grilled with (or
+                  its prefill, where nothing has grilled it) until it is touched,
+                  which is what a created draft would have arrived showing — and a
+                  picker left on it sends nothing when this is created, so the
+                  server's own prefill stands. */}
+              <ProfileChoices>
+                {(saved) => (
+                  <AgentOptions
+                    process={process()}
+                    saved={saved()}
+                    // Composed off what the pickers are showing rather than off
+                    // what the device is holding, so the trigger and the panel
+                    // read as one thing: a page whose repo memory has not landed
+                    // reads *Not chosen* until it does, and switching repos simply
+                    // reads another memory.
+                    picked={{
+                      grilling: showing("grilling"),
+                      implementation: showing("implementation"),
+                      review: showing("review"),
+                    }}
+                  >
+                    {() => (
+                      <>
+                        {/* Drawn by the table rather than by a test for a Process:
+                            a Review has no round for a grilling to open, and it is
+                            the table that says so. */}
+                        <Show when={uses(process(), "grilling")}>
+                          <RolePicker
+                            saved={saved()}
+                            role="grilling"
+                            label={label(process(), "grilling")}
+                            chosen={showing("grilling")}
+                            pick={(picked) => change({ grilling: picked })}
+                          />
+                        </Show>
+                        <Show when={uses(process(), "implementation")}>
+                          <RolePicker
+                            saved={saved()}
+                            role="implementation"
+                            label={label(process(), "implementation")}
+                            chosen={showing("implementation")}
+                            pick={(picked) => change({ implementation: picked })}
+                          />
+                        </Show>
+                        <Show when={uses(process(), "review")}>
+                          <RolePicker
+                            saved={saved()}
+                            role="review"
+                            label={label(process(), "review")}
+                            away={away(process(), "review")}
+                            chosen={showing("review")}
+                            pick={(picked) => change({ review: picked })}
+                          />
+                        </Show>
+                      </>
+                    )}
+                  </AgentOptions>
+                )}
+              </ProfileChoices>
+            </section>
           </div>
 
-          <Show when={gone()}>
-            <ErrorLine class={styles.failure}>
-              That repo is not registered any more, so nothing was created.
-            </ErrorLine>
-          </Show>
-          <Show when={make.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be created: {make.error?.message}
-            </ErrorLine>
-          </Show>
+          {/* And the two presses, under the box and against its far edge: what
+              becomes of what is in the box, which is the whole of why they are
+              the only controls outside it. The quieter one first, because Start
+              is what the page is arranged for. */}
+          <div class={styles.startGrilling}>
+            <div class={styles.presses}>
+              {/* What stands at the near edge of the row the two presses are at
+                  the far edge of, and so is plainly not one of them: the
+                  paperclip, and the way work gets into the pipeline without being
+                  written. Grouped, because one margin has to push both of them
+                  over — see `.near`. */}
+              <div class={styles.near}>
+                {/* The paperclip, left of Save as draft — and not offered at all
+                    while a roadmap is loaded: the box is locked to a card then,
+                    and there is nothing being written for a file to be handed
+                    over with. */}
+                <Show when={adopting() === null}>
+                  <attach.Clip />
+                </Show>
+
+                {/* And the work that is already somewhere else, taken up as it
+                    stands. Drawn while the box is empty and nothing is loaded —
+                    what a row loads stands in place of what would have been
+                    written there, and a menu offering to replace a half-written
+                    brief would be offering to lose it. Nothing to take up is a
+                    level greyed rather than a menu gone: what there is to do here
+                    is not a list the human can see, so it should not come and go
+                    with one. */}
+                <Show when={state().brief.trim() === "" && adopting() === null}>
+                  <OtherActions roadmaps={roadmaps()} load={load} />
+                </Show>
+              </div>
+
+              <button
+                type="button"
+                class={`${styles.draft} secondary`}
+                classList={{ [styles.inert!]: !ready() }}
+                // Truly `disabled` for a press already in flight and nothing
+                // else. Having no repo to create in is the other thing entirely:
+                // it draws inert, answers a press with nothing, and says why in a
+                // `title` — which is the whole reason it is not disabled, a
+                // button a browser will not hover being a button that cannot
+                // explain itself. Exactly as the start beside it works.
+                disabled={make.isPending}
+                aria-disabled={!ready()}
+                title={ready() ? undefined : NO_REPO}
+                onClick={() => ready() && make.mutate(false)}
+              >
+                Save as draft
+              </button>
+              <button
+                type="button"
+                class={styles.start}
+                classList={{ [styles.inert!]: !startable() }}
+                // The same, with one more thing to wait on: creating is all the
+                // press beside it does, and this one grills as well. So a repo is
+                // not the whole of what it needs, and its `title` says whichever
+                // of the two is missing.
+                disabled={make.isPending}
+                aria-disabled={!startable()}
+                title={ready() ? (startable() ? undefined : waiting()) : NO_REPO}
+                onClick={() => startable() && make.mutate(true)}
+              >
+                {make.isPending ? "Starting…" : "Start work"}
+              </button>
+            </div>
+
+            <Show when={gone()}>
+              <ErrorLine class={styles.failure}>
+                That repo is not registered any more, so nothing was created.
+              </ErrorLine>
+            </Show>
+            <Show when={make.isError}>
+              <ErrorLine class={styles.failure}>
+                The conversation could not be created: {make.error?.message}
+              </ErrorLine>
+            </Show>
+          </div>
         </div>
-      </div>
+      </Reaching.Provider>
 
       {/* And the corner of the page, where there is no sidebar to keep it in:
           the switch that says whether what has been put away is drawn. It is

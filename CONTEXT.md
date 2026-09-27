@@ -1862,6 +1862,27 @@ the page lands in the Conversation it made and this device stops holding
 anything. A field the server refuses leaves the rest of the work on that draft,
 and the refusal is said on the draft's own composer.
 
+**And that page has one control the composer of a record does not: a device
+select**, at the head of the row and left of the **Repo**, drawn only where
+another device is linked — with nothing linked the row is the row it has always
+been. It lists this device first and then each **Member** of the cluster, every
+row wearing the mark for its operating system, and a member that did not answer
+the last dial is listed like any other: the list is the membership rather than a
+reachability probe, and a call that cannot be made is refused by the **Relay** in
+its own words. Everything under the select is the named device's — the Repos the
+dropdown offers, the branches the base picker lists, the registry the companion
+rows are drawn from, the Profiles behind the three Pairing pickers, and the
+Repo's own Pairing memory the pickers stand on until they are touched. So a pick
+takes with it everything that named the machine it came off, a Repo id and a
+Profile id each being one Verkstead's own: the Repo, the base commit, the
+companions and the three Pairings go, and the Brief, the branch name and the
+files being held stay where they are. **The pick is remembered in the browser**
+the way the pane widths are — this device until something is picked, which is
+what the laptop that drives the desktop needs — and a device the cluster has lost
+reads as this device again. It reads disabled while a roadmap or a pull request
+is loaded, both of those lists being this device's own, and loading either puts
+the work back here.
+
 **And where there is nothing to list, that page is the whole of Verkstead.** The
 sidebar's list *as filtered* being empty — no unarchived Conversation, and the
 archived ones either absent or hidden — is the **zero state**: `/` goes to the

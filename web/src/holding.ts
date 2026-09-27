@@ -12,7 +12,7 @@
 //! picked is a handle the browser gave this page and nothing that outlives it.
 //! So a reload keeps the brief and loses the files, and the row of pills simply
 //! is not there any more — see `workbench/composing.ts` for what *is* kept, and
-//! `device.ts` for where it is kept.
+//! `remembered.ts` for where it is kept.
 //!
 //! A piece of its own rather than a fold in the compose page, because that page
 //! is not the only thing that will hold files until there is somewhere to send

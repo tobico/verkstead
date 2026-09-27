@@ -14,10 +14,10 @@
    dragged it, and a phone fits fewer triggers than a dragged-out pane — and the
    wrap is the box's own width rather than the window's.
 
-   Three is a passing count rather than the shape of this row, as five was
-   before the role pickers were folded into one Agent control: the rule is
-   written for a row that wraps at whatever it holds, and the number said here
-   is only what it holds today.
+   Four is a passing count rather than the shape of this row, as three was
+   before a cluster put a device on it and five before the role pickers were
+   folded into one Agent control: the rule is written for a row that wraps at
+   whatever it holds, and the number said here is only what it holds today.
 
    A rem under the field it sits below, inside the same box: the brief is what
    the box is for and this is how it will be run, and the two of them a hair
@@ -31,13 +31,23 @@
 }
 
 /* Each option asks for about a quarter of a wide box and refuses to go under a
-   readable width, so a narrow one puts what is left over on the next line. */
+   readable width, so a narrow one puts what is left over on the next line.
+
+   The device select asks for less of it. What one holds is a machine's name
+   rather than a repository's path or a whole pairing, and it is drawn only where
+   there is a cluster — so a row that gave it a full share would be a row that
+   wrapped the moment a second device was linked. */
 .repoOption,
 .repoSelect,
 .processChoice,
 .agentOption,
 .profileChoice {
   flex: 1 1 9rem;
+  min-width: 0;
+}
+
+.deviceSelect {
+  flex: 0 1 7rem;
   min-width: 0;
 }
 
@@ -77,8 +87,7 @@
 }
 
 /* Its value line, laid out as the listbox's closed control is laid out beside
-   it, so the row's five triggers read as five of one thing — and as however
-   many of one thing the row comes to hold. */
+   it, so every trigger in the row reads as one of a set. */
 .optionLine {
   display: flex;
   grid-area: 2 / 1;
@@ -115,7 +124,8 @@
    saying a borderless trigger can be pressed. */
 .optionPick > button,
 .processPick > button,
-.repoSelectPick > button {
+.repoSelectPick > button,
+.deviceSelectPick > button {
   padding: 0 0.6rem 0.15rem;
   background: none;
   border-color: transparent;
@@ -148,8 +158,10 @@
 
 /* The Repo control before there is a repo, which is a listbox where the picked
    one is a panel: its rows are repository names and nothing else, so it asks
-   for a readable width rather than the pairings' double one. */
-.repoSelectPick > [role="listbox"] {
+   for a readable width rather than the pairings' double one. And the device
+   select beside it the same way, its rows being machine names. */
+.repoSelectPick > [role="listbox"],
+.deviceSelectPick > [role="listbox"] {
   min-width: 12rem;
   max-width: min(20rem, calc(100vw - 2.5rem));
 }

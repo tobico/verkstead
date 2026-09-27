@@ -35,6 +35,13 @@
 //! row: two pages that asked these questions apart would come to word them
 //! differently.
 //!
+//! **And one of them is not drawn on a Conversation at all.** The device select
+//! — [`DeviceSelect`], which stands left of the Repo — is about where a piece of
+//! work will be *done*, which is a question only while there is nothing doing it
+//! yet: the compose page asks it, and the composer of a saved draft asks it to
+//! move one. It lives here with the rest because it is one control drawn in
+//! several places, which is what this file is for.
+//!
 //! The role pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
@@ -56,6 +63,7 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   type Accessor,
   type JSX,
@@ -66,6 +74,7 @@ import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import { DEFAULT_PROFILE, type AgentType } from "../agents";
+import { deviceShown, osIcon, useDevices } from "../devices";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -95,6 +104,7 @@ import type {
   CompanionRemoved,
   CompanionView,
   ConversationView,
+  DeviceIdentity,
   PairingView,
   Process,
   ProcessPicked,
@@ -110,6 +120,7 @@ import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { keyOf, useDevice } from "../reaching";
+import type { Device } from "../reaching";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
@@ -453,6 +464,107 @@ export function RepoOptions(props: {
     >
       {props.children}
     </Menu>
+  );
+}
+
+/// Which device of the cluster the work will be done on: the first option in the
+/// row, left of the Repo.
+///
+/// **Not drawn at all where there is no other device**, which is nearly every
+/// Verkstead: the row is the row it has always been, with no select, no label and
+/// no gap. A column of one answer repeated is the rule the sidebar's rows and the
+/// pane headers are already drawn under — see `deviceShown` in
+/// [`../devices.ts`](../devices.ts).
+///
+/// With a member linked it lists this device first and then each of them, each
+/// wearing the mark a device wears wherever it is drawn: a WSL reads as Linux,
+/// and an operating system this build has no mark for still draws a row.
+///
+/// **A member that is not answering is listed like any other.** What this offers
+/// is the cluster's membership rather than a reachability probe — the row says a
+/// machine is linked, which is still true of one that did not answer the last
+/// dial, and a call that cannot be made is refused by the Relay in its own
+/// words. Unlinking is the Remote access pane's, where an unreachable row is
+/// dimmed and says so.
+///
+/// **A device the membership no longer holds reads as this one.** The pick is
+/// remembered in the browser rather than on the server (see `draftingOn` in
+/// `../remembered.ts`), so it outlives the cluster it was made in: the correction
+/// goes up to whoever owns the pick, which drops what named the machine along
+/// with it. Drawn or not — a cluster that has shrunk to nothing takes the select
+/// away, and the page must not be left pointed at a machine that has gone.
+///
+/// One control, and what a pick *does* is the page's own, exactly as it is for
+/// every other control in this row: the compose page moves what it is composing,
+/// and a saved draft's composer replays it.
+export function DeviceSelect(props: {
+  /// Which device is picked — `null` for this one, which is what a browser that
+  /// has never picked reads as.
+  chosen: Device;
+  disabled?: boolean;
+  pick: (device: Device) => void;
+}): JSX.Element {
+  // This device's own, whichever machine the page is about: the membership is
+  // the hub's own finding about its cluster — see `useDevices`.
+  const devices = useDevices();
+
+  /// Every device that can be picked: this one, and then each member in the
+  /// order the membership lists them.
+  const options = (): DeviceIdentity[] => {
+    const view = devices.data;
+    return view === undefined
+      ? []
+      : [view.this, ...view.members.map((member) => member.identity)];
+  };
+
+  /// What the control is showing, as a row writes it: this device's own id where
+  /// nothing has been picked, and nothing at all until the membership has landed
+  /// — a control showing a device it has not read about yet would be one whose
+  /// first correction was made against an empty list.
+  const showing = (): string => {
+    const view = devices.data;
+    if (view === undefined) return "";
+
+    return props.chosen ?? view.this.device;
+  };
+
+  // And the correction, which runs whether or not the control is drawn: a pick
+  // this browser is holding for a device that has left the cluster is a page
+  // pointed at a machine nothing can reach, and taking the select away — which
+  // is what the last member being unlinked does — would leave it pointed there
+  // for good.
+  createEffect(() => {
+    const view = devices.data;
+    if (
+      view !== undefined &&
+      props.chosen !== null &&
+      deviceShown(view, props.chosen) === null
+    ) {
+      props.pick(null);
+    }
+  });
+
+  return (
+    <Show when={(devices.data?.members.length ?? 0) > 0}>
+      <div class={styles.deviceSelect}>
+        <Listbox
+          id="conversation-device"
+          class={styles.deviceSelectPick}
+          heading={{ words: "Device", class: styles.optionLabel }}
+          options={options()}
+          value={(device) => device.device}
+          label={(device) => device.name}
+          icon={(device) => osIcon(device.os)}
+          chosen={showing()}
+          disabled={props.disabled}
+          // This device's own id back to `null`, so that *this device* is the
+          // value it is everywhere else — see `Device` in `../reaching.ts`.
+          pick={(device) =>
+            props.pick(device === devices.data?.this.device ? null : device)
+          }
+        />
+      </div>
+    </Show>
   );
 }
 

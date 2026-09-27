@@ -40,7 +40,7 @@ import type {
   Response,
   SetView,
 } from "../api/types";
-import { setWrapping, wrapping } from "../device";
+import { setWrapping, wrapping } from "../remembered";
 import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
 import { PaneHead } from "../workbench/PaneHead";
 import { Answering } from "./Answering";

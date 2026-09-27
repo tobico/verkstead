@@ -57,12 +57,13 @@
 //! its placeholder, which is the honest reading of *what you picked is gone*.
 //!
 //! [`Listbox`] is the same choice drawn out of ordinary elements, for the rows
-//! that carry a harness mark beside their words: an `<option>` holds text and
-//! nothing else, in every browser, which is the whole reason there is a second
-//! control here at all. It is the four pairing pickers, the profile form's
-//! harness type and the Repo — a control the app draws itself has to be given
-//! back everything the native one arrived with, which is the keyboard, the roles
-//! a screen reader reads it by and a row a finger can hit, so it earns its keep
+//! that carry a mark beside their words: an `<option>` holds text and nothing
+//! else, in every browser, which is the whole reason there is a second control
+//! here at all. It is the four pairing pickers, the profile form's harness type,
+//! the Repo and the device select, whose rows wear the mark for each machine's
+//! operating system — a control the app draws itself has to be given back
+//! everything the native one arrived with, which is the keyboard, the roles a
+//! screen reader reads it by and a row a finger can hit, so it earns its keep
 //! only where a row has something of its own to draw.
 //!
 //! The Repo's is the second reason to draw one: the two rows at the foot of that
@@ -94,6 +95,7 @@ import {
 } from "solid-js";
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 
 import { HarnessMark } from "./HarnessMark";
 import { Icon } from "./Icon";
@@ -335,6 +337,20 @@ export function Listbox<T>(
     /// words it belongs to is the same space in every one of them.
     mark?: (option: T) => AgentType | null;
 
+    /// Or an icon in front of the words, for the rows whose mark is not a
+    /// harness's: the device select's, where each row wears the mark for its
+    /// operating system — see `osIcon` in [`./devices.ts`](./devices.ts).
+    ///
+    /// Beside [`mark`] rather than in place of it because the two are drawn out
+    /// of different things: a harness is a brand's own drawing, carried whole
+    /// (see `HarnessMark.tsx`), and this is one of the app's own icons. No
+    /// caller hands in both, there being one mark in front of a row's words.
+    ///
+    /// Unlabelled where it is drawn, as the same mark is on a sidebar row: what
+    /// the human is choosing between is the words, and the mark is a shape to
+    /// scan a list by.
+    icon?: (option: T) => IconDefinition;
+
     /// What the *closed* control reads, where that is not what the row it came
     /// off reads.
     ///
@@ -496,6 +512,7 @@ export function Listbox<T>(
             <Reading
               of={picked()!}
               mark={props.mark}
+              icon={props.icon}
               label={props.closed ?? props.label}
             />
           </Show>
@@ -553,7 +570,12 @@ export function Listbox<T>(
                 }
                 onClick={() => take(index())}
               >
-                <Reading of={option} mark={props.mark} label={props.label} />
+                <Reading
+                  of={option}
+                  mark={props.mark}
+                  icon={props.icon}
+                  label={props.label}
+                />
               </div>
             )}
           </For>
@@ -597,19 +619,28 @@ export function Listbox<T>(
   );
 }
 
-/// One row's reading: the harness's mark, and the words beside it.
+/// One row's reading: the mark, and the words beside it.
 ///
 /// Drawn by the list and again by the closed control, out of one component,
 /// because a control showing one thing and offering the same thing drawn
 /// differently is a control the eye has to check.
+///
+/// The mark is a harness's or one of the app's own icons — see [`Listbox`]'s
+/// `mark` and `icon`, which no caller hands in together. Neither is drawn where
+/// the caller offers neither, which is most of them: nothing is put in front of
+/// the words, so no row carries a gap where a mark would have been.
 function Reading<T>(props: {
   of: T;
   mark?: (option: T) => AgentType | null;
+  icon?: (option: T) => IconDefinition;
   label: (option: T) => string;
 }): JSX.Element {
   return (
     <>
       <HarnessMark of={props.mark?.(props.of) ?? null} />
+      <Show when={props.icon?.(props.of)}>
+        {(of) => <Icon of={of()} class={styles.mark!} />}
+      </Show>
       {/* The words in a span of their own, so the closed control can cut a
           reading too long for it and the rows under it never have to. */}
       <span class={styles.words}>{props.label(props.of)}</span>

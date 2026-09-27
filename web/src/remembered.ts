@@ -1,17 +1,26 @@
-//! What the device in front of you remembers: `localStorage`, and the settings
+//! What the browser in front of you remembers: `localStorage`, and the settings
 //! kept in it.
 //!
-//! Deliberately per device and never sent to the server — a phone and a laptop
+//! Named for what it holds rather than for where it holds it, and deliberately
+//! not for a *device*: the linked devices of this Verkstead's cluster are
+//! `devices.ts`, and a module a letter away from that one holding a browser's
+//! settings was a pair of names nobody could tell apart — see the device this
+//! browser is drafting onto, at the foot of this file, which is the one setting
+//! here that is about a device at all.
+//!
+//! Deliberately per browser and never sent to the server — a phone and a laptop
 //! answer the same Set from different places, and neither has any business
 //! deciding how the other draws a Diff — or how the other draws a file in Code,
-//! which is the three settings at the foot of this file. Push notifications are
-//! per device for the same reason, but the browser is the one that remembers
-//! those, so nothing about them is kept here.
+//! which is three of the settings at the foot of this file. Push notifications
+//! are per browser for the same reason, but the browser is the one that
+//! remembers those, so nothing about them is kept here.
 //!
 //! Storage is a convenience the whole way down: a browser that refuses it costs
 //! the human their drafts and their settings and nothing else, so nothing on
 //! this path is worth a thrown error. Every read comes back `null` and every
 //! write is dropped.
+
+import type { Device } from "./reaching";
 
 /// Where the wrap setting lives. Namespaced like the drafts beside it, so
 /// everything this app leaves in a browser is legible as its own.
@@ -177,5 +186,43 @@ function keep(key: string, standard: boolean, body: string): void {
     forget(key);
   } else {
     write(key, body);
+  }
+}
+
+/// And where the device the compose page is drafting onto lives.
+///
+/// Which machine of the cluster a new Conversation is being composed for is
+/// remembered the way the pane widths are, and for the same reason: it is a fact
+/// about the human in front of this browser rather than about the Verkstead they
+/// opened. The laptop that drives the desktop is the case it is kept for — that
+/// browser picks the desktop once and goes on drafting onto it, where *this
+/// device every time* would be the pick to make again on every visit.
+///
+/// Its own key rather than a field of the compose draft beside it, though both
+/// are in this one browser: the draft is dropped the moment a Conversation is
+/// created out of it, and a draft of nothing is never written down at all, so a
+/// pick kept in there would be forgotten by the very press it was made for.
+const DRAFTING = "verkstead.drafting-on";
+
+/// Which device this browser last drafted onto — `null` for this one, which is
+/// what an untouched browser answers and what a browser with no storage
+/// answers too.
+///
+/// Nothing here says whether that device is still in the cluster: the
+/// membership is the server's to answer, and a device that has left reads as
+/// this one where the pick is drawn — see `DeviceSelect` in
+/// `workbench/Setup.tsx`.
+export function draftingOn(): Device {
+  return read(DRAFTING);
+}
+
+/// Remember which device it is drafting onto, or drop the pick where the work
+/// is back on this one: the absence is already *this device*, so a browser put
+/// back leaves nothing behind — the way the wrap settings above it do.
+export function setDraftingOn(device: Device): void {
+  if (device === null) {
+    forget(DRAFTING);
+  } else {
+    write(DRAFTING, device);
   }
 }

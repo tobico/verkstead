@@ -19,7 +19,7 @@ Roadmap stage: [07: Drafting on a device](docs/roadmaps/cluster-mode/07-drafting
 
 ## Tasks
 
-- [ ] 01: The device select — [details](01-the-device-select.md)
+- [x] 01: The device select — [details](01-the-device-select.md)
 - [ ] 02: Open and Create on the picked device — [details](02-open-and-create-on-the-picked-device.md)
 - [ ] 03: Starting the work on the picked device — [details](03-starting-the-work-on-the-picked-device.md)
 - [ ] 04: Moving a saved draft — [details](04-moving-a-saved-draft.md)

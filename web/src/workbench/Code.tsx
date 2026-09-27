@@ -324,7 +324,7 @@
 //! pane rather than about anything open in it goes: the three settings ADR 0019
 //! exposes — word wrap, the font size and the minimap — each a row of the one
 //! menu the app has. Kept per device beside the Diff's own wrap setting (see
-//! `device.ts`) and never sent to the server, for the reason that one is: a
+//! `remembered.ts`) and never sent to the server, for the reason that one is: a
 //! phone and a laptop are entitled to draw the same file differently, and
 //! neither has any business deciding for the other. A browser that refuses
 //! storage costs the setting and nothing else, the editors drawing VS Code's
@@ -450,7 +450,7 @@ import {
   drawn as atRest,
   setDrawn as remember,
   type Drawn,
-} from "../device";
+} from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 // The seam beside the nudge table: what the tabs and the tree follow the disk
