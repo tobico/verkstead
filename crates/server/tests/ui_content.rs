@@ -2807,6 +2807,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -2835,7 +2836,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // every poll — recorded here rather than watched for, as the pull request
     // above is. Still running, which is the ordinary state of a wrap-up: the
     // suite is what it is waiting on.
-    store::record_check_rollup(&pool, wrapping, store::Rollup::Running)
+    store::record_check_rollup(&pool, wrapping, repos[0].id, 41, store::Rollup::Running)
         .await
         .unwrap();
 
@@ -2844,7 +2845,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // fine and GitHub is still thinking about the tests. A conflict is the
     // reading the viewer's own tests compose over this one — what is being
     // carried here is the field.
-    store::record_merging(&pool, wrapping, repos[0].id, store::Merging::Cleanly)
+    store::record_merging(&pool, wrapping, repos[0].id, 41, store::Merging::Cleanly)
         .await
         .unwrap();
 
@@ -2877,7 +2878,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The suite went green on the way, which is what settling the checks above
     // means: the last thing the watcher wrote down before it stopped watching,
     // and what the card on a finished Conversation goes on showing.
-    store::record_check_rollup(&pool, wrapping, store::Rollup::Passed)
+    store::record_check_rollup(&pool, wrapping, repos[0].id, 41, store::Rollup::Passed)
         .await
         .unwrap();
 

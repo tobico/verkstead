@@ -4154,6 +4154,7 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -4274,6 +4275,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
                 number: 42,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -4337,6 +4339,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -4656,6 +4659,7 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -4756,6 +4760,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -9408,6 +9413,37 @@ async fn a_review_draws_none_of_the_pull_requests_own_commits() {
     );
 }
 
+/// And the pull request it recorded carries the head branch GitHub named, which
+/// nothing used to write down.
+///
+/// The branch a wrap-up holds a green suite against, and one of the branches a
+/// session sent at a stack is told: both are questions about one pull request, and
+/// a repository holding several makes the Worktree's checkout the wrong place to
+/// ask. So it goes on the row as GitHub said it, at the moment there is a row.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_taken_up_pull_request_carries_the_branch_its_work_is_on() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let id = reviewing(&app, elsewhere.path(), repo_id, 41).await;
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::pull_request(&pool, id, repo_id)
+            .await
+            .unwrap()
+            .expect("the take-up recorded the pull request it was pointed at")
+            .head,
+        Some("rate-limiting".to_owned()),
+    );
+}
+
 /// A local branch of that name standing behind origin's is caught up and taken:
 /// the pull request's work is on the remote, and this checkout's copy is a copy.
 #[cfg(unix)]
@@ -10825,6 +10861,7 @@ async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -10842,7 +10879,9 @@ async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
         (store::Rollup::Failed, CheckRollup::Failed),
         (store::Rollup::Passed, CheckRollup::Passed),
     ] {
-        store::record_check_rollup(&pool, id, asked).await.unwrap();
+        store::record_check_rollup(&pool, id, repo_id, 41, asked)
+            .await
+            .unwrap();
 
         assert_eq!(
             checks(&opened(&app, id).await),
@@ -10896,6 +10935,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -10914,7 +10954,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
         // conflict: the reading is written over, so the mark goes.
         (store::Merging::Cleanly, Merging::Cleanly),
     ] {
-        store::record_merging(&pool, id, repo_id, asked)
+        store::record_merging(&pool, id, repo_id, 41, asked)
             .await
             .unwrap();
 
@@ -10938,7 +10978,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
     }
     store::finish_wrap_up(&pool, id).await.unwrap();
 
-    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+    store::record_merging(&pool, id, repo_id, 41, store::Merging::Conflicting)
         .await
         .unwrap();
 
@@ -10968,9 +11008,88 @@ fn merges(view: &ConversationView) -> [Option<Merging>; 2] {
     [pinned.flatten(), reached.flatten()]
 }
 
-/// A companion's pull request carries its own reading, which is where this
-/// parts company with the rollup beside it: a rollup is written down per
-/// Conversation, and whether a branch merges is a fact about that branch.
+/// A companion's pull request carries its own rollup, where the second suite
+/// written used to stand for both of them.
+///
+/// The rollup was the Conversation's, from when a Conversation had one pull
+/// request to have a suite — so two watchers wrote one row, each read the other's
+/// suite, and the view drew the icon on the work's own card alone rather than draw
+/// a word that might be about the wrong branch. It is the pull request's now, and
+/// each card draws its own.
+///
+/// Which is the shape a wrap-up really has: the work's own suite red while the
+/// companion's is green is two repositories being two repositories.
+#[tokio::test]
+async fn each_pull_request_carries_how_its_own_checks_are() {
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let beside = second_repo(&app, elsewhere.path(), "askance").await;
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_another_pull_request(
+        &pool,
+        id,
+        beside,
+        &store::PullRequest {
+            number: 7,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/askance/pull/7".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_check_rollup(&pool, id, repo_id, 41, store::Rollup::Failed)
+        .await
+        .unwrap();
+    store::record_check_rollup(&pool, id, beside, 7, store::Rollup::Passed)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+
+    let each: Vec<(Option<String>, Option<CheckRollup>)> = view
+        .pinned
+        .iter()
+        .filter_map(|event| match event {
+            PinnedEvent::PullRequest(opened) => Some((opened.repo.clone(), opened.checks)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        each,
+        vec![
+            (None, Some(CheckRollup::Failed)),
+            (Some("askance".to_owned()), Some(CheckRollup::Passed)),
+        ],
+        "each card draws its own suite, where the companion's used to draw no icon \
+         at all",
+    );
+}
+
+/// A companion's pull request carries its own merge reading too, for the rollup
+/// above's reason: whether a branch merges is a fact about that branch.
 ///
 /// So a wrap-up ending on two pull requests can have one conflicted and one
 /// clean, which is the ordinary shape of it — a base having moved in one
@@ -10995,6 +11114,7 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -11009,16 +11129,17 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
             number: 7,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/askance/pull/7".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
     .await
     .unwrap();
 
-    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+    store::record_merging(&pool, id, repo_id, 41, store::Merging::Cleanly)
         .await
         .unwrap();
-    store::record_merging(&pool, id, beside, store::Merging::Conflicting)
+    store::record_merging(&pool, id, beside, 7, store::Merging::Conflicting)
         .await
         .unwrap();
 
@@ -11077,12 +11198,13 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
     .await
     .unwrap();
-    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+    store::record_merging(&pool, id, repo_id, 41, store::Merging::Conflicting)
         .await
         .unwrap();
 
@@ -11104,7 +11226,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
 
     // Where somebody has resolved it in the meantime, or the freshening the pane
     // does as it opens found the conflict gone.
-    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+    store::record_merging(&pool, id, repo_id, 41, store::Merging::Cleanly)
         .await
         .unwrap();
 
@@ -11154,12 +11276,13 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
     .await
     .unwrap();
-    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+    store::record_merging(&pool, id, repo_id, 41, store::Merging::Conflicting)
         .await
         .unwrap();
 
@@ -11228,6 +11351,7 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -11313,6 +11437,7 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )

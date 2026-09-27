@@ -24,10 +24,12 @@
 //!
 //! **And it ends per pull request rather than all at once.** A pull request
 //! recorded merged or closed is an answer that will not change, so it drops out
-//! of the walk the moment one is recorded and is never asked about again. That
-//! is learned from the same call that watches for the conflict, which is what
-//! makes the ending free: a sweep that had to ask a second question to find out
-//! whether to stop asking would be two calls for every one it saved.
+//! of the walk the moment one is recorded and is never asked about again — by its
+//! own number, so a stack of three in one repository leaves the walk one at a
+//! time as the human merges up the chain. That is learned from the same call that
+//! watches for the conflict, which is what makes the ending free: a sweep that had
+//! to ask a second question to find out whether to stop asking would be two calls
+//! for every one it saved.
 //!
 //! **Nothing is dispatched from here and nothing moves.** After Done this is
 //! watching and nothing else: no session, no Notice, no push to a device. A
@@ -145,6 +147,7 @@ async fn sweep(state: &AppState) {
             state,
             pull_request.conversation_id,
             &pull_request.repo,
+            pull_request.number,
             landing,
         )
         .await;
@@ -169,6 +172,7 @@ pub(crate) async fn remember(
     state: &AppState,
     conversation_id: i64,
     repo: &store::Repo,
+    number: i64,
     landing: Landing,
 ) {
     let merging = match landing.mergeable {
@@ -183,13 +187,13 @@ pub(crate) async fn remember(
     // A sweep that found the same word a quarter of an hour later has nothing to
     // tell anybody.
     if let Some(merging) = merging {
-        match store::record_merging(&state.pool, conversation_id, repo.id, merging).await {
+        match store::record_merging(&state.pool, conversation_id, repo.id, number, merging).await {
             Ok(true) => state.nudges.announce(Nudge::Conversation {
                 conversation: conversation_id,
             }),
             Ok(false) => {}
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = repo.name, "recording whether a pull request that has not landed merges failed");
+                tracing::error!(error = ?error, conversation_id, repo = repo.name, number, "recording whether a pull request that has not landed merges failed");
             }
         }
     }
@@ -206,9 +210,9 @@ pub(crate) async fn remember(
     };
 
     if let Err(error) =
-        store::record_standing(&state.pool, conversation_id, repo.id, standing).await
+        store::record_standing(&state.pool, conversation_id, repo.id, number, standing).await
     {
-        tracing::error!(error = ?error, conversation_id, repo = repo.name, "recording where a pull request has got to failed");
+        tracing::error!(error = ?error, conversation_id, repo = repo.name, number, "recording where a pull request has got to failed");
         return;
     }
 
@@ -216,6 +220,7 @@ pub(crate) async fn remember(
         tracing::info!(
             conversation_id,
             repo = repo.name,
+            number,
             standing = ?standing,
             "a pull request has been finished with, so nothing asks about it again",
         );

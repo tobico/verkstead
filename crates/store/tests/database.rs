@@ -59,6 +59,7 @@ fn opened(number: i64) -> PullRequest {
         number,
         title: "Rate limiting".to_owned(),
         url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        head: Some(format!("rate-limiting-{number}")),
         repo: None,
     }
 }

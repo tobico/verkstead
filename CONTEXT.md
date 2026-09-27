@@ -2400,7 +2400,10 @@ word: anything red reads as *failed*, else anything unfinished reads as
 *running*, else *passed*. The **pull request** card draws it as the icon GitHub
 draws beside a pull request — a tick, a cross, a dot — on the right of its head.
 
-Written down on every poll of the checks watcher, so it outlives both the poll
+Written down on every poll of the checks watcher and per pull request, as
+**Mergeable** beside it is: a suite is a fact about one branch, so a Conversation
+ending on a read-write companion's pull request as well as its own draws each
+card's own icon, and so does every branch of a stack. It outlives both the poll
 and the server: a Conversation carried to Done keeps the icon the last poll
 earned it. Which also means it can be stale, the watching stopping when the
 wrap-up is over — and what freshens a stale one is opening the pull request's

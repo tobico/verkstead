@@ -116,6 +116,7 @@ mod tests {
             number,
             title: "Conversation sharing".to_owned(),
             url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some("conversation-sharing".to_owned()),
             repo: repo.map(str::to_owned),
         }
     }

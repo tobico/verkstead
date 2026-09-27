@@ -369,7 +369,14 @@ async fn once(
     // it and the card outlives the watching: this is the one place anything asks
     // GitHub how the checks are while a wrap-up is running, and what it learned
     // would otherwise go no further than the settle below.
-    remember(state, conversation_id, &suite.checks).await;
+    remember(
+        state,
+        conversation_id,
+        watched.repo.id,
+        watched.number,
+        &suite.checks,
+    )
+    .await;
 
     // And whether the pull request merges at all, which came back in the same
     // answer. Read before the checks rather than after, because it is a fact
@@ -596,7 +603,18 @@ fn pushed_head(worktree: &Path) -> Option<String> {
 /// Nudged only where the word changed. A suite that is still running says the
 /// same thing every thirty seconds for as long as it takes, and a page told each
 /// time would be a page re-reading a Timeline nothing had happened on.
-pub(crate) async fn remember(state: &AppState, conversation_id: i64, checks: &[Check]) {
+///
+/// Written against the pull request it is a suite of rather than against the
+/// Conversation, because that is what it is a suite of: `repo_id` and `number`
+/// together are which one, and a Conversation with a read-write companion or a
+/// stack has as many suites as it has pull requests.
+pub(crate) async fn remember(
+    state: &AppState,
+    conversation_id: i64,
+    repo_id: i64,
+    number: i64,
+    checks: &[Check],
+) {
     // A pull request with no checks on it at all is not passing and is not
     // failing: there is nothing to say about a repository with no CI, and a
     // green tick would be one this suite never earned. So nothing is written
@@ -605,13 +623,13 @@ pub(crate) async fn remember(state: &AppState, conversation_id: i64, checks: &[C
         return;
     };
 
-    match store::record_check_rollup(&state.pool, conversation_id, rollup).await {
+    match store::record_check_rollup(&state.pool, conversation_id, repo_id, number, rollup).await {
         Ok(true) => state.nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
         }),
         Ok(false) => {}
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "recording how the checks are failed");
+            tracing::error!(error = ?error, conversation_id, repo_id, number, "recording how the checks are failed");
         }
     }
 }
@@ -1005,13 +1023,21 @@ async fn merging(
     // off this, and a pull request that merged cleanly on the last poll merges
     // cleanly on this one — a page told so every thirty seconds would be a page
     // re-reading a Timeline nothing had happened on.
-    match store::record_merging(&state.pool, conversation_id, watched.repo.id, merging).await {
+    match store::record_merging(
+        &state.pool,
+        conversation_id,
+        watched.repo.id,
+        watched.number,
+        merging,
+    )
+    .await
+    {
         Ok(true) => state.nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
         }),
         Ok(false) => {}
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the pull request merges failed");
+            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, number = watched.number, "recording whether the pull request merges failed");
         }
     }
 

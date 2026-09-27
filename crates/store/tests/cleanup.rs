@@ -141,6 +141,7 @@ async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -652,6 +653,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -659,11 +661,13 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap();
 
     // What GitHub last said about it, and how far the wrap-up got.
-    record_check_rollup(pool, id, Rollup::Passed).await.unwrap();
-    record_merging(pool, id, repo, Merging::Cleanly)
+    record_check_rollup(pool, id, repo, 41, Rollup::Passed)
         .await
         .unwrap();
-    record_standing(pool, id, repo, Standing::Open)
+    record_merging(pool, id, repo, 41, Merging::Cleanly)
+        .await
+        .unwrap();
+    record_standing(pool, id, repo, 41, Standing::Open)
         .await
         .unwrap();
     settle_wrap_up(pool, id, WaitingOn::Review).await.unwrap();

@@ -2791,6 +2791,10 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
             number: held.number,
             title: held.title.clone(),
             url: held.url.clone(),
+            // The branch the take-up has just put the Worktree on, which GitHub
+            // named when the Target was resolved — see [`store::PullRequest::head`]
+            // for what is afterwards held against it.
+            head: Some(held.head.clone()),
             repo: None,
         };
 

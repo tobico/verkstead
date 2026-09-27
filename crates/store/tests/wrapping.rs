@@ -23,8 +23,8 @@ use verkstead_store::{
     close_conversation, finish_wrap_up, hold_pull_request, implement_again, load_conversation,
     merges, merging, open_database, pick_direction, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
-    record_standing, register_repo, resolve_conflicts, save_brief, settle_wrap_up, standing,
-    start_conversation, start_grilling, start_tinkering, take_up, timeline,
+    record_standing, register_repo, resolve_conflicts, rollups, save_brief, settle_wrap_up,
+    standing, start_conversation, start_grilling, start_tinkering, take_up, timeline,
     unfinished_pull_requests, wrap_up_settled,
 };
 
@@ -118,6 +118,7 @@ fn opened() -> PullRequest {
         number: 41,
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        head: Some("rate-limiting".to_owned()),
         repo: None,
     }
 }
@@ -152,6 +153,21 @@ async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
                 WaitingOn::Mergeable(repo.id),
             ]
         }))
+        .collect()
+}
+
+/// Which Timeline Event each of a Conversation's pull requests is, in the order
+/// they were recorded.
+///
+/// What both the rollup map and the merge map are keyed by, that being what a card
+/// has to hand — see [`verkstead_store::rollups`].
+async fn pull_request_events(pool: &SqlitePool, id: i64) -> Vec<i64> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| matches!(event.event, Event::PullRequest(_)))
+        .map(|event| event.id)
         .collect()
 }
 
@@ -668,15 +684,16 @@ fn beside_it() -> PullRequest {
         number: 7,
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/askance/pull/7".to_owned(),
+        head: Some("rate-limiting".to_owned()),
         repo: None,
     }
 }
 
-/// A pull request recorded against a repository that already has one reuses the
-/// row it has. Which is what makes a discovery that runs twice do nothing the
-/// second time — and what a second wrap lands on.
+/// A pull request already on the record reuses the row it has. Which is what makes
+/// a discovery that runs twice do nothing the second time — and what a second wrap
+/// lands on.
 #[tokio::test]
-async fn a_repository_that_already_has_one_keeps_the_row_it_has() {
+async fn a_pull_request_already_on_the_record_keeps_the_row_it_has() {
     let (_dir, pool) = fresh_pool().await;
     let id = implementing(&pool).await;
     let beside = companion(&pool).await;
@@ -691,13 +708,109 @@ async fn a_repository_that_already_has_one_keeps_the_row_it_has() {
         .await
         .unwrap();
 
-    let requests = events(&pool, id)
-        .await
-        .into_iter()
-        .filter(|event| matches!(event, Event::PullRequest(_)))
-        .count();
+    assert_eq!(
+        pull_request_events(&pool, id).await.len(),
+        2,
+        "one row per pull request, and no more",
+    );
+}
 
-    assert_eq!(requests, 2, "one pull request per repository, and no more");
+/// And another number in the same repository stands beside it, which is what a
+/// stack is: a chain of pull requests each based on the one below, all in the one
+/// place.
+///
+/// Every one of them reads back with its own checks, its own merge reading and its
+/// own standing, because every one of those is keyed by the pull request rather
+/// than by the repository it is in.
+#[tokio::test]
+async fn a_stack_is_several_pull_requests_of_one_repository() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    for above in [
+        stacked(42, "rate-limiting-2"),
+        stacked(43, "rate-limiting-3"),
+    ] {
+        assert!(
+            record_another_pull_request(&pool, id, own, &above)
+                .await
+                .unwrap(),
+            "the chain above the named pull request is recorded in the same repository",
+        );
+    }
+
+    assert_eq!(
+        pull_requests(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(repo, opened)| (repo.id, opened.number, opened.head))
+            .collect::<Vec<_>>(),
+        [
+            (own, 41, Some("rate-limiting".to_owned())),
+            (own, 42, Some("rate-limiting-2".to_owned())),
+            (own, 43, Some("rate-limiting-3".to_owned())),
+        ],
+        "all three read back in the order they were recorded, each on its own branch",
+    );
+
+    // A reading of GitHub apiece, and each of the three different from the two
+    // beside it: a stack whose bottom branch has stopped merging is exactly that
+    // shape.
+    for (number, rollup, merges, stands) in [
+        (41, Rollup::Failed, Merging::Conflicting, Standing::Open),
+        (42, Rollup::Running, Merging::Cleanly, Standing::Open),
+        (43, Rollup::Passed, Merging::Cleanly, Standing::Merged),
+    ] {
+        record_check_rollup(&pool, id, own, number, rollup)
+            .await
+            .unwrap();
+        record_merging(&pool, id, own, number, merges)
+            .await
+            .unwrap();
+        record_standing(&pool, id, own, number, stands)
+            .await
+            .unwrap();
+    }
+
+    for (number, rollup, merges, stands) in [
+        (41, Rollup::Failed, Merging::Conflicting, Standing::Open),
+        (42, Rollup::Running, Merging::Cleanly, Standing::Open),
+        (43, Rollup::Passed, Merging::Cleanly, Standing::Merged),
+    ] {
+        assert_eq!(
+            check_rollup(&pool, id, own, number).await.unwrap(),
+            Some(rollup),
+            "pull request {number} keeps its own suite",
+        );
+        assert_eq!(
+            merging(&pool, id, own, number).await.unwrap(),
+            Some(merges),
+            "and its own merge reading",
+        );
+        assert_eq!(
+            standing(&pool, id, own, number).await.unwrap(),
+            Some(stands),
+            "and its own standing",
+        );
+    }
+}
+
+/// One pull request of the chain above the named one: the same repository, a
+/// number of its own, and the branch its work is on.
+fn stacked(number: i64, head: &str) -> PullRequest {
+    PullRequest {
+        number,
+        title: "Rate limiting".to_owned(),
+        url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        head: Some(head.to_owned()),
+        repo: None,
+    }
 }
 
 /// A Conversation that is not there has nothing to record another pull request
@@ -773,53 +886,134 @@ async fn a_pull_request_says_which_repository_it_is_in() {
 /// what these ask is the two things the card depends on: that the last word
 /// written is the word read back, and that saying the same thing twice is not
 /// news.
+///
+/// Per pull request rather than per Conversation, which is what a suite is about:
+/// a Conversation with a read-write companion has two of them, each watched on its
+/// own interval, and one row between them would be each watcher reading the
+/// other's suite.
 #[tokio::test]
 async fn how_the_checks_are_is_written_down_and_read_back() {
     let (_dir, pool) = fresh_pool().await;
     let id = implementing(&pool).await;
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
         .await
         .unwrap();
 
     assert_eq!(
-        check_rollup(&pool, id).await.unwrap(),
+        check_rollup(&pool, id, own, 41).await.unwrap(),
         None,
         "nothing has asked GitHub yet, which is not the same as green",
     );
 
     assert!(
-        record_check_rollup(&pool, id, Rollup::Running)
+        record_check_rollup(&pool, id, own, 41, Rollup::Running)
             .await
             .unwrap(),
         "the first poll is news",
     );
     assert_eq!(
-        check_rollup(&pool, id).await.unwrap(),
+        check_rollup(&pool, id, own, 41).await.unwrap(),
         Some(Rollup::Running)
     );
 
     assert!(
-        !record_check_rollup(&pool, id, Rollup::Running)
+        !record_check_rollup(&pool, id, own, 41, Rollup::Running)
             .await
             .unwrap(),
         "and a suite still running half an hour later is the same thing said again",
     );
 
     assert!(
-        record_check_rollup(&pool, id, Rollup::Failed)
+        record_check_rollup(&pool, id, own, 41, Rollup::Failed)
             .await
             .unwrap(),
         "a check going red is news",
     );
-    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Failed));
+    assert_eq!(
+        check_rollup(&pool, id, own, 41).await.unwrap(),
+        Some(Rollup::Failed)
+    );
+
+    // And the companion's suite, which is a suite of its own: it went green while
+    // the work's own was red, and neither reading is the other's.
+    record_check_rollup(&pool, id, beside, 7, Rollup::Passed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        check_rollup(&pool, id, own, 41).await.unwrap(),
+        Some(Rollup::Failed),
+        "the companion going green is nothing about the work's own suite",
+    );
+    assert_eq!(
+        check_rollup(&pool, id, beside, 7).await.unwrap(),
+        Some(Rollup::Passed),
+    );
 
     assert!(
-        record_check_rollup(&pool, id, Rollup::Passed)
+        record_check_rollup(&pool, id, own, 41, Rollup::Passed)
             .await
             .unwrap(),
-        "and so is the fix session's push going green",
+        "and the fix session's push going green is news",
     );
-    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Passed));
+    assert_eq!(
+        check_rollup(&pool, id, own, 41).await.unwrap(),
+        Some(Rollup::Passed)
+    );
+}
+
+/// And every one of them together, by the Timeline Event each pull request is,
+/// which is what the Conversation view draws its icons off.
+///
+/// Keyed by the Event for the merge map's reason — a pull request's card is drawn
+/// pinned above the record and at the moment it opened, and both copies know only
+/// which Event they are.
+///
+/// Every pull request rather than the Conversation's own, which is the whole of
+/// what this slice changed: a companion's card drew no icon at all while the
+/// rollup was the Conversation's, and draws its own now.
+#[tokio::test]
+async fn every_pull_requests_rollup_is_read_back_by_the_event_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
+        .await
+        .unwrap();
+
+    assert!(
+        rollups(&pool, id).await.unwrap().is_empty(),
+        "nothing has asked GitHub about either of them, so there is nothing to draw",
+    );
+
+    record_check_rollup(&pool, id, own, 41, Rollup::Failed)
+        .await
+        .unwrap();
+    record_check_rollup(&pool, id, beside, 7, Rollup::Passed)
+        .await
+        .unwrap();
+
+    let events = pull_request_events(&pool, id).await;
+
+    assert_eq!(
+        rollups(&pool, id).await.unwrap(),
+        std::collections::HashMap::from(
+            [(events[0], Rollup::Failed), (events[1], Rollup::Passed),]
+        ),
+        "each Event carries the suite of its own pull request, where the second \
+         written used to stand for both",
+    );
 }
 
 /// And it survives a restart, which is the whole reason it is written down
@@ -832,22 +1026,26 @@ async fn how_the_checks_are_outlives_the_server_that_asked() {
 
     let pool = open_database(&database).await.unwrap();
     let id = implementing(&pool).await;
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
         .await
         .unwrap();
-    record_check_rollup(&pool, id, Rollup::Passed)
+    record_check_rollup(&pool, id, own, 41, Rollup::Passed)
         .await
         .unwrap();
     pool.close().await;
 
     let pool = open_database(&database).await.unwrap();
 
-    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Passed));
+    assert_eq!(
+        check_rollup(&pool, id, own, 41).await.unwrap(),
+        Some(Rollup::Passed)
+    );
 }
 
-/// And whether it merges, which is the other reading of GitHub written down
-/// here — kept per pull request rather than per Conversation, because a conflict
-/// is a fact about one branch and its base.
+/// And whether it merges, which is the other reading of GitHub written down here —
+/// kept per pull request, as the rollup above it is, because a conflict is a fact
+/// about one branch and its base.
 ///
 /// A Conversation with a read-write companion has one clean and one conflicted
 /// as easily as two of either: the base moved in one repository and not in the
@@ -869,33 +1067,33 @@ async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
         .unwrap();
 
     assert_eq!(
-        merging(&pool, id, own).await.unwrap(),
+        merging(&pool, id, own, 41).await.unwrap(),
         None,
         "nothing has asked GitHub yet, which is not the same as merging cleanly",
     );
 
     assert!(
-        record_merging(&pool, id, own, Merging::Conflicting)
+        record_merging(&pool, id, own, 41, Merging::Conflicting)
             .await
             .unwrap(),
         "the first poll is news",
     );
-    record_merging(&pool, id, beside, Merging::Cleanly)
+    record_merging(&pool, id, beside, 7, Merging::Cleanly)
         .await
         .unwrap();
 
     assert_eq!(
-        merging(&pool, id, own).await.unwrap(),
+        merging(&pool, id, own, 41).await.unwrap(),
         Some(Merging::Conflicting),
     );
     assert_eq!(
-        merging(&pool, id, beside).await.unwrap(),
+        merging(&pool, id, beside, 7).await.unwrap(),
         Some(Merging::Cleanly),
         "the companion's own base has not moved, and its pull request says so",
     );
 
     assert!(
-        !record_merging(&pool, id, own, Merging::Conflicting)
+        !record_merging(&pool, id, own, 41, Merging::Conflicting)
             .await
             .unwrap(),
         "and a conflict still standing on the next poll is the same thing said again",
@@ -904,20 +1102,20 @@ async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
     // And the conflict resolved: written over rather than added to, a conflict
     // that has been dealt with not being a conflict.
     assert!(
-        record_merging(&pool, id, own, Merging::Cleanly)
+        record_merging(&pool, id, own, 41, Merging::Cleanly)
             .await
             .unwrap(),
         "a resolution landing is news, which is what takes the mark off the card",
     );
 
     assert_eq!(
-        merging(&pool, id, own).await.unwrap(),
+        merging(&pool, id, own, 41).await.unwrap(),
         Some(Merging::Cleanly)
     );
 }
 
 /// And every one of them together, by the Timeline Event each pull request is,
-/// which is what the Conversation view draws its cards off.
+/// which is what the Conversation view draws its marks off.
 ///
 /// Keyed by the Event rather than by the Repo because that is what a card has to
 /// hand — the same pull request is drawn pinned above the record and at the
@@ -943,19 +1141,13 @@ async fn every_pull_requests_merge_is_read_back_by_the_event_it_is() {
         "nothing has asked GitHub about either of them, so there is nothing to draw",
     );
 
-    record_merging(&pool, id, own, Merging::Conflicting)
+    record_merging(&pool, id, own, 41, Merging::Conflicting)
         .await
         .unwrap();
 
     // Which Event each pull request is, in the order they were recorded — the
     // Conversation's own first, then the companion's.
-    let events: Vec<i64> = timeline(&pool, id)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|event| matches!(event.event, Event::PullRequest(_)))
-        .map(|event| event.id)
-        .collect();
+    let events = pull_request_events(&pool, id).await;
 
     assert_eq!(
         merges(&pool, id).await.unwrap(),
@@ -963,7 +1155,7 @@ async fn every_pull_requests_merge_is_read_back_by_the_event_it_is() {
         "the one that was asked about is in it, and the one that was not is absent",
     );
 
-    record_merging(&pool, id, beside, Merging::Cleanly)
+    record_merging(&pool, id, beside, 7, Merging::Cleanly)
         .await
         .unwrap();
 
@@ -991,7 +1183,7 @@ async fn whether_a_pull_request_merges_outlives_the_server_that_asked() {
     record_pull_request(&pool, id, own, &opened())
         .await
         .unwrap();
-    record_merging(&pool, id, own, Merging::Conflicting)
+    record_merging(&pool, id, own, 41, Merging::Conflicting)
         .await
         .unwrap();
     pool.close().await;
@@ -999,7 +1191,7 @@ async fn whether_a_pull_request_merges_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
 
     assert_eq!(
-        merging(&pool, id, own).await.unwrap(),
+        merging(&pool, id, own, 41).await.unwrap(),
         Some(Merging::Conflicting),
     );
 }
@@ -1027,24 +1219,24 @@ async fn where_each_pull_request_has_got_to_is_written_down_and_read_back() {
         .unwrap();
 
     assert_eq!(
-        standing(&pool, id, own).await.unwrap(),
+        standing(&pool, id, own, 41).await.unwrap(),
         None,
         "nothing has asked GitHub yet, which is not the same as being open",
     );
 
-    record_standing(&pool, id, own, Standing::Open)
+    record_standing(&pool, id, own, 41, Standing::Open)
         .await
         .unwrap();
-    record_standing(&pool, id, beside, Standing::Merged)
+    record_standing(&pool, id, beside, 7, Standing::Merged)
         .await
         .unwrap();
 
     assert_eq!(
-        standing(&pool, id, own).await.unwrap(),
+        standing(&pool, id, own, 41).await.unwrap(),
         Some(Standing::Open)
     );
     assert_eq!(
-        standing(&pool, id, beside).await.unwrap(),
+        standing(&pool, id, beside, 7).await.unwrap(),
         Some(Standing::Merged),
         "the companion's half has landed and the work's own has not, which is two \
          repositories being two repositories",
@@ -1052,26 +1244,26 @@ async fn where_each_pull_request_has_got_to_is_written_down_and_read_back() {
 
     // And the merge beside it is untouched by any of that: a pull request that
     // has been merged merged cleanly.
-    record_merging(&pool, id, own, Merging::Conflicting)
+    record_merging(&pool, id, own, 41, Merging::Conflicting)
         .await
         .unwrap();
 
     assert_eq!(
-        standing(&pool, id, own).await.unwrap(),
+        standing(&pool, id, own, 41).await.unwrap(),
         Some(Standing::Open)
     );
     assert_eq!(
-        merging(&pool, id, own).await.unwrap(),
+        merging(&pool, id, own, 41).await.unwrap(),
         Some(Merging::Conflicting),
     );
 
     // Written over rather than added to, as every reading of GitHub here is.
-    record_standing(&pool, id, own, Standing::Closed)
+    record_standing(&pool, id, own, 41, Standing::Closed)
         .await
         .unwrap();
 
     assert_eq!(
-        standing(&pool, id, own).await.unwrap(),
+        standing(&pool, id, own, 41).await.unwrap(),
         Some(Standing::Closed),
     );
 }
@@ -1128,14 +1320,14 @@ async fn the_pull_requests_still_waiting_to_land_are_the_done_ones_nobody_has_me
 
     // A reading that leaves it open leaves it on the list, which is the sweep
     // going on asking.
-    record_standing(&pool, wrapping, own, Standing::Open)
+    record_standing(&pool, wrapping, own, 41, Standing::Open)
         .await
         .unwrap();
 
     assert_eq!(unfinished_pull_requests(&pool).await.unwrap().len(), 1);
 
     // And one that says somebody has merged it takes it off for good.
-    record_standing(&pool, wrapping, own, Standing::Merged)
+    record_standing(&pool, wrapping, own, 41, Standing::Merged)
         .await
         .unwrap();
 
@@ -1143,6 +1335,64 @@ async fn the_pull_requests_still_waiting_to_land_are_the_done_ones_nobody_has_me
         unfinished_pull_requests(&pool).await.unwrap(),
         Vec::new(),
         "a merged pull request is a question with a final answer",
+    );
+}
+
+/// And a stack is walked one pull request at a time: three in one repository are
+/// three questions, and the one somebody has merged leaves the walk without taking
+/// the two beside it with it.
+#[tokio::test]
+async fn a_stack_leaves_the_sweep_one_pull_request_at_a_time() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    for above in [
+        stacked(42, "rate-limiting-2"),
+        stacked(43, "rate-limiting-3"),
+    ] {
+        record_another_pull_request(&pool, id, own, &above)
+            .await
+            .unwrap();
+    }
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    assert_eq!(
+        unfinished_pull_requests(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|unfinished| unfinished.number)
+            .collect::<Vec<_>>(),
+        [41, 42, 43],
+        "every pull request of the stack is asked about, in the order they were \
+         recorded",
+    );
+
+    // The human merges the bottom of the stack, which is the one that can land
+    // first.
+    record_standing(&pool, id, own, 41, Standing::Merged)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unfinished_pull_requests(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|unfinished| unfinished.number)
+            .collect::<Vec<_>>(),
+        [42, 43],
+        "and the two above it are still questions with no final answer",
     );
 }
 
@@ -1188,7 +1438,7 @@ async fn where_a_pull_request_has_got_to_outlives_the_server_that_asked() {
     record_pull_request(&pool, id, own, &opened())
         .await
         .unwrap();
-    record_standing(&pool, id, own, Standing::Merged)
+    record_standing(&pool, id, own, 41, Standing::Merged)
         .await
         .unwrap();
     pool.close().await;
@@ -1196,7 +1446,7 @@ async fn where_a_pull_request_has_got_to_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
 
     assert_eq!(
-        standing(&pool, id, own).await.unwrap(),
+        standing(&pool, id, own, 41).await.unwrap(),
         Some(Standing::Merged),
     );
 }
@@ -1225,7 +1475,7 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
 
     // The base moved under the branch while nobody was working on it, which is
     // what the sweep after Done writes down and dispatches nothing about.
-    record_merging(&pool, id, own, Merging::Conflicting)
+    record_merging(&pool, id, own, 41, Merging::Conflicting)
         .await
         .unwrap();
 
@@ -1318,10 +1568,10 @@ async fn only_the_pull_requests_that_conflict_go_back_to_being_waited_on() {
     }
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 
-    record_merging(&pool, id, own, Merging::Cleanly)
+    record_merging(&pool, id, own, 41, Merging::Cleanly)
         .await
         .unwrap();
-    record_merging(&pool, id, beside, Merging::Conflicting)
+    record_merging(&pool, id, beside, 7, Merging::Conflicting)
         .await
         .unwrap();
 
@@ -1372,7 +1622,7 @@ async fn a_conversation_with_nothing_conflicting_is_left_where_it_is() {
         Resolving::NothingConflicts,
     );
 
-    record_merging(&pool, id, own, Merging::Cleanly)
+    record_merging(&pool, id, own, 41, Merging::Cleanly)
         .await
         .unwrap();
 
@@ -1404,7 +1654,7 @@ async fn only_a_done_conversation_is_sent_back_to_wrapping_up() {
     record_pull_request(&pool, id, own, &opened())
         .await
         .unwrap();
-    record_merging(&pool, id, own, Merging::Conflicting)
+    record_merging(&pool, id, own, 41, Merging::Conflicting)
         .await
         .unwrap();
 

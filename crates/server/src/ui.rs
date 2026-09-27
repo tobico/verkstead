@@ -1323,25 +1323,25 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // And how the pull request's checks were the last time anything asked, which
+    // And how each pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
-    // once for the two cards drawn from it below, both being the one card in the
-    // two places a pull request is drawn.
+    // once for the two cards drawn from each of them below, both being the one
+    // card in the two places a pull request is drawn.
     //
-    // The Conversation's own repository's pull request only. How the checks are
-    // is written down per Conversation rather than per pull request, so it is the
-    // one that moved this Conversation into Wrapping that it belongs to — see
-    // [`own_checks`]. A companion's card draws no icon rather than this one's.
+    // Every pull request rather than the Conversation's own: a suite is a fact
+    // about one branch, so a companion's card and each branch of a stack draw
+    // their own icon. Which is why it is read as a map by the Event each pull
+    // request is — that is what both copies of a card have to hand.
     //
     // Stale on a Conversation nothing is watching any more, the watcher stopping
     // when the wrap-up is over — which is a card an hour behind rather than a
     // card that is wrong: the last thing anybody asked GitHub is the honest
     // thing to draw.
-    let checks = match store::check_rollup(&state.pool, id).await {
-        Ok(checks) => checks.map(rollup),
+    let checks = match store::rollups(&state.pool, id).await {
+        Ok(checks) => checks,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading how a pull request's checks are failed");
-            None
+            tracing::error!(error = ?error, conversation_id = id, "reading how a Conversation's pull requests' checks are failed");
+            std::collections::HashMap::new()
         }
     };
 
@@ -1349,10 +1349,7 @@ pub(crate) async fn conversation_view(
     // moves — the checks watcher writes it every poll of a wrap-up, and the sweep
     // after Done goes on writing it until the pull request is merged or closed.
     //
-    // Every pull request rather than the Conversation's own, unlike the rollup
-    // above: this is written down per pull request, so a companion's card draws
-    // its own reading. Which is why it is read as a map by the Event each pull
-    // request is — that is what both copies of a card have to hand.
+    // Read the same way and keyed the same way, for the same reason.
     //
     // A pull request nothing has asked GitHub about is absent, and so is one
     // GitHub has not worked the answer out for. Both are a card with no mark,
@@ -1425,7 +1422,7 @@ pub(crate) async fn conversation_view(
                 title: opened.title.clone(),
                 url: opened.url.clone(),
                 repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
+                checks: checks.get(&event.id).copied().map(rollup),
                 merging: merges.get(&event.id).copied().map(merging),
             },
         )),
@@ -2039,7 +2036,7 @@ pub(crate) async fn conversation_view(
                             title: opened.title,
                             url: opened.url,
                             repo: opened.repo.clone(),
-                            checks: own_checks(&opened.repo, checks),
+                            checks: checks.get(&event.id).copied().map(rollup),
                             merging: merges.get(&event.id).copied().map(merging),
                         },
                     ),
@@ -3574,25 +3571,28 @@ async fn pull_request(
     };
 
     let gh = state.github.clone();
+    let number = opened.number;
 
     let asked = {
         let path = repo.path.clone();
 
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, opened.number)).await
+        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, number)).await
     };
 
     match asked {
         Ok(Ok(read)) => {
             // Written down before the answer goes out, so a page that redraws
             // the card on the Nudge this sends draws what the pane is about to
-            // show it.
-            crate::checks::remember(&state, id, &read.checks).await;
+            // show it. Against this pull request rather than the Conversation:
+            // one repository holds as many as a stack is deep, and each has a
+            // suite of its own.
+            crate::checks::remember(&state, id, repo.id, number, &read.checks).await;
 
             // And the two facts about the pull request itself that came back on
             // the same question: whether it merges, and where it has got to. The
             // pane is what freshens both on a Conversation nothing is watching
             // and nothing is sweeping — see [`crate::merges::remember`].
-            crate::merges::remember(&state, id, &repo, read.landing).await;
+            crate::merges::remember(&state, id, &repo, number, read.landing).await;
 
             Json(read.pane).into_response()
         }
@@ -4570,24 +4570,6 @@ fn merging(merges: store::Merging) -> Merging {
     match merges {
         store::Merging::Cleanly => Merging::Cleanly,
         store::Merging::Conflicting => Merging::Conflicting,
-    }
-}
-
-/// How the checks are, but only on the pull request they were written down
-/// about.
-///
-/// A rollup is recorded per Conversation, and a Conversation now ends on one
-/// pull request per repository it was worked in — so the word belongs to the one
-/// that moved it into Wrapping, which is the Conversation's own repository's.
-/// That is the pull request whose `repo` reads back unlabeled: a companion's
-/// carries the name of the repository it was opened in.
-///
-/// A companion's card draws no icon rather than this one's. Drawing it there
-/// would be saying something about a suite nobody asked GitHub about.
-fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<CheckRollup> {
-    match repo {
-        None => checks,
-        Some(_) => None,
     }
 }
 

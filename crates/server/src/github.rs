@@ -683,26 +683,40 @@ pub(crate) fn comment(
 
 /// The pull request on `branch`, as the host's `gh` finds it.
 ///
-/// The three facts worth recording and no more — see
-/// [`store::PullRequest`]. Whether it is a draft, whether its checks are green
-/// and what is on it are all things that move while the PR is open, and this
-/// runs once.
+/// The four facts worth recording and no more — see [`store::PullRequest`].
+/// Whether it is a draft, whether its checks are green and what is on it are all
+/// things that move while the PR is open, and this runs once.
+///
+/// The head comes back from GitHub rather than off `branch`, though the two are
+/// the same branch: a selector is what was asked and `headRefName` is what GitHub
+/// answered about, and the answer is the one worth writing down.
 pub(crate) fn pull_request(
     gh: &Gh,
     repo: &Path,
     branch: &str,
 ) -> Result<store::PullRequest, Trouble> {
-    /// What `--json number,title,url` comes back as.
+    /// What `--json number,title,url,headRefName` comes back as.
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Opened {
         number: i64,
         title: String,
         url: String,
+        head_ref_name: String,
     }
 
     // `--` is not gh's; the branch goes where gh takes a PR selector, which is a
     // number, a URL or a branch name.
-    let said = gh.ask(repo, &["pr", "view", branch, "--json", "number,title,url"])?;
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            branch,
+            "--json",
+            "number,title,url,headRefName",
+        ],
+    )?;
 
     let opened: Opened = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
@@ -711,6 +725,7 @@ pub(crate) fn pull_request(
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        head: Some(opened.head_ref_name),
         // Unnamed: which repository this was asked in is what the caller already
         // knows, and the name on a recorded pull request is the label a reader
         // wants rather than anything written here. See [`store::PullRequest`].
@@ -1586,9 +1601,9 @@ mod tests {
 
     /// The ordinary answer: a branch with a PR on it.
     #[test]
-    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_and_url() {
+    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_url_and_head() {
         let (dir, gh) = stub(
-            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}"#,
+            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting"}"#,
             "",
         );
 
@@ -1598,6 +1613,9 @@ mod tests {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                // GitHub's own answer rather than the selector it was asked with,
+                // which is what a green suite is afterwards held against.
+                head: Some("rate-limiting".to_owned()),
                 // Which repository is the caller's to know: what `gh` was asked
                 // in is not something it reads back.
                 repo: None,
@@ -2144,8 +2162,8 @@ mod tests {
                 r#"token="${GH_TOKEN-unset}"
                    if [ "$1" = api ]; then printf '[]'; exit 0; fi
                    case "$5" in
-                     number,title,url)
-                       printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
+                     number,title,url,headRefName)
+                       printf '{"number":41,"title":"%s","url":"u","headRefName":"b"}' "$token" ;;
                      statusCheckRollup,headRefOid,mergeable)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)

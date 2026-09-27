@@ -14,23 +14,25 @@
 //! transaction: a Wrapping with no PR under it would be a Conversation waiting
 //! on a review of nothing.
 //!
-//! One PR per Conversation per Repo, by the unique index. A Conversation is one
-//! branch per repository and a branch is one pull request — so a Conversation
-//! working alongside read-write companions ends on several, one each, and
-//! recording the second is the same wrap-up learning about another pull request
-//! rather than a second move.
+//! One row per pull request, by the unique index: the Conversation, the Repo and
+//! the number. A Conversation working alongside read-write companions ends on one
+//! per repository, and a Conversation wrapping up a **stack** holds several in
+//! the one repository — a stack being a chain of pull requests each of whose
+//! bases is the one below's head, all in the same place. So recording a second is
+//! the same wrap-up learning about another pull request rather than a second
+//! move.
 //!
 //! The Repo is part of that identity for the commits table's reason: two
-//! repositories are two sets of numbers, and `#41` says nothing across them.
+//! repositories are two sets of numbers, and `#41` says nothing across them. The
+//! number is part of it because one repository holds as many as a stack is deep.
 //!
-//! Which is also why a PR recorded against a repository that already has one
-//! records nothing new. It is what makes a second attempt at the same ending
-//! safe, and it is what a *second wrap* lands on: a Conversation whose review
-//! split its findings out into a backlog leaves Wrapping to build them and
-//! finishes again, and what its finish step opens is the pull requests it
-//! already had. So each record is reused rather than written twice, and the
-//! lifecycle moves either side of it are what tell the re-entry's story on the
-//! Timeline.
+//! Which is why a PR recorded twice records nothing new. It is what makes a
+//! second attempt at the same ending safe, and it is what a *second wrap* lands
+//! on: a Conversation whose review split its findings out into a backlog leaves
+//! Wrapping to build them and finishes again, and what its finish step opens is
+//! the pull requests it already had. So each record is reused rather than written
+//! twice, and the lifecycle moves either side of it are what tell the re-entry's
+//! story on the Timeline.
 
 use std::collections::HashMap;
 
@@ -57,6 +59,22 @@ pub struct PullRequest {
     /// The whole URL, so the workbench can link out to it without building one
     /// out of a repository name it would have to guess at.
     pub url: String,
+
+    /// The branch the work is on, unqualified — `tobi/steer` rather than
+    /// `origin/tobi/steer`.
+    ///
+    /// The one thing here that is neither a label nor a link, and the reason it
+    /// is written down at all: a green suite is held against what origin holds on
+    /// *this* pull request's branch rather than on whatever the Worktree has
+    /// checked out, and a session sent at a stack has to be told which branches
+    /// it is working. Both are questions about a pull request that several in one
+    /// Worktree make impossible to answer off the checkout.
+    ///
+    /// `None` on a row written before Verkstead wrote it down — which for the
+    /// Conversation's own repository is that Conversation's own branch, the one
+    /// thing it was possible for it to be, and for a companion's is nothing
+    /// anybody can recover.
+    pub head: Option<String>,
 
     /// What the Repo it was opened in is called, where that is not the
     /// Conversation's own — the label the pinned card draws.
@@ -247,16 +265,23 @@ pub enum Wrapping {
 /// PR is one Event's full self, and the Event is what a Timeline holds.
 ///
 /// The Conversation is on the row as well as on the Event above it, for the
-/// commits table's reason: *one Conversation has one pull request per Repo* is
-/// the rule, and SQLite cannot index a column that lives in another table.
+/// commits table's reason: *one Conversation has one row per pull request* is the
+/// rule, and SQLite cannot index a column that lives in another table.
 ///
-/// The Repo is the second column of that index, and a database written before a
-/// Conversation could end on more than one pull request has neither it nor the
-/// column — it has `UNIQUE (conversation_id)` instead, which is the old rule.
-/// Which is [`super::migrations`]'s to put right as the database opens rather
-/// than this function's: the constraint is declared inline, so it is the table
-/// itself that has to be rebuilt, and that is not something a `CREATE TABLE IF
-/// NOT EXISTS` can reach.
+/// The Repo and the number are the rest of that index — together they are what a
+/// pull request *is* to Verkstead, `#41` naming something else in the next
+/// repository along or nothing at all. A database written before a Conversation
+/// could hold several in one repository has the number in the table and not in
+/// the rule, and one written before a Conversation could end on more than one
+/// pull request has neither the Repo nor the column. Both are
+/// [`super::migrations`]'s to put right as the database opens rather than this
+/// function's: the constraint is declared inline, so it is the table itself that
+/// has to be rebuilt, and that is not something a `CREATE TABLE IF NOT EXISTS`
+/// can reach.
+///
+/// `head_branch` is nullable for the same migration's sake: every row written
+/// before Verkstead wrote the head down has nothing to put there. See
+/// [`PullRequest::head`].
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pull_requests (
@@ -266,7 +291,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              number          INTEGER NOT NULL,
              title           TEXT NOT NULL,
              url             TEXT NOT NULL,
-             UNIQUE (conversation_id, repo_id)
+             head_branch     TEXT,
+             UNIQUE (conversation_id, repo_id, number)
          ) STRICT",
     )
     .execute(pool)
@@ -283,16 +309,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // that moves belongs: the row hangs off a Timeline Event, and a Timeline
     // Event is a thing that happened.
     //
-    // One row or none per Conversation, there being one pull request per
-    // Conversation — and it survives a restart, which is the whole reason it
-    // is written down rather than held in the watcher: the watcher stops when
-    // the wrap-up is over, and a Done Conversation would otherwise lose its
-    // icon the next time the server came up.
+    // One row or none per pull request, a suite being a fact about one branch:
+    // two watchers writing one row would each be reading the other's suite, and
+    // a Conversation with a read-write companion or a stack has as many suites
+    // as it has pull requests. A database written while this was keyed by the
+    // Conversation alone is [`super::migrations`]'s to rekey.
+    //
+    // And it survives a restart, which is the whole reason it is written down
+    // rather than held in the watcher: the watcher stops when the wrap-up is
+    // over, and a Done Conversation would otherwise lose its icon the next time
+    // the server came up.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pull_request_checks (
-             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
              rollup          TEXT NOT NULL,
-             at              TEXT NOT NULL
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number)
          ) STRICT",
     )
     .execute(pool)
@@ -304,11 +338,11 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the rollup above comes from.
     //
     // A table of its own rather than a column beside the rollup, because the two
-    // are not about the same thing: the rollup predates a Conversation ending on
-    // more than one pull request and is keyed by the Conversation alone, and
-    // whether a branch merges is a fact about one pull request. A Conversation
-    // with a read-write companion has one clean and one conflicted as easily as
-    // two of either.
+    // are not read at the same moments: a sweep after Done asks whether a branch
+    // still merges and never asks how its checks were. Keyed the same way, one
+    // row per pull request — a Conversation with a read-write companion has one
+    // clean and one conflicted as easily as two of either, and so has a stack
+    // whose base moved under its bottom branch alone.
     //
     // Written down for the rollup's reason as well: the watching stops when the
     // wrap-up is over, and what a card draws about a Done Conversation is the
@@ -317,9 +351,10 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS pull_request_merges (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
              repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
              merging         TEXT NOT NULL,
              at              TEXT NOT NULL,
-             PRIMARY KEY (conversation_id, repo_id)
+             PRIMARY KEY (conversation_id, repo_id, number)
          ) STRICT",
     )
     .execute(pool)
@@ -342,9 +377,10 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS pull_request_standings (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
              repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
              standing        TEXT NOT NULL,
              at              TEXT NOT NULL,
-             PRIMARY KEY (conversation_id, repo_id)
+             PRIMARY KEY (conversation_id, repo_id, number)
          ) STRICT",
     )
     .execute(pool)
@@ -396,11 +432,11 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// safe: the first made the move, and the second finds a Conversation that has
 /// nothing left to wrap.
 ///
-/// Which is why a companion's pull request does not come through here. A
-/// Conversation that is already Wrapping has nothing left to wrap, so a second
-/// PR arriving a moment behind the work's own would be refused — see
-/// [`record_another_pull_request`], which is this same row without the move over
-/// the top of it.
+/// Which is why neither a companion's pull request nor the rest of a stack comes
+/// through here. A Conversation that is already Wrapping has nothing left to
+/// wrap, so a second PR arriving a moment behind the work's own would be refused
+/// — see [`record_another_pull_request`], which is this same row without the move
+/// over the top of it.
 ///
 /// A *second wrap* is the other thing that gets here, and it is not that. The
 /// Conversation left Wrapping to build a backlog its review split out — see
@@ -464,14 +500,14 @@ pub async fn record_pull_request(
 ///
 /// The same row [`record_pull_request`] writes, without the move: the
 /// Conversation is Wrapping already, and this is that wrap-up learning about
-/// another repository's pull request rather than a second ending. Which is the
-/// whole difference between the two — a Conversation's own repository is what
-/// moves it, and its companions are what the move then covers.
+/// another pull request rather than a second ending. Which is the whole
+/// difference between the two — the pull request a Conversation was pointed at is
+/// what moves it, and the companions' and the rest of its stack are what the move
+/// then covers.
 ///
 /// `false` where there is no Conversation with that id. Nothing else is refused
-/// for: a pull request recorded against a repository that already has one reuses
-/// the row it has, which is what makes a discovery run twice do nothing the
-/// second time.
+/// for: a pull request already on the record reuses the row it has, which is what
+/// makes a discovery run twice do nothing the second time.
 pub async fn record_another_pull_request(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -524,8 +560,8 @@ async fn taking_one_up(
     Ok(held.is_some())
 }
 
-/// The Event and the row under it, or nothing at all where that repository
-/// already has a pull request on this Conversation.
+/// The Event and the row under it, or nothing at all where this Conversation is
+/// on that pull request already.
 ///
 /// Shared by the two above, because the row is the same row: what differs is
 /// only whether the Conversation moves over the top of it.
@@ -539,16 +575,18 @@ async fn record(
     pull_request: &PullRequest,
 ) -> Result<()> {
     let recorded: Option<(i64,)> = sqlx::query_as(
-        "SELECT event_id FROM pull_requests WHERE conversation_id = ? AND repo_id = ?",
+        "SELECT event_id FROM pull_requests
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(pull_request.number)
     .fetch_optional(&mut **tx)
     .await
     .with_context(|| {
         format!(
-            "looking for the pull request Conversation {conversation_id} is already on in Repo \
-             {repo_id}"
+            "looking for pull request {} of Repo {repo_id} on Conversation {conversation_id}",
+            pull_request.number
         )
     })?;
 
@@ -570,8 +608,9 @@ async fn record(
     })?;
 
     sqlx::query(
-        "INSERT INTO pull_requests (event_id, conversation_id, repo_id, number, title, url)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO pull_requests
+             (event_id, conversation_id, repo_id, number, title, url, head_branch)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(event_id)
     .bind(conversation_id)
@@ -579,6 +618,7 @@ async fn record(
     .bind(pull_request.number)
     .bind(&pull_request.title)
     .bind(&pull_request.url)
+    .bind(pull_request.head.as_deref())
     .execute(&mut **tx)
     .await
     .with_context(|| {
@@ -591,29 +631,38 @@ async fn record(
     Ok(())
 }
 
-/// The pull request a Conversation's work is on in one Repo, or `None` where
-/// that repository has none yet.
+/// The first pull request a Conversation's work was recorded on in one Repo, or
+/// `None` where that repository has none yet.
 ///
 /// Per Repo and not per Conversation, because a number is a fact about a
 /// repository: a Conversation working alongside read-write companions ends on
 /// one pull request each, and `#41` in one of them is a different pull request
 /// from `#41` in another.
 ///
-/// What a wrap-up's watchers ask before they ask GitHub anything — the number is
-/// how a pull request is named on a command line — and what the steer into
-/// Wrapping asks about the Conversation's own repository, that being the one a
-/// wrap-up is defined by.
+/// **The first**, in the order they were recorded, which is the one the
+/// Conversation was pointed at: a repository holds as many as a stack is deep,
+/// and what is asked for here is the pull request a wrap-up is *defined* by
+/// rather than the whole of what it covers. Which is what the steer into Wrapping
+/// asks about the Conversation's own repository, and what says whether a
+/// repository has a pull request at all. [`pull_requests`] is the list.
 pub async fn pull_request(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
 ) -> Result<Option<PullRequest>> {
-    let row: Option<(i64, String, String, Option<String>)> = sqlx::query_as(
-        "SELECT p.number, p.title, p.url, r.name
+    /// The columns in the order the query below selects them: the pull request,
+    /// the branch its work is on, and the Repo's name where it is not the
+    /// Conversation's own.
+    type Row = (i64, String, String, Option<String>, Option<String>);
+
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT p.number, p.title, p.url, p.head_branch, r.name
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
-         WHERE p.conversation_id = ? AND p.repo_id = ?",
+         WHERE p.conversation_id = ? AND p.repo_id = ?
+         ORDER BY p.event_id
+         LIMIT 1",
     )
     .bind(conversation_id)
     .bind(repo_id)
@@ -623,10 +672,11 @@ pub async fn pull_request(
         format!("reading the pull request of Repo {repo_id} on Conversation {conversation_id}")
     })?;
 
-    Ok(row.map(|(number, title, url, repo)| PullRequest {
+    Ok(row.map(|(number, title, url, head, repo)| PullRequest {
         number,
         title,
         url,
+        head,
         repo,
     }))
 }
@@ -635,13 +685,14 @@ pub async fn pull_request(
 /// opened in.
 ///
 /// What a wrap-up's watchers are started from: there is a suite per pull request
-/// and a Conversation ends on one per repository it was worked in, so *which
-/// pull requests* is a question with a list for an answer. The Repo comes with
-/// each of them because that is where `gh` has to be run to ask about it — a
-/// number means something else in another repository, or nothing.
+/// and a Conversation ends on one per repository it was worked in and as many in
+/// one repository as its stack is deep, so *which pull requests* is a question
+/// with a list for an answer. The Repo comes with each of them because that is
+/// where `gh` has to be run to ask about it — a number means something else in
+/// another repository, or nothing.
 ///
-/// In the order they were recorded, which is the Conversation's own first and
-/// the companions as they were found.
+/// In the order they were recorded, which is the one the Conversation was pointed
+/// at first and the rest — the companions', the stack's — as they were found.
 ///
 /// A pull request whose Repo is no longer registered is left out rather than
 /// carried without one: there is nowhere left to ask about it.
@@ -651,11 +702,21 @@ pub async fn pull_requests(
 ) -> Result<Vec<(Repo, PullRequest)>> {
     /// The columns in the order the query below selects them: the Repo, whether
     /// it is one beside the Conversation's own, and the pull request.
-    type Row = (i64, String, String, String, i64, i64, String, String);
+    type Row = (
+        i64,
+        String,
+        String,
+        String,
+        i64,
+        i64,
+        String,
+        String,
+        Option<String>,
+    );
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT r.id, r.path, r.name, r.default_branch, r.id <> v.repo_id,
-                p.number, p.title, p.url
+                p.number, p.title, p.url, p.head_branch
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          JOIN repos r ON r.id = p.repo_id
@@ -670,7 +731,7 @@ pub async fn pull_requests(
     Ok(rows
         .into_iter()
         .map(
-            |(id, path, name, default_branch, beside, number, title, url)| {
+            |(id, path, name, default_branch, beside, number, title, url, head)| {
                 let repo = Repo {
                     id,
                     path: std::path::PathBuf::from(path),
@@ -688,6 +749,7 @@ pub async fn pull_requests(
                         number,
                         title,
                         url,
+                        head,
                         repo: named,
                     },
                 )
@@ -740,8 +802,8 @@ pub async fn pull_request_repo(
 ///
 /// A map read on its own rather than joined into the Timeline query, for the
 /// reason a Capture summary's is: that query is already at the sixteen columns a
-/// tuple can be read back as. This one is cheap regardless — a Conversation has
-/// one pull request per repository it was worked in, and usually none at all.
+/// tuple can be read back as. This one is cheap regardless — a Conversation has a
+/// handful of pull requests at the very most, and usually none at all.
 ///
 /// The Repo is left-joined on the condition that says what the label is for: it
 /// is joined only where the pull request's Repo is not the Conversation's own,
@@ -752,8 +814,13 @@ pub(crate) async fn on_timeline(
     pool: &SqlitePool,
     conversation_id: i64,
 ) -> Result<HashMap<i64, PullRequest>> {
-    let rows: Vec<(i64, i64, String, String, Option<String>)> = sqlx::query_as(
-        "SELECT p.event_id, p.number, p.title, p.url, r.name
+    /// The columns in the order the query below selects them: the Event, the pull
+    /// request, the branch its work is on, and the Repo's name where it is not the
+    /// Conversation's own.
+    type Row = (i64, i64, String, String, Option<String>, Option<String>);
+
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT p.event_id, p.number, p.title, p.url, p.head_branch, r.name
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
@@ -766,13 +833,14 @@ pub(crate) async fn on_timeline(
 
     Ok(rows
         .into_iter()
-        .map(|(event_id, number, title, url, repo)| {
+        .map(|(event_id, number, title, url, head, repo)| {
             (
                 event_id,
                 PullRequest {
                     number,
                     title,
                     url,
+                    head,
                     repo,
                 },
             )
@@ -816,7 +884,13 @@ pub async fn conversation_on_pull_request(
     Ok(row.map(|(conversation_id,)| conversation_id))
 }
 
-/// Write down how the pull request's checks are, and say whether that is news.
+/// Write down how the checks on the pull request `number` names in `repo_id` are,
+/// and say whether that is news.
+///
+/// Per pull request, a suite being a fact about one branch: a Conversation with a
+/// read-write companion has two, and one wrapping up a stack has one per pull
+/// request in the chain. One row between them would be each watcher reading the
+/// other's suite and the card drawing whichever wrote last.
 ///
 /// Called on every poll of the checks watcher, which is every half minute for as
 /// long as a Conversation is wrapping up — so what it answers is *did this
@@ -830,30 +904,48 @@ pub async fn conversation_on_pull_request(
 pub async fn record_check_rollup(
     pool: &SqlitePool,
     conversation_id: i64,
+    repo_id: i64,
+    number: i64,
     rollup: Rollup,
 ) -> Result<bool> {
     let mut tx = super::writing(pool, "recording how a pull request's checks are").await?;
 
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT rollup FROM pull_request_checks WHERE conversation_id = ?")
-            .bind(conversation_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .with_context(|| format!("reading how Conversation {conversation_id}'s checks were"))?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT rollup FROM pull_request_checks
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(number)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "reading how the checks on pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} were"
+        )
+    })?;
 
     let before = row.map(|(word,)| Rollup::read(&word)).transpose()?;
 
     sqlx::query(
-        "INSERT INTO pull_request_checks (conversation_id, rollup, at)
-         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT (conversation_id)
+        "INSERT INTO pull_request_checks (conversation_id, repo_id, number, rollup, at)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, number)
          DO UPDATE SET rollup = excluded.rollup, at = excluded.at",
     )
     .bind(conversation_id)
+    .bind(repo_id)
+    .bind(number)
     .bind(rollup.stored())
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("recording how Conversation {conversation_id}'s checks are"))?;
+    .with_context(|| {
+        format!(
+            "recording how the checks on pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} are"
+        )
+    })?;
 
     tx.commit()
         .await
@@ -864,29 +956,80 @@ pub async fn record_check_rollup(
 
 /// And how they were the last time anything asked, or `None` where nothing has.
 ///
-/// What the Conversation view carries to the card. It may be stale, and on a
-/// Conversation nothing is watching any more it will be: the watching stops when
-/// the wrap-up is over, and what is drawn after that is the last thing anybody
-/// asked GitHub — which is a card an hour behind rather than a card that is
-/// wrong.
-pub async fn check_rollup(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Rollup>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT rollup FROM pull_request_checks WHERE conversation_id = ?")
-            .bind(conversation_id)
-            .fetch_optional(pool)
-            .await
-            .with_context(|| format!("reading how Conversation {conversation_id}'s checks are"))?;
+/// It may be stale, and on a Conversation nothing is watching any more it will
+/// be: the watching stops when the wrap-up is over, and what is read after that
+/// is the last thing anybody asked GitHub — which is a card an hour behind rather
+/// than a card that is wrong.
+pub async fn check_rollup(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    number: i64,
+) -> Result<Option<Rollup>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT rollup FROM pull_request_checks
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(number)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading how the checks on pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} are"
+        )
+    })?;
 
     row.map(|(word,)| Rollup::read(&word)).transpose()
 }
 
-/// Write down whether the pull request opened in `repo_id` merges into its base.
+/// And every one of a Conversation's rollups together, by the Timeline Event each
+/// pull request is.
 ///
-/// Per pull request rather than per Conversation, unlike the rollup above: a
-/// Conversation ends on one pull request per repository it was worked in, and
-/// whether a branch conflicts with its base is a fact about the branch. One of
-/// them conflicting while another merges is the ordinary shape of it, a base
-/// having moved in one repository and not in the other.
+/// What the Conversation view draws the check icon off, and the mirror of
+/// [`merges`] below in every respect — including why it is keyed by the Event: a
+/// pull request's card is drawn twice from one Event, pinned above the record and
+/// at the moment it opened, and an Event id is what both copies have to hand.
+///
+/// Every pull request rather than the Conversation's own. A rollup used to be the
+/// Conversation's alone, so the one it belonged to was the one that moved the
+/// Conversation into Wrapping and a companion's card drew no icon at all; each
+/// now has its own, and draws it.
+///
+/// A pull request nothing has asked GitHub about has no entry, which is the card
+/// that draws no icon — the same honesty a suite with no checks in it is written
+/// down with, which is not at all.
+pub async fn rollups(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64, Rollup>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT p.event_id, c.rollup
+         FROM pull_requests p
+         JOIN pull_request_checks c
+           ON c.conversation_id = p.conversation_id
+          AND c.repo_id = p.repo_id
+          AND c.number = p.number
+         WHERE p.conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading how Conversation {conversation_id}'s pull requests' checks are")
+    })?;
+
+    rows.into_iter()
+        .map(|(event_id, word)| Ok((event_id, Rollup::read(&word)?)))
+        .collect()
+}
+
+/// Write down whether the pull request `number` names in `repo_id` merges into
+/// its base.
+///
+/// Per pull request, as the rollup above is: whether a branch conflicts with its
+/// base is a fact about the branch. One conflicting while another merges is the
+/// ordinary shape of it — a base having moved in one repository and not in the
+/// other, or under the bottom of a stack and nowhere above it.
 ///
 /// Written over rather than appended to: this is how the pull request merges
 /// now, and a conflict that has been resolved is not a conflict.
@@ -906,42 +1049,45 @@ pub async fn record_merging(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
     merging: Merging,
 ) -> Result<bool> {
     let mut tx = super::writing(pool, "recording whether a pull request merges").await?;
 
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT merging FROM pull_request_merges
-         WHERE conversation_id = ? AND repo_id = ?",
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(number)
     .fetch_optional(&mut *tx)
     .await
     .with_context(|| {
         format!(
-            "reading whether the pull request Conversation {conversation_id} opened in \
-             Repo {repo_id} merged"
+            "reading whether pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} merged"
         )
     })?;
 
     let before = row.map(|(word,)| Merging::read(&word)).transpose()?;
 
     sqlx::query(
-        "INSERT INTO pull_request_merges (conversation_id, repo_id, merging, at)
-         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT (conversation_id, repo_id)
+        "INSERT INTO pull_request_merges (conversation_id, repo_id, number, merging, at)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, number)
          DO UPDATE SET merging = excluded.merging, at = excluded.at",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(number)
     .bind(merging.stored())
     .execute(&mut *tx)
     .await
     .with_context(|| {
         format!(
-            "recording whether the pull request Conversation {conversation_id} opened in \
-             Repo {repo_id} merges"
+            "recording whether pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} merges"
         )
     })?;
 
@@ -961,19 +1107,21 @@ pub async fn merging(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
 ) -> Result<Option<Merging>> {
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT merging FROM pull_request_merges
-         WHERE conversation_id = ? AND repo_id = ?",
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(number)
     .fetch_optional(pool)
     .await
     .with_context(|| {
         format!(
-            "reading whether the pull request Conversation {conversation_id} opened in \
-             Repo {repo_id} merges"
+            "reading whether pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} merges"
         )
     })?;
 
@@ -996,6 +1144,12 @@ pub async fn merging(
 ///
 /// A pull request nothing has ever asked GitHub about has no row at all and is
 /// not among these, exactly as it draws no mark: not knowing is not a conflict.
+///
+/// One entry per repository rather than per conflicting pull request, because
+/// what the caller does with each is put a settlement back to waiting and that
+/// settlement is the repository's. A stack with three branches conflicting names
+/// its repository once, and the wrap-up waits on that repository's merge — which
+/// is the one settlement there is to unsettle.
 pub(crate) async fn conflicted(
     tx: &mut sqlx::SqliteConnection,
     conversation_id: i64,
@@ -1004,9 +1158,12 @@ pub(crate) async fn conflicted(
         "SELECT p.repo_id
          FROM pull_requests p
          JOIN pull_request_merges m
-           ON m.conversation_id = p.conversation_id AND m.repo_id = p.repo_id
+           ON m.conversation_id = p.conversation_id
+          AND m.repo_id = p.repo_id
+          AND m.number = p.number
          WHERE p.conversation_id = ? AND m.merging = ?
-         ORDER BY p.event_id",
+         GROUP BY p.repo_id
+         ORDER BY MIN(p.event_id)",
     )
     .bind(conversation_id)
     .bind(Merging::Conflicting.stored())
@@ -1028,9 +1185,8 @@ pub(crate) async fn conflicted(
 /// by the Event rather than by the Repo, unlike [`merging`] above, whose caller
 /// is a watcher that already knows which repository it is asking about.
 ///
-/// Every repository's rather than the Conversation's own, unlike the rollup
-/// beside it: whether a branch merges is written down per pull request, so a
-/// companion's card draws its own reading rather than nothing.
+/// Every pull request's, as [`rollups`] beside it is: whether a branch merges is
+/// written down per pull request, so each card draws its own reading.
 ///
 /// A pull request nothing has asked GitHub about has no entry at all, which is
 /// the card that draws no mark. Stale on a Conversation nothing is watching or
@@ -1040,7 +1196,9 @@ pub async fn merges(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i
         "SELECT p.event_id, m.merging
          FROM pull_requests p
          JOIN pull_request_merges m
-           ON m.conversation_id = p.conversation_id AND m.repo_id = p.repo_id
+           ON m.conversation_id = p.conversation_id
+          AND m.repo_id = p.repo_id
+          AND m.number = p.number
          WHERE p.conversation_id = ?",
     )
     .bind(conversation_id)
@@ -1055,7 +1213,7 @@ pub async fn merges(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i
         .collect()
 }
 
-/// Write down where the pull request opened in `repo_id` has got to.
+/// Write down where the pull request `number` names in `repo_id` has got to.
 ///
 /// Per pull request for [`record_merging`]'s reason and beside it in the same
 /// spirit: this is a reading of GitHub as it stood the last time anything asked,
@@ -1069,23 +1227,25 @@ pub async fn record_standing(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
     standing: Standing,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO pull_request_standings (conversation_id, repo_id, standing, at)
-         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT (conversation_id, repo_id)
+        "INSERT INTO pull_request_standings (conversation_id, repo_id, number, standing, at)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, number)
          DO UPDATE SET standing = excluded.standing, at = excluded.at",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(number)
     .bind(standing.stored())
     .execute(pool)
     .await
     .with_context(|| {
         format!(
-            "recording where the pull request Conversation {conversation_id} opened in \
-             Repo {repo_id} has got to"
+            "recording where pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} has got to"
         )
     })?;
 
@@ -1101,19 +1261,21 @@ pub async fn standing(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
 ) -> Result<Option<Standing>> {
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT standing FROM pull_request_standings
-         WHERE conversation_id = ? AND repo_id = ?",
+         WHERE conversation_id = ? AND repo_id = ? AND number = ?",
     )
     .bind(conversation_id)
     .bind(repo_id)
+    .bind(number)
     .fetch_optional(pool)
     .await
     .with_context(|| {
         format!(
-            "reading where the pull request Conversation {conversation_id} opened in \
-             Repo {repo_id} has got to"
+            "reading where pull request {number} of Repo {repo_id} on \
+             Conversation {conversation_id} has got to"
         )
     })?;
 
@@ -1141,8 +1303,13 @@ pub async fn standing(
 /// at once. A pull request nothing has asked about yet has no row at all, and
 /// that is as much a reason to ask as an open one.
 ///
+/// **Per pull request rather than per repository.** Each recorded pull request is
+/// asked about on its own number, so a stack of three in one repository is three
+/// questions and three rows — the standing that ends the asking belonging to one
+/// pull request and saying nothing about the ones beside it.
+///
 /// In Conversation order and then the order the pull requests were recorded,
-/// which is each Conversation's own first and its companions as they were found.
+/// which is each Conversation's own first and the rest as they were found.
 pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinished>> {
     /// The columns in the order the query below selects them: the Conversation,
     /// the Repo to ask in, and the number to ask about.
@@ -1154,7 +1321,9 @@ pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinishe
          JOIN conversations v ON v.id = p.conversation_id
          JOIN repos r ON r.id = p.repo_id
          LEFT JOIN pull_request_standings s
-              ON s.conversation_id = p.conversation_id AND s.repo_id = p.repo_id
+              ON s.conversation_id = p.conversation_id
+             AND s.repo_id = p.repo_id
+             AND s.number = p.number
          WHERE v.state = ?
            AND (s.standing IS NULL OR s.standing = ?)
          ORDER BY p.conversation_id, p.event_id",

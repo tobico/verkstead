@@ -23,7 +23,7 @@ Roadmap stage: [07: A stack of pull requests](docs/roadmaps/processes/07-a-stack
 
 ## Tasks
 
-- [ ] 01: Several pull requests in one repository — [details](01-several-pull-requests-in-one-repository.md)
+- [x] 01: Several pull requests in one repository — [details](01-several-pull-requests-in-one-repository.md)
 - [ ] 02: The settling rule over several pull requests — [details](02-the-settling-rule-over-several.md)
 - [ ] 03: Walking the stack — [details](03-walking-the-stack.md)
 - [ ] 04: One session for the stack — [details](04-one-session-for-the-stack.md)

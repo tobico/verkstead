@@ -117,7 +117,7 @@ pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,
     conversation_on_pull_request, merges, merging, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
-    record_standing, standing, unfinished_pull_requests,
+    record_standing, rollups, standing, unfinished_pull_requests,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,

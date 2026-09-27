@@ -1820,7 +1820,7 @@ esac
 }
 
 /// What that companion says when the finish opened a pull request in it.
-const COMPANION_PULL_REQUEST: &str = r#"    printf '{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}'
+const COMPANION_PULL_REQUEST: &str = r#"    printf '{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}' "$3"
     exit 0"#;
 
 /// And what it says when the finish left it without one, in the words the real
@@ -7905,6 +7905,24 @@ async fn own_repo(fixture: &Grilling) -> i64 {
     conversation.repo.id
 }
 
+/// The Conversation's own pull request: the Repo it is in and the number it is,
+/// which together are what everything written down about it is keyed by.
+///
+/// Read off the record rather than held by the fixture, so that a test asking
+/// what Verkstead wrote down is asking about the pull request Verkstead actually
+/// recorded.
+async fn own_pull_request(fixture: &Grilling) -> (i64, i64) {
+    let repo = own_repo(fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    let opened = verkstead_server::store::pull_request(&pool, fixture.id, repo)
+        .await
+        .unwrap()
+        .expect("the Conversation is on a pull request");
+    pool.close().await;
+
+    (repo, opened.number)
+}
+
 /// And the one beside it, for the fixtures that are configured with a companion.
 async fn companion_repo(fixture: &Grilling) -> i64 {
     let pool = open_database(&fixture.database).await.unwrap();
@@ -7929,8 +7947,9 @@ async fn companion_repo(fixture: &Grilling) -> i64 {
 /// because that is where it is: what a poll or an opened details pane learned
 /// from GitHub outlives both.
 async fn check_rollup(fixture: &Grilling) -> Option<verkstead_server::store::Rollup> {
+    let (repo, number) = own_pull_request(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let rollup = verkstead_server::store::check_rollup(&pool, fixture.id)
+    let rollup = verkstead_server::store::check_rollup(&pool, fixture.id, repo, number)
         .await
         .unwrap();
     pool.close().await;
@@ -7983,9 +8002,9 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 /// Read out of the store rather than off the Timeline for [`checks_settled`]'s
 /// reason: it is a reading of GitHub rather than something that happened.
 async fn recorded_merging(fixture: &Grilling) -> Option<verkstead_server::store::Merging> {
-    let repo = own_repo(fixture).await;
+    let (repo, number) = own_pull_request(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let merging = verkstead_server::store::merging(&pool, fixture.id, repo)
+    let merging = verkstead_server::store::merging(&pool, fixture.id, repo, number)
         .await
         .unwrap();
     pool.close().await;
@@ -7996,9 +8015,9 @@ async fn recorded_merging(fixture: &Grilling) -> Option<verkstead_server::store:
 /// And where it had got to — open, merged or closed — which is the reading that
 /// ends the sweep after Done.
 async fn recorded_standing(fixture: &Grilling) -> Option<verkstead_server::store::Standing> {
-    let repo = own_repo(fixture).await;
+    let (repo, number) = own_pull_request(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let standing = verkstead_server::store::standing(&pool, fixture.id, repo)
+    let standing = verkstead_server::store::standing(&pool, fixture.id, repo, number)
         .await
         .unwrap();
     pool.close().await;
@@ -11681,6 +11700,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
                 repo: None,
             },
         )
@@ -20411,7 +20431,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"%s"}' "$3"
     ;;
 esac
 "#;
@@ -23254,6 +23274,7 @@ async fn wrapping_unwatched(fixture: &Grilling) {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
             repo: None,
         },
     )
@@ -26101,7 +26122,7 @@ case "$(pwd -P)" in
         printf 'no pull requests found for branch "%s"\n' "$3" >&2
         exit 1
     fi
-    printf '{{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+    printf '{{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
     exit 0
     ;;
 esac
@@ -32340,7 +32361,7 @@ case "$(pwd -P)" in
         printf '{{"comments":[],"reviews":[]}}'
         ;;
     *)
-        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
         ;;
     esac
     exit 0
@@ -33037,7 +33058,7 @@ case "$(pwd -P)" in
 {companion}
         ;;
     *)
-        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
         ;;
     esac
     exit 0
