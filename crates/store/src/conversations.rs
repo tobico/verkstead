@@ -996,6 +996,20 @@ pub enum Landing {
     Wrapping,
 }
 
+/// How a take-up enters the wrap-up that follows it.
+///
+/// Two facts about the one moment, which is why they travel together: where the
+/// take-up leaves the Conversation, and what the wrap-up it is entering has
+/// already settled.
+pub struct Entering<'a> {
+    /// Which door this is — see [`Landing`].
+    pub landing: Landing,
+
+    /// And what that wrap-up has settled before it looks, which is empty for
+    /// every Process but one — see [`take_up`].
+    pub settled: &'a [super::WaitingOn],
+}
+
 /// What became of a direction picked on a wrap-up proposal.
 ///
 /// Driven by a Response arriving rather than by anything the human pressed, so
@@ -5432,6 +5446,17 @@ pub async fn start_stage<'a>(
 ///
 /// `companions` is where the companion repos the human configured while this
 /// drafted were checked out, in this transaction for [`start_stage`]'s reason.
+///
+/// `entering` is where this leaves the Conversation and what the wrap-up it is
+/// entering has settled before it looks — see [`Entering`]. What is settled is
+/// nothing at all for every Process but one: a **Fix Merge Issues** enters with
+/// the review and its pull request's comments settled, a wrap-up narrowed to what
+/// GitHub refuses a merge for, and they are written *here* rather than after the
+/// move, whichever door this is. Over a bare branch this transaction is the move,
+/// and over a pull request it is the transaction before the one that makes it, so
+/// a sweep or a restart never finds a wrapping Conversation that has not got them
+/// yet. The resolve press is the precedent, entering Wrapping with the review's
+/// settle standing and the merge put back to waiting — see [`resolve_conflicts`].
 pub async fn take_up<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -5439,8 +5464,10 @@ pub async fn take_up<'a>(
     base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
-    landing: Landing,
+    entering: Entering<'_>,
 ) -> Result<Taking> {
+    let Entering { landing, settled } = entering;
+
     let base = base.into();
     let worktree = super::repos::text(worktree)?;
 
@@ -5484,6 +5511,14 @@ pub async fn take_up<'a>(
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
+
+    // And what the wrap-up has settled before it looks, which is how a narrowed
+    // one is entered. Inside this transaction with the move below it, so that a
+    // Conversation that says Wrapping is never one a watcher could read before
+    // they landed.
+    for one in settled {
+        super::wrap_up::settle(&mut tx, id, *one).await?;
+    }
 
     // And the move, where there is no pull request coming to make it — see
     // [`Landing`]. The state and the Timeline together, as every move is written.

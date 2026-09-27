@@ -47,6 +47,13 @@
 //! what is said on the pull requests is answered in batches, and the whole
 //! thing goes Done when the suites are green. See [`skipped`].
 //!
+//! **And a Conversation whose Process never reads a branch is the same thing
+//! reached the other way.** A **Fix Merge Issues** wraps up narrowed to what
+//! GitHub refuses a merge for, so this settles the moment its wrap-up looks,
+//! exactly as *No review* does — and it is read off the Process rather than off
+//! the Review Pairing that Process never waits on. See [`skipping`], and
+//! [`crate::conversations::narrows_the_wrap_up`].
+//!
 //! The settle is what carries that, rather than a rule somewhere reading the
 //! pick: what the rest of a wrap-up waits on is *the review is over*, and a
 //! review that was never to happen is over. Which is also why nothing further
@@ -202,7 +209,8 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     }
 }
 
-/// Settle the review of a Conversation whose human picked *no review*.
+/// Settle the review of a Conversation there is to be none of: one whose human
+/// picked *no review*, or one whose Process never reads a branch.
 ///
 /// The one wrap-up step that runs no session. What the settle is for is the
 /// same either way — it is what the rest of the wrap-up reads to know the
@@ -210,11 +218,14 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
 /// what is on the pull request — so the wrap-up from here on is exactly the one
 /// a review that found nothing leaves behind: the checks with their two fix
 /// attempts apiece, the comments answered in batches, and Done once the suites
-/// are green.
+/// are green. On a narrowed one there are no batches either, the comments having
+/// been settled as it entered — see [`crate::comments`].
 ///
 /// Nothing is written to the Timeline for it. What the human picked is on the
-/// setup card and read on the details pane ever after, and a Notice saying the
-/// review they turned off did not happen would be a row to dismiss.
+/// setup card and read on the details pane ever after, the Process is on the
+/// pane beside it and said in the note the take-up wrote, and a Notice saying the
+/// review that was never going to happen did not happen would be a row to
+/// dismiss.
 async fn skipped(state: &AppState, conversation_id: i64) {
     settle(state, conversation_id).await;
 
@@ -534,8 +545,13 @@ enum Wanted {
     /// keep, that nothing is launched behind a stop.
     Nothing,
 
-    /// There is to be no review: the human picked that on the setup card, so
-    /// this settles without a session — see [`skipped`].
+    /// There is to be no review, so this settles without a session — see
+    /// [`skipped`].
+    ///
+    /// Two ways of there being none and the answer is the same: the human picked
+    /// *No review* on the setup card, or the Conversation's Process is one whose
+    /// wrap-up is narrowed to what GitHub refuses a merge for and never reads a
+    /// branch at all. See [`skipping`].
     Skipped,
 
     /// Nobody has read the branch, so a review session reads it.
@@ -587,7 +603,7 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
     // below it: a Conversation that is not to be reviewed has no review session
     // to have left a Set standing, and one that did leave a Set is one whose
     // human picked *no review* after it was already asking, which is not
-    // reachable — the pick freezes at grill start.
+    // reachable — the pick freezes at grill start, and so does the Process.
     if skipping(state, conversation_id).await {
         return Wanted::Skipped;
     }
@@ -598,15 +614,36 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
     }
 }
 
-/// Whether the human picked the row that says this Conversation is not to be
-/// reviewed.
+/// Whether this Conversation is to be reviewed at all, which is two questions of
+/// one record.
+///
+/// **The row the human picked**, which is *No review* on the setup card: a
+/// Conversation whose branch they said they did not want read.
+///
+/// **And the Process**, which is a wrap-up narrowed to what GitHub refuses a
+/// merge for — see [`crate::conversations::narrows_the_wrap_up`]. A **Fix Merge
+/// Issues** enters Wrapping with the review already settled, so most looks never
+/// get this far; what this catches is the looks that do. A steer into Wrapping
+/// takes the review's settle with it, deliberately, because a steer is the human
+/// saying *read this again* — and on a Process that reads nothing there is
+/// nothing to read again. So the settle is written back here rather than at the
+/// steer, and a Resume, a restart and the resolve press all come past the same
+/// reading. Which is what makes every door into Wrapping behave alike with no
+/// bookkeeping per door.
+///
+/// Read off the Process rather than off the Review Pairing that Process never
+/// waits on: a Fix has one role and no Review picker, so the pick beside it is
+/// whatever the composer last remembered and says nothing about this wrap-up.
 ///
 /// A store that will not answer reads as *it is to be reviewed*, which is the
 /// safe way round: what hangs on this is a wrap-up settling a review nobody
 /// read, and a database that will not say is not grounds for it.
 async fn skipping(state: &AppState, conversation_id: i64) -> bool {
     match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.review_pairing.skipped(),
+        Ok(Some(conversation)) => {
+            conversation.review_pairing.skipped()
+                || crate::conversations::narrows_the_wrap_up(conversation.process)
+        }
         Ok(None) => false,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading whether a Conversation is to be reviewed failed");

@@ -324,6 +324,29 @@ pub async fn settle_wrap_up(
     conversation_id: i64,
     waiting_on: WaitingOn,
 ) -> Result<()> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("settling something a wrap-up waits on")?;
+
+    settle(&mut connection, conversation_id, waiting_on).await
+}
+
+/// The same, inside a transaction that is doing something else as well.
+///
+/// Which is a Conversation entering Wrapping with something already settled,
+/// rather than settling it once the watchers have looked — the shape the resolve
+/// press has for the review, widened to be written rather than merely left
+/// standing. A **Fix Merge Issues** is what wants it: its wrap-up is narrowed to
+/// what GitHub refuses a merge for, so the review and its pull request's comments
+/// are settled as it lands, in or before the transaction that makes the move, and
+/// no sweep or restart can find it wrapping up without them. See
+/// [`super::take_up`], which is the door.
+pub(crate) async fn settle(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    waiting_on: WaitingOn,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO wrap_up_settled (conversation_id, repo_id, waiting_on, at)
          VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -332,7 +355,7 @@ pub async fn settle_wrap_up(
     .bind(conversation_id)
     .bind(waiting_on.repo())
     .bind(waiting_on.stored())
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| {
         format!("settling {waiting_on:?} for the wrap-up of Conversation {conversation_id}")

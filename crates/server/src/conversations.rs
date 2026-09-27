@@ -2736,7 +2736,34 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         Target::Branch(_) => store::Landing::Wrapping,
     };
 
-    match store::take_up(pool, id, &head, base, &path, &checkouts, landing).await? {
+    // And what the wrap-up it is entering has settled before it looks, which is
+    // nothing at all for a **Review** and the review and the comments for a **Fix
+    // Merge Issues**: that one is narrowed to what GitHub refuses a merge for, so
+    // the comments watcher has nothing to dispatch and the review watcher nothing
+    // to start, and the rule that ends the whole thing is left waiting on
+    // Mergeable and the checks. Written in the transaction below rather than after
+    // it, for the reason [`store::take_up`] gives.
+    //
+    // The comments are settled against the Conversation's own Repo, which is where
+    // the pull request is — the one it has now, or the one a bare branch has
+    // `submitting` open into the same repository a moment from now.
+    let narrowed = narrows_the_wrap_up(conversation.process);
+
+    let settled = if narrowed {
+        vec![
+            store::WaitingOn::Review,
+            store::WaitingOn::Comments(conversation.repo.id),
+        ]
+    } else {
+        Vec::new()
+    };
+
+    let entering = store::Entering {
+        landing,
+        settled: &settled,
+    };
+
+    match store::take_up(pool, id, &head, base, &path, &checkouts, entering).await? {
         store::Taking::Recorded => {}
         store::Taking::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
         store::Taking::NotDrafting => return Ok(TakenUp::NotDrafting),
@@ -2771,7 +2798,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // some watchers, and none of them makes a directory.
     drop(making);
 
-    if let Err(error) = store::note(pool, id, &taken(&taking, &named)).await {
+    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed)).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
     }
 
@@ -3145,8 +3172,18 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// against `named`. Which is the one thing about a branch that is not obvious from
 /// the panel — the base picker's choice becomes the pull request's base at this
 /// moment and never again.
-fn taken(taking: &Target, named: &str) -> String {
-    match taking {
+///
+/// **And the wrap-up that is about to run, where it is a narrowed one.** `narrowed`
+/// is [`narrows_the_wrap_up`]'s answer about the Process, and a **Fix Merge
+/// Issues** is the one it is true of: the review and the comments are settled as
+/// this lands, so nothing will read the branch and nothing said on the pull
+/// request will be answered. Which is worth a sentence precisely because it is an
+/// absence — a wrap-up nothing reviews looks from the Timeline like one whose
+/// review has not started yet, and the human picked the Process minutes ago.
+/// Nothing is said for any other Process, there being nothing to say: the
+/// ordinary wrap-up is what a taken-up Conversation has always run.
+fn taken(taking: &Target, named: &str, narrowed: bool) -> String {
+    let taken = match taking {
         Target::PullRequest(held) => format!(
             "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
              what this Timeline records starts at that branch's head: the commits already on the \
@@ -3158,7 +3195,17 @@ fn taken(taking: &Target, named: &str) -> String {
              being opened against `{named}` before the wrap-up reads it. What this Timeline records \
              starts at that branch's head — the commits already on it are the work's own.",
         ),
+    };
+
+    if !narrowed {
+        return taken;
     }
+
+    format!(
+        "{taken} The wrap-up is narrowed to what GitHub refuses a merge for: no review will be \
+         read, and nothing said on the pull request will be answered — what it waits on is the \
+         checks and whether the pull request merges."
+    )
 }
 
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
@@ -3714,6 +3761,26 @@ pub(crate) fn takes_a_target(process: store::Process) -> bool {
         process,
         store::Process::Review | store::Process::FixMergeIssues
     )
+}
+
+/// And which of them wrap up narrowed to what GitHub refuses a merge for: the
+/// review and the comments settled as the Conversation lands, so the wrap-up
+/// waits on **Mergeable** and the checks alone.
+///
+/// **Fix Merge Issues**, and nothing else. Every other Process reads the branch
+/// and answers what is said on the pull request; this one is pointed at a pull
+/// request that has been reviewed and talked about already, and what is left of
+/// wrapping it up is the two things GitHub itself refuses a merge for.
+///
+/// Asked in three places and by each of them for itself, which is the pattern the
+/// rest of the wrap-up follows: the take-up writes the settles as it enters — see
+/// [`take_up`] — and the review watcher and the comments watcher each read this a
+/// moment later and do nothing, see [`crate::review`] and [`crate::comments`].
+/// Settling alone would not hold, because a steer into Wrapping takes the
+/// review's settle with it and a comment landing unsettles the comments; read
+/// this way every door into Wrapping behaves alike, with no bookkeeping per door.
+pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
+    matches!(process, store::Process::FixMergeIssues)
 }
 
 /// Whether git would take this as a branch name.

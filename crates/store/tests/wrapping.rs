@@ -18,8 +18,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AdoptedPullRequest, Event, Finished, Landing, Lifecycle, Merging, PullRequest, Rebuilding,
-    Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
+    AdoptedPullRequest, Entering, Event, Finished, Landing, Lifecycle, Merging, PullRequest,
+    Rebuilding, Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
     close_conversation, finish_wrap_up, hold_pull_request, implement_again, load_conversation,
     merges, merging, open_database, pick_direction, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
@@ -354,7 +354,10 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
             "c0ffee",
             Path::new("/state/worktrees/rate-limiting"),
             &[],
-            Landing::Drafting,
+            Entering {
+                landing: Landing::Drafting,
+                settled: &[],
+            },
         )
         .await
         .unwrap(),
@@ -384,6 +387,72 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
             .collect::<Vec<_>>(),
         [Lifecycle::Wrapping],
         "one move, from the Draft it was straight into the wrap-up",
+    );
+}
+
+/// And a take-up may enter Wrapping with things already settled, which is a
+/// wrap-up narrowed before it looks.
+///
+/// **Fix Merge Issues** is what asks for it: the review and the pull request's
+/// comments are settled as the Conversation lands, so what its wrap-up waits on is
+/// whether the checks are green and whether GitHub will merge it. They are written
+/// in this transaction rather than after it — over a bare branch this *is* the
+/// move, and over a pull request it is the transaction before the one that makes
+/// it — so there is no moment in which a sweep or a restart could find the
+/// Conversation wrapping up and not narrowed.
+///
+/// Asked over the bare branch here, that being the door where the move and the
+/// settles are the one write: the Conversation is Wrapping when this returns and
+/// both are already down.
+#[tokio::test]
+async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let id = start_conversation(&pool, repo.id, "verkstead-1")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    assert_eq!(
+        take_up(
+            &pool,
+            id,
+            "rate-limiting",
+            "c0ffee",
+            Path::new("/state/worktrees/rate-limiting"),
+            &[],
+            Entering {
+                landing: Landing::Wrapping,
+                settled: &[WaitingOn::Review, WaitingOn::Comments(repo.id)],
+            },
+        )
+        .await
+        .unwrap(),
+        Taking::Recorded,
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Wrapping);
+
+    let settled = wrap_up_settled(&pool, id).await.unwrap();
+
+    assert!(
+        settled.contains(&WaitingOn::Review),
+        "the review is settled as the Conversation lands: {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Comments(repo.id)),
+        "and so is what is said on the pull request that Repo is about to hold: {settled:?}",
+    );
+    assert!(
+        !settled.contains(&WaitingOn::Checks(repo.id))
+            && !settled.contains(&WaitingOn::Mergeable(repo.id)),
+        "and nothing else is: those two are what a narrowed wrap-up waits on: {settled:?}",
     );
 }
 

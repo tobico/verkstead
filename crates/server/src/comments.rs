@@ -114,6 +114,16 @@
 //! Writing each one down as it is skipped is what makes taking a rule away
 //! change what happens next rather than what happened.
 //!
+//! **And a wrap-up narrowed to what GitHub refuses a merge for reads none of
+//! it.** A **Fix Merge Issues** Conversation is pointed at a pull request that
+//! has been reviewed and talked about already, so what is said on it is not this
+//! wrap-up's to answer: the watcher reads the Process off the record on its first
+//! look and stops there — nothing dispatched, nothing settled, nothing put back
+//! to waiting. What lets such a wrap-up reach Done is the settle written as it
+//! entered Wrapping, and the only thing that could take that away is the unsettle
+//! below. See [`crate::conversations::narrows_the_wrap_up`], and
+//! [`crate::review`], which reads the same fact for the review.
+//!
 //! Nothing here ever asks the human itself. What asks is the session dispatched
 //! about a batch, which puts what it would do to them rather than what they
 //! said: their own words back at them would be the one question with nothing
@@ -214,6 +224,25 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // same fact: this is not a wrap-up any more.
     if conversation.state != store::Lifecycle::Wrapping {
         return Watching::Done("the Conversation is not wrapping up any more");
+    }
+
+    // And the Process, which is the other thing that ends the watching outright:
+    // a wrap-up narrowed to what GitHub refuses a merge for does not answer what
+    // is said on the pull request, so there is nothing here to poll for. Read of
+    // the record a moment after the watcher was started rather than decided by
+    // whatever started it, which is the pattern the rest of the wrap-up follows —
+    // see [`crate::conversations::narrows_the_wrap_up`], and [`crate::review`] for
+    // the other half of it.
+    //
+    // Ended rather than merely quietened, because the whole of what this watcher
+    // does is on the far side of it: nothing is dispatched, nothing is settled and
+    // nothing is put back to waiting, so a poll that went on asking GitHub twice a
+    // minute would be two calls spent to reach this same line. What lets the
+    // wrap-up reach Done is the settle written as it entered Wrapping — see
+    // [`store::take_up`] — and the unsettle that would take it away is this
+    // watcher's alone.
+    if crate::conversations::narrows_the_wrap_up(conversation.process) {
+        return Watching::Done("this wrap-up does not answer what is said on the pull request");
     }
 
     // Asked before anything is dispatched, for the runner's reason: *the run does

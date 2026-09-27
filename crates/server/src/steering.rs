@@ -815,7 +815,7 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let roles = roles(submission.target);
+    let roles = roles(submission.target, conversation.process);
 
     if roles.is_empty() {
         return Ok(None);
@@ -1074,7 +1074,7 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
         return Vec::new();
     };
 
-    roles(submission.target)
+    roles(submission.target, conversation.process)
         .iter()
         .copied()
         .filter(|role| {
@@ -1281,10 +1281,21 @@ pub(crate) async fn standing(
 /// review role only where nothing was picked for it, which is what lets a
 /// Conversation that has never fixed a review Pairing — a steered draft — be
 /// steered into a wrap-up at all without replacing one that was chosen.
-fn roles(target: SteerTarget) -> &'static [Role] {
+///
+/// **Unless the wrap-up is a narrowed one**, which is why the Process is asked
+/// about here at all. A **Fix Merge Issues** wraps up without ever reading the
+/// branch, so its Wrapping runs under the Implementation Pairing alone — the same
+/// reading its own Start press makes, where the Agent control is one picker and no
+/// Review Pairing is ever waited on. Waiting on one here would refuse the steer on
+/// account of a role whose sessions this Conversation has none of. See
+/// [`crate::conversations::narrows_the_wrap_up`].
+fn roles(target: SteerTarget, process: store::Process) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
         SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
+            &[Role::Implementation]
+        }
+        SteerTarget::Wrapping if crate::conversations::narrows_the_wrap_up(process) => {
             &[Role::Implementation]
         }
         SteerTarget::Wrapping => &[Role::Implementation, Role::Review],

@@ -2955,11 +2955,11 @@ export type Prefilled = { value: string, source: Source, };
  * enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
  * held to each other in one function on the server.
  *
- * All five, though only [`Process::Develop`] can start anything yet: which of
- * them the picker offers is a list of its own, and what a stage after this one
- * adds is a row on that list and a start path behind it — never a variant. A
- * wire that carried only what could be started would be one to widen every
- * time one more could.
+ * All five, and all five can start something now that Fix Merge Issues has
+ * landed: which of them the picker offers is a list of its own all the same,
+ * and what a stage adds is a row on that list and a start path behind it —
+ * never a variant. A wire that carried only what could be started would be one
+ * to widen every time one more could.
  *
  * See ADR-0020.
  */

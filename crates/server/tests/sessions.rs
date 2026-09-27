@@ -19709,13 +19709,41 @@ const A_TAKEN_UP_BRIEF: &str = "# Rate limiting for the public API\n\nA token bu
 /// it. So the branch is made, pushed and then dropped locally: what the press
 /// finds is exactly what a fresh clone would, which is the ordinary case.
 async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    taking_up_however_reviewed(spill, stub, gh, Pickers::UnderEveryPairing, "").await
+    taking_up_however_reviewed(
+        spill,
+        stub,
+        gh,
+        Pickers::UnderEveryPairing,
+        Process::Review,
+        "",
+    )
+    .await
 }
 
 /// The same with the Review picker moved onto the row that runs nothing, which
 /// is the take-up that wraps up without a review.
 async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    taking_up_however_reviewed(spill, stub, gh, Pickers::Unreviewed, "").await
+    taking_up_however_reviewed(spill, stub, gh, Pickers::Unreviewed, Process::Review, "").await
+}
+
+/// And the same pull request taken up under **Fix Merge Issues**, which is the
+/// narrowed wrap-up: the review and the comments are settled as it lands, so what
+/// it waits on is whether the pull request merges and whether its checks are
+/// green.
+///
+/// One role rather than two, an Agent control of its own and no Review picker at
+/// all — see [`Bench::the_one_an_investigation_runs_under`]. Everything else about
+/// the press is the Review's own, this being one take-up.
+async fn taking_up_to_fix(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_however_reviewed(
+        spill,
+        stub,
+        gh,
+        Pickers::UnderEveryPairing,
+        Process::FixMergeIssues,
+        "",
+    )
+    .await
 }
 
 /// And the same with the settings page's *Share to pull request when done*
@@ -19730,17 +19758,23 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
         stub,
         gh,
         Pickers::UnderEveryPairing,
+        Process::Review,
         "share_on_done: true\n",
     )
     .await
 }
 
-/// And the whole of it, the pickers and `config.yaml` included.
+/// And the whole of it, the pickers, the Process and `config.yaml` included.
+///
+/// `process` is which of the two Processes pointed at a target is pressing. A
+/// **Review** settles the two roles a wrap-up runs under; a **Fix Merge Issues**
+/// settles the one it has, nothing about it ever reading the branch.
 async fn taking_up_however_reviewed(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     pickers: Pickers,
+    process: Process,
     config: &str,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
@@ -19764,7 +19798,11 @@ async fn taking_up_however_reviewed(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.the_two_a_wrap_up_runs_under(id).await;
+    if process == Process::FixMergeIssues {
+        bench.the_one_an_investigation_runs_under(id).await;
+    } else {
+        bench.the_two_a_wrap_up_runs_under(id).await;
+    }
 
     if pickers == Pickers::Unreviewed {
         bench.unreviewed(id).await;
@@ -19773,7 +19811,7 @@ async fn taking_up_however_reviewed(
     let picked: ProcessPicked = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Review }),
+        &serde_json::json!({ "process": process }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -20758,10 +20796,24 @@ async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_sa
         "with what was already said on the pull request folded in: {sent}",
     );
 
+    let view = fixture.view().await;
+
     assert_eq!(
-        fixture.view().await.state,
+        view.state,
         Lifecycle::Wrapping,
         "which is the state the press landed it in",
+    );
+
+    // And the note the press wrote says nothing about a narrowed wrap-up, that
+    // being the other Process's: the ordinary one is what a taken-up Conversation
+    // has always run, and a sentence about an absence that is not there would be
+    // a line the human had to work out was wrong.
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("narrowed")),
+        "a Review's wrap-up is the whole one and says nothing of the sort: {:?}",
+        notices(&view),
     );
 }
 
@@ -21056,6 +21108,305 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
         notices_since_the_take_up(&view),
     );
     assert!(!view.working, "and nothing is left holding the Worktree");
+}
+
+/// A **Fix Merge Issues** wrap-up reads no branch and answers nothing said on the
+/// pull request: it enters Wrapping with the review and the comments settled, and
+/// sails to Done on the checks and the merge alone.
+///
+/// Which is the whole of what narrowing it means. The pull request here was
+/// somebody else's and has three comments standing on it — enough to have
+/// dispatched a review that folded them in on a Review, and a batch session after
+/// it on a take-up with *No review* — and this Process does neither: what it is
+/// pointed at has been reviewed and talked about already, so what is left of
+/// wrapping it up is what GitHub itself refuses a merge for.
+///
+/// The settles are read at the press rather than waited for, because that is the
+/// claim: they are written in the transaction the move comes through, so there is
+/// no moment in which a sweep or a restart could find this wrapping and not
+/// narrowed.
+#[tokio::test]
+async fn a_fix_merge_issues_wrap_up_reads_no_branch_and_answers_nothing_said_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    // Settled as it landed, both of them, and against this Conversation's own
+    // Repo — which is where the pull request the take-up recorded is.
+    assert!(
+        review_settled(&fixture).await,
+        "the review is settled at the press, so nothing is ever sent to read the branch",
+    );
+    assert!(
+        comments_settled(&fixture).await,
+        "and so is what is said on the pull request, so nothing is ever sent to answer it",
+    );
+
+    // And the Timeline says so, beside what was taken up: an absence is worth a
+    // sentence precisely because it looks from the outside like something that has
+    // not happened yet.
+    let view = fixture.view().await;
+    let taken = notices(&view)
+        .into_iter()
+        .find(|notice| notice.contains("was taken up for wrapping"))
+        .expect("the press wrote down what it took up");
+
+    assert!(
+        taken.contains("narrowed") && taken.contains("no review will be read"),
+        "the note says the wrap-up is narrowed and what that leaves out: {taken}",
+    );
+
+    // Then Done, on the two things it waits on and nothing else.
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        checks_settled(&fixture).await && merge_settled(&fixture).await,
+        "the suite is green and GitHub says it merges, which is the whole of what \
+         this wrap-up was waiting on",
+    );
+    assert!(
+        !reviews.exists(),
+        "and nothing read the branch: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+    assert!(
+        !batches.exists(),
+        "and nothing was dispatched about the three comments standing on it: {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert_eq!(
+        fixes(&view),
+        0,
+        "and nothing was wrong with the checks either",
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// And a **Fix Merge Issues** over a bare branch lands in the same narrowed
+/// wrap-up, the pull request `submitting` opens being one in the same repository a
+/// moment later.
+///
+/// The settles are the take-up's either way, which is what makes this one claim
+/// rather than two: they are written against the Conversation's own Repo, and that
+/// is where the pull request goes whether GitHub already had one or whether the
+/// session about to run opens it.
+#[tokio::test]
+async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_opened_by_hand(&opened),
+        None,
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "the take-up's own move settled both, there being no pull request record \
+         to carry them in",
+    );
+
+    // And they are still settled once the pull request the branch was owed is
+    // there, which is the moment the wrap-up has something to wait on.
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "and the pull request arriving in the same Repo changed neither",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "reviewing/SKILL.md").await,
+        0,
+        "no session read the branch: {:?}",
+        outputs(&view).len(),
+    );
+    assert_eq!(
+        sessions_on(&fixture, "responding/SKILL.md").await,
+        0,
+        "and none was sent to answer what was said on it",
+    );
+}
+
+/// A red check on a narrowed wrap-up is fixed exactly as it is on any other, and
+/// Done comes when the suite goes green and GitHub says the pull request merges.
+///
+/// Which is the other half of narrowing it: what was taken out is the review and
+/// the comments, and everything the checks watcher does is untouched — the fix
+/// dispatched inside the addressing skill, under the Implementation Pairing the
+/// one Agent control settled, and the rule that ends the whole thing waiting on
+/// the answer.
+#[tokio::test]
+async fn a_fix_merge_issues_still_fixes_a_red_check_and_settles_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    // Red until a fix session has been sent at it, which is what a fix that
+    // reached the right pull request does to a suite.
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(&red_until(&dispatched), "", ""),
+    )
+    .await;
+
+    let told = until_written(&dispatched).await;
+
+    assert!(
+        told.contains("addressing/SKILL.md"),
+        "the red check got its fix session, inside the addressing skill as ever: {told}",
+    );
+    assert!(
+        told.contains("model=claude-implementation-5"),
+        "under the one Pairing this Process waits on: {told}",
+    );
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert_eq!(fixes(&view), 1, "one go was all it took");
+    assert!(
+        checks_settled(&fixture).await && merge_settled(&fixture).await,
+        "and what carried it to Done is the suite and the merge",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "with no review and no batch session anywhere on it: {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+}
+
+/// A steer into Wrapping on a narrowed wrap-up reads no branch either, though the
+/// steer itself puts the review back to waiting.
+///
+/// Which is why settling it at the press could not be the whole of it. A steer is
+/// the human saying *look at this again*, so it deliberately takes the review's
+/// settle with it — and on a Process that reads nothing there is nothing to look
+/// at again. So the review watcher reads the Process for itself a moment later and
+/// settles it back, and the wrap-up the steer landed in finishes the way the first
+/// one did.
+#[tokio::test]
+async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened,
+        "everything had finished, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture.steer_into("Wrapping", false).await,
+        ConversationSteered::Steered,
+    );
+
+    // Which is the wrap-up finishing a second time, on a review that settled
+    // without a session all over again.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .await;
+
+    assert!(
+        review_settled(&fixture).await,
+        "the steer put it back to waiting and the watcher settled it again",
+    );
+    assert!(
+        !reviews.exists(),
+        "and still nothing has read the branch: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+}
+
+/// And a Resume on one reads no branch either, though a Resume is the one press
+/// that means *read it from the start*.
+///
+/// The stop this is pressed over is the ordinary one a red check nothing can fix
+/// leaves: two fix sessions and then the human. What Resume does with a wrap-up is
+/// start the whole of it over with the review read afresh — and afresh on a
+/// Process that reads nothing is still nothing, so the third fix session is the
+/// only thing the press spends.
+#[tokio::test]
+async fn a_resume_of_a_narrowed_wrap_up_reads_no_branch_either() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    // Read past the take-up's own note, which is the first thing on this
+    // Timeline and is not a stop.
+    let stopped = fixture
+        .until(|view| notices_since_the_take_up(view).into_iter().next_back())
+        .await;
+
+    assert!(
+        stopped.contains("Rust"),
+        "what stopped it is the check nothing could fix: {stopped:?}",
+    );
+    assert_eq!(
+        fixes(&fixture.view().await),
+        2,
+        "the machine had its two goes at it",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // A third go, which is what the press bought — and the review read afresh is
+    // still no review at all.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+
+    assert!(
+        review_settled(&fixture).await,
+        "the review settled without a session on the way past, as it did at the press",
+    );
+    assert!(
+        !reviews.exists(),
+        "and the branch has still never been read: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
 }
 
 /// A browser watching one live session's Screen: the socket it is attached
