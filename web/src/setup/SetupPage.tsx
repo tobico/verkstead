@@ -23,6 +23,12 @@
 //! what it wants and the frame's own rule stands for every moment it says
 //! nothing.
 //!
+//! **And inside the app it is dragged by its top.** The window has no title bar
+//! (ADR-0020) and what moves it everywhere else is a pane head; this page has
+//! none, so it draws the bare bar that stands where one would — see
+//! [`DragBar`](../DragBar.tsx). Nothing at all in a browser, which is where a
+//! phone on the tailnet walks this same wizard.
+//!
 //! **Which step is open is this device's**, kept in browser storage and never
 //! sent anywhere — see `steps.ts`. A step that stands met can be opened again
 //! by pressing its heading, which is the whole of the navigation the frame has:
@@ -31,6 +37,7 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
+import { DragBar } from "../DragBar";
 import { loadOnboarding } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -108,73 +115,76 @@ export function SetupPage(): JSX.Element {
   });
 
   return (
-    <section class={styles.setup}>
-      <h1>Set Verkstead up</h1>
-      <p class={styles.standing}>
-        There is a little to settle before any work can be started here. Nothing
-        else is reachable until it is done.
-      </p>
+    <>
+      <DragBar />
+      <section class={styles.setup}>
+        <h1>Set Verkstead up</h1>
+        <p class={styles.standing}>
+          There is a little to settle before any work can be started here.
+          Nothing else is reachable until it is done.
+        </p>
 
-      <Show
-        when={onboarding.data}
-        fallback={
-          <Show
-            when={onboarding.isError}
-            fallback={<Empty>Reading this machine…</Empty>}
-          >
-            <ErrorLine>This machine could not be read.</ErrorLine>
-          </Show>
-        }
-      >
-        {(view) => (
-          <ol class={styles.steps}>
-            <For each={STEPS}>
-              {(step) => (
-                <li
-                  class={styles.step}
-                  classList={{ [styles.open!]: open() === step }}
-                  data-step={step}
-                  data-met={met(view().steps, step) ? "yes" : "no"}
-                  aria-current={open() === step ? "step" : undefined}
-                >
-                  <StepHead
-                    step={step}
-                    met={met(view().steps, step)}
-                    open={open() === step}
-                    show={show}
-                  />
-                  {/* And under the open one, what that step is about. */}
-                  <Show when={open() === step}>
-                    <div class={styles.body}>
-                      <Show when={step === "dependencies"}>
-                        <Dependencies
-                          reading={view()}
-                          onwards={() => onwards(step)}
-                          poll={setAsked}
-                        />
-                      </Show>
-                      <Show when={step === "accounts"}>
-                        <Accounts
-                          reading={view()}
-                          onwards={() => onwards(step)}
-                        />
-                      </Show>
-                      {/* And the last of the three, whose Next is the
-                          wizard finishing rather than a step opening — which is
-                          why it takes no `onwards`: what it goes on to is the
-                          app itself. */}
-                      <Show when={step === "git"}>
-                        <Git />
-                      </Show>
-                    </div>
-                  </Show>
-                </li>
-              )}
-            </For>
-          </ol>
-        )}
-      </Show>
-    </section>
+        <Show
+          when={onboarding.data}
+          fallback={
+            <Show
+              when={onboarding.isError}
+              fallback={<Empty>Reading this machine…</Empty>}
+            >
+              <ErrorLine>This machine could not be read.</ErrorLine>
+            </Show>
+          }
+        >
+          {(view) => (
+            <ol class={styles.steps}>
+              <For each={STEPS}>
+                {(step) => (
+                  <li
+                    class={styles.step}
+                    classList={{ [styles.open!]: open() === step }}
+                    data-step={step}
+                    data-met={met(view().steps, step) ? "yes" : "no"}
+                    aria-current={open() === step ? "step" : undefined}
+                  >
+                    <StepHead
+                      step={step}
+                      met={met(view().steps, step)}
+                      open={open() === step}
+                      show={show}
+                    />
+                    {/* And under the open one, what that step is about. */}
+                    <Show when={open() === step}>
+                      <div class={styles.body}>
+                        <Show when={step === "dependencies"}>
+                          <Dependencies
+                            reading={view()}
+                            onwards={() => onwards(step)}
+                            poll={setAsked}
+                          />
+                        </Show>
+                        <Show when={step === "accounts"}>
+                          <Accounts
+                            reading={view()}
+                            onwards={() => onwards(step)}
+                          />
+                        </Show>
+                        {/* And the last of the three, whose Next is the
+                            wizard finishing rather than a step opening — which is
+                            why it takes no `onwards`: what it goes on to is the
+                            app itself. */}
+                        <Show when={step === "git"}>
+                          <Git />
+                        </Show>
+                      </div>
+                    </Show>
+                  </li>
+                )}
+              </For>
+            </ol>
+          )}
+        </Show>
+      </section>
+    </>
   );
 }
 

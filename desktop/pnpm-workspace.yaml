@@ -1,0 +1,30 @@
+# Nothing here is a workspace: this file is where pnpm keeps the settings that
+# used to live in `.npmrc`, and the viewer has one of its own for the same
+# reason.
+#
+# **esbuild builds**, as it does for the viewer: vitest transforms the
+# TypeScript through it, and an esbuild that was not allowed to put its binary
+# in place is a test run that cannot start.
+#
+# **Electron's own install script stays denied.** The package's `postinstall`
+# downloads a platform build of Electron — a couple of hundred megabytes — and
+# nothing in this project runs it: `pnpm start` runs the dev shell's Electron
+# (see `flake.nix`), and CI only lints, typechecks and tests, which want the
+# package for its TypeScript definitions and nothing else. The Electron that
+# gets *packed* is electron-builder's own download of the version this package
+# pins — see `electron-builder.yml`, which says why it must not be the dev
+# shell's — and that happens inside `pnpm run pack` rather than on every
+# install. Said as a denial rather than left unsaid, because an install script
+# pnpm is ignoring without having been told to is one it refuses the whole
+# install over.
+#
+# **And `electron-winstaller`'s is denied with it.** That package arrives under
+# electron-builder and is the Squirrel.Windows target's; its install script
+# fetches Squirrel's own binaries. Windows gets an msi through the WiX target
+# instead (ADR-0020), so nothing here will ever build a Squirrel installer —
+# and what the script would do meanwhile is download a Windows toolchain onto
+# every machine that installs this project, Linux runners included.
+allowBuilds:
+  esbuild: true
+  electron: false
+  electron-winstaller: false

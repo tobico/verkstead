@@ -1,0 +1,59 @@
+# The pnpm toolchain, in one place. Three callers need the same pnpm, the same
+# Node and the same `--frozen-lockfile` install before they can run anything of
+# a project's: `ci.yml`'s viewer job, its desktop job, and the release
+# workflow. Carried in each separately, those pins drift apart, and a check
+# that passes against one toolchain while the artefact ships from another is
+# the drift that matters.
+#
+# **The project is an input rather than a second copy of this file.** There are
+# two pnpm projects in the repository now — the viewer under `web/` and the
+# Electron app under `desktop/` — and what differs between them is which
+# directory they are in and nothing else.
+#
+# Setup and nothing past it: what the caller does with the installed project —
+# CI lints, typechecks and tests, the release workflow builds — differs by
+# caller, so it stays with the caller.
+name: Set up a pnpm project
+description: Install the pinned pnpm and Node, then a project's dependencies.
+
+inputs:
+  project:
+    description: The directory holding the project's package.json — `web` or `desktop`.
+    required: false
+    default: web
+
+runs:
+  using: composite
+  steps:
+    # pnpm before node, because the node cache below asks pnpm where its store
+    # is. 11.27.0 is the flake's, and both lockfiles are `lockfileVersion: 9.0`
+    # — whatever pnpm the runner image happens to ship is not a version we have
+    # agreed to.
+    - name: Install pnpm 11.27.0
+      uses: pnpm/action-setup@v6.0.10
+      with:
+        version: 11.27.0
+
+    # Also the flake's, down to the patch. `cache: pnpm` caches the pnpm store
+    # keyed on the lockfile, so an unchanged lockfile means an install that
+    # unpacks rather than downloads.
+    - name: Install Node 24.21.0
+      uses: actions/setup-node@v7.0.0
+      with:
+        node-version: 24.21.0
+        cache: pnpm
+        cache-dependency-path: ${{ inputs.project }}/pnpm-lock.yaml
+
+    # `--frozen-lockfile` is the point of the step: a `package.json` that has
+    # moved away from the lockfile fails here, rather than being quietly
+    # resolved into whatever is newest today.
+    #
+    # `working-directory` is spelled out because a calling job's
+    # `defaults.run.working-directory` does not reach inside a composite
+    # action — the step would otherwise run at the repository root, where there
+    # is no `package.json`. `shell` is likewise required of every `run` step in
+    # a composite action.
+    - name: Install
+      run: pnpm install --frozen-lockfile
+      shell: bash
+      working-directory: ${{ inputs.project }}

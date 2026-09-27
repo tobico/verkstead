@@ -6,6 +6,8 @@
 /web/node_modules
 /web/dist
 /web/dist-share
+/desktop/node_modules
+/desktop/dist
 .direnv
 /.pnpm-store
 

@@ -9,14 +9,21 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `git`, `languages`, `instructions`, `sandbox-binds`, `cleanup`,
-//!   `remote` and `repos` — everything git is told, the languages a session
-//!   gets build support for, the text every session is given, the extra paths
-//!   every sandbox gets, what becomes of an archived Conversation, whether this
-//!   machine can be reached from a phone, and the Repos that are registered,
-//!   each named by a word. There is one of each of them, and a word says so.
+//! - `desktop`, `git`, `languages`, `instructions`, `sandbox-binds`, `cleanup`,
+//!   `remote` and `repos` — what the desktop app does about its own window,
+//!   everything git is told, the languages a session gets build support for, the
+//!   text every session is given, the extra paths every sandbox gets, what
+//!   becomes of an archived Conversation, whether this machine can be reached
+//!   from a phone, and the Repos that are registered, each named by a word.
+//!   There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
+//!
+//! `desktop` is a word here in every browser, while the section behind it is
+//! drawn only inside the Electron app — see `bridge.ts`. Which is not the
+//! asymmetry it looks like: the words are what this page *can* open, and a path
+//! naming a pane that draws nothing leaves the details bare, exactly as the
+//! paragraph below says a path naming no pane at all does.
 //!
 //! The `profiles/` segment is what keeps the ids and the word-named panes
 //! apart, as the workbench's `events/` does: a bare id segment would have read
@@ -38,11 +45,12 @@
 //! is what they are when nothing is open at all: the URL is a record of what was
 //! picked rather than a promise that it is still there.
 
-/// The openings named by a word rather than by an id: everything git is told,
-/// the languages a session gets build support for, the text every session is
-/// given, the extra paths every sandbox gets, what becomes of an archived
-/// Conversation, how this machine is reached from a phone and which Repos are
-/// registered — the things there is exactly one of on this page.
+/// The openings named by a word rather than by an id: what the desktop app does
+/// about its own window, everything git is told, the languages a session gets
+/// build support for, the text every session is given, the extra paths every
+/// sandbox gets, what becomes of an archived Conversation, how this machine is
+/// reached from a phone and which Repos are registered — the things there is
+/// exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -56,6 +64,7 @@
 /// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
 /// — and a word added here arrives with the route that reaches it.
 export const WORDS = [
+  "desktop",
   "git",
   "languages",
   "instructions",

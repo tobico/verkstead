@@ -1,0 +1,12 @@
+{
+  // What `pnpm build` emits, which is the main process and nothing around it:
+  // the tests and this project's own configuration are typechecked by
+  // `tsconfig.json` and have no business in what Electron loads.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

@@ -1879,7 +1879,7 @@ fn raising(platform: Platform, line: &str, marker: Option<&Path>) -> Vec<String>
 /// quotes none of them — so a script with a space in it would arrive as a
 /// dozen arguments. `-EncodedCommand` takes base64 of UTF-16, which is one word
 /// with nothing in it a command line has an opinion about. See
-/// `verkstead_desktop::elevate`, which is the arm this is for.
+/// [`crate::elevate`], which is the arm this is for.
 ///
 /// **`Stop` because a cmdlet that fails is not a shell that failed.** A failing
 /// native command sets `$LASTEXITCODE` and a failing cmdlet — which is what

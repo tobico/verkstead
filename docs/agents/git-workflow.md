@@ -77,11 +77,14 @@ pull request, and they are the only writes to `main` that bypass the process
 above. Both are deliberate.
 
 - **`chore: version <version>`**, before anything is built, touching
-  `Cargo.toml` and `Cargo.lock`. The compiled binary reports the version it
-  was compiled with, so the number has to be in the tree that gets built, and
-  it has to be there before the build rather than after it. `v0.1.1` shipped a
-  binary reporting `0.1.0` back when this was a human's job to remember: a
-  fresh install offered to update itself to the version it already was.
+  `Cargo.toml`, `Cargo.lock` and `desktop/package.json`. The compiled binary
+  reports the version it was compiled with, so the number has to be in the tree
+  that gets built, and it has to be there before the build rather than after it.
+  `v0.1.1` shipped a binary reporting `0.1.0` back when this was a human's job
+  to remember: a fresh install offered to update itself to the version it
+  already was. The third file is the same rule for the Windows installer, which
+  electron-builder versions from that `package.json` and nothing else bumps —
+  left alone, every Release's msi would read `0.1.0` in **Installed apps**.
 - **`chore: release manifest for <tag>`**, after the Release, touching
   `nix/release.json` and nothing else. That manifest is the entire interface
   to the binary flake: a version, plus a url and an SRI hash per nix system,

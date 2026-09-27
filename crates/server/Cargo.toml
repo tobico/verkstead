@@ -178,10 +178,14 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # profile directory *and* the machine's record of where it was.
 
 # `Win32_System_StationsAndDesktops` is the window station and the desktop a
-# process is on, which a boundary built on a restricted token has to write an
-# entry on the way it writes one on a directory — see
-# `examples/restricted-token-probe.rs`, which is the second mechanism being
-# asked about after the first turned out not to host the agent at all.
+# process is on, and two things want it. `src/display.rs` asks whether this
+# process's station is one somebody is looking at, which is what says whether a
+# tray icon, a dialog or the platform's own password box has anywhere to be
+# drawn — the one source file here that uses the feature. And a boundary built
+# on a restricted token has to write an entry on the station the way it writes
+# one on a directory — see `examples/restricted-token-probe.rs`, which is the
+# second mechanism being asked about after the first turned out not to host the
+# agent at all.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_NetworkManagement_NetManagement",

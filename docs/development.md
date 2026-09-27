@@ -20,7 +20,8 @@ $ nix develop
 ```
 
 Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
-`git`, and the `node` and `pnpm` the viewer is built with.
+`git`, the `node` and `pnpm` the viewer is built with, and the Electron the
+desktop app runs on.
 
 ### 2. Build the viewer and start the server (terminal 1)
 
@@ -62,48 +63,124 @@ out of a checkout does: `--data-dir .` is why every command here says it, and
 it keeps the database, the worktrees and the settings beside the checkout where
 they can be deleted with it.
 
-The desktop app is a verb of that same binary, and the same server: `cargo run
--p verkstead-cli -- desktop --data-dir .` serves what the command above serves
-and opens the viewer in your browser as it comes up. `--no-open` leaves the
-browser alone, and every other flag is the server's own, because the app *is*
-the server ([ADR 0012](adr/0012-desktop-tray-binary.md), as amended) — started
-with nothing said it is the platform's Data Directory again, which is what a
-machine that installed it wants and not what a checkout does. The tray half is
-`crates/desktop`, a library the CLI carries behind its default-on `desktop`
-feature: a build that says nothing gets both halves, which is what makes every
-image that can serve one that can also `ask`, and `--no-default-features` is
-the headless build the musl CLI and the nix package take. It is the one crate
-here that links a system toolkit — GTK on Linux, which is why the workspace
-builds in the dev shell and nowhere else here; AppKit on a Mac and Win32 on
-Windows, which are those platforms' own and want nothing installed. An address
-something is already listening on — the command above, say — is a dialog and a
-nonzero exit rather than a second Verkstead beside the first.
+The desktop app is the Electron project in [`desktop/`](../desktop), started
+with `pnpm start` from this shell ([ADR 0020](adr/0020-electron-desktop.md),
+which supersedes ADR 0012). It finds the headless `verkstead` the workspace
+built, brings it up beside itself as `serve --desktop`, waits for the server to
+answer on `/api/v1/health` and opens one window on the workbench already logged
+in — the **Workbench Key** read out of the **Data Directory** rather than
+pasted. So it wants the two commands above run first: the viewer built, because
+the server serves it, and the CLI compiled, because that binary is what the app
+starts. Nothing at `target/debug/verkstead` is a dialog naming the path it
+looked at, and `VERKSTEAD_CLI` names a binary somewhere else — a release build,
+or the one a Release shipped.
 
-What it puts on the screen is an icon in the system tray, and the menu on it is
-**Open** — the viewer again, in your browser — **View Logs**, which opens the
-file the server's log goes to instead of a stdout nobody launched from an icon
-will read, **Launch on Startup**, and **Exit**, which stops Verkstead where it
-stands the way stopping the systemd unit does. Run it where there is no screen
-to put an icon on, over SSH or under a test, and it is the server and the open
-and no more: a warning in the log, and everything else exactly as it was.
+```console
+$ export VERKSTEAD_DATA_DIR=$PWD   # the checkout, which is what --data-dir . says above
+$ (cd desktop && pnpm install && pnpm start)
+```
 
-**Launch on Startup** is a checkbox over the platform's own registration — your
-desktop's autostart entry at `~/.config/autostart/net.tobico.Verkstead.desktop`
-here, a launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` on
-macOS, a `net.tobico.Verkstead` value under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows — and that
-registration is the whole of the state: checking the box writes it, unchecking
-removes it, turning it off in your desktop's own settings unchecks it, and no
-setting of Verkstead's own keeps a second copy of the answer. Every
-launch rewrites it while it is there, with the path of the executable that is
-running and the `desktop` verb behind it — one image has more than one way in
-now — so a binary you moved heals its own entry the next time you start it by
-hand. What it writes starts the app with `--no-open`: a login is not a
-moment to be handed a browser window. The one thing the box cannot see is the
-platform's own second opinion about it — macOS's Login Items list, which
-`launchd` keeps in a database rather than in the file, and Windows' Startup tab
-in Task Manager, which Explorer records under `StartupApproved`: switch
-Verkstead off in either and the box goes on showing what the registration says.
+**The Data Directory is said through the environment here**, because the app
+has no flag of its own to say it with: the sidecar inherits the shell the app
+was started from, so `VERKSTEAD_DATA_DIR` is to the app what `--data-dir .` is
+to every other command in this document, and a launch that says nothing gets
+the platform's own place again. Every setting but one is the server's the same
+way — **the exception is the address**, which the app hands the sidecar as
+`--listen 127.0.0.1:8422` rather than inheriting: the app probes that address,
+waits on it and loads it, so a `VERKSTEAD_LISTEN` you have exported for a
+`verkstead serve` of your own is overridden and the log says it was. An address
+something is already listening on — the `serve` above, say — is a dialog and a
+nonzero exit rather than a second Verkstead beside the first, and a second
+`pnpm start` is the first window brought forward rather than either of those.
+
+`pnpm lint`, `pnpm typecheck` and `pnpm test` in that same directory are the
+three things CI runs over it. The lint is one rule and it is the wall around
+Electron: everything the app decides is a function of values the entry file
+hands it, so that vitest can call it without an application under it. Which is
+what the tests are over — the main process's pure parts, there being no driven
+end-to-end suite (ADR 0020).
+
+What it puts on the screen is one window and one icon in the tray. The window
+loads the workbench off `127.0.0.1:8422` with nothing about the viewer changed
+to draw inside it; a link that leads off the workbench opens in the browser you
+already have rather than navigating the window away from it; and where the
+window was last time is where it comes back, remembered in the app's own user
+data because where a window sits is a fact about the desk rather than about
+your Verkstead. The menu bar is hidden on Linux and Windows with copy, paste,
+zoom, reload and the developer tools still on their keystrokes — Alt brings the
+bar down — and a Mac keeps the strip at the top of the screen that says which
+application is in front. The icon's menu is **Open**, **View Logs** and
+**Quit**, a left click on it opens the window, and its **Quit** never asks.
+Closing the window is a choice rather than a quit — keep running in the tray,
+which is the default, ask before quitting, or quit — while the server ending is
+still the app quitting. The sidecar's stdout and the app's own lines both go to
+`verkstead.log` under the **Log Directory**, which the app names on the terminal
+as it opens it and which both **View Logs** open.
+
+**And the window has no title bar of its own.** What stands at its top-right
+corner on Linux and Windows is the platform's own controls overlay, drawn on the
+paper the page's heads are drawn on with its symbols in their ink and as tall as
+the head beneath it: the page pushes what it is drawn in, how tall its band
+stands and where the row inside that band is over the same preload bridge at load
+and at every flip of the machine's colour scheme, so going dark recolours the
+controls with no restart and the log says each push. A Mac has traffic lights
+rather than an overlay, so it ignores the two colours and the same push moves the
+lights instead — centred in the head's first row, left of the wordmark, which is
+how a larger text size carries them down the window along with the head. What moves
+the window is any pane head — the sidebar's wordmark, a pane's own title row,
+the settings, the composer — with every button standing in one still pressing,
+and a double-click on one maximising. The frame pads whichever head is at an
+edge of the window clear of the controls, so nothing in a head ends up
+underneath them; and a page with no head at all — the setup wizard, the
+no-such-page, the moment before the onboarding verdict lands — draws a bare bar
+of the same height to be moved by. In a browser on this machine there is none of
+it: the drag regions are inert, the insets are nought, and there is no bridge
+for the colours to cross. CONTEXT.md's **Window Decorations** is the account of
+the whole of it.
+
+**On a Wayland session the overlay can be a close button alone, and that is
+Chromium rather than your desktop.** The pinned Electron picks Wayland by itself
+where the session says it is Wayland, and on a nested COSMIC 1.2.0 the overlay
+came out 32 px wide with nothing in it but close; the same app on the same
+session over Xwayland is 96 px and the usual three. COSMIC is refusing nothing —
+its toplevel carries all four window capabilities, and neither its own toolkit
+settings nor a GTK decoration layout moves it. So maximise is a double-click on
+any head, and minimise is the app's own to ask for: nothing COSMIC ships binds a
+key to one. The whole measurement is in
+[stage 05's brief](roadmaps/electron-desktop/05-linux-appimage.md), and what a
+packaged Linux app does about it is that stage's to settle.
+
+**The Desktop section at the top of the settings page is where those choices
+are made**, and it is drawn only inside the app: the page reaches the app over
+a preload bridge on the app's own window, so the same settings page in a
+browser on this machine — or on a phone over the tailnet — has no such section,
+and nothing about any of it is on the wire or in `config.yaml`. It holds **When
+the window is closed**, **Show tray icon**, **Launch on Startup** and a **View
+Logs** button opening the file the tray item opens. What a dev run writes it to
+is `desktop.json`, beside the `window.json` the window's place is kept in, under
+Electron's own user data rather than anywhere `--data-dir` says: deleting it is
+the app back at its defaults. Turning the tray off takes the icon away that
+moment and greys the keep-running position, the choice falling to Quit while
+there is no icon to come back from. **And Launch on Startup is greyed on a run
+from a checkout**, with a note saying it needs an installed Verkstead: what an
+autostart entry could name here is the dev shell's Electron in the nix store
+plus this build directory, which breaks the next time either moves — so the
+whole path is written and under vitest, and the writing is what is refused. Its
+account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
+
+**No release carries the Rust tray app any longer**, Windows having been the
+last platform whose release leg went over to the packed Electron app: nothing
+the packaging section below builds is that app. `crates/desktop` is still here
+all the same — its tray half behind the CLI's default-on `desktop` feature, a
+build that says nothing getting both halves, and `--no-default-features` the
+headless build the musl CLI, the nix package and every desktop artifact's
+sidecar take — and it is the one crate here that links a system toolkit, GTK
+on Linux, which is why the workspace builds in the dev shell and nowhere else
+here. Taking it away is the last stage of
+[the Electron roadmap](roadmaps/electron-desktop/ROADMAP.md); its account until
+then is [ADR 0012](adr/0012-desktop-tray-binary.md) and CONTEXT.md's **Startup
+Registration**, which is where **Launch on Startup** is written down; nothing
+in this section starts it.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -501,9 +578,9 @@ a serve set up by hand reads on that page exactly as one set up from it would.
 Where the press is refused for want of the operator grant — Tailscale allows a
 serve from nobody but root and the tailnet's operator — the pane shows the
 `sudo tailscale set --operator=…` that lifts it, and the next press is the
-re-try. A `cargo run -p verkstead-cli -- desktop` puts that through `pkexec`
-instead, an app having somebody at the machine to ask where a `serve` started
-in a terminal has not.
+re-try. The desktop app puts that through `pkexec` instead — its sidecar
+is a `serve --desktop`, and the flag is how the server knows there is somebody
+at the machine to ask, where a `serve` started in a terminal has not.
 
 ## The dev loop
 
@@ -517,52 +594,102 @@ $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 $ blender -b tools/hammer/verkstead-hammer.blend \
     --python tools/hammer/render.py   # the artwork, from the blend file it is modelled in
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
-$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
-$ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
-$ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
-$ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
+$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the menu bar template, the icns and the ico
 ```
 
-The last three are the three desktop artifacts a release ships, one per desktop
-platform. Each takes everything from the working tree and leaves one file under
-`target/`, and each wants `web/dist` already built, because the viewer is
-compiled into the binary they wrap. Each also runs only where its artifact does:
-the dmg wants a Mac for `lipo` and `hdiutil`, and the msi wants Windows for the
-WiX toolset and the MSVC build under it, so the dev shell has the first of the
-three and nothing of the other two.
+None of the three desktop artifacts a release ships is a script here. All
+three are the packed Electron app, which is `pnpm run pack` in `desktop/` —
+one configuration and one command, handed the `verkstead` the artifact is
+to carry, and each of them packing only on the platform it is for. The three
+paragraphs below are what that comes to on each.
 
-The AppImage is the unified binary, the packaging assets and every library the
-tray is drawn over, in one file, and it is the same command CI runs. It builds
-what `cargo build --release -p verkstead-cli` builds, feature and all, and its
-`AppRun` supplies the `desktop` verb — a desktop launcher names a file and has
-nowhere to say one — so it wants the dev shell for the same reason that build
-does.
+The AppImage is the Electron app with a `verkstead` packed inside it as its
+sidecar, and which binary that is is the one thing
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml) cannot say —
+so `pnpm run pack` is told, either as its first argument or in `VERKSTEAD_CLI`:
 
-The dmg is `Verkstead.app` — the same binary built for both Apple targets and
-`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` whose
-`CFBundleIdentifier` is `net.tobico.Verkstead` and whose `LSUIElement` is what
-makes it a menu-bar app with no Dock tile. Its `CFBundleIconFile` names that
-icns with the extension on it — macOS appends `.icns` only to a value that has
-none, and a dotted identifier reads as having one already, so a value without
-it is a name no file answers to and Finder draws the generic app icon. The
-release's dmg leg reads the key back off the mounted bundle and has `iconutil`
-open what it names, which is the only way that failure is visible from outside
-a Finder window. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
-the operating system's own tools, and there is no cross build of it from here.
-The bundle is ad-hoc signed rather than signed with a Developer ID, because
-Apple silicon will not execute a binary with no signature at all — that is not
-the signing that gets an app past Gatekeeper, and there is none of that.
+```console
+$ cargo build --release -p verkstead-cli --no-default-features
+$ cd desktop && pnpm run pack ../target/release/verkstead
+```
 
-The msi is the two files a Windows install is — the unified `verkstead` and the
-windows-subsystem shim that opens it from an icon — wrapped in an installer,
-because two files beside each other are not a portable download. What goes where
-is [`tools/verkstead.wxs`](../tools/verkstead.wxs), and all of it goes into the
-profile: `%LOCALAPPDATA%\Programs\Verkstead`, the user's own Start menu, and
-the user's own `PATH`, so that `verkstead ask` works in a terminal opened
-afterwards. Per-user because the package is unsigned, and asking for
-administrator would be an unsigned program asking for the machine. It runs on
-Windows only: the WiX toolset's `candle` and `light` compile the package, and
-MSVC and the Windows SDK build what goes in it.
+That build is the headless binary a Release ships, and the release leg hands the
+same variable the static musl one the CLI matrix published. What comes out is
+`target/electron/out/Verkstead-x86_64.AppImage`, packed against the Electron
+`desktop/package.json` pins — fetched by the pack rather than taken from the dev
+shell, whose Electron is a different patch version. The viewer is inside the CLI
+rather than beside it, so `web/dist` is that build's business rather than the
+pack's; and one configuration serves all three platforms, the Linux, macOS
+and Windows targets all filled in.
+
+The dmg is the same pack on a Mac, and the one place `pnpm run pack` is given
+two paths rather than one: the download there is a universal app for both Apple
+machines, so the sidecar inside it has to be universal too, and the script
+`lipo`s the two Mac builds into the one staged `verkstead` before
+electron-builder builds either half. Both halves come from that Mac's own
+toolchain, the second Apple target a `rustup target add` away.
+
+```console
+$ cargo build --release -p verkstead-cli --no-default-features \
+    --target aarch64-apple-darwin
+$ cargo build --release -p verkstead-cli --no-default-features \
+    --target x86_64-apple-darwin
+$ cd desktop && pnpm run pack \
+    ../target/aarch64-apple-darwin/release/verkstead \
+    ../target/x86_64-apple-darwin/release/verkstead
+```
+
+What comes out is `target/electron/out/Verkstead-universal.dmg`, holding
+`Verkstead.app` — one file for both Macs, electron-builder building each half
+and `@electron/universal` merging the two, which is why the sidecar has to be
+joined first: that merge refuses a resource that differs between the halves. The
+bundle's `CFBundleIdentifier` is `net.tobico.Verkstead` and its
+`CFBundleIconFile` names the staged icns, both of them electron-builder's to
+write; the release's dmg leg reads that key back off the mounted bundle and has
+`iconutil` open what it names, which is the only way a Finder icon that resolves
+to nothing is visible from outside a Finder window. **Nothing in that plist asks
+for a menu-bar app with no Dock tile**, and that absence is the whole of what
+makes this a regular Dock app where the Rust bundle was one the Dock never held
+— see the `mac:` section of
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml), which says
+which key that was and why it is read back off what was packed
+([ADR-0020](adr/0020-electron-desktop.md)). The bundle is ad-hoc signed rather
+than signed with a Developer ID, because Apple silicon will not execute a binary
+with no signature at all — that is not the signing that gets an app past
+Gatekeeper, and there is none of that — with the hardened runtime off beside it,
+which under an ad-hoc signature would enforce library validation and reject the
+pre-signed Electron framework for carrying another Team ID. It packs on a Mac
+only: `lipo`, `codesign` and `hdiutil` are the operating system's own tools, and
+there is no cross build of it from here.
+
+The msi is the same pack on Windows, and the one artifact of the three that is
+an installer rather than a file to keep wherever you like: an app whose two
+ways in are a Start-menu entry and a directory on the user's `PATH` has to be
+put somewhere before either of them exists.
+
+```console
+$ cargo build --release -p verkstead-cli --no-default-features
+$ cd desktop && pnpm run pack ../target/release/verkstead.exe
+```
+
+What comes out is `target/electron/out/Verkstead-x86_64.msi`, and what it
+installs goes into the profile: `%LOCALAPPDATA%\Programs\Verkstead`, with the
+launcher `Verkstead.exe` at its root and the sidecar under `resources\cli`; an
+entry in the user's own Start menu; and `resources\cli` on the user's own
+`PATH`, so that `verkstead ask` works in a terminal opened afterwards. The
+CLI's own directory rather than the install root, because the root is where
+the launcher stands and Windows resolves a `PATH` lookup without regard to
+case ([ADR-0020](adr/0020-electron-desktop.md)). Per-user because the package
+is unsigned, and asking for administrator would be an unsigned program asking
+for the machine. That `PATH` entry and the install directory's name are the two
+things electron-builder's msi target cannot be told, so
+[`desktop/scripts/msi.mjs`](../desktop/scripts/msi.mjs) patches them into the
+generated WiX project through the target's `msiProjectCreated` hook — string
+surgery on a generated file, so every patch has to match exactly once or the
+pack stops rather than writing an installer with no `PATH` entry in it. It
+packs on Windows only: the WiX toolset that compiles the package is a set of
+Windows programs, fetched by electron-builder rather than carried by the dev
+shell, and MSVC builds what goes inside.
 
 ### The sessions suite, and the machine under it
 
@@ -808,19 +935,34 @@ why the virtual display the addon suggests is not an option in a Sandbox.
 at the web root and, because the viewer is embedded, carried inside every binary
 including the headless CLI — and a desktop entry and a launcher's icons are
 neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
-gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
-tree that `tools/build-appimage.sh` installs into the AppImage,
-`net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
-bundle, and `net.tobico.Verkstead.ico`, which Windows wants twice:
-`crates/desktop/build.rs` compiles it into the shim as a resource, nothing
-installed beside an exe being what Alt-Tab and the taskbar draw it with, and
-`tools/verkstead.wxs` names it again for the entry the msi leaves in Apps &
-Features. It is written by
+gets a directory of its own: the hicolor icon tree that
+[`desktop/scripts/pack.mjs`](../desktop/scripts/pack.mjs) stages as the flat
+`<size>x<size>.png` set electron-builder reads an icon directory as — a rename
+rather than a second set of pixels, so a panel, a menu and the packed image's
+own `.DirIcon` are all drawn from the same hammer — and beside it
+`net.tobico.Verkstead.desktop`, which the packed app's entry takes its *fields*
+from rather than being installed itself, electron-builder writing that entry
+with an `Exec` of its own that no configuration replaces. Then
+`menubarTemplate.png` and the `@2x` beside it, which are the one thing in the
+tree that is not a downscale of the drawing: a Mac's menu bar lays a status item
+out at the size of the image it is handed rather than scaling it to the bar, and
+it draws a *template* image — one colour and an alpha channel — black on a light
+bar and white on a dark one. So that platform gets the hammer's silhouette at
+the 22 points the bar lays out, and the `Template` at the end of the name is the
+whole of how it is asked for: Electron reads the suffix off the file name. Then
+`net.tobico.Verkstead.icns`, which `pack.mjs` stages beside the icon directory
+for electron-builder to copy into the Mac bundle and name in its `Info.plist`,
+and `net.tobico.Verkstead.ico`, staged beside it for the platform
+that wants one picture three times over: electron-builder edits it into
+`Verkstead.exe` as the launcher's own resource, nothing installed beside an exe
+being what Alt-Tab and the taskbar draw it with; the msi names it as
+`ARPPRODUCTICON`, so the row in **Installed apps** is drawn with it; and the
+Start-menu shortcut is advertised against it. It is written by
 [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
 hammer, and committed for the same reason the viewer's icons are. That script
-rewrites the whole directory from nothing on every run — so a size
-that stops being generated stops being committed, and nothing under it is ever
-edited by hand.
+rewrites the whole directory from nothing on every run — so a size that stops
+being generated stops being committed, and nothing under it is ever edited by
+hand.
 
 The icns is written by the script itself rather than by `iconutil`, which is a
 Mac's: the format is a header and a PNG per icon slot, so it is generated in the

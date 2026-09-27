@@ -312,11 +312,9 @@ everything else on the network it sits on, which was never a boundary drawn on
 purpose — and what took the exception away is that a session there runs as an
 ordinary local account, reaching the network the way everything else on that
 machine does. The `verkstead` a session asks with
-is the running server's own image, first on the `PATH` inside, so the CLI a
-session asks with and the server it asks are one build and cannot disagree
-about a schema — with the libraries that image was packed with, where it was
-packed with any, reached through a launcher of Verkstead's own so that nothing
-else the session runs loads out of them. What
+is the running server's own image, first on the `PATH` inside and the one file
+on that entry, so the CLI a session asks with and the server it asks are one
+build and cannot disagree about a schema. What
 it asks *through* is the loopback, scoped to the Conversation it is asking
 from — except on Windows, where it is a **named pipe** the server opens beside
 its socket and names in the session's environment, in the same
@@ -446,8 +444,8 @@ _Avoid_: daemon, sccache daemon, build server, compiler service
 
 **Log Directory**:
 The other directory of Verkstead's own outside the Data Directory: where the
-desktop app writes the server's log file, because the stdout of a tray app
-launched from an icon goes nowhere and a file has to have somewhere to be.
+desktop app writes the log file, because the stdout of an app launched from an
+icon goes nowhere and a file has to have somewhere to be.
 Where it is is the platform's and nothing says otherwise —
 `~/.local/state/verkstead` on Linux (`$XDG_STATE_HOME` where that is set to an
 absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
@@ -459,14 +457,19 @@ as the Build Cache makes its own where it uses it, and what it holds is the log
 and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
 few megabytes and kept no further back than that, so a machine that has been
 running Verkstead for months is not handed a log nobody can open. **View Logs**
-on the tray menu is what opens it. **A file started here opens with a
-byte-order mark** — a fresh one and each roll both, and a run appending to one
-that already has content adds none: Verkstead's own messages have em-dashes in
-them, and the viewers Windows opens a `.log` in read a file with no mark in the
-machine's code page, which is mojibake to the very person being asked to report
-what it says. The server itself keeps logging to stdout
-wherever it was started from — where the events go is the starting binary's
-call — and `RUST_LOG` filters the file exactly as it filters that stdout.
+opens it, on the tray menu and on the **Desktop** section of the settings both,
+one act reached two ways rather than two that agree — so a desktop that gives
+Verkstead no icon loses the icon and nothing else. **A file started here opens
+with a byte-order mark** — a fresh one and each roll both, and a run appending
+to one that already has content adds none: Verkstead's own messages have
+em-dashes in them, and the viewers Windows opens a `.log` in read a file with
+no mark in the machine's code page, which is mojibake to the very person being
+asked to report what it says. **The server keeps logging to stdout and the app
+reads it**: nothing about a `verkstead serve`'s own logging changes, and what
+goes in the file is those lines with the app's own beside them, interleaved as
+they happened — the app saying it started a sidecar, the server saying it is
+listening, the app saying the window is opening on it. `RUST_LOG` filters the
+file exactly as it filters that stdout.
 **A machine that names nowhere to put one is not refused**: it gets no file, the
 app says so and logs to standard error instead, and the menu item says the same
 rather than opening nothing — a Verkstead with nowhere for a log file has only
@@ -477,23 +480,214 @@ _Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
 
 **Startup Registration**:
 What says Verkstead comes up when the machine's desktop session does, and what
-**Launch on Startup** on the tray menu ticks and unticks. The platform's own,
-and the platform's alone: an XDG autostart entry named for the app id on Linux
-(`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
-launch agent on macOS. **It is the state rather than a copy of it** — the box
+**Launch on Startup** on the **Desktop** section of the settings ticks and
+unticks — the tray menu is **Open**, **View Logs** and **Quit**, and startup is
+not among them. The platform's own, and the platform's alone: an XDG autostart
+entry named for the app id on Linux
+(`~/.config/autostart/net.tobico.Verkstead.desktop`), and the login item the
+platform keeps on the other two — the Run key on Windows, and on macOS what the
+tray app's hand-written launch agent is taken over into. **It is the state rather than a copy of it** — the box
 is drawn from reading it, checking writes it and unchecking removes it, and
 neither settings file has an entry for this or ever will: a human who turns it
 off with their desktop's own settings has unchecked the box, and Verkstead
 agrees with them rather than argues. **Every launch rewrites it while it is
-there**, with the path of the executable that is running and the `desktop` verb
-that is the app — one image has more than one way in, and a registration naming
-the path alone would start a Verkstead that printed the Guide — so a binary that
-was moved — downloaded again elsewhere, an AppImage put somewhere else — heals
-its own registration the next time it is started by hand; a machine that never
-asked for one is left alone. What it starts is an ordinary launch of the app
-with the browser left alone, because a login is not a moment to be handed a
-browser window.
+there**, with the path of the app that is running and no verb in front of it —
+the app is the one way into itself, where the tray app's binary had several and
+the registration had to say which. **What that path is on Linux is `$APPIMAGE`**
+where the runtime set one, and the running executable otherwise: an AppImage runs
+out of a filesystem mounted for that run alone, so the executable inside it is a
+path under `/tmp` that is nothing at all by the next login, and the variable is
+the runtime saying where the file the human actually has is. So an app that was
+moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
+own registration the next time it is started by hand; a machine that never asked
+for one is left alone.
+**And what a login start comes to is a Verkstead with no window on the screen**
+while there is an icon in the tray to reach it by, and one with a window where
+there is not: a window arriving over whatever the human is doing at every login
+is what gets the box unticked, and an app with neither an icon nor a window is a
+Verkstead nobody can reach. Which is a reading of the login rather than a
+**Launch on Startup** that needs the tray. **Each platform says a login start
+its own way**: Linux's entry and the Run key on Windows are command lines and
+carry a flag, while a Mac's login item carries no arguments and is asked whether
+it started the run.
+**The tray app's launch agent is taken over once**, on a Mac that had it: that
+app wrote `~/Library/LaunchAgents/net.tobico.Verkstead.plist` by hand and the
+login item API knows nothing about it, so left alone it is a login starting a
+binary that is gone while the box reads off. The first launch of a packed
+Verkstead reads it — its presence, and the two keys `launchd` turns an agent off
+by — registers through the API where it said on, registers nothing where it said
+off, and removes it either way. Read at a launch rather than offered as a
+control: it is a registration this app made another way, not a second setting.
+**And so is the tray app's Run value, on a Windows machine that had it**: a value
+under `HKCU\...\CurrentVersion\Run` named for the app id and holding that app's
+binary with a verb after it. The same take-over, shorter by the keys a plist can
+be turned off with — a registry value has none, so the value being there is the
+whole of what it says, and the first packed launch registers through the API and
+deletes it whatever it named.
+**Which is why the value Verkstead registers is not named for the app id.**
+Electron names the value it writes after the application's Windows identity,
+which is that id — the very name the take-over reads — so it is told a name of
+its own instead, and the two staying different is what keeps the take-over to a
+single shot rather than a box that unregisters itself every other launch.
+**And Windows is read in two halves, because neither can see what the other
+does.** Whether Verkstead's value is under the Run key at all is read from the
+registry, the login-item API accounting only for the values that name the
+executable which is running — so an app that had moved would read as
+unregistered and never heal. Whether Explorer has switched that value off is the
+API's to say, being kept in a key of its own that the value knows nothing about:
+a human who turns Verkstead off in Task Manager's **Startup apps** has unticked
+the box, exactly as one who turns off a Linux entry with their desktop's own
+settings has, and the rewrite at a launch leaves it alone rather than putting
+back what they took away. **What the two halves cannot both answer is an app
+that has moved *and* was switched off**: the list the second half reads is of
+the values naming the executable that is running, so a value naming where the
+app used to be carries no answer about its switch at all, and the box reads on.
+The rewrite then heals the path and clears the switch with it. Left that way
+knowingly — Explorer keeps on or off in the bytes of a value the registry read
+here only says the presence of — because the choice is between a moved app that
+never heals and one that heals too much, and a registration pointing at a
+binary that is gone starts nothing at all.
+**And a Mac can hold a registration that is there off.** The login item is
+`SMAppService` from macOS 13, which reports a `status` beside it: a
+`requires-approval` registration is in place, is not starting Verkstead, and is
+not made to start it by registering again — so the box is greyed there, the third
+of the three reasons it is greyed at all beside a run from a checkout and a
+machine with nowhere to keep an entry. **Not a switch somebody flipped**: on
+macOS 15 the registration is an *Application* row under *Open at Login* in System
+Settings with no switch beside it, and the control on that row is the minus
+button, so what the greyed box names is where to remove the row rather than
+somewhere to turn it back on.
 _Avoid_: autostart setting, startup preference, run at login option
+
+**Desktop Settings**:
+What the desktop app keeps about the machine it is running on, and the
+**Desktop** section at the top of the settings page that draws them: **When the
+window is closed** — keep running in the tray, ask before quitting, or quit,
+keeping running being the default — and **Show tray icon**. A JSON file of
+Electron's own under its user data, beside the one the window's place is
+remembered in, rather than anything the server was ever told (ADR-0020):
+whether this machine's Verkstead keeps running when its window is closed is a
+fact about the desk in front of the human, and the same account read from a
+laptop and from a desktop wants two different answers. **So none of it is on
+the wire and none of it is in `config.yaml`** — the split the viewer's own
+per-device push switch already made, and the reason there is no server setting
+standing behind any of it.
+**The page reaches the app over a preload bridge and over nothing else**:
+`window.verkstead`, which the app puts on its own window, exposing the platform,
+the settings read and written, the log file opened, and the **Startup
+Registration** read and written — and carrying, in the other direction and from
+every page rather than from this section, what the page says its heads are drawn
+in (**Window Decorations**). **A page with no bridge is a page with no
+Desktop section**: the same document served to a browser on this machine, or to
+a phone over the tailnet, carries no preload, and that absence reads as *this is
+not the app* rather than as something that failed — which is the whole mechanism
+by which a phone never sees the section, and why nothing had to be added to the
+wire to keep it away from one.
+**A set is enacted in the run it is made in** rather than kept for the next
+launch: turning the tray off takes the icon away that moment, greys the
+keep-running position with a note saying why, and the choice falls to Quit while
+there is no icon to come back from — an app with no icon that has hidden its
+only window is a Verkstead nobody can reach. **And the app is what validates
+one**: a value that is not one of the three positions, or not a boolean, changes
+nothing and answers with the settings as they stand, so the control it came from
+goes back where it was.
+**Two things stand on that section without being settings of it.** **Launch on
+Startup** is the **Startup Registration** itself, read from the platform through
+the bridge and written to it, never copied into the file; and **View Logs** is
+the tray item's own act reached the other way, drawn whatever the tray setting
+says and on every platform: a switch somebody can turn off cannot be the only
+way to a log file, and the desktop most likely to have it turned off is the one
+the tray misbehaved on, which is the machine whose log is worth reading.
+**A Mac draws no close radio**, closing a window there leaving the application
+running in the Dock, and **Show tray icon** reads as the menu bar, that being
+where the icon goes.
+_Avoid_: preferences, app config, device settings, desktop configuration, the
+settings page (that is the whole page, and this is one section of it)
+
+**Window Decorations**:
+The window the desktop app draws has no title bar, and what stands where one
+would have been is the platform's own controls: the traffic lights inset to the
+left of the wordmark on a Mac, the controls overlay at the top-right corner on
+Windows and Linux (ADR-0020). Controls drawn by the page were rejected — the
+platform's keep Windows' snap layouts and a Mac's traffic lights as that
+platform draws them, and neither is worth redrawing by hand. `titleBarStyle:
+"hidden"` is the whole of what asks for it, and there is no platform branch
+behind it: a Mac reads that option as the two platforms with an overlay do, and
+what it does with the two colours beside it is nothing — where its lights go it is
+told instead, over the same bridge and out of the same push.
+**What the overlay holds is Chromium's answer rather than the desktop's.** On a
+Wayland desktop it is one button wide — a close and nothing else — where the same
+app over Xwayland draws the usual three: measured on a COSMIC session whose
+toplevel advertised all four window capabilities, and moved by neither the
+compositor's own toolkit settings nor a decoration layout written into the app's
+config. So the pair that is missing follows the platform Chromium picked rather
+than a desktop refusing anything, and what answers it is the app's own chrome
+rather than a control the page draws — which stays rejected. **Windows draws
+all three, and offers its snap layouts off the middle one**: hit-testing the
+band a point at a time there answers `MAXBUTTON` under the maximise button,
+which is what that platform asks a window before it offers them — measured on
+a real one rather than taken on trust from having kept the platform's
+controls. A double-click on any
+pane head maximises the window and a second one restores it; and **Minimize** is
+on the hidden menu bar under **Window**, on the platform's own
+`CommandOrControl+M`, because that desktop binds no minimise of its own out of the
+box and putting the window away is the one gesture the overlay leaves wanting.
+**The strip is the app's to paint and the page's to say what in**: the paper a
+head is drawn on, the ink its marks are in, how tall the head's band stands and
+how far down the window the middle of its first row sits, pushed over the preload
+bridge on load and again at every flip of the machine's colour scheme, and the
+overlay recoloured in the run it is pushed in rather than at the next launch.
+**And on a Mac that push moves the traffic lights** rather than painting anything:
+there is no overlay to recolour there, so the app centres the buttons on the row
+the page said it drew — the platform's own inset from the left edge kept, the row
+being the only part of it a head can have an opinion about. Which is why the row
+travels beside the band: the band is the whole strip the controls are drawn over,
+while the row is the line inside it that a head's title and its buttons stand in,
+and lights centred on the band would be centred on nothing the page draws. **Two fixed colours in the app were rejected** — there is a
+light scheme and a dark one, a head is drawn on the paper of whichever the
+machine is in, and an overlay that did not follow would be a strip of the wrong
+colour welded to the corner of the window. The height travels for a neighbouring
+reason: a band is written in rem, what a rem is is the browser's own answer, and
+a human who has told theirs to draw text larger has a taller head than any
+constant compiled into the app could know about.
+**Every pane header is the region the window is dragged by**, everything
+pressable inside it excepted — said once over the header's descendants rather
+than marked control by control, so the next control put in a head is not the one
+nobody marked. They are one component, so the sidebar's wordmark, the timeline's
+name, the details pane, the settings, the composer and the Set sheet all move
+the window without any of them having been told about it. Inside the app the
+text in a header gives up taking a selection, which is the price rather than an
+oversight: a bar the pointer sweeps a selection across cannot also be the bar
+the window moves by. Inside the app **and nowhere else** — the region itself is
+a property no browser acts on, while giving up the selection is an ordinary one
+every browser honours, so that half is worn where the bridge is.
+**And keeping clear of the controls is the frame's rather than any pane's**,
+which header stands at an edge of the *window* being a fact about the layout:
+the page reads what the controls left it — `getTitlebarAreaRect()`, which
+answers with the strip across the top that is still the page's, so what they
+took is the slivers either side of it — hands both insets to the frame, and the
+header at each edge is padded by that much. One sum and no platform in it, a
+Mac's traffic lights coming out as a left inset and the other two platforms'
+controls as a right one. **Read again on both of the events that move it**,
+the overlay's own and the window's resize: the sum is the window's width less
+the strip the page was left, and Windows delivers those two a moment apart —
+so a reading taken on either event alone pairs a rectangle that has moved with
+a window that has not, and pads the head by the difference or by nothing at
+all. And the one pane a narrow window shows is at both edges at once.
+**A page with no header gets a bare drag bar** of the same band: the onboarding
+wizard, the no-such-page, and the moment before the verdict about this machine
+lands. A window that cannot be moved for the length of any of them is the same
+hole three times over, which is why it is one bar in three places rather than
+three bars.
+**And none of it reaches a browser.** A drag region is Chromium's own property
+and only a window with no title bar reads one; every inset is nought where there
+is no overlay to ask, so nothing is padded and nothing is moved; the bare bar
+and the header's giving up of the selection are drawn on the bridge being there,
+the way the **Desktop** section of the settings is; and the colours cross that
+same bridge, which a browser on this machine and a phone on the tailnet do not
+have. The same document, drawn the same way, telling nobody — and a standalone
+share, which is the one of these a stranger is handed, reads exactly as it did.
+_Avoid_: title bar, window chrome, custom controls, header bar, frameless
 
 **Workbench Key**:
 The one long-lived secret that says a request is the human's browser rather
@@ -534,13 +728,38 @@ handing over is the browser and **Open**, so a run with neither says the link
 itself rather than serving a workbench nobody can get into. And a browser that
 would not open is reported by the address, at startup and at a press alike — a
 line about a failure is that file on that desk, and is nobody's only way in.
+**And the sidecar's line redacts for the same reason, on the flag's word.**
+`verkstead serve --desktop` is the server the desktop app starts beside itself
+(ADR-0020), and the flag is the whole of what it knows about who started it: the
+app reads the key out of the **Data Directory** before there is a server to ask
+one of and opens its own window on the link, so the line names the address alone
+and the log file the app's own **View Logs** opens carries no login. Three
+installs, therefore, and two answers: the daemon's line hands the link over
+because nobody is at the machine, and both installs with somebody at it have
+handed it over already. Nothing about the key itself changes under the flag —
+`workbench.key` in the Data Directory at the mode it always had, which is the one
+place the app reads it from and where a human who started that sidecar by hand
+reads it too. A `serve` with no flag on it is the daemon's line whatever else is
+true of the machine: the flag is said rather than guessed, because a display is
+not who started this.
+**And the sidecar with no display says the link after all**, which is the same
+fallback the app makes where no tray came up: the app that flag speaks for could
+not have started — nothing draws a window where there is nowhere to put one — so
+a `--desktop` run over SSH or in a container is a caller that handed the link to
+nobody, and the address alone would leave it serving a workbench whose only way
+in is a file nobody has been told to read. The daemon's line exactly where the
+sidecar has become the daemon, and the case it fires in is the one case where
+the app is not there to have a log file for the secret to sit in.
 A session cannot read the file whatever is in it, the log living in the human's
 own local application data and a session running as a local account of
 Verkstead's own.
 **Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
-device that could reach the server at all. One secret with a press behind it,
+device that could reach the server at all. **The desktop app's own window lets
+itself back in**: a 401 on its frame's own navigation is the file read again and
+the link loaded again, once per navigation, so a reset made from the phone costs
+that window a reload rather than a restart. One secret with a press behind it,
 rather than a key per device or a key that expires.
 _Avoid_: password, login, token, API key, session
 
@@ -581,8 +800,16 @@ privilege to raise, so a refused press hands back `sudo tailscale set
 --operator=<user>` for this machine's own user and the next press is the
 re-try. The desktop app has somebody at the machine to ask and a daemon has
 not, so where the app started the server that press goes through the platform's
-own password dialog first; the NixOS module makes the grant itself, so nobody
-on a host is shown a command they are also the one to run.
+own password dialog first — the app in-process, and the sidecar
+`verkstead serve --desktop` starts as on its own word, which is the only thing
+either of them is told about who is at the machine. **And only where there is
+somewhere to draw one**: a run over SSH or in a container is the app with no
+display, and a dialog nobody can see is a press waiting on a dismissal that
+cannot arrive, so there the line is shown as a daemon's is. A `serve` with no
+flag on it never asks, whatever the machine has on it — the flag is said rather
+than guessed, a display being no answer to who started this. The NixOS module
+makes the grant itself, so nobody on a host is shown a command they are also the
+one to run.
 **And the address by itself lets nobody in**, which is why the pane draws the
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
@@ -665,12 +892,13 @@ The last Next clears the mode and lands on the compose page.
 
 **The first step installs what it names** (2026-09-11). An absent row carries
 a checkbox where its tick would be, the gating rows ticked by default, and Next
-installs what is ticked: one elevated package-manager run through the platform
-dialog the desktop app hands the server — a server with no way to ask sends
-every ticked row to the hint screen without asking — then the vendor installers
-as the user. A directory Verkstead installs into is written to `session_path`
-in `config.yaml` and composed ahead of the server's own `PATH`, the one thing
-added that the `PATH` did not name. Three screens: the checkboxes, an install
+installs what is ticked: one elevated package-manager run through the same
+platform dialog the operator grant goes through, which an app install has and a
+daemon has not — a server with no way to ask sends every ticked row to the hint
+screen without asking — then the vendor installers as the user. A directory
+Verkstead installs into is written to `session_path` in `config.yaml` and
+composed ahead of the server's own `PATH`, the one thing added that the `PATH`
+did not name. Three screens: the checkboxes, an install
 screen with a progress bar and a status line that moves on by itself, and a
 **hint screen** drawing only the ticked rows still absent with their
 instructions, its Next held with an *n/m detected* counter until every one is
@@ -1290,8 +1518,16 @@ badge, no Event, and nothing held off. Somebody who means to take the work on by
 hand presses **Stop** first, and the Conversation being **Stopped** is what
 holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
+
+**Never the other sense of the word**, which is somewhere for a window to
+appear: that is a **display** throughout — `$DISPLAY` or `$WAYLAND_DISPLAY` on
+Linux, the window server on a Mac, a visible window station on Windows — and it
+is what says whether a tray icon, a dialog or the platform's own password box
+has anywhere to be drawn. This word is the terminal grid and nothing else, so a
+Verkstead running where nobody is looking has no display rather than no screen.
+See `verkstead_server::display`.
 _Avoid_: terminal (that is the human's own shell — see **Terminal**), console,
-attach view, pane
+attach view, pane, screen (for a display — see above)
 
 **Terminal**:
 A shell of the human's own wherever a session's agent runs, with the Worktree as

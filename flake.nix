@@ -1,7 +1,7 @@
 {
   description = "Verkstead — a service and CLI through which coding agents put questions to a human";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
   outputs =
     { self, nixpkgs }:
@@ -121,6 +121,16 @@
               clippy
               rustfmt
               rust-analyzer
+              # What `pnpm start` in `desktop/` runs (ADR-0020). The npm
+              # package the project pins is there for its TypeScript
+              # definitions and for what electron-builder packs in CI; its own
+              # install script downloads a couple of hundred megabytes of
+              # Electron and is denied in `desktop/pnpm-workspace.yaml`, so
+              # this is the only Electron a developer ends up with. Same major
+              # as the pinned one — 43 — because a dev-only Electron that is
+              # not what ships would be proving the app against the wrong
+              # runtime.
+              electron
               sqlite
               # The CLI derives `project`, `branch` and the Diff by shelling out
               # to git, so git is a runtime dependency and not just a habit.
@@ -157,10 +167,6 @@
               # writes: an entry a desktop will not parse is one that never
               # appears in a menu, and nothing else here would notice.
               desktop-file-utils
-              # `mksquashfs`, which is an AppImage's filesystem and so most of
-              # what tools/build-appimage.sh needs to make one — see there for
-              # why the format's own tool is not what makes it.
-              squashfsTools
               # What the desktop crate's C dependencies below are found with.
               # Nothing else here needs one: `crates/desktop` is the first thing
               # in this repository to link a system library at all.
