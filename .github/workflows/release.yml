@@ -1853,6 +1853,18 @@ jobs:
       # halves rather than once at the end, so that a failure says which install
       # left two.
       #
+      # **And the `PATH` entry is read as well as counted**, which the other two
+      # are not. A count says two products are not both installed; it does not
+      # say *whose* entry survived, and here the two disagree about what they
+      # put on a `PATH`: the package this one replaces named the install root,
+      # which is exactly the spelling this stage moved away from — the root
+      # holds `Verkstead.exe` and Windows looks a name up without regard to
+      # case, so `verkstead guide` there answers with a window rather than with
+      # the Guide. An upgrade that removed the new entry and left the old one
+      # would be one entry, and it would be the wrong one. This half is the only
+      # place that transition is ever made, so the name is checked where it is
+      # made rather than only on the fresh install further up.
+      #
       # Last of the assertions because of what it leaves behind: the second half
       # has an older Verkstead installed for part of it, and every step above
       # asks its question of the install this leg's own msi made.
@@ -1912,7 +1924,22 @@ jobs:
             " | tr -d '\r'
           }
 
-          # One of each, whatever was installed over whatever.
+          # One of each, whatever was installed over whatever — and the one
+          # `PATH` entry read as well as counted.
+          #
+          # The name comes off the report's own `PATH` line rather than a line
+          # of its own, that being the same string either way. A wording change
+          # up there leaves this finding nothing, which fails here rather than
+          # passing quietly.
+          #
+          # Compared with the case taken out of it and a trailing separator
+          # off the end, for the reasons the two steps above give: Windows
+          # compares paths without regard to case and nothing settles whose
+          # spelling of the profile directory each side got, and a Windows
+          # directory property ends in a separator where this entry, naming a
+          # directory inside one, does not.
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
           one() {
             said=$1
             report=$(counts)
@@ -1927,7 +1954,16 @@ jobs:
                 exit 1
               fi
             done
-            echo "One row in Installed apps, one PATH entry, one Start-menu entry."
+
+            entry=$(printf '%s\n' "$report" | sed -n 's/^says=PATH: //p')
+            got=$(lower "$(cygpath -u "$entry" 2> /dev/null)")
+            if [ "${got%/}" != "$(lower "$INSTALL/resources/cli")" ]; then
+              echo "::error::After $said the one PATH entry is '$entry', and it is not $INSTALL/resources/cli — a verkstead found there is the app rather than the CLI."
+              printf '%s\n' "$report"
+              exit 1
+            fi
+
+            echo "One row in Installed apps, one Start-menu entry, and the one PATH entry is $entry."
           }
 
           # The first half. Nothing is uninstalled in between, which is exactly
