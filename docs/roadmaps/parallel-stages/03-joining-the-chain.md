@@ -78,6 +78,10 @@ order.
 6. **This repository's own block** — `docs/agents/git-workflow.md` says how a
    stage joins. AC: the block covers a branch that exists and is not at the
    top.
+7. **The words** — `docs/design/verkstead.md`'s **Stages always stack**, whose
+   *the next stage's branch stacks on the unmerged predecessor* is what the chain
+   replaces. AC: it is refined in the document's own *refined <date>, building
+   <stage>* form rather than rewritten, and says the join is at the finish.
 
 ## Re-verify at start
 

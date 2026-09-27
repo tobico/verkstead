@@ -62,8 +62,11 @@ for both.
    continued for the ones that are ready.
 6. **A bad roadmap, running** — AC: nothing starts, and the Event gives the
    reason stage 01's judgement gives.
-7. **The words** — `CONTEXT.md`'s **Stage** and **Adopt**, and the `next-stage`
-   skill's *no other plan in flight to check for*.
+7. **The words** — `CONTEXT.md`'s **Stage** and **Adopt**, the `next-stage`
+   skill's *no other plan in flight to check for*, and
+   `docs/design/verkstead.md`'s *the next stage starts only after wrap-up
+   completes*. AC: the design document is refined in its own *refined <date>,
+   building <stage>* form rather than rewritten.
 
 ## Re-verify at start
 

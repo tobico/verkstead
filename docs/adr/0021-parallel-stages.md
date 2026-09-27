@@ -6,8 +6,11 @@ roadmap a Conversation is a stage of* a stored fact, and on
 is what a roadmap's stages leave behind. What this revises is the rule
 `crates/server/src/stages.rs` states where it picks the next stage — *"the
 roadmap's order is the roadmap's own and its stages are strictly sequential"* —
-and the **Stage** entry of `CONTEXT.md`, *started by the Stage before it
-settling*.
+the **Stage** entry of `CONTEXT.md`, *started by the Stage before it settling*,
+and two decisions the design document settled: that **the next stage starts
+only after wrap-up completes**, and **Stages always stack** on the unmerged
+predecessor. Both of those are refined in `docs/design/verkstead.md` as the
+stages that change them land — stage 03 the stacking, stage 04 the ordering.
 
 Decided in the grilling of 2026-09-27. The roadmap that builds it is
 `docs/roadmaps/parallel-stages/`. What it is for, in the human's words: to
