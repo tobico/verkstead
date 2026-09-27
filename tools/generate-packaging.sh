@@ -224,11 +224,18 @@ for scale in "menubarTemplate.png 22" "menubarTemplate@2x.png 44"; do
 done
 
 # And the Windows icon, which is those same downscales again inside the one
-# container Windows reads an executable's icon out of. It is not copied into a
-# bundle the way the .icns is: `crates/desktop/build.rs` compiles it into
-# verkstead-desktop.exe — the shim a Start-menu shortcut names — as a resource,
-# so Explorer, the taskbar and the window that a dialog opens all draw Verkstead
-# out of the file itself.
+# container Windows reads an executable's icon out of. Staged into the pack
+# beside the .icns and wanted three times over there: electron-builder edits it
+# into `Verkstead.exe` as the launcher's own resource, nothing installed beside
+# an exe being what Explorer, Alt-Tab and the taskbar draw it with; the msi
+# names it as `ARPPRODUCTICON`, so the row in **Installed apps** is drawn with
+# it; and the Start-menu shortcut is advertised against it. See
+# `desktop/scripts/pack.mjs` and `desktop/electron-builder.yml`.
+#
+# `crates/desktop/build.rs` compiles it into the shim as a resource as well,
+# which is a Windows install this no longer describes: nothing a release ships
+# is that binary any more, and the last stage of the Electron roadmap takes the
+# crate.
 #
 # Written with `magick` rather than by hand, which is where this differs from
 # the .icns above: the tool that writes an .icns is a Mac's and the format had
