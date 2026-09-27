@@ -1407,6 +1407,39 @@ fn swept(asked: &Path) -> usize {
 /// What a test that is about the *second* thing GitHub says has to wait for
 /// first: writing the new answer before anything had read the old one would be a
 /// test that never saw the change it was about.
+/// Wait until an investigation's probes are out of `worktree` again, and hand back
+/// what `git status` last said about it.
+///
+/// [`until_swept`]'s shape over the other thing no view reports. The state landing
+/// is on the record a moment before the checkout is put back — deliberately, the
+/// move being what says which investigation ended — so a Conversation that reads
+/// Wrapping is not yet one whose scratch has gone, and `put_back` takes a path at
+/// a time: what a single read can catch is the first probe gone and the second
+/// still there.
+///
+/// Only the probes are waited on. What the human had already left uncommitted is
+/// never touched, so it is in every answer this could hand back and is asserted
+/// against the one it does.
+async fn until_tidied(worktree: &Path) -> String {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let scratch = git(worktree, &["status", "--porcelain"]);
+
+        if !scratch.contains("probe.md") && !scratch.contains("scratch.md") {
+            return scratch;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the probes the investigation wrote are still in the checkout the work \
+             goes on in, staged one or untracked one: {scratch:?}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 async fn until_swept(asked: &Path) {
     let deadline = Instant::now() + *PATIENCE;
 
@@ -25598,13 +25631,14 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     // `git add -A`, so a probe left lying about is a probe on the pull request —
     // and one they did not commit would have their own Done signal refused over a
     // file they never wrote.
-    let scratch = git(&worktree, &["status", "--porcelain"]);
+    // Waited for rather than read off the state landing, because the tidying comes
+    // *after* that move and is meant to: the move is what says which investigation
+    // ended, and the driver started after the tidying is the first thing that
+    // works in here. So a view reading Wrapping is not yet a checkout put back,
+    // and the probes go one path at a time — a read between them would find the
+    // first gone and the second still there.
+    let scratch = until_tidied(&worktree).await;
 
-    assert!(
-        !scratch.contains("probe.md") && !scratch.contains("scratch.md"),
-        "the probes the investigation wrote are gone, staged one and untracked one \
-         alike: {scratch:?}",
-    );
     assert!(
         !worktree.join("probe.md").exists() && !worktree.join("scratch.md").exists(),
         "and gone off the disk rather than only out of the index",
