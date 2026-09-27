@@ -6,14 +6,15 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
-    ProfileFacts, RoadmapStage, RowState, StageOf, Staged, Switched, Unarchiving, add_companion,
-    adopted_pull_request, adopting, any_archived, archive_conversation, archived,
-    close_conversation, conversation_branch, conversations, create_profile, follow_branch,
-    hold_pull_request, load_conversation, open_database, register_repo, reinvent_branch,
-    rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
-    settle_naming, show_archived, showing_archived, stacks_on, stage_roadmap, start_adoption,
-    start_conversation, start_grilling, start_stage, start_tinkering, start_unnamed_conversation,
-    state, switch_repo, target, timeline, unarchive_conversation,
+    ProfileFacts, Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer,
+    Switched, Unarchiving, add_companion, adopted_pull_request, adopting, any_archived,
+    archive_conversation, archived, close_conversation, conversation_branch, conversations,
+    create_profile, follow_branch, hold_pull_request, load_conversation, open_database,
+    register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
+    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
+    stacks_on, stage_roadmap, stage_standings, start_adoption, start_conversation, start_grilling,
+    start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
+    switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1829,4 +1830,217 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
         "and a Conversation nothing recorded a roadmap against has no row at all",
     );
     assert_eq!(stacks_on(&pool, never).await.unwrap(), None);
+}
+
+/// A stage Conversation of `roadmap`, started as a stage and left implementing.
+///
+/// The branch is named after the label rather than read off it, which is what the
+/// record is for: nothing here or anywhere else works a label out from a branch.
+async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i64 {
+    let id = start_conversation(pool, repo_id, &format!("roadmaps/{roadmap}/{label}"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_stage(
+        pool,
+        id,
+        "c0ffee",
+        &PathBuf::from("/data/worktrees").join(format!("{roadmap}-{label}")),
+        None,
+        RoadmapStage { roadmap, label },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+/// A steer into `target` and nothing else with it, which is how a test walks a
+/// stage up the ladder: the move is written the way every move is, so the
+/// Timeline says where it has been.
+fn steer(target: Lifecycle) -> Steer<'static> {
+    Steer {
+        target,
+        pairings: &[],
+        brief: None,
+        instruction: None,
+        direction: None,
+        worktree: None,
+        base: None,
+        companions: &[],
+        opened: &[],
+        checkouts: &[],
+        said: None,
+        recorded: Recorded::default(),
+        scratch: &[],
+    }
+}
+
+/// What the record says about each stage of a roadmap, which is the reading both
+/// of Verkstead's own readings of a roadmap are handed.
+///
+/// Every one of the three answers, and each of them from a Conversation that got
+/// where it is the way a real one does: still implementing, finished, closed from
+/// a wrap-up, and closed before there was one.
+#[tokio::test]
+async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were_abandoned() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let done = stage(&pool, repo_id, "mvp", "01").await;
+    steer_conversation(&pool, done, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    let wrapped_up_then_closed = stage(&pool, repo_id, "mvp", "02").await;
+    steer_conversation(&pool, wrapped_up_then_closed, steer(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+    close_conversation(&pool, wrapped_up_then_closed)
+        .await
+        .unwrap();
+
+    let closed_part_way = stage(&pool, repo_id, "mvp", "03").await;
+    close_conversation(&pool, closed_part_way).await.unwrap();
+
+    // And one nothing has finished with, left implementing, which is where every
+    // stage starts and is nobody's to steer from here.
+    stage(&pool, repo_id, "mvp", "04").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(
+        standings.of("mvp", "01"),
+        Some(StageStanding::Settled),
+        "a stage in Done has settled, whether or not its pull request has merged",
+    );
+    assert_eq!(
+        standings.of("mvp", "02"),
+        Some(StageStanding::Settled),
+        "and so has one closed from a wrap-up: the human saying they are finished with it",
+    );
+    assert_eq!(
+        standings.of("mvp", "03"),
+        Some(StageStanding::Abandoned),
+        "one closed before it ever wrapped up is neither settled nor in flight",
+    );
+    assert_eq!(
+        standings.of("mvp", "04"),
+        Some(StageStanding::InFlight),
+        "and one still being implemented is in flight",
+    );
+    assert_eq!(
+        standings.of("mvp", "05"),
+        None,
+        "and a stage the record holds nothing about is nothing at all, which is \
+         what leaves its box to speak for it",
+    );
+
+    // The other half of the human's say: nothing may rebase onto a branch that is
+    // moving again, so a stage steered out of Done is in flight once more however
+    // far it once got.
+    steer_conversation(&pool, done, steer(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::InFlight),
+    );
+}
+
+/// Two Conversations answer to one label where a stage was attempted twice, and
+/// the roadmap has one line for it either way: settled counts over in flight, and
+/// in flight over abandoned.
+#[tokio::test]
+async fn the_furthest_of_two_attempts_at_one_stage_is_what_the_record_says() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // Abandoned, and taken up again: somebody is on it now.
+    let abandoned = stage(&pool, repo_id, "mvp", "01").await;
+    close_conversation(&pool, abandoned).await.unwrap();
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::InFlight),
+        "in flight over abandoned, the second attempt being the live one",
+    );
+
+    // And once that one finishes, the stage has settled — whichever order the
+    // rows come back in.
+    steer_conversation(&pool, second, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+}
+
+/// The reading is one Repo's. A Conversation belongs to one Repo and two Repos may
+/// hold roadmaps of the same name, so a stage of `mvp` over there answers for
+/// nothing here.
+#[tokio::test]
+async fn one_repos_stages_do_not_answer_for_anothers() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    steer_conversation(&pool, elsewhere, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, ours).await.unwrap().of("mvp", "01"),
+        None,
+        "the other Repo's finished stage 01 says nothing about this Repo's",
+    );
+    assert_eq!(
+        stage_standings(&pool, theirs)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+}
+
+/// And a row holding a roadmap and no label is no stage's standing: it is a stage
+/// from before the label was written down, or the Conversation that wrote the
+/// roadmap, and the boxes go on speaking for whatever it was.
+#[tokio::test]
+async fn a_row_with_no_label_stands_for_no_stage() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let before = stage(&pool, repo_id, "mvp", "01").await;
+    steer_conversation(&pool, before, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE stage_roadmaps SET stage = NULL WHERE conversation_id = ?")
+        .bind(before)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id).await.unwrap(),
+        verkstead_store::StageStandings::default(),
+        "a roadmap with no label against it puts nothing in the reading",
+    );
 }

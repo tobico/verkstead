@@ -19846,7 +19846,7 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
 
     let fixture = adopting_asking(
         spill,
-        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -21532,16 +21532,19 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
 /// nothing worth raising.
 ///
 /// The plan commit is the piece the chain turns on, and it is written the way
-/// `/next-stage` writes one: `.tasks/`, plus the in-progress annotation naming
-/// the branch it is on. That annotation is what keeps the carry-on off this
-/// stage's own box when the wrap-up settles — *which* roadmap is read comes off
-/// the record the stage was started with rather than off anything the branch
-/// wrote.
+/// `/next-stage` writes one: `.tasks/`, plus whatever `annotating` puts on the
+/// stage's own line.
+///
+/// [`ANNOTATES_THE_STAGE`] is what the skill writes there, and nothing is what a
+/// roadmap looks like with the annotation left off — which is how a test asks
+/// whether Verkstead's own record is what decides that this stage is done. Either
+/// way *which* roadmap is read comes off the record the stage was started with
+/// rather than off anything the branch wrote.
 ///
 /// Which stage it is planning it reads off the branch it is standing on, because
 /// that is the fact it has: a stage's branch is its brief's name, so the entry to
 /// annotate is the one whose link names it.
-fn a_stage_planned_and_worked_to_a_finish(planning: &Path) -> String {
+fn a_stage_planned_and_worked_to_a_finish(planning: &Path, annotating: &str) -> String {
     format!(
         r#"
 case "$2" in
@@ -21553,7 +21556,7 @@ case "$2" in
     printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
     printf '# 01. do the work\n' > .tasks/01-do-the-work.md
     stage=$(basename "$branch")
-    sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
+{annotating}
     git add -A
     git commit --quiet -m "chore: plan the $branch stage"
     : > /tmp/verkstead/done
@@ -21591,6 +21594,14 @@ esac
     )
 }
 
+/// What `/next-stage` writes on the line of the stage it is planning: the branch
+/// it is being worked on, in backticks, beside whatever that line already says.
+///
+/// The roadmap keeping its own score for whoever reads the file. Verkstead does
+/// not need it to know which stage is being worked — that is its own record's —
+/// and it is what the readings fall back to where there is no record at all.
+const ANNOTATES_THE_STAGE: &str = r#"    sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md"#;
+
 /// The join adoption rests on: an adopted stage that settles starts the stage
 /// after it, down the path a staged roadmap has always gone down.
 ///
@@ -21611,7 +21622,7 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
 
     let fixture = adopting_asking(
         spill,
-        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -21698,6 +21709,54 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         2,
         "one planning session for the adopted stage and one for the stage after \
          it: {planned:?}",
+    );
+}
+
+/// And the same chain with the roadmap saying nothing at all about the stage that
+/// settled: its box unticked, its line unannotated, and the stage after it starts
+/// all the same.
+///
+/// This is what Verkstead's own record is for, end to end. The stage worked here
+/// ticks its own box in its own finish commit — which this stub never writes,
+/// exactly as a stage whose finish commit is on a branch this reading has never
+/// seen never wrote it — and nothing on the line says whose it is. So the boxes
+/// and the annotation together have nothing to say, and the only thing that keeps
+/// the carry-on from offering stage 01 back to itself for ever is the row saying
+/// that stage 01 of this roadmap, in this Repo, has settled.
+#[tokio::test]
+async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "roadmaps/rate-limiting/02-refusing",
+        "the stage after the one that settled, by the record alone",
+    );
+
+    // And the roadmap on the settled stage's own branch really does say nothing:
+    // had the box been ticked or the line annotated, the reading off the boxes
+    // would have answered the same and this would be proving nothing.
+    let settled = fixture.view().await;
+    let worktree = PathBuf::from(settled.worktree.expect("a stage has a Worktree").path);
+    let index =
+        std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md")).unwrap();
+
+    assert!(
+        index.contains("- [ ] 01: Count the requests — [brief](01-counter.md)\n"),
+        "stage 01's line is exactly as the roadmap was written: {index:?}",
     );
 }
 

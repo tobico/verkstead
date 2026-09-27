@@ -26,12 +26,15 @@
 //! `docs/roadmaps/`: touching a roadmap is not what makes a Conversation a stage
 //! of it, and it used to be.
 //!
-//! **What that roadmap has left is read off the Worktree**, by the same rule the
-//! pinned stage list is drawn by — see [`crate::stages`] — so the boxes the
-//! human is watching and the stage that starts next cannot come to disagree. The
-//! pinned block draws every roadmap the branch touched, which is the wider
-//! question and stays that way: one of those cards is this Conversation's own
-//! effort and the rest are roadmaps it edited in passing.
+//! **What that roadmap has left comes from the record and the boxes together** —
+//! see [`crate::stages::left`], which is the whole of that rule. The entries and
+//! the briefs are read off the Worktree, by the same rule the pinned stage list is
+//! drawn by; whether each of them is done is the record's answer wherever it has a
+//! row for the stage, because a stage that settled ticked its own box on its own
+//! branch and this one may never have seen it. The pinned block draws every
+//! roadmap the branch touched, which is the wider question and stays that way: one
+//! of those cards is this Conversation's own effort and the rest are roadmaps it
+//! edited in passing.
 //!
 //! **What is decided is where the branch goes**, and only that — see [`Stands`],
 //! which is the whole of the rule. A stage stands on the branch the stage before
@@ -128,11 +131,24 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         }
     };
 
-    // Which stage of it comes back beside the name and nothing here asks it yet:
-    // what a roadmap has left is still the boxes' answer, read off the Worktree
-    // below. See [`store::StageOf`].
+    // Which stage of it comes back beside the name, and this reading does not need
+    // it: what the stages of this roadmap have got to is read for the whole Repo
+    // below, and this Conversation's own row is one of those. See
+    // [`store::StageOf`].
     let Some(store::StageOf { roadmap, .. }) = recorded else {
         return unrecorded(&state, &conversation, conversation_id).await;
+    };
+
+    // And what the record says each stage of that roadmap has got to, which is
+    // half of what says a stage is done — see [`stages::next_stage`]. The Repo's
+    // rows in one read rather than a lookup per stage, and read here rather than
+    // inside the reading so that the reading stays a reading.
+    let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what this roadmap's stages had got to failed");
+            return;
+        }
     };
 
     let branch = conversation.branch.clone();
@@ -143,7 +159,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         let worktree = worktree.clone();
         move || {
             (
-                stages::next_stage(&worktree, &roadmap, &branch),
+                stages::next_stage(&worktree, &roadmap, &branch, &record),
                 stages::stacks(&worktree),
             )
         }
@@ -351,7 +367,7 @@ async fn start(
     // branch named after neither of them.
     //
     // Either name, because a stage started before the scheme changed is on the
-    // former one — and its plan commit ticking the box rides on that branch
+    // former one — and the commit ticking its box rides on that branch
     // until the pull request merges, so the branch is the only thing saying the
     // stage is under way. The notice names whichever was found, that being the
     // one the human would go and look at.

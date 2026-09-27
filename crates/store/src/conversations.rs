@@ -15,6 +15,7 @@
 //! which a column could not hold at all.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -5730,6 +5731,167 @@ pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<StageOf>
             })?;
 
     Ok(row.map(|(roadmap, stage)| StageOf { roadmap, stage }))
+}
+
+/// How far the record says one stage Conversation got.
+///
+/// Three answers rather than two, because *did it settle* and *is somebody on it*
+/// are not each other's opposite: a stage whose Conversation was closed part-way
+/// through is neither, and what happens to it is neither reading's business.
+///
+/// The human's own two halves are what decide the first: a Conversation in Done
+/// has settled, and one Closed from a wrap-up has settled too, because closing a
+/// Conversation that got as far as a pull request is the human saying they are
+/// finished with it. Nothing here is about a pull request having merged — a stage
+/// whose branch is still open is a stage the one after it stacks on, which is the
+/// whole of how a roadmap runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageStanding {
+    /// Its work is finished: it is in Done now, or it was closed having reached
+    /// Wrapping or Done at some point.
+    ///
+    /// Read off the state as it stands rather than off the Timeline alone, which
+    /// is what makes the other half of the human's say work: nothing may rebase
+    /// onto a branch that is moving again, so a stage steered out of Done is in
+    /// flight once more however far it once got.
+    Settled,
+
+    /// Somebody — or some unattended run — is on it: implementing, wrapping up,
+    /// waiting on a question, being followed up. Anything that is not Closed and
+    /// has not settled.
+    InFlight,
+
+    /// Closed without ever having wrapped up: abandoned part-way through.
+    ///
+    /// Neither of the other two, and nothing reading the record starts it again:
+    /// what it left behind is a branch, and the branch is what refuses the stage
+    /// wherever one is offered.
+    Abandoned,
+}
+
+impl StageStanding {
+    /// Which of two standings for one label is the one to believe.
+    ///
+    /// Two Conversations answer to one stage where a stage was attempted twice —
+    /// one closed, another started after it — and the roadmap has one line for
+    /// it either way. Settled wins, because a stage that settled once is done
+    /// whatever else was tried; in flight beats abandoned, because somebody is on
+    /// it now.
+    fn over(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Settled, _) | (_, Self::Settled) => Self::Settled,
+            (Self::InFlight, _) | (_, Self::InFlight) => Self::InFlight,
+            _ => Self::Abandoned,
+        }
+    }
+}
+
+/// What Verkstead's record says about the stages of one Repo's roadmaps: which
+/// of them settled, which are in flight, and which were abandoned.
+///
+/// One Repo's worth, read in one go, because that is the shape both readings
+/// want: the carry-on asks about the one roadmap the record named, and the
+/// adoption walks every roadmap of every registered Repo and would otherwise ask
+/// the database once per roadmap inside each of them. And one Repo's worth rather
+/// than the whole table, because a Conversation belongs to one Repo and two Repos
+/// may hold roadmaps of the same name — a stage of `mvp` over there answers for
+/// nothing here.
+///
+/// A value rather than a query, so that the readings stay readings: neither of
+/// them asks the database, and what they are handed is this.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StageStandings(HashMap<String, HashMap<String, StageStanding>>);
+
+impl StageStandings {
+    /// What the record says about stage `label` of `roadmap`, or `None` where it
+    /// holds no row for it.
+    ///
+    /// `None` is the answer that matters as much as the other three: a stage
+    /// worked by hand or by the old tools has no row, and its box is all there is
+    /// to go on.
+    pub fn of(&self, roadmap: &str, label: &str) -> Option<StageStanding> {
+        self.0.get(roadmap)?.get(label).copied()
+    }
+
+    /// One built from rows rather than from a database, for the readings' own
+    /// tests: what they take is a value, so what a test hands them is one too.
+    pub fn from_rows<'a>(
+        rows: impl IntoIterator<Item = (&'a str, &'a str, StageStanding)>,
+    ) -> Self {
+        let mut standings = Self::default();
+
+        for (roadmap, label, standing) in rows {
+            standings.record(roadmap, label, standing);
+        }
+
+        standings
+    }
+
+    /// Put one stage Conversation's standing in, behind whatever a second
+    /// Conversation answering to the same label already said — see
+    /// [`StageStanding::over`].
+    fn record(&mut self, roadmap: &str, label: &str, standing: StageStanding) {
+        self.0
+            .entry(roadmap.to_owned())
+            .or_default()
+            .entry(label.to_owned())
+            .and_modify(|held| *held = held.over(standing))
+            .or_insert(standing);
+    }
+}
+
+/// What the record says about every stage Conversation of `repo_id`'s roadmaps.
+///
+/// The read behind [`StageStandings`], and the one thing that joins Verkstead's
+/// record to the boxes a repository keeps: the record decides what is done
+/// wherever it has a row for the stage, and the boxes decide wherever it has
+/// none — see the server's `stages` module, which is where the two are put
+/// together.
+///
+/// Only the rows that hold a label, which is what a stage Conversation's own row
+/// holds. A row with a roadmap and no label says nothing about any stage — it is a
+/// stage from before the label was written down, or the Conversation that wrote
+/// the roadmap — so it is left out of this and the box goes on speaking for
+/// whichever it was; see [`StageOf::stage`].
+///
+/// Whether a Closed Conversation ever wrapped up is the Timeline's to answer,
+/// every move being written on it — see [`moved`]. The state column says where it
+/// is now and the Timeline says where it has been, and it takes both: a stage
+/// steered out of Done is in flight again, and a stage closed from Done settled.
+pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
+    let rows: Vec<(String, String, String, bool)> = sqlx::query_as(
+        "SELECT r.roadmap, r.stage, c.state,
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body IN (?, ?)
+                )
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         WHERE c.repo_id = ? AND r.stage IS NOT NULL
+         ORDER BY r.conversation_id",
+    )
+    .bind(Event::Moved(Lifecycle::Wrapping).kind())
+    .bind(Lifecycle::Wrapping.stored())
+    .bind(Lifecycle::Done.stored())
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading what Repo {repo_id}'s roadmap stages have got to"))?;
+
+    let mut standings = StageStandings::default();
+
+    for (roadmap, label, state, wrapped) in rows {
+        let standing = match (Lifecycle::read(&state)?, wrapped) {
+            (Lifecycle::Done, _) => StageStanding::Settled,
+            (Lifecycle::Closed, true) => StageStanding::Settled,
+            (Lifecycle::Closed, false) => StageStanding::Abandoned,
+            _ => StageStanding::InFlight,
+        };
+
+        standings.record(&roadmap, &label, standing);
+    }
+
+    Ok(standings)
 }
 
 /// Put a move on a Conversation's Timeline.

@@ -9,11 +9,18 @@
 //! finishes. So the Event is a reading of the Worktree as it stands and cannot
 //! disagree with the branch it is read off.
 //!
-//! What says a stage is done is the checkbox in `ROADMAP.md`, which is what
-//! `/next-stage` reads too — a stage's brief stays where it is for ever, being
-//! the record of what the stage was for, so there is no file going away to read
-//! it off. The same answer a backlog gives, for the same reason: see
-//! [`crate::tasks`].
+//! What says a stage is done is **Verkstead's own record where it has a row for
+//! that stage, and the checkbox in `ROADMAP.md` where it has none** — see
+//! [`left`], which is the whole of that rule, and
+//! [ADR-0021](../../../../docs/adr/0021-parallel-stages.md). A stage settled is a
+//! stage done however its box reads on the branch being read, because with
+//! branches side by side each Worktree holds a `ROADMAP.md` of its own and the
+//! boxes stop being one fact; a stage with no row is one worked by hand or by the
+//! old tools, and its box is all there is to go on. Nothing looks for a file
+//! going away, either way: a stage's brief stays where it is for ever, being the
+//! record of what the stage was for. See [`crate::tasks`], which is the same
+//! answer a backlog gives and for the same reason — a backlog has no record
+//! beside it.
 //!
 //! *Which* roadmap is the one thing this does differently, and the one thing
 //! here that is **stored**. A Worktree has one `.tasks/` and may hold any number
@@ -265,16 +272,16 @@ fn stacking(workflow: &str) -> bool {
 /// settled.
 ///
 /// *Which* roadmap is the record's — named by the caller and settled when the
-/// stage started. What it has left is read off the Worktree, by the same rule
-/// the pinned stage list is drawn by: the boxes as that roadmap wrote them. So
-/// what the human is watching and what Verkstead starts next cannot come to
-/// disagree.
+/// stage started. What it has left comes from the record and the boxes together:
+/// the entries and the briefs are the Worktree's, read as the pinned stage list
+/// reads them, and whether each of those entries is done is [`left`]'s question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Next {
-    /// This one: the lowest-numbered stage still unchecked.
+    /// This one: the lowest-numbered stage still to do.
     Stage(Box<Stage>),
 
-    /// Every stage is done. The roadmap is finished, and its directory stays
+    /// Nothing is left to start. Every stage of it is done, or the only ones left
+    /// are stages somebody is on — and either way the roadmap's directory stays
     /// where it is as the record of what it was.
     Complete {
         /// What it is called, for saying so.
@@ -359,7 +366,7 @@ impl Stage {
     /// Asked wherever a stage is looked at for having been started already, and
     /// asked for good rather than for a while. A stage started under the former
     /// scheme is on a branch of that shape for as long as the branch is there,
-    /// and the plan commit ticking its box rides on that branch until its pull
+    /// and the commit ticking its box rides on that branch until its pull
     /// request merges — so the branch is the only thing saying the stage is
     /// under way, and a reading that did not ask would offer the stage a second
     /// time. One ref lookup, and it never lies.
@@ -432,12 +439,15 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
 /// roadmap somebody else is carrying on: what the branch touched decides
 /// nothing at all.
 ///
-/// The Conversation's own stage is skipped, and that is the one piece of
-/// reading that is not just *the lowest unchecked box*. A stage ticks itself off
-/// in the plan commit of the stage after it — the roadmap keeps its score one
-/// step behind — so when a stage's own work settles, its box is still open and
-/// annotated with the branch it was worked on. That annotation is the roadmap
-/// saying *this one is in flight*, and the branch in it is what says whose.
+/// What it has left is not just *the lowest unchecked box*: whether an entry is
+/// done is [`left`]'s question, and `record` is the half of it the repository does
+/// not hold — what Verkstead's own record says about each stage of this roadmap in
+/// this Repo. The Conversation's own stage settling is what brought this reading
+/// about, so the record is what skips it, and the annotation the roadmap keeps
+/// beside the line is the fallback where the record has no label for it.
+///
+/// A value rather than a lookup, so this stays a reading: the rows are read once,
+/// by the caller, and nothing in here asks the database.
 ///
 /// A roadmap that is not there to read is [`Next::Unstartable`], which is the
 /// treatment a stage naming a brief nobody wrote gets and for the same reason:
@@ -447,7 +457,12 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
 /// is exactly the guess this stopped making.
 ///
 /// Blocking work: one file read, and one more for the brief.
-pub(crate) fn next_stage(worktree: &Path, roadmap: &str, branch: &str) -> Next {
+pub(crate) fn next_stage(
+    worktree: &Path,
+    roadmap: &str,
+    branch: &str,
+    record: &store::StageStandings,
+) -> Next {
     let directory = worktree.join(ROADMAPS).join(roadmap);
 
     let Ok(list) = std::fs::read_to_string(directory.join(INDEX)) else {
@@ -475,12 +490,12 @@ pub(crate) fn next_stage(worktree: &Path, roadmap: &str, branch: &str) -> Next {
         };
     }
 
-    let Some(entry) = entries.find(|entry| !entry.checked && !ours(entry.after, branch)) else {
-        // Every stage of it is done — or the only one left is this
-        // Conversation's, which the plan commit that ticks it has not landed yet
-        // and never will, there being no stage after it. Either way the roadmap
-        // is finished, and another roadmap in this Worktree having work left is
-        // not a reason to start it.
+    let Some(entry) = entries.find(|entry| left(entry, record.of(roadmap, entry.label), branch))
+    else {
+        // Every stage of it is done — or the only ones left are stages the record
+        // says somebody is on, which is this Conversation's own where there is no
+        // stage after it. Either way there is nothing here to start, and another
+        // roadmap in this Worktree having work left is not a reason to start it.
         return Next::Complete {
             roadmap: roadmap.to_owned(),
         };
@@ -506,6 +521,50 @@ pub(crate) fn next_stage(worktree: &Path, roadmap: &str, branch: &str) -> Next {
         title: entry.title.to_owned(),
         brief: markdown,
     }))
+}
+
+/// Whether one entry of a roadmap is a stage still to start: the rule that joins
+/// Verkstead's record to the boxes the repository keeps.
+///
+/// **The record decides where it says something about the stage, and the box
+/// decides where it does not** — see
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), which is where that
+/// was settled, and `store::stage_standings`, which is where the record is read.
+///
+/// - **Settled** is done, whatever the box on this branch says. This is the whole
+///   point of the record: with stages worked side by side each Worktree holds a
+///   `ROADMAP.md` of its own, so the boxes stop being one fact — the stage that
+///   settled ticked its own box in its own finish commit, on its own branch, and
+///   the branch being read here may well never have seen it.
+/// - **In flight** is neither done nor a stage to start. Newly load-bearing, and
+///   load-bearing in the other direction from the box: a stage ticks its own box
+///   at its finish, before its pull request has even opened, so a ticked box
+///   already means *its tasks are done* rather than *it settled*.
+/// - **Abandoned**, and **no row at all**, leave the box to speak. Nothing here
+///   starts an abandoned stage again on the strength of the record: what it left
+///   behind is a branch, and a branch by the stage's name is what refuses it
+///   wherever a stage is started from. A stage with no row is one worked by hand
+///   or by the old tools, and its box is all there is to go on.
+///
+/// And the annotation stays as the fallback in front of all of it. The
+/// Conversation whose settling brought the reading about has a row of its own
+/// saying so — but every stage started between ADR-0017 landing and the label
+/// being written down has a row holding a roadmap and no label, and for one of
+/// those the annotation naming its branch is the only thing that keeps it from
+/// being offered its own stage back.
+fn left(
+    entry: &checklist::Entry<'_>,
+    standing: Option<store::StageStanding>,
+    branch: &str,
+) -> bool {
+    if ours(entry.after, branch) {
+        return false;
+    }
+
+    match standing {
+        Some(store::StageStanding::Settled | store::StageStanding::InFlight) => false,
+        Some(store::StageStanding::Abandoned) | None => !entry.checked,
+    }
 }
 
 /// Whether what a roadmap wrote after a stage's link says the stage is in
@@ -1382,8 +1441,19 @@ Turns this askance clone into Verkstead.
         /// The roadmap is named rather than worked out, which is the whole of
         /// the change: the record says which one this Conversation is a stage
         /// of, and nothing about the branch decides it.
+        ///
+        /// With a record holding nothing, which is every roadmap worked before
+        /// Verkstead wrote one — so what these answer with is the boxes and the
+        /// annotation alone, exactly as they answered before there was a record.
         fn next(&self, roadmap: &str, branch: &str) -> Next {
-            next_stage(self.path(), roadmap, branch)
+            self.next_with(roadmap, branch, &store::StageStandings::default())
+        }
+
+        /// And the same reading with a record behind it: what Verkstead knows
+        /// about the stages of this Repo's roadmaps, which is what decides whether
+        /// a stage is done wherever it says anything at all.
+        fn next_with(&self, roadmap: &str, branch: &str, record: &store::StageStandings) -> Next {
+            next_stage(self.path(), roadmap, branch, record)
         }
 
         /// And which roadmaps this branch created since the base commit, which
@@ -1935,10 +2005,10 @@ Turns this askance clone into Verkstead.
         );
     }
 
-    /// The one piece of reading that is not just *the lowest unchecked box*. A
-    /// stage is ticked off by the plan commit of the stage after it, so when its
-    /// own work settles its box is still open — and what says so is the roadmap's
-    /// annotation naming the branch it was worked on.
+    /// The fallback, which is what a roadmap the record knows nothing about is
+    /// read by: a stage's box is still open where it was worked before Verkstead
+    /// wrote a record, and what says so is the roadmap's annotation naming the
+    /// branch it was worked on.
     ///
     /// A Conversation that started stage 02 again here would be a run going round
     /// in circles for ever, with nobody watching.
@@ -1968,6 +2038,251 @@ Turns this askance clone into Verkstead.
         };
 
         assert_eq!(stage.label, "02");
+    }
+
+    /// A roadmap with three stages in it and none of them ticked, which is what a
+    /// branch cut before any of them finished holds: whether each of them is done
+    /// is the record's to say here, and the boxes say nothing.
+    const UNTICKED: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+";
+
+    /// What Verkstead's record says about the stages of this Repo's roadmaps.
+    fn record<'a>(
+        rows: impl IntoIterator<Item = (&'a str, &'a str, store::StageStanding)>,
+    ) -> store::StageStandings {
+        store::StageStandings::from_rows(rows)
+    }
+
+    /// A stage that settled is a stage done, whatever the box on the branch being
+    /// read says.
+    ///
+    /// This is the whole point of the record. Stage 01 ticked its own box in its
+    /// own finish commit, on its own branch; the branch this reading is off was cut
+    /// before that landed and holds a `ROADMAP.md` with nothing ticked in it at
+    /// all. With the boxes alone the carry-on would start stage 01 a second time.
+    #[test]
+    fn a_settled_stage_is_done_however_its_box_reads_on_this_branch() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "anything-else",
+            &record([("mvp", "01", store::StageStanding::Settled)]),
+        ) else {
+            panic!("stage 01 settled, so stage 02 is the one to start");
+        };
+
+        assert_eq!(stage.label, "02");
+    }
+
+    /// And a stage the record knows nothing about is done where its box is ticked:
+    /// worked by hand or by the old tools, and the boxes are all there is to go on.
+    ///
+    /// Both halves of the rule in one reading, which is what a roadmap carried on
+    /// from before this looks like: stage 01 ticked with no row, stage 02 settled
+    /// with no tick, and stage 03 the one left.
+    #[test]
+    fn a_stage_ticked_with_no_record_of_it_is_done_too() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
+        );
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "anything-else",
+            &record([("mvp", "02", store::StageStanding::Settled)]),
+        ) else {
+            panic!("the box speaks for 01 and the record for 02, so stage 03 is the one left");
+        };
+
+        assert_eq!(stage.label, "03");
+    }
+
+    /// A stage the record says is in flight is neither done nor one to start,
+    /// however its box reads.
+    ///
+    /// Which is newly load-bearing, and load-bearing in the other direction from
+    /// the box: a stage ticks its own box in its finish commit, before its pull
+    /// request has even opened, so a ticked box says *its tasks are done* rather
+    /// than *it settled*. Both readings of the box are here — 01 ticked and 02 not
+    /// — and neither is started.
+    #[test]
+    fn a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
+        );
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let in_flight = record([
+            ("mvp", "01", store::StageStanding::InFlight),
+            ("mvp", "02", store::StageStanding::InFlight),
+        ]);
+
+        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &in_flight) else {
+            panic!("the two stages somebody is on are not stages to start");
+        };
+
+        assert_eq!(stage.label, "03");
+
+        // And in flight is not done either: a roadmap whose only unstarted stage is
+        // the one this reading just refused has nothing to start, which is not the
+        // same statement as a stage having been skipped.
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md)\n",
+        );
+
+        assert_eq!(
+            repo.next_with("mvp", "anything-else", &in_flight),
+            Next::Complete {
+                roadmap: "mvp".to_owned()
+            },
+        );
+    }
+
+    /// A stage the record says was abandoned is left to its box, and nothing here
+    /// starts it again on the strength of the record: what it left behind is a
+    /// branch by the stage's name, and that is what refuses it where a stage is
+    /// started.
+    #[test]
+    fn an_abandoned_stage_is_left_to_what_its_box_says() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let abandoned = record([("mvp", "01", store::StageStanding::Abandoned)]);
+
+        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &abandoned) else {
+            panic!("an abandoned stage is not a settled one, so its unticked box stands");
+        };
+
+        assert_eq!(
+            stage.label, "01",
+            "the stage is offered and the branch it left behind is what refuses it",
+        );
+
+        // And where somebody ticked it off by hand, the box is what there is to go
+        // on: abandoned says nothing about whether the work got done.
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+        );
+
+        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &abandoned) else {
+            panic!("stage 02 is the one left");
+        };
+
+        assert_eq!(stage.label, "02");
+    }
+
+    /// The whole of an in-order roadmap, which is every roadmap until stages are
+    /// worked side by side: the stage whose settling brought this reading about is
+    /// skipped by its own row, and the stage after it starts.
+    ///
+    /// Its box is unticked on this branch twice over — the tick rode in its own
+    /// finish commit on its own branch, and this reading is off the branch of the
+    /// stage before it — and the annotation is the roadmap saying whose it is.
+    #[test]
+    fn a_roadmap_run_in_order_carries_on_from_the_stage_that_settled() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) \
+             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
+        );
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "roadmaps/mvp/02-grilling",
+            &record([
+                ("mvp", "01", store::StageStanding::Settled),
+                ("mvp", "02", store::StageStanding::Settled),
+            ]),
+        ) else {
+            panic!("stage 02 has settled, so stage 03 is the one to start");
+        };
+
+        assert_eq!(stage.label, "03");
+    }
+
+    /// And a stage whose row holds a roadmap and no label is skipped by its own
+    /// annotation, which is the only thing that keeps it from being offered its own
+    /// stage back.
+    ///
+    /// Every stage started between ADR-0017 landing and the label being written
+    /// down is one of those: the record has rows for the stages around it and
+    /// nothing for this one, so the annotation is what says whose stage 02 is.
+    #[test]
+    fn a_stage_the_record_holds_no_label_for_is_still_skipped_by_its_annotation() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) \
+             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
+        );
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "roadmaps/mvp/02-grilling",
+            &record([("mvp", "01", store::StageStanding::Settled)]),
+        ) else {
+            panic!("the stage after this Conversation's own is the one to start");
+        };
+
+        assert_eq!(stage.label, "03");
+    }
+
+    /// Two Repos may hold roadmaps of one name, and one Repo's stages answer for
+    /// nothing in another: the record handed to this reading is the Repo's own.
+    ///
+    /// Written as the thing the reading cannot do rather than as a fact about the
+    /// rows — what keeps the two apart is that the record is read per Repo, which
+    /// is `store::stage_standings`' own rule and is asserted where it is read.
+    #[test]
+    fn what_another_roadmap_of_this_repo_settled_says_nothing_about_this_one() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "anything-else",
+            &record([("public-release", "01", store::StageStanding::Settled)]),
+        ) else {
+            panic!("nothing has settled in this roadmap, whatever another one has");
+        };
+
+        assert_eq!(stage.label, "01");
     }
 
     /// And a declaration on the line does not hide it, whichever way round the
@@ -2040,8 +2355,8 @@ Turns this askance clone into Verkstead.
         );
     }
 
-    /// Including the last stage of one, whose own box is ticked by a plan commit
-    /// that is never going to land: there is no stage after it to write one.
+    /// Including the last stage of one whose box nothing ticked, which is what the
+    /// annotation is left saying where there is no record to go on.
     #[test]
     fn the_last_stage_finishing_is_the_roadmap_complete() {
         let repo = Repo::with(&[]);
@@ -2082,7 +2397,7 @@ Turns this askance clone into Verkstead.
         repo.brief("brain-chat-parity", "14-brain-chat-widget.md", "# 14.\n");
 
         // And this Conversation's own, down to its last stage — the one in
-        // flight on this branch, which no plan commit is ever going to tick.
+        // flight on this branch, whose box nothing is ever going to tick.
         repo.write(
             "missing-roles",
             "# Missing roles roadmap\n\n\
