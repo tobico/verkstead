@@ -53,8 +53,12 @@ once — the other reading of silence — would start stages on top of work they
 were written to follow.
 
 **A cycle, or an `after` naming a stage that is not there, is refused**: the
-roadmap's own session at `verkstead done`, and a roadmap already running by
-starting nothing and saying why on the Timeline. Falling back to running in
+roadmap's own session at `verkstead done`, a roadmap already running by starting
+nothing and saying why on the Timeline, and **Continue a roadmap by saying so at
+the press**. That last is the one with somebody waiting for an answer — and a
+roadmap written by hand or by the old tools, which is what adoption is for, is
+the likeliest to declare badly — so it names the fault where the press was made
+rather than on a Timeline the human has yet to open. Falling back to running in
 order was rejected, because it runs a roadmap in a way nobody wrote down.
 
 **Read afresh at every start**, off the top of the chain, so a hand edit to a

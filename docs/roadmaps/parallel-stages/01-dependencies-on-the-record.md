@@ -23,8 +23,9 @@ written before this is read exactly as it was.
   refused by anything: that is every roadmap written so far.
 - **A cycle or an `after` naming no stage is refused**, not repaired and not
   run in order instead. In this stage that is the refusal at `verkstead done`
-  for the session that wrote the roadmap; the running roadmap's half — start
-  nothing, say why on the Timeline — is stage 04's, where there is a start to
+  for the session that wrote the roadmap; the other two refusals — a running
+  roadmap starting nothing and saying why on the Timeline, and Continue a
+  roadmap saying so at the press — are stage 04's, where there is a start to
   refuse.
 - **A stage may only name stages of its own roadmap**, by their labels as
   written, zero-padding and all.

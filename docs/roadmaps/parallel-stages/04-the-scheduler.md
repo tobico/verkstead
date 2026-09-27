@@ -31,7 +31,11 @@ for both.
 - **Continue a roadmap starts every ready stage**, up to the limit. The card
   that named *the Stage that would be started* names them all.
 - **A running roadmap that declares badly starts nothing and says why on the
-  Timeline** — the other half of stage 01's refusal.
+  Timeline**, and **Continue a roadmap on one says so at the press** — the other
+  half of stage 01's refusal, both halves of it. The press is the one path with
+  somebody waiting on the answer, and the roadmap adoption is for is the
+  likeliest to declare badly, so the fault is named where it was pressed rather
+  than only on a Timeline nobody has opened.
 - **Declarations are read afresh at every start, off the top of the chain**,
   so a committed hand edit takes effect.
 - **The guards that assumed one stage go**: the adoption refusing a roadmap
@@ -60,8 +64,10 @@ for both.
 5. **Continue a roadmap** — AC: the card names every stage the press would
    start; the press starts them; a roadmap with stages in flight can be
    continued for the ones that are ready.
-6. **A bad roadmap, running** — AC: nothing starts, and the Event gives the
-   reason stage 01's judgement gives.
+6. **A bad roadmap, refused at both ends** — AC: nothing starts, and the Event
+   gives the reason stage 01's judgement gives; the adoption notice and the
+   compose page offer nothing off it; the press refuses naming the same fault,
+   the way it names a branch already taken.
 7. **The words** — `CONTEXT.md`'s **Stage** and **Adopt**, the `next-stage`
    skill's *no other plan in flight to check for*, and
    `docs/design/verkstead.md`'s *the next stage starts only after wrap-up
@@ -89,5 +95,9 @@ for both.
 - Several sessions under one Implementation Pairing share one account's usage
   window; `limits.rs` stops a run on exhaustion. Check that three stopping at
   once reads as one thing to the human rather than three.
+- `stages::startable` still answers the adoption notice, the compose page and
+  the press off one reading, with only the press told which clause refused it.
+  A roadmap that declares badly is another clause, and the press is where it is
+  worth wording.
 - Stage 05 adds the server-wide limit on top of this start. Leave the place
   where a start is permitted a single one.
