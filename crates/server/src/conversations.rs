@@ -2490,10 +2490,12 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// **Every refusal is named, and they are checked cheap-first**, which is
 /// [`adopt`]'s order and for its reason: each of them is something different for
 /// the human to go and do, and the record's own state and its Profiles are
-/// answered before anything that costs a call to GitHub or to git. The one
-/// Conversation per piece of work is the last of the free answers: a pull
-/// request another Conversation is on is refused naming it, and the refusal
-/// leads there.
+/// answered before anything that costs a call to GitHub or to git. Then GitHub,
+/// which answers what the Target names — a number's pull request, or whichever
+/// one is open on a branch — and with that in hand the record says whether
+/// somebody is already on it: one Conversation per piece of work, so a pull
+/// request another Conversation is on is refused naming it and the refusal leads
+/// there, however the Target named it. Then git.
 ///
 /// **Two roles rather than three.** The work on a pull request is built, so
 /// there is no round for a grilling to open and no grilling picker on the page
@@ -2577,19 +2579,36 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         Err(refusal) => return Ok(refusal),
     };
 
+    // And which pull request this is, whichever way it was named. A pull request
+    // named outright is its own number; a branch's is whatever GitHub has open on
+    // it, which is a question a branch has to be asked as squarely as a number
+    // does — see [`opened_on`]. Neither is a number this Conversation may take up
+    // until the record has been asked about it.
+    let number = match &taking {
+        Target::PullRequest(held) => Some(held.number),
+        Target::Branch(branch) => match opened_on(state, &conversation, branch).await? {
+            Ok(number) => number,
+            Err(refusal) => return Ok(refusal),
+        },
+    };
+
     // And whether somebody is already on it. There is one Conversation per piece
     // of work, so a pull request another Conversation has on its record is a
     // refusal that leads there rather than a second wrap-up over the same
-    // branch. Asked of the record rather than of git, and asked before the
-    // fetch: it is a row, and it is the last thing that costs nothing.
+    // branch. Asked of the record rather than of git, and asked before the fetch:
+    // it is a row, and it is the last thing that costs nothing.
     //
-    // A branch is answered by git instead, a branch nobody has opened anything on
-    // being nowhere on the record: whoever is wrapping it up has it checked out,
-    // and [`settled`] refuses a branch that is checked out anywhere naming the
-    // place.
-    if let Target::PullRequest(held) = &taking
+    // **Asked of a branch too, and that is the whole of why the question above it
+    // is asked.** A branch is the other name for the same piece of work — the
+    // `submitting` session a branch take-up sends is told by its own skill that a
+    // pull request already on the branch *is the job done* — so a branch would
+    // otherwise be the way round this refusal rather than a case it does not
+    // cover. A Conversation that has finished with a pull request and been Closed
+    // has let go of its worktree and kept its branch, so [`settled`] has nothing
+    // to say about the one case that matters most.
+    if let Some(number) = number
         && let Some(other) =
-            store::conversation_on_pull_request(pool, conversation.repo.id, held.number).await?
+            store::conversation_on_pull_request(pool, conversation.repo.id, number).await?
         && other != id
     {
         return Ok(TakenUp::AlreadyHeld {
@@ -2937,6 +2956,57 @@ async fn resolve(
         head: found.head,
         base: found.base,
     })))
+}
+
+/// And which pull request GitHub has open on `branch`, where it has one.
+///
+/// [`resolve`]'s other half, over the other way a Review names its work. A
+/// number names a pull request and this asks what a *branch* names — because to
+/// the one-Conversation-per-piece-of-work rule they are the same question, and a
+/// branch that went unasked would be the way round a refusal rather than a case
+/// it did not cover: the `submitting` session a branch take-up sends is told by
+/// its own skill that a pull request already on the branch is the job done, so it
+/// would quietly make this Conversation the second wrap-up on somebody else's.
+///
+/// **`None` is a branch with nothing open on it**, which is the ordinary case and
+/// the one the whole bare-branch ending is for: there is nothing to check against
+/// the record, and nothing is owed but the pull request the take-up sends for.
+/// One that is closed or merged reads the same way, and rightly — what a branch
+/// like that is owed is a pull request of its own, which is what will be opened.
+///
+/// **A GitHub that cannot be asked refuses**, as it does over a number: it is not
+/// GitHub saying the branch is free, and this Conversation is being set going
+/// towards a `gh pr create` it would walk into the same wall with. The same
+/// reading [`settled`] takes of a git that will not answer, one door along.
+async fn opened_on(
+    state: &AppState,
+    conversation: &store::Conversation,
+    branch: &str,
+) -> Result<std::result::Result<Option<i64>, TakenUp>> {
+    // Off the runtime's threads, as [`resolve`]'s own call is: `gh` is a process.
+    let asked = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let repo = conversation.repo.path.clone();
+        let branch = branch.to_owned();
+
+        move || crate::github::pull_request(&gh, &repo, &branch)
+    })
+    .await?;
+
+    Ok(match asked {
+        Ok(opened) => Ok(Some(opened.number)),
+        Err(crate::github::Trouble::NoPullRequest) => Ok(None),
+        Err(trouble) => {
+            tracing::debug!(
+                conversation_id = conversation.id,
+                branch,
+                why = trouble.why(),
+                "a Review's branch could not be asked about through the host gh",
+            );
+
+            Err(TakenUp::GitHubRefused { why: trouble.why() })
+        }
+    })
 }
 
 /// What the branch being taken up is here, and what its tip comes to.

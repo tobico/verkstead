@@ -9555,9 +9555,14 @@ async fn taking_up_is_refused_by_name_when_the_fetch_fails() {
     nothing_taken_up(&app, id, &repo).await;
 }
 
-/// A `gh` that answers about a pull request by number out of a file in the Repo
-/// it is run in — `pr-41.json` for `#41`, and `gh`'s own way of saying there is
-/// nothing there where no such file was written.
+/// A `gh` that answers about a pull request out of a file in the Repo it is run
+/// in — `pr-41.json` for `#41`, `pr-rate-limiting.json` for that branch, and
+/// `gh`'s own way of saying there is nothing there where no such file was written.
+///
+/// Both selectors, because `gh pr view` takes both and a Review asks it both
+/// ways: a number for a Target that named one, and the branch for a Target that
+/// named a branch — see `opened_on`, which is what refuses a branch somebody else
+/// is already wrapping up.
 ///
 /// A stand-in for a program is a program, which is what keeps this off Windows;
 /// the `pull_requests` suite is off it for the same reason. `sh -c` gives `$0`
@@ -9599,6 +9604,10 @@ fn on_github(repo: &Path, number: i64, head: &str, base: &str, state: &str, fork
     });
 
     std::fs::write(repo.join(format!("pr-{number}.json")), said.to_string()).unwrap();
+
+    // And under the branch as well, which is the other selector `gh pr view`
+    // takes and the one a branch Target is asked with.
+    std::fs::write(repo.join(format!("pr-{head}.json")), said.to_string()).unwrap();
 }
 
 /// Everything a Review needs before the press: the Process picked, the Brief
@@ -9902,14 +9911,72 @@ async fn a_review_over_a_pull_request_another_conversation_holds_leads_there() {
     assert_eq!(opened(&app, second).await.worktree, None);
 }
 
+/// And so is a *branch* whose pull request another Conversation is on, which is
+/// the same refusal reached by the other name.
+///
+/// The one that matters most, because it is the one `settled` cannot catch: a
+/// Conversation that finished with a pull request and was Closed has let go of its
+/// worktree and kept its branch, so nothing is standing on the name — and the
+/// `submitting` session a branch take-up sends is told by its own skill that a
+/// pull request already on the branch is the job done. Unasked, naming the branch
+/// would be the way round this refusal rather than a case it does not cover.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_review_over_a_branch_another_conversation_has_a_pull_request_on_leads_there() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    // The first Conversation takes the pull request up by number and is closed,
+    // which is what leaves the branch standing with nobody on it: the worktree
+    // goes with the close and the record of the pull request does not.
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.
+", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    // And the second is pointed at the *branch*, which names the same piece of
+    // work without ever saying the number.
+    let second = started(&app, repo_id).await;
+    assert_eq!(
+        pick_process(&app, second, Process::Review).await,
+        ProcessPicked::Picked,
+    );
+    assert_eq!(
+        write_brief(&app, second, "Give the limiter branch a read.\n").await,
+        BriefSaved::Saved,
+    );
+    choose(&app, second, "implementation", implementation).await;
+    choose(&app, second, "review", review).await;
+    assert_eq!(
+        name_target(&app, second, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::AlreadyHeld {
+            conversation: first,
+        },
+        "the branch is the pull request, and the way on is the Conversation on it",
+    );
+    nothing_taken_up(&app, second, &repo).await;
+}
+
 /// A Review whose Target is a branch on origin lands Wrapping over that branch
 /// with no pull request recorded at all: the same take-up, the head at take-up as
 /// the base commit, and the base the picker holds as the branch it goes into.
 ///
 /// Which is the whole of what a bare branch changes about the press. The work is
-/// built and pushed and nobody opened anything, so there is nothing for GitHub to
-/// be asked and nothing to record — and the move into Wrapping is the take-up's
-/// own, recording a pull request being the door every other ending comes through.
+/// built and pushed and nobody opened anything, so GitHub has nothing to say
+/// about it beyond that — see `opened_on` — and there is nothing to record: the
+/// move into Wrapping is the take-up's own, recording a pull request being the
+/// door every other ending comes through.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_review_takes_up_a_branch_on_origin_with_no_pull_request() {
