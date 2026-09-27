@@ -3219,23 +3219,25 @@ Turns this askance clone into Verkstead.
     }
 
     /// Which is what keeps a stage currently mid-flight under Verkstead out of
-    /// the list. Its plan commit ticks the box and annotates the entry, and both
-    /// ride on the stage's own branch until its pull request merges — so the
+    /// the list. Everything the stage writes on its own line rides on its own
+    /// branch until its pull request merges — the annotation its plan commit puts
+    /// there, and the tick its finish commit puts there later — so the
     /// default-tip read sees a roadmap that still has stage 03 open, and the
     /// branch is the only thing saying otherwise.
     #[test]
-    fn a_plan_commit_that_has_not_reached_the_default_branch_is_invisible() {
+    fn what_a_stage_wrote_on_its_own_branch_is_invisible_at_the_default_tip() {
         let repo = Repo::with(&[("mvp", MVP)]);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
 
         // The stage starts: a branch at its own name, and a plan commit on it
-        // ticking the box and saying whose it is.
+        // saying whose the stage is. Its box stays unticked until its own finish
+        // commit, which rides on this branch too.
         repo.write(
             "mvp",
             &MVP.replace(
                 "- [ ] 03: Implementation — [brief](03-implementation.md)",
-                "- [x] 03: Implementation — [brief](03-implementation.md) \
+                "- [ ] 03: Implementation — [brief](03-implementation.md) \
                  *(in progress: `implementation`)*",
             ),
         );
@@ -3247,7 +3249,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(
             at(repo.path(), &repo.tip(), "docs/roadmaps/mvp/ROADMAP.md",),
             Some(MVP.to_owned()),
-            "the default branch has none of the plan commit",
+            "the default branch has none of what the stage wrote",
         );
         assert!(
             repo.abandoned().is_empty(),
