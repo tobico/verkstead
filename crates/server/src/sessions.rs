@@ -23,6 +23,7 @@
 //! reading back a live one out of a database.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -2042,6 +2043,59 @@ impl Sessions {
             .as_ref()
             .map(|agents| agents.pace)
             .unwrap_or_default()
+    }
+
+    /// The environment a session of `conversation_id` would run a program in,
+    /// as far as one that reads a home and a `PATH` can tell.
+    ///
+    /// What it is for is the one question the host cannot answer on a session's
+    /// behalf: whether a `gh` extension is installed. An extension is a
+    /// directory inside the home `gh` is run under, and a session's home is
+    /// Verkstead's own rather than whoever started the server — so the answer
+    /// has to be asked under that home or it is an answer about somebody else.
+    /// See [`crate::github::Gh::extension`], which is the one caller.
+    ///
+    /// **Both halves are the ones a sandbox is built with** rather than read
+    /// again beside it: the home is [`Homes::for_conversation`]'s, which is the
+    /// directory the sandbox makes `~`, and the `PATH` is
+    /// [`sandbox::machine_path`], which is the half of a session's own that a
+    /// human installs anything into — the other half being Verkstead's own
+    /// directory, which holds one file and is a path inside the sandbox rather
+    /// than one on the host. Which is the same list the onboarding probes
+    /// resolve a program on, and for the same reason.
+    ///
+    /// The profile's other names on the platform that has them, because there
+    /// `gh` keeps its extensions under `LOCALAPPDATA` rather than under the
+    /// home itself — see [`sandbox::windows_names`].
+    ///
+    /// `None` where this server runs no session at all, which is a server with
+    /// no home to hand one.
+    pub(crate) fn session_environment(
+        &self,
+        conversation_id: i64,
+    ) -> Option<Vec<(String, OsString)>> {
+        let agents = self.agents.as_ref()?;
+        let platform = agents.homes.platform();
+        let home = agents
+            .homes
+            .for_conversation(conversation_id)
+            .path()
+            .to_owned();
+
+        let mut named = vec![("PATH".to_owned(), sandbox::machine_path(platform))];
+
+        match platform {
+            Platform::Linux | Platform::MacOs => {
+                named.push(("HOME".to_owned(), home.into_os_string()));
+            }
+            Platform::Windows => named.extend(
+                sandbox::windows_names(&home)
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value)),
+            ),
+        }
+
+        Some(named)
     }
 
     /// Whether a session's Rust build would have its *compiling* cached and not

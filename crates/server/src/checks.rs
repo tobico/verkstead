@@ -91,6 +91,20 @@
 //! instead, in the settings file, and then the session is told to rebase and
 //! force-push with a lease. See [`resolve`] and [`resolving`].
 //!
+//! **A stack gets one session for the whole of it**, and that is the one place
+//! the strategy is not read. A Fix Merge Issues Conversation walks GitHub's
+//! chain at Start and records every pull request of it — see [`crate::stacks`]
+//! — and a fix low in a stack moves every branch above it, so a conflict
+//! anywhere in one dispatches a single session told the ordered branches from
+//! the bottom and told to sync them with `gh stack sync`. The goes are counted
+//! per stack without anything new being counted, the conflict's count being
+//! kept against the Conversation and the Repo already. And because that
+//! extension is a separate install of a `gh` running under a home of
+//! Verkstead's own, it is asked for in the environment a session gets *before*
+//! a go is spent on one: a Sandbox without it stops the run with a Notice
+//! naming it, and the checks and the merge go on being read and written down
+//! either way. See [`syncing`], [`unsyncable`] and [`crate::stacks::missing`].
+//!
 //! A conflict is the whole of what such a poll *dispatches*. A branch nothing
 //! can land is not a branch worth getting a check green on, and the resolution's
 //! own push is what puts the suite in front of the next poll anyway. The suite
@@ -1170,6 +1184,22 @@ async fn merging(
 /// nobody has looked at since. Coming back in half a minute costs nothing and
 /// asks GitHub afresh — and nothing is counted for a poll that could not get in,
 /// the count being of sessions dispatched rather than of conflicts seen.
+///
+/// **And one session for a stack rather than one per pull request of it.** A
+/// Conversation that walked a chain holds several pull requests in the one
+/// repository — see [`crate::stacks`] — and a fix low in a stack moves every
+/// branch above it, so what is sent is one session told the whole ordered list
+/// from the bottom and told to sync it with `gh stack sync`. Whatever the
+/// configured strategy says: a stack is gh-stack's, and merging a base into
+/// each branch of one is what that extension's own documentation warns against.
+/// The count needs nothing new for it — [`store::conflict_fix_attempts`] is
+/// kept against the Conversation and the Repo, which for a stack is per stack —
+/// and a lone pull request is the paragraph above, unchanged. See [`syncing`].
+///
+/// **What syncs it is asked for before a go is spent**, the extension being a
+/// separate install: a Sandbox without it stops the run here rather than in the
+/// failure of a session that could not do what it was told. See
+/// [`crate::stacks::missing`] and [`unsyncable`].
 async fn resolve(
     state: &AppState,
     conversation_id: i64,
@@ -1215,9 +1245,39 @@ async fn resolve(
         return Watching::Again(writing);
     };
 
+    // Which pull requests of this repository the Conversation holds, in order
+    // from the bottom — one where nothing was walked, and the chain where one
+    // was. Read under the Turn rather than before it, so that a poll which
+    // could not get in costs neither this query nor the run below it.
+    let stack = match store::stack(&state.pool, conversation_id, watched.repo.id).await {
+        Ok(stack) => stack,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "reading the stack a conflicting pull request is one of failed");
+            return Watching::Again(writing);
+        }
+    };
+
+    // What the session is told, which is where the two part company — and, for
+    // a stack, the one thing asked of the machine before a go is spent on it.
+    let told = match chained(&stack) {
+        Some(branches) => match crate::stacks::missing(state, conversation_id).await {
+            Some(why) => return unsyncable(state, conversation_id, watched, &why, writing).await,
+            None => syncing(watched, &stack, &branches),
+        },
+        // Read as the session is dispatched rather than held from anywhere: the
+        // settings file is read every time it is asked for, and a resolution
+        // configured a minute ago is what the next conflict is resolved by.
+        //
+        // Here rather than on a blocking thread: it is one small file, and this
+        // is the moment a conflict was found rather than anything on the poll's
+        // hot path.
+        None => resolving(watched, state.settings.config().conflict_resolution()),
+    };
+
     // Counted as the session is dispatched rather than as it ends, so that an
     // attempt spent by a server that then restarted is one the next server does
-    // not spend again.
+    // not spend again. After the extension above and not before it: a Sandbox
+    // that cannot sync a stack spends nothing at all.
     if let Err(error) =
         store::record_conflict_fix_attempt(&state.pool, conversation_id, watched.repo.id).await
     {
@@ -1225,27 +1285,68 @@ async fn resolve(
         return Watching::Again(writing);
     }
 
-    // Read as the session is dispatched rather than held from anywhere: the
-    // settings file is read every time it is asked for, and a resolution
-    // configured a minute ago is what the next conflict is resolved by.
-    //
-    // Here rather than on a blocking thread: it is one small file, and this is
-    // the moment a conflict was found rather than anything on the poll's hot
-    // path.
-    let resolution = state.settings.config().conflict_resolution();
-
     tracing::info!(
         conversation_id,
         repo = watched.repo.name,
         number = watched.number,
-        resolution = ?resolution,
+        deep = stack.len(),
         "the pull request will not merge, so a session is starting on the conflict",
     );
 
-    let said =
-        crate::runner::address(state, conversation_id, &resolving(watched, resolution)).await;
+    let said = crate::runner::address(state, conversation_id, &told).await;
 
     Watching::Again(said.or(writing))
+}
+
+/// Stop asking the machine about a stack nothing here can sync, and say so on
+/// the Timeline.
+///
+/// [`unmergeable`]'s twin and its opposite in one respect: that one is written
+/// once the machine has had its goes, and this one before it has had any. What
+/// is missing is the extension rather than a resolution, and no number of
+/// sessions would find it — so the goes are left where they are and the human
+/// is asked straight away.
+///
+/// **The Notice names the extension and the command that installs it.** A stop
+/// saying only that something did not work would be one somebody had to open a
+/// terminal to understand; what this is for is the human reading the one line
+/// and knowing the one thing to run. See [`crate::stacks::INSTALL`].
+async fn unsyncable(
+    state: &AppState,
+    conversation_id: i64,
+    watched: &Watched,
+    why: &str,
+    writing: Option<i64>,
+) -> Watching {
+    let how = format!(
+        "{} is one of a stack, and a stack is synced with the `gh {extension}` extension \
+         rather than merged into branch by branch — which a session here cannot run: \
+         {why}. Install it with `{install}` and Resume. Nothing has been spent on the \
+         conflict: the goes are still there once the extension is.",
+        named(watched),
+        extension = crate::stacks::EXTENSION,
+        install = crate::stacks::INSTALL,
+    );
+
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        &format!("syncing the stack {} is one of", named(watched)),
+        &how,
+        writing,
+    )
+    .await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "the stack could not be synced and the stop saying so could not be recorded"
+        );
+    }
+
+    Watching::Done("the stack cannot be synced here, so the human is being asked")
 }
 
 /// Stop asking the machine about a pull request that will not merge, and say so
@@ -1333,6 +1434,100 @@ fn resolving(watched: &Watched, resolution: store::ConflictResolution) -> String
          meant.",
         named(watched),
         watched.worktree.display(),
+    )
+}
+
+/// The branches of `stack` from the bottom, where it is a stack whose branches
+/// are all on the record — and `None` where it is not one.
+///
+/// Two things are being asked at once, and they are one question: whether there
+/// is more than one pull request here, and whether every one of them says which
+/// branch it is on. A session told to sync a stack is told it as a list of
+/// branches, so a chain with a row that never recorded its head is one nothing
+/// could be told to sync — and that is a row written before Verkstead wrote
+/// heads down, which is to say before there were stacks at all. It falls back
+/// on the configured strategy, which is what such a Conversation has always
+/// had.
+///
+/// The order is [`store::stack`]'s, which is the chain read off the rows: the
+/// bottom first, because that is the end a sync works from and the end a human
+/// reads a stack from.
+fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
+    if stack.len() < 2 {
+        return None;
+    }
+
+    let branches: Vec<&str> = stack
+        .iter()
+        .filter_map(|opened| opened.head.as_deref())
+        .collect();
+
+    (branches.len() == stack.len()).then_some(branches)
+}
+
+/// What a session sent at a **stack** is told: which pull request will not
+/// merge, which chain it is one of, where to work, and to sync the whole thing.
+///
+/// [`resolving`]'s twin, and what it says instead of a strategy is the one
+/// thing the strategy cannot say. A stack is a chain of branches each based on
+/// the one under it, and a fix low in one moves every branch above it — so
+/// merging a base into each branch in turn is not the same act done several
+/// times, it is the act `gh stack`'s own documentation warns against. The
+/// extension cascades the rebase and force-pushes the chain atomically, which
+/// is why what the session is told is the extension rather than git.
+///
+/// **The registry is per worktree**, and this Conversation's was made minutes
+/// ago by the take-up, so there may be nothing in it: the session is told to
+/// adopt the chain with `gh stack init` where `gh stack view` finds none. The
+/// branches are named in order from the bottom, which is the order `init`
+/// wants and the order a human checks it against.
+///
+/// **And what the sync backs out on is the session's to resolve.** `gh stack
+/// sync` refuses rather than half-rebases when a branch conflicts, and `gh
+/// stack rebase` is the verb that stops in it — so the session is told both,
+/// and told that the resolution is the point rather than the sync succeeding.
+///
+/// Where to work for [`feedback`]'s reason, and named the same way whichever
+/// repository it is. Every branch of the stack is a branch of *this*
+/// repository — that is what the walk refuses a fork for — so they are all
+/// reached through the one Worktree.
+fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -> String {
+    let listed: Vec<String> = stack
+        .iter()
+        .map(|opened| match opened.head.as_deref() {
+            Some(head) => format!("#{} (`{head}`)", opened.number),
+            None => format!("#{}", opened.number),
+        })
+        .collect();
+
+    format!(
+        "GitHub cannot merge {} into its base branch, and it is one of a stack of {deep} \
+         pull requests in that repository — from the bottom: {listed}. A fix low in a stack \
+         moves every branch above it, so the whole chain is yours to put right rather than \
+         the one pull request.\n\n\
+         Work in that repository's worktree, at `{worktree}` — `git` and `gh` both read the \
+         repository from wherever they are run, and every branch of this stack is in that \
+         one repository, so the whole job is done in that one directory.\n\n\
+         Sync the stack with the `gh {extension}` extension rather than merging or rebasing \
+         by hand: it cascade-rebases each branch onto its updated parent and force-pushes \
+         them atomically, which is what keeps the chain a chain. Its registry is kept per \
+         worktree and this worktree is new, so run `gh stack view` first and, where it \
+         knows of no stack, adopt the chain with `gh stack init {init}` — the branches in \
+         that order, bottom first.\n\n\
+         Then `gh stack sync`. Where it reports a conflict it backs out rather than leaving \
+         a branch half-rebased, and `gh stack rebase` is what walks the chain again and \
+         stops in the conflict for you to resolve. Resolving it is the job: a conflict is \
+         two changes to reconcile, and taking one side's hunk wholesale throws away work \
+         somebody did. Then run the repository's tests over the top branch, and make sure \
+         every branch of the stack is pushed before you finish — the sync force-pushes \
+         them, which is what a stack is rebased and re-linked by, and is the one place \
+         force-pushing is what was asked for.",
+        named(watched),
+        deep = stack.len(),
+        listed = listed.join(", "),
+        worktree = watched.worktree.display(),
+        extension = crate::stacks::EXTENSION,
+        init = branches.join(" "),
     )
 }
 
@@ -1610,6 +1805,115 @@ mod tests {
             told.contains("two changes to reconcile"),
             "and neither side is the one to keep, which is the same either way: \
              {told}",
+        );
+    }
+
+    /// One recorded pull request of a chain, as [`store::stack`] hands it back.
+    fn link(number: i64, head: &str, base: &str) -> store::PullRequest {
+        store::PullRequest {
+            number,
+            title: format!("Stage {number}"),
+            url: format!("https://github.com/tobico/askance/pull/{number}"),
+            head: Some(head.to_owned()),
+            base: Some(base.to_owned()),
+            repo: None,
+        }
+    }
+
+    /// A stack is more than one pull request with a branch on every row, and
+    /// the branches come back in the order the rows were in — which is from the
+    /// bottom.
+    #[test]
+    fn a_stack_is_every_branch_of_it_from_the_bottom() {
+        let stack = [
+            link(5, "stage-01", "main"),
+            link(6, "stage-02", "stage-01"),
+            link(7, "rate-limiting", "stage-02"),
+        ];
+
+        assert_eq!(
+            chained(&stack),
+            Some(vec!["stage-01", "stage-02", "rate-limiting"]),
+        );
+    }
+
+    /// A lone pull request is not a stack, and neither is a chain a row of
+    /// which never recorded the branch it is on.
+    ///
+    /// The second is a row written before there were stacks. What a session is
+    /// told to sync is a list of branches, so a chain that cannot be written
+    /// out as one is a conflict for the configured strategy rather than for the
+    /// extension.
+    #[test]
+    fn a_lone_pull_request_and_a_chain_missing_a_branch_are_not_stacks() {
+        assert_eq!(chained(&[link(7, "rate-limiting", "main")]), None);
+
+        let forgotten = [
+            store::PullRequest {
+                head: None,
+                ..link(5, "stage-01", "main")
+            },
+            link(7, "rate-limiting", "stage-01"),
+        ];
+
+        assert_eq!(chained(&forgotten), None);
+    }
+
+    /// What a session sent at a stack is told: which pull request will not
+    /// merge, the whole chain from the bottom, the worktree all of it is
+    /// reached through, and the extension that syncs it rather than a strategy.
+    #[test]
+    fn a_stack_session_is_told_the_chain_and_to_sync_it() {
+        let stack = [
+            link(5, "stage-01", "main"),
+            link(6, "stage-02", "stage-01"),
+            link(7, "rate-limiting", "stage-02"),
+        ];
+        let branches = chained(&stack).expect("three pull requests, each with a branch");
+        let told = syncing(&watched(), &stack, &branches);
+
+        assert!(
+            told.contains("#7") && told.contains("askance"),
+            "which pull request, in which repository: {told}",
+        );
+        assert!(
+            told.contains("stack of 3")
+                && told.contains("#5 (`stage-01`)")
+                && told.contains("#6 (`stage-02`)")
+                && told.contains("#7 (`rate-limiting`)"),
+            "and the whole chain, from the bottom: {told}",
+        );
+        assert!(
+            told.contains("/state/worktrees/rate-limiting-askance"),
+            "and the one worktree every branch of it is reached through: {told}",
+        );
+        assert!(
+            told.contains("gh stack sync"),
+            "synced rather than merged into branch by branch: {told}",
+        );
+        assert!(
+            told.contains("gh stack init stage-01 stage-02 rate-limiting"),
+            "adopted first where the worktree's registry is empty, bottom branch \
+             first: {told}",
+        );
+        assert!(
+            told.contains("gh stack rebase"),
+            "and the verb that stops in what the sync backed out on: {told}",
+        );
+        assert!(
+            told.contains("two changes to reconcile"),
+            "resolved rather than taken one side of, as every conflict here is: \
+             {told}",
+        );
+        assert!(
+            told.contains("tests") && told.contains("pushed"),
+            "and the suite run and the chain pushed before it is finished: {told}",
+        );
+        assert!(
+            !told.contains("Merge the pull request's base branch")
+                && !told.contains("Rebase the branch"),
+            "and nothing of the configured strategy, which a stack is not resolved \
+             by: {told}",
         );
     }
 

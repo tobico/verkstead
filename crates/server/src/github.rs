@@ -9,6 +9,14 @@
 //! And the few things it *writes*: a share's gist, a comment on a pull request,
 //! and the repository half of a create — see [`create_repository`].
 //!
+//! **One thing here is about a session's `gh` after all**, and it is the one
+//! question the host's cannot answer: whether a `gh` extension is installed.
+//! The program is the same file either way — both are resolved off the
+//! machine's own `PATH` — but an extension lives inside the home `gh` is run
+//! under, and a session's home is Verkstead's own. So that one is asked under
+//! the home a session gets rather than under this process's. See
+//! [`Gh::extension`].
+//!
 //! It authenticates as the configured token — the one in `secrets.yaml` that
 //! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
 //! environment of the call. The file is read at the moment of the call rather
@@ -32,6 +40,7 @@
 //! the real GitHub would be a test that needed a network, an account and a
 //! repository with a pull request on it.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -245,6 +254,79 @@ impl Gh {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// Whether the `gh` extension `name` is there to be run, asked by running
+    /// it — `Ok(())` where it answered, and the reason where it did not.
+    ///
+    /// **The one thing here that is about a session's `gh` rather than the
+    /// server's.** The program is the same file either way, both being resolved
+    /// off the machine's own `PATH`; what differs is the home it is run under,
+    /// and an extension is a directory *inside* that home. So the host having
+    /// one says nothing whatever about what a session would find, and the only
+    /// honest way to ask is to ask under the home a session gets — which is
+    /// what `environment` carries, composed where a session's own is. See
+    /// [`crate::sessions::Sessions::session_environment`].
+    ///
+    /// The environment is therefore emptied first rather than added to: one
+    /// that inherited this process's would be answering for the server's home
+    /// and reporting it as a session's, which is the whole mistake this exists
+    /// to avoid. The same reading the same way round as the server makes of its
+    /// own image before it equips anybody with it — see
+    /// [`crate::sandbox::Executable::probed`].
+    ///
+    /// `--help` is the verb, because it is the one that reaches for nothing: an
+    /// extension prints its own usage without opening a socket or reading a
+    /// repository, so a non-zero exit says the extension is not there rather
+    /// than that something it wanted was not. Which is also the test
+    /// `docs/agents/git-workflow.md` tells a human to install by.
+    ///
+    /// Blocking, like everything else here that shells out.
+    pub(crate) fn extension(
+        &self,
+        name: &str,
+        environment: &[(String, OsString)],
+    ) -> Result<(), Trouble> {
+        let (program, before) = self
+            .program
+            .split_first()
+            .expect("a Gh is built with at least the program to run");
+
+        let mut command = Command::new(program);
+
+        command
+            .args(before)
+            .args([name, "--help"])
+            .env_clear()
+            .unseen()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+
+        // And the token, for the reason every other call here gets one: what a
+        // `gh` with nothing configured falls back on is the host's own login,
+        // and an extension asked as nobody is one that may refuse for a reason
+        // that has nothing to do with being installed.
+        if let Some(token) = self.token() {
+            command.env("GH_TOKEN", token);
+        }
+
+        let output = match command.output() {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Trouble::NoGh);
+            }
+            Err(error) => return Err(Trouble::Refused(error.to_string())),
+        };
+
+        match output.status.success() {
+            true => Ok(()),
+            false => Err(Trouble::read(&String::from_utf8_lossy(&output.stderr))),
+        }
     }
 }
 

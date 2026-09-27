@@ -2438,12 +2438,13 @@ mod tests {
         );
     }
 
-    /// One skill for four callers is the whole reason it is one skill, so it
-    /// has to name all four: a failed check, a review finding, a comment on the
-    /// pull request and a conflict with its base are one job, and four skills
-    /// saying it would be four things to keep true.
+    /// One skill for five callers is the whole reason it is one skill, so it
+    /// has to name all five: a failed check, a review finding, a comment on the
+    /// pull request, a conflict with its base and a stack that will not sync
+    /// are one job, and five skills saying it would be five things to keep
+    /// true.
     #[test]
-    fn the_addressing_skill_is_written_for_all_four_kinds_of_feedback() {
+    fn the_addressing_skill_is_written_for_all_five_kinds_of_feedback() {
         let addressing = skill("addressing/SKILL.md");
 
         for named in [
@@ -2451,12 +2452,43 @@ mod tests {
             "finding from the review",
             "comment",
             "merge conflict",
+            "stack that will not sync",
         ] {
             assert!(
                 addressing.contains(named),
                 "the skill should say it serves a {named}: {addressing}"
             );
         }
+    }
+
+    /// And the one thing the fifth kind needs said that the other four say the
+    /// opposite of: a stack session works every branch of the chain and its
+    /// sync force-pushes each of them.
+    ///
+    /// The skill tells a session to touch no branch beyond the one it was sent
+    /// to and never to force-push one it merged into, and both of those are
+    /// true of the other four and false of this one. A skill that left them
+    /// standing unqualified would be one arguing with the feedback Verkstead
+    /// sends at a stack — and the way that argument ends is a session that runs
+    /// `gh stack sync` and then tries to undo what it did.
+    #[test]
+    fn the_addressing_skill_says_a_stack_is_every_branch_of_it() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("gh stack sync"),
+            "the verb that syncs a stack is named: {addressing}"
+        );
+        assert!(
+            addressing.contains("a stack's feedback sent you to all of them"),
+            "and the one branch it was sent to is every branch of the stack: \
+             {addressing}"
+        );
+        assert!(
+            addressing.contains("force-pushing branches you did not start on is what was"),
+            "and the force-push the sync makes is what was asked for rather than \
+             the thing never to do: {addressing}"
+        );
     }
 
     /// What a resolution session must not do, and it is the one failure mode

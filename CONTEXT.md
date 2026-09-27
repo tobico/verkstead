@@ -2468,8 +2468,23 @@ above: a **Fix Merge Issues** Conversation may hold a whole stack of pull
 requests in one repository, and a conflict anywhere in it sends one session told
 the ordered list from the bottom — a fix low in a stack changing everything
 above it — with the goes counted per stack rather than per pull request, and `gh
-stack sync` doing the work whatever the resolution strategy says. Every other
-Conversation holds one pull request per repository and is the paragraph above.
+stack sync` doing the work whatever the resolution strategy says. What that
+session is told is the chain, the one worktree every branch of it is reached
+through, `gh stack init` over those branches where the worktree holds no
+registry of its own, `gh stack sync`, and `gh stack rebase` for whatever the
+sync backs out on — then the repository's tests, and every branch pushed. Every
+other Conversation holds one pull request per repository and is the paragraph
+above.
+
+**And the extension is asked for before anything is sent at a stack.** `gh
+stack` is a separate install and a session's `gh` runs under a home of
+Verkstead's own, so the host having it says nothing about what a session would
+find: it is asked by running it in the environment a session gets, and a
+Sandbox without it stops the run with a Notice naming the extension and the one
+command that installs it — before a go is spent, rather than after two sessions
+have failed at their first command. Nothing else about the wrap-up stops with
+it: the checks and the merge are read and written down on that same poll, so
+what the human comes back to says where the stack had got to.
 
 **And it goes on being asked after Done.** A wrap-up's watchers stop when the
 Conversation reaches Done, and the pull request goes on sitting there waiting to

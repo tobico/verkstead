@@ -8123,6 +8123,72 @@ async fn until_standing(fixture: &Grilling, said: verkstead_server::store::Stand
     }
 }
 
+/// Whether the wrap-up has settled `waiting` about the pull request numbered
+/// `number` in this Conversation's own Repo.
+///
+/// [`checks_settled`] and [`merge_settled`] read the one the Conversation was
+/// pointed at, which is what every Conversation but a stacked one has. A
+/// Conversation that walked a chain holds three in that repository, each
+/// settled on its own, and this is how the other two are read.
+async fn settled_about(
+    fixture: &Grilling,
+    number: i64,
+    waiting: fn(i64, i64) -> verkstead_server::store::WaitingOn,
+) -> bool {
+    let repo_id = own_repo(fixture).await;
+
+    settled(fixture, waiting(repo_id, number)).await
+}
+
+/// And what Verkstead has written down about whether that one merges.
+async fn merging_about(
+    fixture: &Grilling,
+    number: i64,
+) -> Option<verkstead_server::store::Merging> {
+    let repo = own_repo(fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    let merging = verkstead_server::store::merging(&pool, fixture.id, repo, number)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    merging
+}
+
+/// Every pull request this Conversation has recorded in its own Repo, in stack
+/// order — waited for until the walk has recorded `deep` of them.
+///
+/// Waited for rather than read once, for the reason every other read of a
+/// running wrap-up is: the walk runs a `gh` call or two behind the press, and a
+/// test that read the record at the press would be reading it before there was
+/// a chain on it.
+async fn until_stacked(fixture: &Grilling, deep: usize) -> Vec<i64> {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let repo = own_repo(fixture).await;
+        let pool = open_database(&fixture.database).await.unwrap();
+        let recorded: Vec<i64> = verkstead_server::store::stack(&pool, fixture.id, repo)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|opened| opened.number)
+            .collect();
+        pool.close().await;
+
+        if recorded.len() >= deep {
+            return recorded;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "only {recorded:?} of a stack of {deep} was ever walked",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// And how many resolution sessions it has counted against the conflict on that
 /// same pull request.
 ///
@@ -22194,6 +22260,379 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
         notices_since_the_take_up(&view).is_empty(),
         "and nothing stopped anywhere along the way: {:?}",
         notices_since_the_take_up(&view),
+    );
+}
+
+/// A `gh` whose repository holds a three-deep stack and whose **bottom** pull
+/// request will not merge, which is the shape a conflict in a stack really has:
+/// the base moves under the branch everything above it is built on.
+///
+/// `#40` on `stage-01` into `main`, `#41` on `rate-limiting` into `stage-01` —
+/// the one the Conversation is pointed at — and `#42` on `stage-03` into
+/// `rate-limiting`. Every suite green from the first poll, so the merge is the
+/// whole of what this wrap-up is waiting on, and the two above the conflict
+/// merge clean throughout: the point of a stack session is that the chain is
+/// fixed from the bottom rather than one pull request at a time.
+///
+/// `resolved` is the file a resolution session writes, which is where the
+/// bottom stops conflicting — a path nothing writes is a conflict nothing
+/// resolves. `installed` is whether `gh stack --help` answers, which is what
+/// Verkstead asks in the environment a session gets before it sends anything at
+/// a stack at all.
+fn gh_stacked_and_conflicting(resolved: &Path, installed: bool) -> String {
+    let extension = match installed {
+        true => "if [ \"$1\" = stack ]; then exit 0; fi",
+        false => {
+            "if [ \"$1\" = stack ]; then \
+             printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1; fi"
+        }
+    };
+
+    format!(
+        r#"
+{extension}
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then
+    printf '[{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false}},'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false}},'
+    printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false}}]'
+    exit 0
+fi
+if [ -e {resolved} ]; then bottom=MERGEABLE; else bottom=CONFLICTING; fi
+case "$5" in
+*statusCheckRollup*)
+    if [ "$3" = 40 ]; then merges="$bottom"; else merges=MERGEABLE; fi
+    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges"
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    case "$3" in
+    40)
+        printf '{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
+        ;;
+    42)
+        printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false,"state":"OPEN"}}'
+        ;;
+    *)
+        printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false,"state":"OPEN"}}'
+        ;;
+    esac
+    ;;
+esac
+"#,
+        resolved = quoted(resolved),
+    )
+}
+
+/// A conflict low in a three-deep stack sends **one** `addressing` session,
+/// told the whole ordered chain from the bottom and told to sync it — and
+/// nothing else is dispatched beside it.
+///
+/// Which is the whole of what a stack changes about the dispatch. A fix low in
+/// a stack moves every branch above it, so one session per conflicting pull
+/// request would be two more sessions working branches the first one had
+/// already rewritten — and merging the base into each branch of a chain is what
+/// `gh stack`'s own documentation warns against. So the configured strategy is
+/// not read at all here: the session is told the branches, told to adopt them
+/// where this worktree's registry is empty, and told to sync.
+///
+/// The conflict is on the **bottom** deliberately: it is the pull request the
+/// Conversation was *not* pointed at, so nothing about this would have happened
+/// at all before the chain was walked and recorded.
+#[tokio::test]
+async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let released = spill.path().join("released");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_conflict_and_nothing_beside_it(
+            &reviews,
+            &batches,
+            &dispatched,
+            Some(&released),
+            &resolved,
+        ),
+        &gh_stacked_and_conflicting(&resolved, true),
+    )
+    .await;
+
+    assert_eq!(
+        until_stacked(&fixture, 3).await,
+        [40, 41, 42],
+        "the chain was walked both ways from #41 and recorded from the bottom",
+    );
+
+    // The one session in the Worktree with its go spent and nothing committed
+    // yet, which is the conflicted stack standing still.
+    let told = until_written_by(&dispatched, 1).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "nothing lands over a conflict at the bottom of a stack",
+    );
+    assert!(
+        settled_about(&fixture, 40, |repo_id, number| {
+            verkstead_server::store::WaitingOn::Checks { repo_id, number }
+        })
+        .await,
+        "the conflicting pull request's own suite is green and settled — the two \
+         are different facts about the same branch",
+    );
+    assert!(
+        !settled_about(&fixture, 40, |repo_id, number| {
+            verkstead_server::store::WaitingOn::Mergeable { repo_id, number }
+        })
+        .await,
+        "and the conflict is what the whole wrap-up is waiting on",
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        1,
+        "one go, counted against the stack as the session was dispatched",
+    );
+
+    let worktree = view.worktree.clone().expect("the work is checked out").path;
+    let prompt = prompts(&told)[0];
+
+    assert!(
+        prompt.contains("addressing/SKILL.md") && prompt.contains("model=claude-implementation-5"),
+        "the same dispatch a lone conflict gets, under the one Pairing this \
+         Process waits on: {prompt}",
+    );
+    assert!(
+        prompt.contains("#40") && prompt.contains("verkstead"),
+        "told which pull request will not merge, in which repository: {prompt}",
+    );
+    assert!(
+        prompt.contains("stack of 3")
+            && prompt.contains("#40 (`stage-01`)")
+            && prompt.contains("#41 (`rate-limiting`)")
+            && prompt.contains("#42 (`stage-03`)"),
+        "and the whole chain it is one of, from the bottom: {prompt}",
+    );
+    assert!(
+        prompt.contains(&worktree),
+        "and the one worktree every branch of it is reached through, {worktree}: \
+         {prompt}",
+    );
+    assert!(
+        prompt.contains("gh stack sync")
+            && prompt.contains("gh stack init stage-01 rate-limiting stage-03"),
+        "told to adopt the chain where this worktree has no registry and then to \
+         sync it: {prompt}",
+    );
+    assert!(
+        !prompt.contains("Merge the pull request's base branch"),
+        "and nothing of the configured strategy, which a stack is not resolved \
+         by: {prompt}",
+    );
+
+    // And nothing else was dispatched beside it — not a second resolution for
+    // either of the other two, and neither of the two sessions this Process
+    // never runs.
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "no review and no batch session: {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "and nothing stopped over it: the stack has a go left, and this is it: \
+         {:?}",
+        notices_since_the_take_up(&view),
+    );
+
+    // The session lets go, which is the sync landing as far as the `gh` beside
+    // it is concerned — and the wrap-up carries the whole chain to Done.
+    std::fs::write(&released, "x").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "every pull request of the stack merges, which is the last of what this \
+         wrap-up waits on",
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&dispatched).unwrap()).len(),
+        1,
+        "and one session was the whole of it: one conflict in a stack is one \
+         dispatch, however deep the stack",
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// Two goes at a stack and then the human, the count being the stack's rather
+/// than any one pull request's.
+///
+/// One resolution is one act over the whole chain, so the goes are counted by
+/// the repository — which for a Conversation holding a stack is per stack, and
+/// needs nothing new counted. After the second the run stops, and the Notice
+/// names the pull request left conflicting rather than the stack in general: a
+/// human reading it has to know which link of the chain to go and look at.
+///
+/// A third poll dispatches nothing. The stack's goes are spent, and there is no
+/// other pull request owed one for the stop to wait on.
+#[tokio::test]
+async fn two_goes_at_a_stack_and_then_the_human() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    // The session writes here and the `gh` beside it watches somewhere else, so
+    // every sync it makes leaves the bottom of the stack exactly as conflicted
+    // as it was — which is a stack the machine cannot fix.
+    let claimed = spill.path().join("claimed-resolved");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &claimed),
+        &gh_stacked_and_conflicting(&resolved, true),
+    )
+    .await;
+
+    assert_eq!(until_stacked(&fixture, 3).await, [40, 41, 42]);
+
+    let stopped = fixture
+        .until(|view| notices_since_the_take_up(view).into_iter().next_back())
+        .await;
+
+    assert!(
+        stopped.contains("conflict"),
+        "what stopped it is the merge nothing could make clean: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("#40") && stopped.contains("verkstead"),
+        "and the Notice names the pull request left conflicting rather than the \
+         stack in general: {stopped:?}",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "every session the stack was allowed has been spent",
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        2,
+        "two goes at the stack and no more",
+    );
+
+    // Long enough for many more polls, had anything still been dispatching.
+    pause(Duration::from_millis(500)).await;
+
+    let told = std::fs::read_to_string(&dispatched).unwrap();
+
+    assert_eq!(
+        prompts(&told).len(),
+        2,
+        "the run does not go round again once it has stopped: {told}",
+    );
+    assert!(
+        prompts(&told)
+            .iter()
+            .all(|prompt| prompt.contains("gh stack sync")),
+        "and both of them were the stack's own session: {told}",
+    );
+}
+
+/// And a Sandbox whose `gh` has no `stack` extension stops before it spends
+/// anything, with the Notice naming the extension and the command that installs
+/// it.
+///
+/// The extension is a separate install and a session's `gh` runs under a home
+/// of Verkstead's own, so the host having it says nothing about what a session
+/// would find. Asking afterwards would mean two sessions failing at their first
+/// command and a stop that named a merge conflict — which is not what is wrong.
+///
+/// **And nothing else about the wrap-up stops with it.** The checks and the
+/// merge are read and written down on the same poll, before anything is
+/// dispatched at all: what the human comes back to is a record that says
+/// exactly where the stack had got to.
+#[tokio::test]
+async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
+        &gh_stacked_and_conflicting(&resolved, false),
+    )
+    .await;
+
+    assert_eq!(until_stacked(&fixture, 3).await, [40, 41, 42]);
+
+    let stopped = fixture
+        .until(|view| notices_since_the_take_up(view).into_iter().next_back())
+        .await;
+
+    assert!(
+        stopped.contains("gh stack"),
+        "the Notice names the extension that is missing: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("gh extension install github/gh-stack"),
+        "and the one command that installs it: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("#40"),
+        "and which pull request it was about to be run for: {stopped:?}",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "Verkstead stopping rather than the human, as every stop it writes is",
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        0,
+        "and no go was spent on a session that could not have done what it was \
+         told",
+    );
+    assert!(
+        !dispatched.exists(),
+        "nothing was dispatched at all: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    // And the reading of GitHub went on being written down, which is what the
+    // human finds when they come back to it.
+    assert!(
+        settled_about(&fixture, 40, |repo_id, number| {
+            verkstead_server::store::WaitingOn::Checks { repo_id, number }
+        })
+        .await,
+        "the suite on the conflicting pull request is green and settled",
+    );
+    assert_eq!(
+        merging_about(&fixture, 40).await,
+        Some(verkstead_server::store::Merging::Conflicting),
+        "and the conflict itself is on the record rather than only in a Notice",
     );
 }
 

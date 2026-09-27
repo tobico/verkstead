@@ -40,10 +40,74 @@
 //! where *that* is recorded — the same walk, a few minutes later, with a note of
 //! its own because the take-up's was written before there was anything to walk
 //! from.
+//!
+//! **And what syncs a stack is asked for before anything is sent at one.** A
+//! conflict anywhere in a recorded stack dispatches one session told to run
+//! `gh stack sync` — see [`crate::checks::resolve`] — and that extension is a
+//! separate install of a `gh` running under a home of Verkstead's own. So it is
+//! asked for in the environment a session gets, and a Sandbox without it stops
+//! the run with a Notice naming it rather than spending the stack's goes on
+//! sessions that cannot do what they were told. See [`missing`].
 
 use crate::AppState;
 use crate::github::{self, Numbered};
 use crate::store;
+
+/// The `gh` extension a stack is synced with, as `gh` is asked for it and as
+/// the Timeline names it.
+///
+/// One word here because it is two things in one: the sub-command `gh` is asked
+/// to print the usage of, and the name a human reads off a Notice that says it
+/// is missing.
+pub(crate) const EXTENSION: &str = "stack";
+
+/// And how a human installs it, which is the other half of that Notice: a stop
+/// that named what was missing and not how to get it would be a stop somebody
+/// had to go and look something up for.
+pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
+
+/// Whether a session sent at this Conversation's stack would find `gh stack` —
+/// `None` where it would, and the reason in words where it would not.
+///
+/// **Asked before a session is sent rather than found in one's failure.** The
+/// extension is a separate install and the wrap-up has never driven it, so the
+/// first thing a stack session would do is the first thing that could go
+/// missing — and a go spent on a session that cannot do what it was told is a
+/// go the human paid for and got nothing from. Two of those and the run would
+/// stop over a conflict nothing had actually tried to resolve.
+///
+/// **In the environment a session gets rather than the server's own**, which is
+/// the only reason the answer is worth having: an extension lives inside the
+/// home `gh` is run under, and a session's home is Verkstead's own. See
+/// [`crate::sessions::Sessions::session_environment`], which composes it, and
+/// [`github::Gh::extension`], which runs it.
+///
+/// A server that runs no session answers as though the extension were there:
+/// there is nothing here to equip, so there is nothing for this to be in front
+/// of, and a stop written by a server that dispatches nothing would be a Notice
+/// about a session that was never going to start.
+pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<String> {
+    let environment = state.sessions.session_environment(conversation_id)?;
+
+    // Off the runtime's threads, as every other reach for `gh` is: it is a
+    // process, and running one blocks.
+    let asked = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+
+        move || gh.extension(EXTENSION, &environment)
+    })
+    .await;
+
+    match asked {
+        Ok(Ok(())) => None,
+        Ok(Err(trouble)) => Some(trouble.why()),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "asking gh whether it has the stack extension failed");
+
+            Some("Verkstead could not run `gh` to find out".to_owned())
+        }
+    }
+}
 
 /// Walk the chain from the pull request `conversation_id` is on, record every
 /// link of it, and say in words what the stack is.
