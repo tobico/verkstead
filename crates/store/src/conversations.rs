@@ -4437,19 +4437,21 @@ async fn out_of_follow_up(
 
     if pushed {
         // Every pull request the work ended up on, rather than the one. A
-        // Conversation ends on one per repository it was worked in and each has
-        // a suite of its own, so a follow-up that pushed is a wrap-up whose
-        // checks are all of them running again — and one left settled would be a
-        // wrap-up finishing on a green nobody re-earned.
-        let opened: Vec<(i64,)> =
-            sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+        // Conversation ends on one per repository it was worked in and as many in
+        // one repository as its stack is deep, each with a suite of its own, so a
+        // follow-up that pushed is a wrap-up whose checks are all of them running
+        // again — and one left settled would be a wrap-up finishing on a green
+        // nobody re-earned.
+        let opened: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT repo_id, number FROM pull_requests WHERE conversation_id = ?")
                 .bind(id)
                 .fetch_all(&mut *tx)
                 .await
                 .with_context(|| format!("reading which pull requests Conversation {id} is on"))?;
 
-        for (repo_id,) in opened {
-            super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks(repo_id)).await?;
+        for (repo_id, number) in opened {
+            super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks { repo_id, number })
+                .await?;
         }
     }
 
@@ -4609,8 +4611,9 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
         return Ok(Resolving::NothingConflicts);
     }
 
-    for repo_id in conflicted {
-        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable(repo_id)).await?;
+    for (repo_id, number) in conflicted {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable { repo_id, number })
+            .await?;
     }
 
     let pressed = Event::ResolveConflicts;

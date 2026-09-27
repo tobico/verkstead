@@ -681,6 +681,57 @@ pub async fn pull_request(
     }))
 }
 
+/// One pull request by name: `number` of Repo `repo_id`, or `None` where the
+/// Conversation is not on it.
+///
+/// What a watcher asks every poll. One is started for each pull request on the
+/// record and told which — the Repo and the number together, that being what a
+/// pull request is — so what it needs back is *is this one still on the record*
+/// and the branch its work is on. [`pull_request`] beside it is the other
+/// question, *what has this repository got*, which a stack gives several answers
+/// to; this one is asked about one of them.
+///
+/// `None` is a record that has been got at rather than a wrap-up to carry on
+/// with: a watcher is started where a pull request is recorded and never before
+/// it, and nothing takes one off the record while a Conversation is wrapping up.
+pub async fn pull_request_numbered(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    number: i64,
+) -> Result<Option<PullRequest>> {
+    /// The columns in the order the query below selects them: the pull request,
+    /// the branch its work is on, and the Repo's name where it is not the
+    /// Conversation's own.
+    type Row = (i64, String, String, Option<String>, Option<String>);
+
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT p.number, p.title, p.url, p.head_branch, r.name
+         FROM pull_requests p
+         JOIN conversations v ON v.id = p.conversation_id
+         LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
+         WHERE p.conversation_id = ? AND p.repo_id = ? AND p.number = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(number)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading pull request #{number} of Repo {repo_id} on Conversation {conversation_id}"
+        )
+    })?;
+
+    Ok(row.map(|(number, title, url, head, repo)| PullRequest {
+        number,
+        title,
+        url,
+        head,
+        repo,
+    }))
+}
+
 /// Every pull request a Conversation's work is on, each with the Repo it was
 /// opened in.
 ///
@@ -1129,7 +1180,7 @@ pub async fn merging(
 }
 
 /// Which of a Conversation's pull requests the last look at GitHub found
-/// conflicting with their base, by the Repo each was opened in.
+/// conflicting with their base, as the Repo and the number of each.
 ///
 /// What the resolve press reads to know there is anything to resolve, and which
 /// of the wrap-up's settlements it puts back to waiting — see
@@ -1145,25 +1196,24 @@ pub async fn merging(
 /// A pull request nothing has ever asked GitHub about has no row at all and is
 /// not among these, exactly as it draws no mark: not knowing is not a conflict.
 ///
-/// One entry per repository rather than per conflicting pull request, because
-/// what the caller does with each is put a settlement back to waiting and that
-/// settlement is the repository's. A stack with three branches conflicting names
-/// its repository once, and the wrap-up waits on that repository's merge — which
-/// is the one settlement there is to unsettle.
+/// One entry per conflicting pull request, because what the caller does with each
+/// is put a settlement back to waiting and that settlement is the pull request's.
+/// A stack with three branches conflicting names its repository three times, once
+/// per number, and the wrap-up waits on each of those merges — which is three
+/// settlements to unsettle.
 pub(crate) async fn conflicted(
     tx: &mut sqlx::SqliteConnection,
     conversation_id: i64,
-) -> Result<Vec<i64>> {
-    let rows: Vec<(i64,)> = sqlx::query_as(
-        "SELECT p.repo_id
+) -> Result<Vec<(i64, i64)>> {
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT p.repo_id, p.number
          FROM pull_requests p
          JOIN pull_request_merges m
            ON m.conversation_id = p.conversation_id
           AND m.repo_id = p.repo_id
           AND m.number = p.number
          WHERE p.conversation_id = ? AND m.merging = ?
-         GROUP BY p.repo_id
-         ORDER BY MIN(p.event_id)",
+         ORDER BY p.event_id",
     )
     .bind(conversation_id)
     .bind(Merging::Conflicting.stored())
@@ -1173,7 +1223,7 @@ pub(crate) async fn conflicted(
         format!("reading which of Conversation {conversation_id}'s pull requests conflict")
     })?;
 
-    Ok(rows.into_iter().map(|(repo_id,)| repo_id).collect())
+    Ok(rows)
 }
 
 /// And every one of them a Conversation has, by the Timeline Event each pull

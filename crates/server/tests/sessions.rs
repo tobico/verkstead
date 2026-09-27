@@ -1511,6 +1511,14 @@ const GREEN: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":
 /// more than its suite, which is not the condition these are about.
 const STILL_RUNNING: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
+/// The branch every one of these `gh` stubs names as its pull request's head.
+///
+/// A fixture's Conversation is on a branch Verkstead invented, and these stubs
+/// answer with a head of their own rather than with that name — which matters in
+/// exactly one place: a green rollup is held against what origin is holding on
+/// *the pull request's* branch, so a test about that has to push to this.
+const HEAD_BRANCH: &str = "rate-limiting";
+
 /// A rollup that says its suite is still running until `head` is there, and then
 /// a green one belonging to whichever commit that file names.
 ///
@@ -7845,9 +7853,11 @@ fn fixes(view: &ConversationView) -> usize {
 /// The Conversation's own, there being one suite per pull request: a companion's
 /// is [`companion_checks_settled`]'s.
 async fn checks_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = own_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Checks(own_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Checks { repo_id, number },
     )
     .await
 }
@@ -7855,18 +7865,22 @@ async fn checks_settled(fixture: &Grilling) -> bool {
 /// And whether Verkstead has recorded that GitHub can merge it, which is the
 /// other thing one poll of the checks watcher settles.
 async fn merge_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = own_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Mergeable(own_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Mergeable { repo_id, number },
     )
     .await
 }
 
 /// And whether the pull request opened in the companion beside it is green.
 async fn companion_checks_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = companion_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Checks(companion_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Checks { repo_id, number },
     )
     .await
 }
@@ -7874,9 +7888,11 @@ async fn companion_checks_settled(fixture: &Grilling) -> bool {
 /// And whether that one merges, a conflict in a companion being as much a reason
 /// to wait as one in the Conversation's own repository.
 async fn companion_merge_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = companion_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Mergeable(companion_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Mergeable { repo_id, number },
     )
     .await
 }
@@ -7918,6 +7934,19 @@ async fn own_pull_request(fixture: &Grilling) -> (i64, i64) {
         .await
         .unwrap()
         .expect("the Conversation is on a pull request");
+    pool.close().await;
+
+    (repo, opened.number)
+}
+
+/// And the pull request the companion beside it is on, read the same way.
+async fn companion_pull_request(fixture: &Grilling) -> (i64, i64) {
+    let repo = companion_repo(fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    let opened = verkstead_server::store::pull_request(&pool, fixture.id, repo)
+        .await
+        .unwrap()
+        .expect("the companion is on a pull request");
     pool.close().await;
 
     (repo, opened.number)
@@ -7966,9 +7995,9 @@ async fn check_rollup(fixture: &Grilling) -> Option<verkstead_server::store::Rol
 /// own session has spent is nothing: an attempt is counted where a fix session
 /// is dispatched, and none is dispatched into a Worktree the review is holding.
 async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
-    let repo = own_repo(fixture).await;
+    let (repo, number) = own_pull_request(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, repo, check)
+    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, repo, number, check)
         .await
         .unwrap();
     pool.close().await;
@@ -9260,10 +9289,12 @@ async fn settle_everything(fixture: &Grilling) {
     let waiting_on =
         verkstead_server::store::WAITED_ON
             .into_iter()
-            .chain(opened.into_iter().flat_map(|(repo, _)| {
+            .chain(opened.into_iter().flat_map(|(repo, opened)| {
+                let (repo_id, number) = (repo.id, opened.number);
+
                 [
-                    verkstead_server::store::WaitingOn::Checks(repo.id),
-                    verkstead_server::store::WaitingOn::Comments(repo.id),
+                    verkstead_server::store::WaitingOn::Checks { repo_id, number },
+                    verkstead_server::store::WaitingOn::Comments { repo_id, number },
                 ]
             }));
 
@@ -12373,9 +12404,11 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
 /// The Conversation's own, there being one conversation per pull request: a
 /// companion's is [`companion_comments_settled`]'s.
 async fn comments_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = own_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Comments(own_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Comments { repo_id, number },
     )
     .await
 }
@@ -12383,9 +12416,11 @@ async fn comments_settled(fixture: &Grilling) -> bool {
 /// And whether nothing is left unaddressed on the pull request opened in the
 /// companion beside it.
 async fn companion_comments_settled(fixture: &Grilling) -> bool {
+    let (repo_id, number) = companion_pull_request(fixture).await;
+
     settled(
         fixture,
-        verkstead_server::store::WaitingOn::Comments(companion_repo(fixture).await),
+        verkstead_server::store::WaitingOn::Comments { repo_id, number },
     )
     .await
 }
@@ -13303,7 +13338,21 @@ async fn a_rollup_about_a_commit_that_is_not_what_was_pushed_settles_nothing() {
     // for the commit before it. Nothing is said about the checks at all until
     // this is written, so there is no window in which the wrap-up could have
     // settled on something else.
-    git(&worktree, &["push", "--quiet", "origin", "HEAD"]);
+    //
+    // Pushed to the branch this fixture's GitHub calls the pull request's head,
+    // which is what a rollup is held against: a repository wrapping up a stack
+    // has several branches through the one checkout, so the question is what
+    // origin holds on *this pull request's* branch rather than on whatever the
+    // Worktree is standing on.
+    git(
+        &worktree,
+        &[
+            "push",
+            "--quiet",
+            "origin",
+            &format!("HEAD:refs/heads/{HEAD_BRANCH}"),
+        ],
+    );
     std::fs::write(&head, git(&worktree, &["rev-parse", "HEAD~1"])).unwrap();
 
     // Long enough for many polls of a pull request answering green every time.
@@ -21319,10 +21368,15 @@ async fn a_fix_merge_issues_wrap_up_reads_no_branch_and_answers_nothing_said_on_
 /// wrap-up, the pull request `submitting` opens being one in the same repository a
 /// moment later.
 ///
-/// The settles are the take-up's either way, which is what makes this one claim
-/// rather than two: they are written against the Conversation's own Repo, and that
-/// is where the pull request goes whether GitHub already had one or whether the
-/// session about to run opens it.
+/// The review is the take-up's either way — one review across the whole of the
+/// work, about no pull request at all — and the comments wait for there to be a
+/// pull request to be about: a settlement names one by the Repo *and* the number
+/// now that a repository can hold a whole stack of them, and a bare branch has no
+/// number until the session about to run opens one. So the door settles what it
+/// can name and the comments watcher writes its own on the first look it takes,
+/// which is the same arrangement that carries every other road into a narrowed
+/// wrap-up — a steer, a restart, a companion recorded late. What the Conversation
+/// gets to either way is a wrap-up that reads no branch and answers nothing said.
 #[tokio::test]
 async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
     let spill = tempfile::tempdir().unwrap();
@@ -21339,20 +21393,31 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
     .await;
 
     assert!(
-        review_settled(&fixture).await && comments_settled(&fixture).await,
-        "the take-up's own move settled both, there being no pull request record \
-         to carry them in",
+        review_settled(&fixture).await,
+        "the take-up's own move settled the review, which is about no pull \
+         request and so nameable before there is one",
     );
 
-    // And they are still settled once the pull request the branch was owed is
-    // there, which is the moment the wrap-up has something to wait on.
+    // And the comments the moment the pull request the branch was owed is there,
+    // which is the moment there is one to settle them against — and the moment
+    // the wrap-up has anything to wait on at all.
     let view = fixture
         .until(|view| pull_request(view).map(|_| view.clone()))
         .await;
 
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "nothing settled what is said on the pull request that arrived",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
     assert!(
-        review_settled(&fixture).await && comments_settled(&fixture).await,
-        "and the pull request arriving in the same Repo changed neither",
+        review_settled(&fixture).await,
+        "and the pull request arriving left the review where the door put it",
     );
     assert_eq!(
         sessions_on(&fixture, "reviewing/SKILL.md").await,

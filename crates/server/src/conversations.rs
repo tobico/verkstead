@@ -2744,26 +2744,36 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // Mergeable and the checks. Written in the transaction below rather than after
     // it, for the reason [`store::take_up`] gives.
     //
-    // The comments are settled against the Conversation's own Repo, which is where
-    // the pull request is — the one it has now, or the one a bare branch has
-    // `submitting` open into the same repository a moment from now.
+    // The comments are settled against the pull request the take-up holds — the
+    // Conversation's own Repo and the number GitHub gave it there, that being what
+    // a settlement names now that a repository can hold a whole stack of them.
+    //
+    // Which is why a bare branch settles only the review here: there is no pull
+    // request yet to name, `submitting` opening one into the same repository a
+    // moment from now, and a number invented for it would be a settlement about
+    // nothing. The comments watcher writes its own the moment there is one to
+    // watch.
     //
     // This door's own writing of them, and neither watcher's licence to skip its
     // own: each of them reads the Process a moment from now and writes its settle
     // back whatever it finds — see [`narrows_the_wrap_up`]. What writing them here
-    // buys is that there is no instant in which a wrapping Conversation is not
-    // narrowed, which is what a sweep or a restart between the move and the first
-    // poll would otherwise find.
+    // buys is that there is no instant in which a wrapping Conversation on a pull
+    // request is not narrowed, which is what a sweep or a restart between the move
+    // and the first poll would otherwise find.
     let narrowed = narrows_the_wrap_up(conversation.process);
 
-    let settled = if narrowed {
-        vec![
-            store::WaitingOn::Review,
-            store::WaitingOn::Comments(conversation.repo.id),
-        ]
-    } else {
-        Vec::new()
-    };
+    let mut settled = Vec::new();
+
+    if narrowed {
+        settled.push(store::WaitingOn::Review);
+
+        if let Target::PullRequest(held) = &taking {
+            settled.push(store::WaitingOn::Comments {
+                repo_id: conversation.repo.id,
+                number: held.number,
+            });
+        }
+    }
 
     let entering = store::Entering {
         landing,

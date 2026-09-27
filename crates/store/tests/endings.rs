@@ -479,9 +479,16 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
             .unwrap();
     }
 
-    settle_wrap_up(&pool, conversation, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        conversation,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     following_up(&pool, conversation).await;
 
@@ -504,7 +511,10 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
     let settled = wrap_up_settled(&pool, conversation).await.unwrap();
 
     assert!(
-        !settled.contains(&WaitingOn::Checks(repo)),
+        !settled.contains(&WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }),
         "the follow-up pushed, so the green standing over the checks was the run \
          before it: {settled:?}",
     );
@@ -824,9 +834,16 @@ async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
             .unwrap();
     }
 
-    settle_wrap_up(&pool, conversation, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        conversation,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     investigating(&pool, conversation).await;
 
@@ -863,7 +880,10 @@ async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
     let settled = wrap_up_settled(&pool, conversation).await.unwrap();
 
     assert!(
-        settled.contains(&WaitingOn::Checks(repo)),
+        settled.contains(&WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }),
         "and the green standing over the checks is still earned: an investigation \
          commits nothing and pushes nothing, so GitHub has no new run to make up \
          its mind about — which is where this parts from a follow-up that pushed: \

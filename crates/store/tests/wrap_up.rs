@@ -15,11 +15,20 @@ use verkstead_store::{
     WAITED_ON, WaitingOn, addressed_comments, ask, batch_over, finish_wrap_up, fix_attempts,
     forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
     implement_again, last_batch_proposal, last_proposal, load_conversation, load_response,
-    lock_set, open_database, pick_direction, pull_requests, record_addressed_comments,
-    record_another_pull_request, record_fix_attempt, record_pull_request, register_repo,
-    review_over, save_brief, settle_wrap_up, start_conversation, start_grilling,
-    steer_conversation, submit_response, timeline, unsettle_wrap_up, wrap_up_settled,
+    lock_set, most_fix_attempts, open_database, pick_direction, pull_requests,
+    record_addressed_comments, record_another_pull_request, record_fix_attempt,
+    record_pull_request, register_repo, review_over, save_brief, settle_wrap_up,
+    start_conversation, start_grilling, steer_conversation, submit_response, timeline,
+    unsettle_wrap_up, wrap_up_settled,
 };
+
+/// The number GitHub gave the Conversation's own pull request, which every
+/// settlement about it names beside the Repo — see [`wrapping`].
+const OWN: i64 = 41;
+
+/// And the number the companion's has in the repository beside it, `#41` there
+/// being something else entirely or nothing at all — see [`beside`].
+const BESIDE: i64 = 7;
 
 /// A Conversation whose work is on a pull request, which is the only state any
 /// of this is about.
@@ -92,11 +101,13 @@ async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
 
     WAITED_ON
         .into_iter()
-        .chain(opened.into_iter().flat_map(|(repo, _)| {
+        .chain(opened.into_iter().flat_map(|(repo, opened)| {
+            let (repo_id, number) = (repo.id, opened.number);
+
             [
-                WaitingOn::Checks(repo.id),
-                WaitingOn::Comments(repo.id),
-                WaitingOn::Mergeable(repo.id),
+                WaitingOn::Checks { repo_id, number },
+                WaitingOn::Comments { repo_id, number },
+                WaitingOn::Mergeable { repo_id, number },
             ]
         }))
         .collect()
@@ -132,6 +143,35 @@ async fn beside(pool: &SqlitePool, id: i64) -> i64 {
     repo.id
 }
 
+/// The numbers of the chain above the Conversation's own pull request, in the
+/// one repository — which is what a **stack** is: branches each based on the one
+/// below, all in the same place.
+const ABOVE: [i64; 2] = [42, 43];
+
+/// Record that chain, so the Conversation is on three pull requests of one Repo.
+///
+/// The other shape the per-pull-request bookkeeping is visible in, and the one
+/// the Repo alone cannot tell apart: three suites, three conversations and three
+/// bases to merge into, with nothing but the number between them.
+async fn stacked(pool: &SqlitePool, id: i64, repo_id: i64) {
+    for number in ABOVE {
+        record_another_pull_request(
+            pool,
+            id,
+            repo_id,
+            &verkstead_store::PullRequest {
+                number,
+                title: "Rate limiting".to_owned(),
+                url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+                head: Some(format!("rate-limiting-{number}")),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -161,16 +201,33 @@ async fn settling_the_checks_twice_settles_them_once() {
 
     let repo = own(&pool, id).await;
 
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
-        vec![WaitingOn::Checks(repo)],
+        vec![WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN
+        }],
     );
 }
 
@@ -184,20 +241,41 @@ async fn checks_that_go_red_again_stop_being_settled() {
 
     let repo = own(&pool, id).await;
 
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
-    unsettle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
+    unsettle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
 
     // And unsettling what was never settled is the ordinary case for as long as
     // a suite is running, rather than anything to refuse.
-    unsettle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    unsettle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
 }
 
@@ -219,10 +297,22 @@ async fn a_review_that_is_over_puts_every_pull_requests_checks_back_to_waiting()
     let companion = beside(&pool, id).await;
 
     for settled in [
-        WaitingOn::Checks(repo),
-        WaitingOn::Checks(companion),
-        WaitingOn::Comments(repo),
-        WaitingOn::Mergeable(repo),
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+        WaitingOn::Checks {
+            repo_id: companion,
+            number: BESIDE,
+        },
+        WaitingOn::Comments {
+            repo_id: repo,
+            number: OWN,
+        },
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: OWN,
+        },
     ] {
         settle_wrap_up(&pool, id, settled).await.unwrap();
     }
@@ -235,8 +325,14 @@ async fn a_review_that_is_over_puts_every_pull_requests_checks_back_to_waiting()
     assert_eq!(
         settled,
         vec![
-            WaitingOn::Comments(repo),
-            WaitingOn::Mergeable(repo),
+            WaitingOn::Comments {
+                repo_id: repo,
+                number: OWN
+            },
+            WaitingOn::Mergeable {
+                repo_id: repo,
+                number: OWN
+            },
             WaitingOn::Review,
         ],
         "the review settled and both suites went back to being waited on",
@@ -245,15 +341,25 @@ async fn a_review_that_is_over_puts_every_pull_requests_checks_back_to_waiting()
     // And the checks settle again as soon as a poll has read the run the push
     // started, which is the ordinary way round: this took nothing away that a
     // green cannot earn back.
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert!(
         wrap_up_settled(&pool, id)
             .await
             .unwrap()
-            .contains(&WaitingOn::Checks(repo)),
+            .contains(&WaitingOn::Checks {
+                repo_id: repo,
+                number: OWN
+            }),
     );
 }
 
@@ -279,10 +385,22 @@ async fn a_batch_session_that_is_over_puts_every_pull_requests_checks_back_to_wa
     let companion = beside(&pool, id).await;
 
     for settled in [
-        WaitingOn::Checks(repo),
-        WaitingOn::Checks(companion),
-        WaitingOn::Comments(repo),
-        WaitingOn::Mergeable(repo),
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+        WaitingOn::Checks {
+            repo_id: companion,
+            number: BESIDE,
+        },
+        WaitingOn::Comments {
+            repo_id: repo,
+            number: OWN,
+        },
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: OWN,
+        },
         WaitingOn::Review,
     ] {
         settle_wrap_up(&pool, id, settled).await.unwrap();
@@ -296,8 +414,14 @@ async fn a_batch_session_that_is_over_puts_every_pull_requests_checks_back_to_wa
     assert_eq!(
         settled,
         vec![
-            WaitingOn::Comments(repo),
-            WaitingOn::Mergeable(repo),
+            WaitingOn::Comments {
+                repo_id: repo,
+                number: OWN
+            },
+            WaitingOn::Mergeable {
+                repo_id: repo,
+                number: OWN
+            },
             WaitingOn::Review,
         ],
         "both suites went back to being waited on, and nothing else moved",
@@ -306,15 +430,25 @@ async fn a_batch_session_that_is_over_puts_every_pull_requests_checks_back_to_wa
     // And they settle again as soon as a poll has read the run the push started,
     // which is the ordinary way round: this took nothing away that a green
     // cannot earn back.
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert!(
         wrap_up_settled(&pool, id)
             .await
             .unwrap()
-            .contains(&WaitingOn::Checks(repo)),
+            .contains(&WaitingOn::Checks {
+                repo_id: repo,
+                number: OWN
+            }),
     );
 }
 
@@ -343,23 +477,27 @@ async fn fix_attempts_are_counted_against_the_check_rather_than_the_conversation
     let repo = own(&pool, id).await;
 
     assert_eq!(
-        fix_attempts(&pool, id, repo, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, repo, OWN, "Rust").await.unwrap(),
         0,
         "nothing has been tried about a check that has only just gone red",
     );
 
     assert_eq!(
-        record_fix_attempt(&pool, id, repo, "Rust").await.unwrap(),
+        record_fix_attempt(&pool, id, repo, OWN, "Rust")
+            .await
+            .unwrap(),
         1,
     );
     assert_eq!(
-        record_fix_attempt(&pool, id, repo, "Rust").await.unwrap(),
+        record_fix_attempt(&pool, id, repo, OWN, "Rust")
+            .await
+            .unwrap(),
         2,
     );
 
-    assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 2);
+    assert_eq!(fix_attempts(&pool, id, repo, OWN, "Rust").await.unwrap(), 2);
     assert_eq!(
-        fix_attempts(&pool, id, repo, "Viewer").await.unwrap(),
+        fix_attempts(&pool, id, repo, OWN, "Viewer").await.unwrap(),
         0,
         "and the job beside it has spent nothing",
     );
@@ -375,22 +513,36 @@ async fn fix_attempts_are_counted_against_the_pull_request_the_check_is_red_on()
     let own = own(&pool, id).await;
     let beside = beside(&pool, id).await;
 
-    assert_eq!(record_fix_attempt(&pool, id, own, "Rust").await.unwrap(), 1);
-    assert_eq!(record_fix_attempt(&pool, id, own, "Rust").await.unwrap(), 2);
+    assert_eq!(
+        record_fix_attempt(&pool, id, own, OWN, "Rust")
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        record_fix_attempt(&pool, id, own, OWN, "Rust")
+            .await
+            .unwrap(),
+        2
+    );
 
     assert_eq!(
-        fix_attempts(&pool, id, beside, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, beside, BESIDE, "Rust")
+            .await
+            .unwrap(),
         0,
         "the companion's own `Rust` has had nothing tried about it",
     );
 
     assert_eq!(
-        record_fix_attempt(&pool, id, beside, "Rust").await.unwrap(),
+        record_fix_attempt(&pool, id, beside, BESIDE, "Rust")
+            .await
+            .unwrap(),
         1,
         "and it counts from the first of its own two",
     );
     assert_eq!(
-        fix_attempts(&pool, id, own, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, own, OWN, "Rust").await.unwrap(),
         2,
         "while what the other pull request has spent is left where it was",
     );
@@ -410,10 +562,19 @@ async fn what_a_check_has_already_been_given_survives_a_restart() {
 
         let repo = own(&pool, id).await;
 
-        record_fix_attempt(&pool, id, repo, "Rust").await.unwrap();
-        settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+        record_fix_attempt(&pool, id, repo, OWN, "Rust")
             .await
             .unwrap();
+        settle_wrap_up(
+            &pool,
+            id,
+            WaitingOn::Checks {
+                repo_id: repo,
+                number: OWN,
+            },
+        )
+        .await
+        .unwrap();
 
         pool.close().await;
         id
@@ -422,10 +583,18 @@ async fn what_a_check_has_already_been_given_survives_a_restart() {
     let restarted = open_database(&database).await.unwrap();
     let repo = own(&restarted, id).await;
 
-    assert_eq!(fix_attempts(&restarted, id, repo, "Rust").await.unwrap(), 1,);
+    assert_eq!(
+        fix_attempts(&restarted, id, repo, OWN, "Rust")
+            .await
+            .unwrap(),
+        1,
+    );
     assert_eq!(
         wrap_up_settled(&restarted, id).await.unwrap(),
-        vec![WaitingOn::Checks(repo)],
+        vec![WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN
+        }],
     );
 }
 
@@ -440,17 +609,30 @@ async fn resuming_gives_every_check_its_attempts_back() {
     let own = own(&pool, id).await;
     let beside = beside(&pool, id).await;
 
-    record_fix_attempt(&pool, id, own, "Rust").await.unwrap();
-    record_fix_attempt(&pool, id, own, "Rust").await.unwrap();
-    record_fix_attempt(&pool, id, own, "Viewer").await.unwrap();
-    record_fix_attempt(&pool, id, beside, "Rust").await.unwrap();
+    record_fix_attempt(&pool, id, own, OWN, "Rust")
+        .await
+        .unwrap();
+    record_fix_attempt(&pool, id, own, OWN, "Rust")
+        .await
+        .unwrap();
+    record_fix_attempt(&pool, id, own, OWN, "Viewer")
+        .await
+        .unwrap();
+    record_fix_attempt(&pool, id, beside, BESIDE, "Rust")
+        .await
+        .unwrap();
 
     forget_fix_attempts(&pool, id).await.unwrap();
 
-    assert_eq!(fix_attempts(&pool, id, own, "Rust").await.unwrap(), 0);
-    assert_eq!(fix_attempts(&pool, id, own, "Viewer").await.unwrap(), 0);
+    assert_eq!(fix_attempts(&pool, id, own, OWN, "Rust").await.unwrap(), 0);
     assert_eq!(
-        fix_attempts(&pool, id, beside, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, own, OWN, "Viewer").await.unwrap(),
+        0
+    );
+    assert_eq!(
+        fix_attempts(&pool, id, beside, BESIDE, "Rust")
+            .await
+            .unwrap(),
         0,
         "every pull request's, the press being one about the whole run",
     );
@@ -632,7 +814,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    record_fix_attempt(&pool, id, own(&pool, id).await, "build")
+    record_fix_attempt(&pool, id, own(&pool, id).await, OWN, "build")
         .await
         .unwrap();
     record_addressed_comments(&pool, id, own(&pool, id).await, &["IC_1".to_owned()])
@@ -672,7 +854,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
         "the new round waits on all of it again"
     );
     assert_eq!(
-        fix_attempts(&pool, id, own(&pool, id).await, "build")
+        fix_attempts(&pool, id, own(&pool, id).await, OWN, "build")
             .await
             .unwrap(),
         0,
@@ -756,9 +938,16 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
         "the companion's checks are nobody's idea of green yet",
     );
 
-    settle_wrap_up(&pool, id, WaitingOn::Checks(beside))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: beside,
+            number: BESIDE,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         finish_wrap_up(&pool, id).await.unwrap(),
@@ -766,9 +955,16 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
         "and nobody has read what was said on it either",
     );
 
-    settle_wrap_up(&pool, id, WaitingOn::Comments(beside))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Comments {
+            repo_id: beside,
+            number: BESIDE,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         finish_wrap_up(&pool, id).await.unwrap(),
@@ -776,11 +972,157 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
         "and nothing has said GitHub can merge it",
     );
 
-    settle_wrap_up(&pool, id, WaitingOn::Mergeable(beside))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Mergeable {
+            repo_id: beside,
+            number: BESIDE,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+}
+
+/// And a stack is three more of them in the one repository: three suites, three
+/// conversations and three merges, with only the number between them.
+///
+/// Which is the whole of what this slice is for. A wrap-up over a stack that
+/// settled *the* checks of *that repository* would be one where the top of the
+/// chain going green stood for the bottom of it — so Done waits until every
+/// number has settled everything about itself, and one red check anywhere holds
+/// the lot.
+#[tokio::test]
+async fn every_pull_request_of_a_stack_is_waited_on_in_its_own_right() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+    let repo_id = own(&pool, id).await;
+
+    stacked(&pool, id, repo_id).await;
+
+    assert_eq!(
+        waiting_on(&pool, id).await.len(),
+        1 + 3 * 3,
+        "the review, and the three things each of the three pull requests is \
+         waited on for",
+    );
+
+    // Everything but the checks of the one at the bottom, which is the red suite
+    // the human would go and look at.
+    for waiting_on in waiting_on(&pool, id).await {
+        if waiting_on
+            == (WaitingOn::Checks {
+                repo_id,
+                number: OWN,
+            })
+        {
+            continue;
+        }
+
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+        "one red check anywhere in the stack is a wrap-up still going",
+    );
+
+    // And each of the three separately, which is what says the rule reads every
+    // number rather than any one of them: the suite that was red goes green, and
+    // then each of the others is taken away in turn.
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
+
+    for number in ABOVE {
+        unsettle_wrap_up(&pool, id, WaitingOn::Mergeable { repo_id, number })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            finish_wrap_up(&pool, id).await.unwrap(),
+            Finished::StillWaiting,
+            "pull request #{number} of the stack conflicts, so nothing can land \
+             what is above it",
+        );
+
+        settle_wrap_up(&pool, id, WaitingOn::Mergeable { repo_id, number })
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::Done,
+        "every one of the three is green and merges, which is the whole of it",
+    );
+}
+
+/// And the goes a red check has are the pull request's own, wherever it is red:
+/// the same check name on two of a stack's branches is two different failures,
+/// and one spending the other's would stop a run that still had somewhere to go.
+///
+/// The Repo cannot tell them apart, which is why the count moved onto the number.
+#[tokio::test]
+async fn one_check_name_red_across_a_stack_has_two_goes_on_each_pull_request() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+    let repo_id = own(&pool, id).await;
+
+    stacked(&pool, id, repo_id).await;
+
+    let above = ABOVE[0];
+
+    assert_eq!(
+        record_fix_attempt(&pool, id, repo_id, OWN, "Rust")
+            .await
+            .unwrap(),
+        1,
+    );
+    assert_eq!(
+        record_fix_attempt(&pool, id, repo_id, OWN, "Rust")
+            .await
+            .unwrap(),
+        2,
+        "the bottom of the stack has had both of its goes at `Rust`",
+    );
+
+    assert_eq!(
+        fix_attempts(&pool, id, repo_id, above, "Rust")
+            .await
+            .unwrap(),
+        0,
+        "and `Rust` on the branch above it has had nothing tried about it",
+    );
+    assert_eq!(
+        record_fix_attempt(&pool, id, repo_id, above, "Rust")
+            .await
+            .unwrap(),
+        1,
+        "so it counts from the first of its own two",
+    );
+
+    assert_eq!(
+        most_fix_attempts(&pool, id, repo_id, OWN).await.unwrap(),
+        2,
+        "what the bottom has spent is where it was left",
+    );
+    assert_eq!(
+        most_fix_attempts(&pool, id, repo_id, above).await.unwrap(),
+        1,
+        "and the one above it has a go still coming, which is what keeps the run \
+         from being stopped over it",
+    );
 }
 
 /// A pull request GitHub cannot merge keeps the wrap-up where it is, however
@@ -801,9 +1143,16 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_going() {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
 
-    unsettle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
-        .await
-        .unwrap();
+    unsettle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         finish_wrap_up(&pool, id).await.unwrap(),
@@ -815,9 +1164,16 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_going() {
         Lifecycle::Wrapping,
     );
 
-    settle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 }
@@ -834,9 +1190,16 @@ async fn checks_that_stop_being_settled_leave_a_finished_wrap_up_unfinishable() 
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
 
-    unsettle_wrap_up(&pool, id, WaitingOn::Checks(own(&pool, id).await))
-        .await
-        .unwrap();
+    unsettle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: own(&pool, id).await,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         finish_wrap_up(&pool, id).await.unwrap(),
@@ -1257,15 +1620,25 @@ async fn leaving_wrapping_puts_the_review_back_to_waiting_and_nothing_else() {
     let repo = own(&pool, id).await;
 
     settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN,
+        },
+    )
+    .await
+    .unwrap();
 
     implement_again(&pool, id).await.unwrap();
 
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
-        vec![WaitingOn::Checks(repo)],
+        vec![WaitingOn::Checks {
+            repo_id: repo,
+            number: OWN
+        }],
         "the review is waiting again and the checks are left where they were",
     );
 }

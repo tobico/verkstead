@@ -450,10 +450,19 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
 
     let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
 
-    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
+    record_fix_attempt(&pool, id, repo, 41, "Rust")
         .await
         .unwrap();
-    record_fix_attempt(&pool, id, repo, "Rust").await.unwrap();
 
     steer_conversation(&pool, id, into(Lifecycle::Wrapping))
         .await
@@ -461,10 +470,13 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
 
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
-        [WaitingOn::Checks(repo)],
+        [WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }],
         "a wrap-up steered into wrapping up is the same round, looked at again",
     );
-    assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 1);
+    assert_eq!(fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(), 1);
 
     steer_conversation(&pool, id, into(Lifecycle::Grilling))
         .await
@@ -474,7 +486,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
         wrap_up_settled(&pool, id).await.unwrap().is_empty(),
         "and the round that starts here waits on all of it from nothing",
     );
-    assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 0);
+    assert_eq!(fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(), 0);
 }
 
 /// A steer into Wrapping puts the review back to waiting, whatever state it was
@@ -501,9 +513,18 @@ async fn a_steer_into_wrapping_reads_the_branch_afresh() {
 
     for waiting_on in [
         WaitingOn::Review,
-        WaitingOn::Checks(repo),
-        WaitingOn::Comments(repo),
-        WaitingOn::Mergeable(repo),
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+        WaitingOn::Comments {
+            repo_id: repo,
+            number: 41,
+        },
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: 41,
+        },
     ] {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -525,9 +546,16 @@ async fn a_steer_into_wrapping_reads_the_branch_afresh() {
         "the review it was carried to Done on is not this wrap-up's: {settled:?}",
     );
     assert!(
-        settled.contains(&WaitingOn::Checks(repo))
-            && settled.contains(&WaitingOn::Comments(repo))
-            && settled.contains(&WaitingOn::Mergeable(repo)),
+        settled.contains(&WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }) && settled.contains(&WaitingOn::Comments {
+            repo_id: repo,
+            number: 41
+        }) && settled.contains(&WaitingOn::Mergeable {
+            repo_id: repo,
+            number: 41
+        }),
         "and everything GitHub is asked about on every poll is left where it \
          was: {settled:?}",
     );

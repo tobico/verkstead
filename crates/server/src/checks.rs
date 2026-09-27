@@ -8,11 +8,13 @@
 //!
 //! **One watcher per pull request**, because a suite is a fact about a pull
 //! request rather than about a Conversation: a Conversation ends on one per
-//! repository it was worked in, each with its own checks running against its own
-//! branch, and each asked about in its own repository — `#7` means something else
-//! in another one, or nothing. [`watching`] starts one for every pull request on
-//! the record, and [`crate::wrapping::covering`] starts one for each companion's
-//! as it finds it.
+//! repository it was worked in and as many in one repository as its stack is
+//! deep, each with its own checks running against its own branch, and each asked
+//! about by its own number in its own repository — `#7` means something else in
+//! another one, or nothing. [`watching`] starts one for every pull request on the
+//! record, and [`crate::wrapping::covering`] starts one for each companion's as
+//! it finds it. Which pull request a watcher is for is the Repo and the number
+//! together, and everything it writes down is keyed by both.
 //!
 //! Three answers and three different things to do. Checks still running are
 //! nothing to do at all. Checks that pass settle one of the things wrap-up is
@@ -118,6 +120,14 @@
 //! a `gh` that answered without a head and a checkout with no origin to ask are
 //! the third thing again, and the rollup stands on its own.
 //!
+//! **What origin is asked about is this pull request's own branch**, off the row
+//! rather than off the checkout. A repository wrapping up a stack has a branch
+//! per pull request through the one Worktree, so a rollup held against whatever
+//! `HEAD` points at would be two suites out of three measured by another branch's
+//! commit — one refused for being about the wrong commit and one believed for a
+//! commit it was never about. See [`pushed_head`], and
+//! [`store::PullRequest::head`], which is why the branch is written down.
+//!
 //! **And a review that has just ended is a push.** The head above tells a stale
 //! rollup by what origin is holding, which works from the moment the push lands
 //! and not before it: while the review is still in the Worktree, what it has
@@ -180,7 +190,14 @@ pub(crate) async fn watching(state: AppState, conversation_id: i64) {
 
     let watchers: Vec<_> = opened
         .into_iter()
-        .map(|(repo, _)| tokio::spawn(watch(state.clone(), conversation_id, repo.id)))
+        .map(|(repo, opened)| {
+            tokio::spawn(watch(
+                state.clone(),
+                conversation_id,
+                repo.id,
+                opened.number,
+            ))
+        })
         .collect();
 
     for watcher in watchers {
@@ -190,18 +207,22 @@ pub(crate) async fn watching(state: AppState, conversation_id: i64) {
     }
 }
 
-/// Watch the checks on the pull request `conversation_id` opened in `repo_id`,
-/// until it stops wrapping up.
+/// Watch the checks on pull request `number` of Repo `repo_id`, until the
+/// Conversation stops wrapping up.
+///
+/// Told which pull request rather than which repository, because that is what a
+/// suite is a fact about: a stack is several in the one repository, each running
+/// its own checks against its own branch.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, that repository has no pull request on the record any more, or driving
-/// stopped. Idle rather than looping, for the runner's reason — a watcher that
-/// kept dispatching sessions at a check nothing was going to fix would be
-/// spending an account on the same failure over and over.
+/// gone, that pull request is not on the record any more, or driving stopped.
+/// Idle rather than looping, for the runner's reason — a watcher that kept
+/// dispatching sessions at a check nothing was going to fix would be spending an
+/// account on the same failure over and over.
 ///
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
-pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64) {
+pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64, number: i64) {
     // The Timeline Event the last fix session printed into, so that a stop
     // written here carries the tail of what it said — which is where the reason
     // it could not fix the check is usually written down.
@@ -213,12 +234,22 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64) {
     let mut reported = false;
 
     loop {
-        match once(&state, conversation_id, repo_id, writing, &mut reported).await {
+        match once(
+            &state,
+            conversation_id,
+            repo_id,
+            number,
+            writing,
+            &mut reported,
+        )
+        .await
+        {
             Watching::Again(said) => writing = said,
             Watching::Done(why) => {
                 tracing::info!(
                     conversation_id,
                     repo_id,
+                    number,
                     why,
                     "a pull request's checks are no longer being watched"
                 );
@@ -282,6 +313,7 @@ async fn once(
     state: &AppState,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
     writing: Option<i64>,
     reported: &mut bool,
 ) -> Watching {
@@ -310,23 +342,27 @@ async fn once(
         return Watching::Done("driving has stopped");
     }
 
-    let opened = match store::pull_request(&state.pool, conversation_id, repo_id).await {
+    let opened = match store::pull_request_numbered(&state.pool, conversation_id, repo_id, number)
+        .await
+    {
         Ok(Some(opened)) => opened,
-        // A Conversation wrapping up has a pull request in the repository whose
-        // watcher this is — a watcher is started where one is recorded and never
-        // before — so this is a record that has been got at rather than a wrap-up
-        // to carry on with.
-        Ok(None) => return Watching::Done("that repository has no pull request to watch"),
+        // A Conversation wrapping up is on the pull request whose watcher this
+        // is — a watcher is started where one is recorded and never before — so
+        // this is a record that has been got at rather than a wrap-up to carry
+        // on with.
+        Ok(None) => return Watching::Done("that pull request is not on the record to watch"),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo_id, "reading the pull request to watch failed");
+            tracing::error!(error = ?error, conversation_id, repo_id, number, "reading the pull request to watch failed");
             return Watching::Again(writing);
         }
     };
 
-    // Which repository to ask in and which checkout its work is done in, read off
-    // the Conversation every poll rather than held: a companion taken away is one
-    // there is nowhere left to ask about.
-    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, opened.number) else {
+    // Which repository to ask in, which branch the suite has to be about and
+    // which checkout its work is done in — read off the record every poll rather
+    // than held: a companion taken away is one there is nowhere left to ask
+    // about, and a branch renamed under a pull request is one GitHub has already
+    // been told about.
+    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, &opened) else {
         return Watching::Done("there is no repository left to ask about that pull request in");
     };
 
@@ -506,10 +542,11 @@ async fn checking(
         // that is very probably the right one, so neither holds a wrap-up up.
         let pushed = {
             let worktree = watched.worktree.clone();
+            let head = watched.head.clone();
 
             // Off the runtime's threads: this is a process, and one that goes
             // to the network.
-            tokio::task::spawn_blocking(move || pushed_head(&worktree))
+            tokio::task::spawn_blocking(move || pushed_head(&worktree, head.as_deref()))
                 .await
                 .unwrap_or_default()
         };
@@ -554,7 +591,17 @@ async fn checking(
     Checking::Failed(failed)
 }
 
-/// What origin is holding `worktree`'s branch on, asked as part of the poll.
+/// What origin is holding this pull request's branch on, asked as part of the
+/// poll.
+///
+/// `head` is the branch the record says the pull request's work is on, and it is
+/// what is asked about: a repository wrapping up a **stack** has several branches
+/// through the one Worktree, so the checkout answers for at most one of them and
+/// a rollup held against the wrong branch is a green suite either refused or
+/// believed for no reason. `None` is a pull request recorded before Verkstead
+/// wrote the head down, and there the checkout stands in — which is the branch
+/// such a row was on, the Conversation's own being the only pull request it was
+/// possible for it to be.
 ///
 /// Origin rather than the checkout's own HEAD, because those are different
 /// commits whenever a session has committed and not yet pushed — and the question
@@ -574,9 +621,16 @@ async fn checking(
 /// the caller reads as nothing to hold the rollup against rather than as a reason
 /// to distrust it. A checkout with no remote is every one of this suite's own,
 /// and a branch origin has never heard of is one nothing has pushed.
-fn pushed_head(worktree: &Path) -> Option<String> {
-    let branch = git(worktree, &["symbolic-ref", "--short", "HEAD"])?;
-    let branch = branch.trim();
+fn pushed_head(worktree: &Path, head: Option<&str>) -> Option<String> {
+    let checked_out;
+
+    let branch = match head {
+        Some(head) => head,
+        None => {
+            checked_out = git(worktree, &["symbolic-ref", "--short", "HEAD"])?;
+            checked_out.trim()
+        }
+    };
 
     // One line of `<commit>\trefs/heads/<branch>`, or nothing at all where origin
     // is not holding that branch — which `ls-remote` reports by saying nothing
@@ -666,7 +720,14 @@ async fn fix(
     let mut fixable = Vec::new();
 
     for check in failed {
-        match store::fix_attempts(&state.pool, conversation_id, watched.repo.id, &check.name).await
+        match store::fix_attempts(
+            &state.pool,
+            conversation_id,
+            watched.repo.id,
+            watched.number,
+            &check.name,
+        )
+        .await
         {
             Ok(spent) if spent < ATTEMPTS => fixable.push(check),
             Ok(_) => {}
@@ -682,7 +743,7 @@ async fn fix(
     // See [`owed_elsewhere`], which is what keeps a pull request out of goes from
     // spending another one's.
     if fixable.is_empty() {
-        if owed_elsewhere(state, conversation_id, watched.repo.id).await {
+        if owed_elsewhere(state, conversation_id, watched).await {
             tracing::debug!(
                 conversation_id,
                 repo = watched.repo.name,
@@ -724,9 +785,14 @@ async fn fix(
     // attempt spent by a server that then restarted is one the next server does
     // not spend again.
     for check in &fixable {
-        if let Err(error) =
-            store::record_fix_attempt(&state.pool, conversation_id, watched.repo.id, &check.name)
-                .await
+        if let Err(error) = store::record_fix_attempt(
+            &state.pool,
+            conversation_id,
+            watched.repo.id,
+            watched.number,
+            &check.name,
+        )
+        .await
         {
             tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, check = check.name, "counting a fix session failed");
             return Watching::Again(writing);
@@ -758,9 +824,12 @@ async fn fix(
 /// green nor a resolution for a base it will not merge — and one that is still
 /// owed a resolution is as much a reason to hold a stop as one owed a fix.
 ///
-/// The attempts are counted per pull request because the same check name red on
-/// two of them is two different failures, and one spending the other's would
-/// stop a run that still had somewhere to go. A stop is the Conversation's
+/// The checks' attempts are counted per pull request because the same check name
+/// red on two of them is two different failures, and one spending the other's
+/// would stop a run that still had somewhere to go. The conflict's are counted
+/// per repository, that being per stack — see
+/// [`store::conflict_fix_attempts`] — so a pull request of a stack is asked
+/// about its own suite and its repository's conflicts. A stop is the Conversation's
 /// rather than one pull request's, though — nothing is dispatched past one — so
 /// the first watcher to run out writing one would spend the other's goes just as
 /// surely as sharing the count would, and which watcher that is is a matter of
@@ -776,7 +845,7 @@ async fn fix(
 /// `false` where the record cannot be read, which is the stop this was in front
 /// of going ahead: what that costs is a go, and holding a stop open on an
 /// unreadable record would cost the human ever being told.
-async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) -> bool {
+async fn owed_elsewhere(state: &AppState, conversation_id: i64, watched: &Watched) -> bool {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => return false,
@@ -803,8 +872,10 @@ async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) ->
     };
 
     for (repo, opened) in opened {
-        // This one, whose goes are what the caller has just run out of.
-        if repo.id == repo_id {
+        // This one, whose goes are what the caller has just run out of. By the
+        // pull request rather than by the repository: the others of a stack are
+        // in this same one and each has goes of its own.
+        if (repo.id, opened.number) == (watched.repo.id, watched.number) {
             continue;
         }
 
@@ -812,28 +883,34 @@ async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) ->
         // taken off the registry mid-wrap-up. Its own watcher stopped on that
         // same fact, so a go it is owed is one nothing will ever spend — and
         // waiting for it would be a stop the human never got.
-        if crate::wrapping::watched(&conversation, repo.id, opened.number).is_none() {
+        if crate::wrapping::watched(&conversation, repo.id, &opened).is_none() {
             continue;
         }
 
+        let number = opened.number;
+        let repo_id = repo.id;
+
         // Its checks, where they have not gone green.
-        if !settled.contains(&store::WaitingOn::Checks(repo.id)) {
-            match store::most_fix_attempts(&state.pool, conversation_id, repo.id).await {
+        if !settled.contains(&store::WaitingOn::Checks { repo_id, number }) {
+            match store::most_fix_attempts(&state.pool, conversation_id, repo_id, number).await {
                 Ok(spent) if spent < ATTEMPTS => return true,
                 Ok(_) => {}
                 Err(error) => {
-                    tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request had been given failed");
+                    tracing::error!(error = ?error, conversation_id, repo = repo.name, number, "reading what a pull request had been given failed");
                 }
             }
         }
 
-        // And its conflict, where GitHub has not said it merges.
-        if !settled.contains(&store::WaitingOn::Mergeable(repo.id)) {
-            match store::conflict_fix_attempts(&state.pool, conversation_id, repo.id).await {
+        // And its conflict, where GitHub has not said it merges. Counted per
+        // repository, so a pull request of the same stack as the caller's reads
+        // the same count back — which is the answer that count is meant to give:
+        // one resolution is one act over the whole chain.
+        if !settled.contains(&store::WaitingOn::Mergeable { repo_id, number }) {
+            match store::conflict_fix_attempts(&state.pool, conversation_id, repo_id).await {
                 Ok(spent) if spent < ATTEMPTS => return true,
                 Ok(_) => {}
                 Err(error) => {
-                    tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request's conflict had been given failed");
+                    tracing::error!(error = ?error, conversation_id, repo = repo.name, number, "reading what a pull request's conflict had been given failed");
                 }
             }
         }
@@ -942,13 +1019,17 @@ fn listed(checks: &[Check]) -> String {
 /// thing to wait on.
 ///
 /// One of however many it is waiting on: a Conversation ends on a pull request
-/// per repository it was worked in, and every one of them has to be green before
-/// the wrap-up is over — see [`store::finish_wrap_up`].
+/// per repository it was worked in and as many in one repository as its stack is
+/// deep, and every one of them has to be green before the wrap-up is over — see
+/// [`store::finish_wrap_up`].
 async fn settle(state: &AppState, conversation_id: i64, watched: &Watched, checks: usize) {
     if let Err(error) = store::settle_wrap_up(
         &state.pool,
         conversation_id,
-        store::WaitingOn::Checks(watched.repo.id),
+        store::WaitingOn::Checks {
+            repo_id: watched.repo.id,
+            number: watched.number,
+        },
     )
     .await
     {
@@ -971,7 +1052,10 @@ async fn unsettle(state: &AppState, conversation_id: i64, watched: &Watched) {
     if let Err(error) = store::unsettle_wrap_up(
         &state.pool,
         conversation_id,
-        store::WaitingOn::Checks(watched.repo.id),
+        store::WaitingOn::Checks {
+            repo_id: watched.repo.id,
+            number: watched.number,
+        },
     )
     .await
     {
@@ -1041,7 +1125,10 @@ async fn merging(
         }
     }
 
-    let waiting_on = store::WaitingOn::Mergeable(watched.repo.id);
+    let waiting_on = store::WaitingOn::Mergeable {
+        repo_id: watched.repo.id,
+        number: watched.number,
+    };
 
     let written = match merging {
         store::Merging::Cleanly => {
@@ -1104,7 +1191,7 @@ async fn resolve(
     // anywhere. See [`owed_elsewhere`], which is what keeps a pull request out of
     // goes from spending another's.
     if spent >= ATTEMPTS {
-        if owed_elsewhere(state, conversation_id, watched.repo.id).await {
+        if owed_elsewhere(state, conversation_id, watched).await {
             tracing::debug!(
                 conversation_id,
                 repo = watched.repo.name,
@@ -1259,6 +1346,8 @@ pub(crate) const ASKED_EVERY: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 mod tests {
+    use std::process::{Command, Stdio};
+
     use super::*;
 
     fn check(name: &str, link: &str) -> Check {
@@ -1267,6 +1356,134 @@ mod tests {
             how: Checked::Failed,
             link: link.to_owned(),
         }
+    }
+
+    /// A checkout with an origin holding two branches, which is a **stack**: the
+    /// chain's lower branch and the one based on it, both pushed, in the one
+    /// worktree.
+    ///
+    /// Handed back with the directories that keep them alive, and with what
+    /// origin is holding each branch on.
+    fn stacked() -> (tempfile::TempDir, tempfile::TempDir, String, String) {
+        let origin = tempfile::tempdir().unwrap();
+        run(
+            origin.path(),
+            &["init", "--bare", "--initial-branch", "main"],
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let worktree = dir.path();
+
+        run(worktree, &["init", "--initial-branch", "main"]);
+        run(
+            worktree,
+            &["config", "user.email", "test@verkstead.invalid"],
+        );
+        run(worktree, &["config", "user.name", "Verkstead Test"]);
+        run(
+            worktree,
+            &[
+                "remote",
+                "add",
+                "origin",
+                &origin.path().display().to_string(),
+            ],
+        );
+
+        std::fs::write(worktree.join("README.md"), "# a repository\n").unwrap();
+        run(worktree, &["add", "README.md"]);
+        run(worktree, &["commit", "-m", "first"]);
+
+        run(worktree, &["checkout", "-b", "rate-limiting"]);
+        std::fs::write(worktree.join("low.md"), "the branch below\n").unwrap();
+        run(worktree, &["add", "low.md"]);
+        run(worktree, &["commit", "-m", "the branch below"]);
+        run(worktree, &["push", "--quiet", "origin", "HEAD"]);
+
+        let low = head(worktree);
+
+        run(worktree, &["checkout", "-b", "rate-limiting-2"]);
+        std::fs::write(worktree.join("high.md"), "the branch above\n").unwrap();
+        run(worktree, &["add", "high.md"]);
+        run(worktree, &["commit", "-m", "the branch above"]);
+        run(worktree, &["push", "--quiet", "origin", "HEAD"]);
+
+        let high = head(worktree);
+
+        (origin, dir, low, high)
+    }
+
+    fn run(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
+
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn head(dir: &Path) -> String {
+        run(dir, &["rev-parse", "HEAD"]).trim().to_owned()
+    }
+
+    /// What a green rollup is held against is what origin is holding on *this*
+    /// pull request's branch, whichever branch the Worktree happens to be on.
+    ///
+    /// The whole reason the head is written down: a repository wrapping up a stack
+    /// has several pull requests through the one checkout, so a rollup held against
+    /// whatever `HEAD` points at would be a green suite refused on two branches out
+    /// of three — or believed on the strength of another branch's commit.
+    #[test]
+    fn what_was_pushed_is_read_off_the_pull_requests_own_branch() {
+        let (_origin, dir, low, high) = stacked();
+        let worktree = dir.path();
+
+        assert_ne!(low, high, "the two branches are at different commits");
+
+        // The Worktree is left on the top of the stack, which is where `gh stack
+        // checkout` leaves one — and the branch below is still a pull request with
+        // a suite of its own.
+        assert_eq!(
+            pushed_head(worktree, Some("rate-limiting")).as_deref(),
+            Some(low.as_str()),
+            "the branch below the checkout is asked about by name",
+        );
+        assert_eq!(
+            pushed_head(worktree, Some("rate-limiting-2")).as_deref(),
+            Some(high.as_str()),
+            "and so is the one the checkout is on",
+        );
+
+        // And a commit in hand is not a commit GitHub could have run anything
+        // against: what is asked for is what origin holds rather than what the
+        // Worktree has got to.
+        std::fs::write(worktree.join("more.md"), "not pushed yet\n").unwrap();
+        run(worktree, &["add", "more.md"]);
+        run(worktree, &["commit", "-m", "not pushed yet"]);
+
+        assert_ne!(head(worktree), high);
+        assert_eq!(
+            pushed_head(worktree, Some("rate-limiting-2")).as_deref(),
+            Some(high.as_str()),
+            "an unpushed commit is not what a rollup is held against",
+        );
+
+        // A pull request recorded before Verkstead wrote the head down has none,
+        // and there the checkout stands in — which is the branch such a row was on.
+        assert_eq!(
+            pushed_head(worktree, None).as_deref(),
+            Some(high.as_str()),
+            "with no head on the record, the branch the Worktree is on is asked about",
+        );
+
+        // And a branch origin has never heard of is *Verkstead cannot tell*, which
+        // holds nothing up.
+        assert_eq!(pushed_head(worktree, Some("rate-limiting-3")), None);
     }
 
     /// A companion's pull request, which is the one a fix session has to be sent
@@ -1280,6 +1497,7 @@ mod tests {
                 default_branch: "main".to_owned(),
             },
             number: 7,
+            head: Some("rate-limiting".to_owned()),
             worktree: std::path::PathBuf::from("/state/worktrees/rate-limiting-askance"),
         }
     }

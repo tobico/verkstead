@@ -343,7 +343,7 @@ pub(crate) async fn across(state: &AppState, conversation_id: i64) -> Option<Str
     let listed: Vec<String> = opened
         .iter()
         .filter_map(|(repo, pull_request)| {
-            let watched = crate::wrapping::watched(&conversation, repo.id, pull_request.number)?;
+            let watched = crate::wrapping::watched(&conversation, repo.id, pull_request)?;
 
             Some(format!(
                 "- {}, at {} — its worktree is at `{}`.",

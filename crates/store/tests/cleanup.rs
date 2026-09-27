@@ -671,7 +671,9 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .await
         .unwrap();
     settle_wrap_up(pool, id, WaitingOn::Review).await.unwrap();
-    record_fix_attempt(pool, id, repo, "build").await.unwrap();
+    record_fix_attempt(pool, id, repo, 41, "build")
+        .await
+        .unwrap();
     record_conflict_fix_attempt(pool, id, repo).await.unwrap();
     record_addressed_comments(pool, id, repo, &["IC_kwDO".to_owned()])
         .await

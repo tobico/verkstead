@@ -167,7 +167,14 @@ pub(crate) async fn watching(state: AppState, conversation_id: i64) {
 
     let watchers: Vec<_> = opened
         .into_iter()
-        .map(|(repo, _)| tokio::spawn(watch(state.clone(), conversation_id, repo.id)))
+        .map(|(repo, opened)| {
+            tokio::spawn(watch(
+                state.clone(),
+                conversation_id,
+                repo.id,
+                opened.number,
+            ))
+        })
         .collect();
 
     for watcher in watchers {
@@ -177,23 +184,28 @@ pub(crate) async fn watching(state: AppState, conversation_id: i64) {
     }
 }
 
-/// Watch what is said on the pull request `conversation_id` opened in `repo_id`
-/// until it stops wrapping up.
+/// Watch what is said on pull request `number` of Repo `repo_id` until the
+/// Conversation stops wrapping up.
+///
+/// Told which pull request rather than which repository, because a conversation
+/// is a fact about a pull request: a stack is several in the one repository, and
+/// a human writes on the one they are reading.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, that repository has no pull request on the record any more, or driving
-/// stopped. Idle rather than looping, for the checks watcher's reason — nothing
-/// advances past a stop, and a watcher that dispatched sessions behind one would
-/// be working on a run the human has stopped.
+/// gone, that pull request is not on the record any more, or driving stopped.
+/// Idle rather than looping, for the checks watcher's reason — nothing advances
+/// past a stop, and a watcher that dispatched sessions behind one would be
+/// working on a run the human has stopped.
 ///
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
-pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64) {
+pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64, number: i64) {
     loop {
-        if let Watching::Done(why) = once(&state, conversation_id, repo_id).await {
+        if let Watching::Done(why) = once(&state, conversation_id, repo_id, number).await {
             tracing::info!(
                 conversation_id,
                 repo_id,
+                number,
                 why,
                 "a pull request's comments are no longer being read"
             );
@@ -215,7 +227,7 @@ enum Watching {
 
 /// Take one look: ask GitHub what has been said, and dispatch a session for
 /// whatever is new.
-async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching {
+async fn once(state: &AppState, conversation_id: i64, repo_id: i64, number: i64) -> Watching {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => return Watching::Done("there is no Conversation left to read comments for"),
@@ -257,7 +269,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // would be two calls spent to reach this same line. The unsettle that could
     // take this away is this watcher's alone, and this watcher is gone.
     if crate::conversations::narrows_the_wrap_up(conversation.process) {
-        settle(state, conversation_id, repo_id).await;
+        settle(state, conversation_id, repo_id, number).await;
 
         return Watching::Done("this wrap-up does not answer what is said on the pull request");
     }
@@ -304,15 +316,17 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
         return Watching::Again;
     }
 
-    let opened = match store::pull_request(&state.pool, conversation_id, repo_id).await {
+    let opened = match store::pull_request_numbered(&state.pool, conversation_id, repo_id, number)
+        .await
+    {
         Ok(Some(opened)) => opened,
-        // A Conversation wrapping up has a pull request in the repository whose
-        // watcher this is — a watcher is started where one is recorded and never
-        // before — so this is a record that has been got at rather than a wrap-up
-        // to carry on with.
-        Ok(None) => return Watching::Done("that repository has no pull request to read"),
+        // A Conversation wrapping up is on the pull request whose watcher this
+        // is — a watcher is started where one is recorded and never before — so
+        // this is a record that has been got at rather than a wrap-up to carry
+        // on with.
+        Ok(None) => return Watching::Done("that pull request is not on the record to read"),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo_id, "reading the pull request to read comments on failed");
+            tracing::error!(error = ?error, conversation_id, repo_id, number, "reading the pull request to read comments on failed");
             return Watching::Again;
         }
     };
@@ -320,7 +334,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // Which repository to ask in and which checkout its work is done in, read off
     // the Conversation every poll rather than held: a companion taken away is one
     // there is nowhere left to ask about.
-    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, opened.number) else {
+    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, &opened) else {
         return Watching::Done("there is no repository left to read that pull request in");
     };
 
@@ -368,7 +382,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
         // is held across the settling itself, so that a batch dispatched between
         // the asking and the writing cannot be settled over either.
         if let Some(_turn) = state.sessions.try_turn(conversation_id) {
-            settle(state, conversation_id, watched.repo.id).await;
+            settle(state, conversation_id, watched.repo.id, watched.number).await;
         } else {
             tracing::debug!(
                 conversation_id,
@@ -635,8 +649,7 @@ pub(crate) async fn for_the_review(state: &AppState, conversation_id: i64) -> Op
     let mut comments = 0;
 
     for (repo, pull_request) in opened {
-        let Some(watched) = crate::wrapping::watched(&conversation, repo.id, pull_request.number)
-        else {
+        let Some(watched) = crate::wrapping::watched(&conversation, repo.id, &pull_request) else {
             continue;
         };
 
@@ -734,6 +747,7 @@ async fn dispatch(
         state,
         conversation_id,
         watched.repo.id,
+        watched.number,
         &feedback(watched, fresh),
         &which,
     )
@@ -819,23 +833,24 @@ fn said_by(watched: &Watched, fresh: &[Comment]) -> String {
 /// has one less thing to wait on.
 ///
 /// One of however many it is waiting on: a Conversation ends on a pull request
-/// per repository it was worked in, and every one of them has to be quiet before
-/// the wrap-up is over — see [`store::finish_wrap_up`].
+/// per repository it was worked in and as many in one repository as its stack is
+/// deep, and every one of them has to be quiet before the wrap-up is over — see
+/// [`store::finish_wrap_up`].
 ///
-/// By the Repo's id rather than by the [`Watched`] the comments were read in,
-/// because the one caller with no comments to read has no `Watched` either: a
-/// narrowed wrap-up settles this on its first look and stops, before the pull
-/// request has been read off the record and before anything is asked of GitHub —
-/// see [`once`].
-async fn settle(state: &AppState, conversation_id: i64, repo_id: i64) {
+/// By the Repo and the number rather than by the [`Watched`] the comments were
+/// read in, because the one caller with no comments to read has no `Watched`
+/// either: a narrowed wrap-up settles this on its first look and stops, before the
+/// pull request has been read off the record and before anything is asked of
+/// GitHub — see [`once`], which is told which pull request it is watching.
+async fn settle(state: &AppState, conversation_id: i64, repo_id: i64, number: i64) {
     if let Err(error) = store::settle_wrap_up(
         &state.pool,
         conversation_id,
-        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Comments { repo_id, number },
     )
     .await
     {
-        tracing::error!(error = ?error, conversation_id, repo_id, "recording that the comments are all addressed failed");
+        tracing::error!(error = ?error, conversation_id, repo_id, number, "recording that the comments are all addressed failed");
     }
 }
 
@@ -845,11 +860,14 @@ async fn unsettle(state: &AppState, conversation_id: i64, watched: &Watched) {
     if let Err(error) = store::unsettle_wrap_up(
         &state.pool,
         conversation_id,
-        store::WaitingOn::Comments(watched.repo.id),
+        store::WaitingOn::Comments {
+            repo_id: watched.repo.id,
+            number: watched.number,
+        },
     )
     .await
     {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "putting the comments back to waiting failed");
+        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, number = watched.number, "putting the comments back to waiting failed");
     }
 }
 
@@ -886,6 +904,7 @@ mod tests {
                 default_branch: "main".to_owned(),
             },
             number: 7,
+            head: Some("rate-limiting".to_owned()),
             worktree: std::path::PathBuf::from("/state/worktrees/rate-limiting-askance"),
         }
     }

@@ -10970,9 +10970,18 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
     // exactly what that sweep is for, so the mark is drawn in this state as
     // readily as in the one above.
     for waiting_on in store::WAITED_ON.into_iter().chain([
-        store::WaitingOn::Checks(repo_id),
-        store::WaitingOn::Comments(repo_id),
-        store::WaitingOn::Mergeable(repo_id),
+        store::WaitingOn::Checks {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -11216,9 +11225,18 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
 
     // And on to Done, which is where the press is offered.
     for waiting_on in store::WAITED_ON.into_iter().chain([
-        store::WaitingOn::Checks(repo_id),
-        store::WaitingOn::Comments(repo_id),
-        store::WaitingOn::Mergeable(repo_id),
+        store::WaitingOn::Checks {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -11287,9 +11305,18 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
         .unwrap();
 
     for waiting_on in store::WAITED_ON.into_iter().chain([
-        store::WaitingOn::Checks(repo_id),
-        store::WaitingOn::Comments(repo_id),
-        store::WaitingOn::Mergeable(repo_id),
+        store::WaitingOn::Checks {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -11369,8 +11396,14 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
 
     for waiting_on in [
         store::WaitingOn::Review,
-        store::WaitingOn::Comments(repo_id),
-        store::WaitingOn::Mergeable(repo_id),
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
     ] {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -11395,9 +11428,16 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
         "and the row says the same thing the card does",
     );
 
-    store::settle_wrap_up(&pool, id, store::WaitingOn::Checks(repo_id))
-        .await
-        .unwrap();
+    store::settle_wrap_up(
+        &pool,
+        id,
+        store::WaitingOn::Checks {
+            repo_id,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert!(
         !opened(&app, id).await.waiting_on_checks,
@@ -11446,7 +11486,10 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
 
     for waiting_on in [
         store::WaitingOn::Review,
-        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
     ] {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -11457,9 +11500,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         "a pull request nothing has said merges is not one waiting on its checks",
     );
 
-    store::settle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
-        .await
-        .unwrap();
+    store::settle_wrap_up(
+        &pool,
+        id,
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),
@@ -11483,9 +11533,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         "and the wrap-up going quiet again is worth saying afresh",
     );
 
-    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Comments(repo_id))
-        .await
-        .unwrap();
+    store::unsettle_wrap_up(
+        &pool,
+        id,
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),
@@ -11493,9 +11550,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         "a comment landing is something else to deal with, so it is not the checks alone",
     );
 
-    store::settle_wrap_up(&pool, id, store::WaitingOn::Comments(repo_id))
-        .await
-        .unwrap();
+    store::settle_wrap_up(
+        &pool,
+        id,
+        store::WaitingOn::Comments {
+            repo_id,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),
@@ -11503,9 +11567,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         "and dealing with it narrows the wrap-up a second time, which is a second line",
     );
 
-    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
-        .await
-        .unwrap();
+    store::unsettle_wrap_up(
+        &pool,
+        id,
+        store::WaitingOn::Mergeable {
+            repo_id,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),

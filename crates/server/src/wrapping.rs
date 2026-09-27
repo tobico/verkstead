@@ -280,10 +280,11 @@ pub(crate) async fn record(
 ///
 /// What both of a wrap-up's per-pull-request watchers need before they can go to
 /// the network, and one thing rather than two because it is one question: a
-/// Conversation ends on a pull request per repository it was worked in, and
-/// asking GitHub about one — its checks or what has been said on it — means
-/// running `gh` in that repository and sending whoever answers to that
-/// repository's checkout. See [`crate::checks`] and [`crate::comments`].
+/// Conversation ends on a pull request per repository it was worked in and as
+/// many in one repository as its stack is deep, and asking GitHub about one — its
+/// checks or what has been said on it — means running `gh` in that repository and
+/// sending whoever answers to that repository's checkout. See [`crate::checks`]
+/// and [`crate::comments`].
 pub(crate) struct Watched {
     /// The registered Repo it was opened in, which is where `gh` is run and what
     /// the feedback and the Notice name it by.
@@ -293,21 +294,42 @@ pub(crate) struct Watched {
     /// repository and nowhere else.
     pub(crate) number: i64,
 
+    /// The branch its work is on, as the record holds it — see
+    /// [`store::PullRequest::head`].
+    ///
+    /// What a green suite is held against: the rollup GitHub reports is a fact
+    /// about one commit, and which commit that has to *be* is whatever origin
+    /// holds on this pull request's own branch. Read off the row rather than off
+    /// the checkout, because a repository wrapping up a stack has several
+    /// branches through the one Worktree and the checkout answers for at most
+    /// one of them.
+    ///
+    /// `None` on a row written before Verkstead wrote the head down, which is
+    /// the one case the checkout still has to stand in for — see
+    /// [`crate::checks`].
+    pub(crate) head: Option<String>,
+
     /// The checkout its branch is on: the Conversation's own worktree, or the
     /// companion's beside it. Where a session sent at it is sent to work.
     pub(crate) worktree: PathBuf,
 }
 
-/// Where the pull request opened in `repo_id` is, and where its work is done.
+/// Where `opened`, the pull request recorded in `repo_id`, is — and where its
+/// work is done.
 ///
 /// The Conversation's own repository and Worktree, or the companion's beside it.
 /// `None` where the Conversation has neither — a companion taken off it, or a
 /// checkout that is gone — which is a pull request nothing can do anything
 /// about.
+///
+/// The whole recorded pull request rather than its number, because the branch
+/// comes with it: which branch this one's work is on is as much a fact off the
+/// row as the number is, and neither can be read off a Worktree that a stack
+/// shares.
 pub(crate) fn watched(
     conversation: &store::Conversation,
     repo_id: i64,
-    number: i64,
+    opened: &store::PullRequest,
 ) -> Option<Watched> {
     let (repo, worktree) = match conversation.repo.id == repo_id {
         true => (&conversation.repo, conversation.worktree.as_ref()?),
@@ -323,7 +345,8 @@ pub(crate) fn watched(
 
     Some(Watched {
         repo: repo.clone(),
-        number,
+        number: opened.number,
+        head: opened.head.clone(),
         worktree: worktree.clone(),
     })
 }
@@ -546,13 +569,14 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                 // past above — so a server coming back up over one gets its
                 // watchers from [`watching`] rather than from here.
                 let repo_id = companion.repo_id;
+                let number = opened.number;
 
                 driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::checks::watch(state, conversation_id, repo_id)
+                    crate::checks::watch(state, conversation_id, repo_id, number)
                 });
 
                 driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::comments::watch(state, conversation_id, repo_id)
+                    crate::comments::watch(state, conversation_id, repo_id, number)
                 });
 
                 // The Timeline has something new pinned on it, and an open page

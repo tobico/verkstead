@@ -146,11 +146,13 @@ async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
 
     WAITED_ON
         .into_iter()
-        .chain(opened.into_iter().flat_map(|(repo, _)| {
+        .chain(opened.into_iter().flat_map(|(repo, opened)| {
+            let (repo_id, number) = (repo.id, opened.number);
+
             [
-                WaitingOn::Checks(repo.id),
-                WaitingOn::Comments(repo.id),
-                WaitingOn::Mergeable(repo.id),
+                WaitingOn::Checks { repo_id, number },
+                WaitingOn::Comments { repo_id, number },
+                WaitingOn::Mergeable { repo_id, number },
             ]
         }))
         .collect()
@@ -419,7 +421,10 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
 ///
 /// Asked over the bare branch here, that being the door where the move and the
 /// settles are the one write: the Conversation is Wrapping when this returns and
-/// both are already down.
+/// both are already down. What the store does with what it is handed is the whole
+/// of what this asks — which pull request the comments are settled against is the
+/// caller's, and a settlement names one by the Repo and the number together now
+/// that a repository can hold a whole stack of them.
 #[tokio::test]
 async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled() {
     let (_dir, pool) = fresh_pool().await;
@@ -444,7 +449,13 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
             &[],
             Entering {
                 landing: Landing::Wrapping,
-                settled: &[WaitingOn::Review, WaitingOn::Comments(repo.id)],
+                settled: &[
+                    WaitingOn::Review,
+                    WaitingOn::Comments {
+                        repo_id: repo.id,
+                        number: 41
+                    }
+                ],
             },
         )
         .await
@@ -462,12 +473,20 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
         "the review is settled as the Conversation lands: {settled:?}",
     );
     assert!(
-        settled.contains(&WaitingOn::Comments(repo.id)),
-        "and so is what is said on the pull request that Repo is about to hold: {settled:?}",
+        settled.contains(&WaitingOn::Comments {
+            repo_id: repo.id,
+            number: 41
+        }),
+        "and so is what is said on the pull request it was handed: {settled:?}",
     );
     assert!(
-        !settled.contains(&WaitingOn::Checks(repo.id))
-            && !settled.contains(&WaitingOn::Mergeable(repo.id)),
+        !settled.contains(&WaitingOn::Checks {
+            repo_id: repo.id,
+            number: 41
+        }) && !settled.contains(&WaitingOn::Mergeable {
+            repo_id: repo.id,
+            number: 41
+        }),
         "and nothing else is: those two are what a narrowed wrap-up waits on: {settled:?}",
     );
 }
@@ -1520,7 +1539,10 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
     let settled = wrap_up_settled(&pool, id).await.unwrap();
 
     assert!(
-        !settled.contains(&WaitingOn::Mergeable(own)),
+        !settled.contains(&WaitingOn::Mergeable {
+            repo_id: own,
+            number: 41
+        }),
         "the conflict the press was made over is something the wrap-up waits on \
          again: {settled:?}",
     );
@@ -1530,7 +1552,13 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
          branch a second time: {settled:?}",
     );
     assert!(
-        settled.contains(&WaitingOn::Checks(own)) && settled.contains(&WaitingOn::Comments(own)),
+        settled.contains(&WaitingOn::Checks {
+            repo_id: own,
+            number: 41
+        }) && settled.contains(&WaitingOn::Comments {
+            repo_id: own,
+            number: 41
+        }),
         "and so does everything this round's own polls settle for themselves: \
          {settled:?}",
     );
@@ -1583,11 +1611,17 @@ async fn only_the_pull_requests_that_conflict_go_back_to_being_waited_on() {
     let settled = wrap_up_settled(&pool, id).await.unwrap();
 
     assert!(
-        !settled.contains(&WaitingOn::Mergeable(beside)),
+        !settled.contains(&WaitingOn::Mergeable {
+            repo_id: beside,
+            number: 7
+        }),
         "the companion's branch is the one that stopped merging: {settled:?}",
     );
     assert!(
-        settled.contains(&WaitingOn::Mergeable(own)),
+        settled.contains(&WaitingOn::Mergeable {
+            repo_id: own,
+            number: 41
+        }),
         "and the work's own still merges, so nothing about it was unsettled: \
          {settled:?}",
     );

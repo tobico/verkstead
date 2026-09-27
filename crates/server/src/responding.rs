@@ -92,10 +92,11 @@ use crate::store;
 /// comments this batch is made of — as addressed against the pull request opened
 /// in `repo_id`. Both are what make this the one session that will act on them.
 ///
-/// `repo_id` is which pull request the batch was left on, carried through so
-/// that whatever has to be put back where it was — the comments unread, the
-/// settlement back to waiting — is put back for that one rather than for all of
-/// them.
+/// `repo_id` and `number` are which pull request the batch was left on, carried
+/// through so that whatever has to be put back where it was — the comments
+/// unread, the settlement back to waiting — is put back for that one rather than
+/// for all of them. Both halves, a repository holding as many pull requests as
+/// its stack is deep.
 ///
 /// Nothing is refused for. This runs unattended with nobody watching, and what
 /// it has to say it says on the Timeline or in the log.
@@ -103,16 +104,36 @@ pub(crate) async fn run(
     state: &AppState,
     conversation_id: i64,
     repo_id: i64,
+    number: i64,
     said: &str,
     which: &[String],
 ) {
+    let batch = Batch {
+        repo_id,
+        number,
+        which,
+    };
+
     match crate::runner::respond(state, conversation_id, said).await {
-        Reviewed::Done => over(state, conversation_id, repo_id, which, None).await,
+        Reviewed::Done => over(state, conversation_id, batch, None).await,
         Reviewed::Stopped { how, writing } => {
-            over(state, conversation_id, repo_id, which, Some((how, writing))).await
+            over(state, conversation_id, batch, Some((how, writing))).await
         }
         Reviewed::Nothing => {}
     }
+}
+
+/// One batch as whoever dispatched it knows it: which pull request it was left
+/// on, and which comments it was made of.
+///
+/// The pull request is the Repo and the number together, that being what a pull
+/// request is — and what says which settlement is this batch's to put back to
+/// waiting when nothing is left behind it.
+#[derive(Clone, Copy)]
+struct Batch<'a> {
+    repo_id: i64,
+    number: i64,
+    which: &'a [String],
 }
 
 /// The batch session is over: leave the wrap-up to carry on, or stop the run.
@@ -127,8 +148,7 @@ pub(crate) async fn run(
 async fn over(
     state: &AppState,
     conversation_id: i64,
-    repo_id: i64,
-    which: &[String],
+    batch: Batch<'_>,
     ended_badly: Option<(String, i64)>,
 ) {
     // A session that put its proposal up and then went — cleanly or otherwise —
@@ -137,19 +157,12 @@ async fn over(
     // nothing would ever act on.
     if let Some(set_id) = proposed(state, conversation_id).await {
         if crate::review::unanswered(state, set_id).await {
-            return abandoned(
-                state,
-                conversation_id,
-                set_id,
-                Some((repo_id, which)),
-                ended_badly,
-            )
-            .await;
+            return abandoned(state, conversation_id, set_id, Some(batch), ended_badly).await;
         }
     }
 
     if let Some((how, writing)) = ended_badly {
-        return stopped(state, conversation_id, repo_id, which, &how, writing).await;
+        return stopped(state, conversation_id, batch, &how, writing).await;
     }
 
     // Everything it was sent to do is done: what was said read, whatever it would
@@ -170,7 +183,9 @@ async fn over(
 
     tracing::info!(
         conversation_id,
-        comments = which.len(),
+        repo_id = batch.repo_id,
+        number = batch.number,
+        comments = batch.which.len(),
         "what was said on the pull request has been answered, so the wrap-up carries on"
     );
 }
@@ -286,13 +301,13 @@ async fn abandoned(
     state: &AppState,
     conversation_id: i64,
     set_id: i64,
-    which: Option<(i64, &[String])>,
+    batch: Option<Batch<'_>>,
     ended_badly: Option<(String, i64)>,
 ) {
     crate::review::closed(state, conversation_id, set_id).await;
 
-    forget(state, conversation_id, which).await;
-    unsettle(state, conversation_id, which.map(|(repo_id, _)| repo_id)).await;
+    forget(state, conversation_id, batch).await;
+    unsettle(state, conversation_id, batch).await;
 
     let left = "a session read what was said on the pull request and put what it would \
                 do to you, and it is gone, so its questions have been closed unanswered. \
@@ -326,10 +341,20 @@ async fn abandoned(
 /// Put comments back to being unread: the batch's own, on the pull request it was
 /// left on, or every one of them on every pull request where the caller cannot
 /// say which those were.
-async fn forget(state: &AppState, conversation_id: i64, which: Option<(i64, &[String])>) {
-    let forgotten = match which {
-        Some((repo_id, which)) => {
-            store::forget_addressed_comments(&state.pool, conversation_id, repo_id, which).await
+async fn forget(state: &AppState, conversation_id: i64, batch: Option<Batch<'_>>) {
+    let forgotten = match batch {
+        // By the repository the pull request is in rather than by the pull
+        // request, which is how the comments themselves are kept: GitHub's ids
+        // are unique wherever a comment was left, so naming them is enough — see
+        // [`store::forget_addressed_comments`].
+        Some(batch) => {
+            store::forget_addressed_comments(
+                &state.pool,
+                conversation_id,
+                batch.repo_id,
+                batch.which,
+            )
+            .await
         }
         None => store::forget_every_addressed_comment(&state.pool, conversation_id).await,
     };
@@ -350,11 +375,14 @@ async fn forget(state: &AppState, conversation_id: i64, which: Option<(i64, &[St
 /// Said before the run is stopped, because wrap-up's rule is decided by a loop
 /// of its own: a Conversation whose checks went green in the meantime would
 /// otherwise reach Done over the top of a proposal nobody is behind.
-async fn unsettle(state: &AppState, conversation_id: i64, repo_id: Option<i64>) {
-    let opened = match repo_id {
-        Some(repo_id) => vec![repo_id],
+async fn unsettle(state: &AppState, conversation_id: i64, batch: Option<Batch<'_>>) {
+    let opened = match batch {
+        Some(batch) => vec![(batch.repo_id, batch.number)],
         None => match store::pull_requests(&state.pool, conversation_id).await {
-            Ok(opened) => opened.into_iter().map(|(repo, _)| repo.id).collect(),
+            Ok(opened) => opened
+                .into_iter()
+                .map(|(repo, opened)| (repo.id, opened.number))
+                .collect(),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id, "reading which pull requests to put back to waiting failed");
                 return;
@@ -362,15 +390,15 @@ async fn unsettle(state: &AppState, conversation_id: i64, repo_id: Option<i64>) 
         },
     };
 
-    for repo_id in opened {
+    for (repo_id, number) in opened {
         if let Err(error) = store::unsettle_wrap_up(
             &state.pool,
             conversation_id,
-            store::WaitingOn::Comments(repo_id),
+            store::WaitingOn::Comments { repo_id, number },
         )
         .await
         {
-            tracing::error!(error = ?error, conversation_id, repo_id, "putting the comments back to waiting failed");
+            tracing::error!(error = ?error, conversation_id, repo_id, number, "putting the comments back to waiting failed");
         }
     }
 }
@@ -393,15 +421,15 @@ async fn unsettle(state: &AppState, conversation_id: i64, repo_id: Option<i64>) 
 async fn stopped(
     state: &AppState,
     conversation_id: i64,
-    repo_id: i64,
-    which: &[String],
+    batch: Batch<'_>,
     how: &str,
     writing: i64,
 ) {
     if let Err(error) =
-        store::forget_addressed_comments(&state.pool, conversation_id, repo_id, which).await
+        store::forget_addressed_comments(&state.pool, conversation_id, batch.repo_id, batch.which)
+            .await
     {
-        tracing::error!(error = ?error, conversation_id, repo_id, "forgetting a batch nobody answered failed");
+        tracing::error!(error = ?error, conversation_id, repo_id = batch.repo_id, number = batch.number, "forgetting a batch nobody answered failed");
     }
 
     if let Err(error) = crate::stopping::stop(
