@@ -1245,19 +1245,19 @@ pub(crate) fn startable(
         return Startable::Complete;
     };
 
-    // Clause 3: nobody on it. Wherever the record has a row for the stage the
-    // record is what says so — in flight is neither done nor a stage to take, and
-    // abandoned is nobody's, what refuses that one being the branch it left behind
-    // under clause 4 below.
+    // Clause 3: nobody on it. In flight is the record saying so outright, and it
+    // says it whatever the roadmap has written on the line.
     //
-    // And where the record has no row the annotation is the fallback it always
-    // was: prose a human may have rewritten, so the branch inside the backticks is
-    // the fact — and one whose branch is gone is a note about an attempt that was
-    // abandoned too.
-    let on_it = match standing {
-        Some(standing) => standing == store::StageStanding::InFlight,
-        None => annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)),
-    };
+    // **Anything else leaves the annotation to speak**, which is where an
+    // abandoned stage goes with a stage the record has no row for at all: the
+    // record saying a Conversation was closed part-way through says nothing about
+    // whether anybody is on the stage *now*, and somebody carrying that work on by
+    // hand says so where the score is kept — the one way an unwanted row is
+    // silenced in the repository, the other being the box. Prose a human may have
+    // rewritten, so the branch inside the backticks is the fact, and one whose
+    // branch is gone is a note about an attempt that was abandoned too.
+    let on_it = standing == Some(store::StageStanding::InFlight)
+        || annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch));
 
     if on_it {
         return Startable::InFlight;
@@ -3356,6 +3356,39 @@ Turns this askance clone into Verkstead.
                 .stage
                 .label,
             "01",
+        );
+    }
+
+    /// And the annotation still speaks for an abandoned stage, which is the one
+    /// way an unwanted row is silenced in the repository other than the box.
+    ///
+    /// The record saying a Conversation was closed part-way through says nothing
+    /// about whether anybody is on the stage now — so somebody carrying that work
+    /// on by hand, on a branch of their own, says so where the score is kept, and
+    /// it is heeded exactly as it is for a stage the record has never heard of.
+    #[test]
+    fn an_abandoned_stage_somebody_annotated_is_left_to_them() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            &UNTICKED.replace(
+                "- [ ] 01: Workbench — [brief](01-workbench.md)",
+                "- [ ] 01: Workbench — [brief](01-workbench.md) *(in progress: `tobi/workbench`)*",
+            ),
+        );
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+        repo.branch("tobi/workbench");
+
+        // The stage's own branch is gone — the attempt Verkstead abandoned left
+        // nothing standing — so clause 4 has nothing to refuse it by.
+        assert_eq!(
+            repo.startable_with(
+                "mvp",
+                &record([("mvp", "01", store::StageStanding::Abandoned)])
+            ),
+            Startable::InFlight,
+            "somebody is on it on a branch of their own, and the line says so",
         );
     }
 
