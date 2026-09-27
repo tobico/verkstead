@@ -315,15 +315,27 @@ fn integer_part(key: &str) -> Result<&str> {
 
 /// Whether `key` is one this arithmetic can work from.
 ///
-/// Three things are asked of it, and each of them is something a key this module
-/// minted cannot fail: its head says a length it is long enough for, every
-/// character after the head is in the alphabet, and its fraction has no trailing
-/// zero. What a failure means is a rank from somewhere else — a hand-edited row,
-/// or a device that agreed about the alphabet and nothing else.
+/// Four things are asked of it, and each of them is something a key this module
+/// minted cannot fail: every character of it is a single byte, its head says a
+/// length it is long enough for, every character after the head is in the
+/// alphabet, and its fraction has no trailing zero. What a failure means is a
+/// rank from somewhere else — a hand-edited row, or a device that agreed about
+/// the alphabet and nothing else.
 fn validate(key: &str) -> Result<()> {
     ensure!(
         key != SMALLEST,
         "{key} is the lowest key there is, so nothing can be ranked above it"
+    );
+
+    // Asked before the head is read, because the head says a length in
+    // characters and [`integer_part`] takes it in bytes: a key carrying a
+    // character wider than one byte would be cut through the middle of that
+    // character rather than refused, which is a panic where every other rank
+    // this cannot read is a report. Nothing minted here can fail it — every
+    // character [`DIGITS`] has is one byte.
+    ensure!(
+        key.is_ascii(),
+        "{key} is not a key: every character of one is a single byte"
     );
 
     let integer = integer_part(key)?;
@@ -599,7 +611,11 @@ mod tests {
     /// something to report rather than to rank around.
     #[test]
     fn a_rank_that_is_not_a_key_is_refused() {
-        for rank in ["", "!!", "a", "a10", SMALLEST] {
+        // `aé` among them because the head counts characters and the slice that
+        // reads it counts bytes, so `validate` asks for a key one byte wide all
+        // through before it reads either: one that is not would be cut through
+        // the middle of a character rather than refused.
+        for rank in ["", "!!", "a", "a10", "aé", SMALLEST] {
             let rank = format!("{rank}{SEPARATOR}{THIS_DEVICE}");
 
             assert!(
