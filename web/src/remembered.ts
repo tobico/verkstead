@@ -4,9 +4,11 @@
 //! Named for what it holds rather than for where it holds it, and deliberately
 //! not for a *device*: the linked devices of this Verkstead's cluster are
 //! `devices.ts`, and a module a letter away from that one holding a browser's
-//! settings was a pair of names nobody could tell apart — see the device this
-//! browser is drafting onto, at the foot of this file, which is the one setting
-//! here that is about a device at all.
+//! settings was a pair of names nobody could tell apart. Two settings here are
+//! nonetheless *about* one of those devices — the device this browser is
+//! drafting onto, at the foot of this file, and the parent the last repo on each
+//! of them went in — which is the distinction rather than a hole in it: what is
+//! kept here is one browser's, whichever machine it is kept about.
 //!
 //! Deliberately per browser and never sent to the server — a phone and a laptop
 //! answer the same Set from different places, and neither has any business
@@ -46,28 +48,52 @@ export function setWrapping(on: boolean): void {
   }
 }
 
-/// And where the last repo this device made was put.
+/// And where the last repo each device made was put.
 ///
 /// Somebody making a second repository is almost certainly putting it beside the
-/// first, and where they keep their code is a fact about the machine in front of
-/// them rather than something to tell the server: a laptop's `~/src` and a
-/// phone's nothing at all are two answers to the same question, and neither is
-/// the other's to write down.
+/// first, and where they keep their code is a fact about the machine it goes on
+/// rather than something to tell the server: a laptop's `~/src` and a phone's
+/// nothing at all are two answers to the same question, and neither is the
+/// other's to write down.
+///
+/// **One answer per device of the cluster**, because the compose page drafts onto
+/// whichever of them will do the work (see `draftingOn` at the foot of this
+/// file). A create made with a member picked makes its directory over there, so
+/// one answer for the lot of them would open that browse at a path on this
+/// machine — a path the far end has most likely never heard of, offered as
+/// though it were somewhere to put a repository.
+///
+/// Which is not the same as it being the server's to keep. This browser is still
+/// the one remembering, the way it remembers everything else in this file: a
+/// laptop and a phone drafting onto the same desktop each keep their own answer
+/// about where its code goes, and neither tells the other.
+///
+/// This device's is the bare key it has always been and a member's carries its
+/// Device Id, so a browser that has been making repositories here since before
+/// there was a cluster opens where it always did.
 const PARENT = "verkstead.repo-parent";
 
-/// The directory the Create repo modal starts its browse in — empty where this
-/// device has not made one yet, which is what a first run always is.
-///
-/// Empty rather than `null` because empty is what the field is given: a path
-/// field standing empty browses the server's own home, so nothing here has to
-/// know what that home is.
-export function repoParent(): string {
-  return read(PARENT) ?? "";
+/// Where one device's memory of that is kept.
+function parentKey(device: Device): string {
+  return device === null ? PARENT : `${PARENT}.${device}`;
 }
 
-/// Remember where a repo was just made, for the next one.
-export function setRepoParent(path: string): void {
-  write(PARENT, path);
+/// The directory the Create repo modal starts its browse in, for the device the
+/// repository is being made on — empty where none has been made on that device
+/// yet, which is what a first run there always is.
+///
+/// Empty rather than `null` because empty is what the field is given: a path
+/// field standing empty browses the server's own home, and through the Relay
+/// that is the picked device's home, so nothing here has to know what that home
+/// is.
+export function repoParent(device: Device): string {
+  return read(parentKey(device)) ?? "";
+}
+
+/// Remember where a repo was just made on that device, for the next one made
+/// there.
+export function setRepoParent(device: Device, path: string): void {
+  write(parentKey(device), path);
 }
 
 /// What is being held under this key, if anything — and `null` when there is no

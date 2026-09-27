@@ -617,13 +617,16 @@ export function OpenRepo(props: {
 /// as two, joining them into a path here being the one place the browser would
 /// build one out of a separator the server never agreed to.
 ///
-/// **The parent is remembered on the device.** Somebody making a second
-/// repository is almost certainly putting it beside the first, and where they
-/// keep their code is a fact about the machine in front of them rather than
-/// something to tell the server — so it is kept where the wrap setting is, in
-/// `remembered.ts`, and the field opens inside it. Where there is none, which a
-/// first run always is, the field stands empty and browses the server's own
-/// home, which is where an unbounded browse already opens.
+/// **The parent is remembered, one answer per device of the cluster.** Somebody
+/// making a second repository is almost certainly putting it beside the first,
+/// and where they keep their code is a fact about the machine it goes on rather
+/// than something to tell the server — so it is kept where the wrap setting is,
+/// in `remembered.ts`, and the field opens inside it. One answer apiece because
+/// this card may be making the repository on a member, and a browser holding a
+/// single one would open a create on the laptop at a path on this machine. Where
+/// there is none for the device picked, which a first run there always is, the
+/// field stands empty and browses the server's own home — the picked device's
+/// home, this browse going out under it like every other.
 ///
 /// **And a tick that makes the same repository on GitHub**, drawn only where a
 /// token is saved. The settings say whether there is one without ever handing it
@@ -713,12 +716,16 @@ export function CreateRepo(props: {
   // drawn on one page, and an id is the page's to keep unique.
   const id = createUniqueId();
 
-  // Where the last repo on this device went, which is where this one starts —
-  // and, because that is a path handed over rather than one being typed, where
-  // its browse opens: see `opened` on `PathField`, which is the tap that wrote
-  // it, made on an earlier visit. Empty on the first run, and an empty field
-  // browses the server's own home.
-  const remembered = repoParent();
+  // Where the last repo on the picked device went, which is where this one
+  // starts — and, because that is a path handed over rather than one being
+  // typed, where its browse opens: see `opened` on `PathField`, which is the tap
+  // that wrote it, made on an earlier visit. Empty where nothing has been made on
+  // that device, and an empty field browses that device's own home.
+  //
+  // Read once, as the card is built: the device is the one the dropdown this was
+  // opened from is drawn for, and a pick made behind an open modal is not a thing
+  // there is.
+  const remembered = repoParent(device());
 
   const [parent, setParent] = createSignal(remembered);
 
@@ -799,9 +806,10 @@ export function CreateRepo(props: {
   const made = (repo: RepoView) => {
     // The parent as the server resolved it rather than as it was typed: that
     // is the directory the repository is actually in, and so the one the next
-    // create should open in.
+    // create should open in — on that device, this being a path on it and on no
+    // other.
     const cut = repo.path.lastIndexOf("/");
-    setRepoParent(cut > 0 ? repo.path.slice(0, cut) : "/");
+    setRepoParent(device(), cut > 0 ? repo.path.slice(0, cut) : "/");
 
     // The list this was made over is now out of date, and so are the roadmaps
     // waiting to be adopted — a registration invalidates both for the same

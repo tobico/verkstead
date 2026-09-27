@@ -1872,7 +1872,13 @@ reachability probe, and a call that cannot be made is refused by the **Relay** i
 its own words. Everything under the select is the named device's — the Repos the
 dropdown offers, the branches the base picker lists, the registry the companion
 rows are drawn from, the Profiles behind the three Pairing pickers, and the
-Repo's own Pairing memory the pickers stand on until they are touched. So a pick
+Repo's own Pairing memory the pickers stand on until they are touched. **The two
+rows at the foot of that dropdown are that device's too**: Open repo's field
+browses the named machine's directories and registers on its registry, and Create
+repo makes the directory and the repository there — each refused in the far end's
+own words rather than as a failed call, and the parent a create opens in
+remembered one answer per device, where somebody keeps their code being a fact
+about the machine it is on. So a pick
 takes with it everything that named the machine it came off, a Repo id and a
 Profile id each being one Verkstead's own: the Repo, the base commit, the
 companions and the three Pairings go, and the Brief, the branch name and the

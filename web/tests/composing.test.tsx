@@ -83,7 +83,9 @@ import {
   theWorkbench,
 } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
-import { browse, held, listingAt } from "./fields";
+// The path field's own rows are `browsed`, the listbox's being `rows` below:
+// one page draws both, and a browse's levels are not what a picker offers.
+import { browse, held, listingAt, rows as browsed } from "./fields";
 import {
   actionRows,
   offered,
@@ -104,6 +106,11 @@ import told from "./fixtures/settings.json" with { type: "json" };
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
 const ABANDONED = abandoned as AbandonedRepo[];
+
+/// And this machine with a cluster around it: two members, one a macOS laptop
+/// that answered the last dial and one a WSL that did not. Which is the reading
+/// the device select is drawn off — see the `describe` below.
+const LINKED = linked as DevicesView;
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -219,6 +226,60 @@ const remembering = (
   review: { Under: { profile: review, model: review.models[0]! } },
 });
 
+/// The member of the cluster the tests below draft onto, and the one beside it:
+/// this device first and then the membership in the order it lists them — a
+/// reachable laptop, and a WSL that did not answer the last dial.
+const MEMBER = LINKED.members[0]!.identity;
+const AWAY = LINKED.members[1]!.identity;
+
+/// Where a call for that member stands. The prefix takes the place of
+/// `/api/ui`, so the far end sees the path the browser would have written
+/// locally — see `src/api/client.ts`, which is the one place a path is composed.
+const at = (path: string) => `/api/ui/members/${MEMBER.device}${path}`;
+
+/// The Repos registered on the member, which are not this device's: a Repo id is
+/// one Verkstead's own, so the two lists collide by construction and the names
+/// are what says which of them a dropdown is drawn off.
+const THEIRS: RepoEntry[] = REPOS.map((repo) => ({
+  ...repo,
+  name: `${repo.name}-on-the-laptop`,
+}));
+
+/// The workbench with a member linked, answering for its own registry and for
+/// what each of its Repos was last grilled with.
+///
+/// At module scope rather than inside the select's own `describe`, because two
+/// of them stand a cluster up: the select and the reading it changes, and the two
+/// rows at the foot of the Repo dropdown, which are the same reading one press
+/// further on.
+function theCluster(...answers: Parameters<typeof serving>) {
+  return theWorkbench(
+    ...REMEMBERED,
+    whenever("/api/ui/devices", json(LINKED)),
+    whenever(at("/repos"), json(THEIRS)),
+    whenever(at("/profiles"), json(PROFILES)),
+    ...THEIRS.map((repo) =>
+      whenever(at(`/repos/${repo.id}/pairings`), json(NO_PAIRINGS)),
+    ),
+    ...answers,
+    json(null),
+  );
+}
+
+/// Draw the compose page over a cluster and pick the member, which is where
+/// everything about the two rows on another device starts.
+///
+/// Waited for the pick to have landed rather than merely made: the select is
+/// drawn off a read of the membership, and what a pick changes is what every
+/// control under it is about — so a test that went on at once would be filling in
+/// the dropdown this device is still holding.
+async function draftingOnTheMember(container: ParentNode): Promise<void> {
+  await composing(container);
+  await drawn(container, `.${setup.deviceSelect}`);
+  pick("Device", MEMBER.name);
+  await waitFor(() => expect(showing("Device")).toBe(MEMBER.name));
+}
+
 /// Every registered Repo remembering something, which is what a workbench that
 /// has grilled anything looks like — and what the three role pickers stand on
 /// when nobody has touched them.
@@ -329,10 +390,35 @@ async function pickRepo(container: ParentNode, id: number): Promise<void> {
   pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
 }
 
-/// And this machine with a cluster around it: two members, one a macOS laptop
-/// that answered the last dial and one a WSL that did not. Which is the reading
-/// the device select is drawn off — see the `describe` below.
-const LINKED = linked as DevicesView;
+/// What the Create repo card's two fields are labelled, which is how they are
+/// found — on this device and on a member both, it being the one card.
+const WHERE = "Where it goes";
+const CALLED = "What it is called";
+
+/// And what the Open repo card's one field is labelled.
+const PATH = "Absolute path of a git repository";
+
+/// Fill the two in and send them.
+function make(parent: string, name: string): void {
+  fireEvent.input(screen.getByLabelText(WHERE), { target: { value: parent } });
+  fireEvent.input(screen.getByLabelText(CALLED), { target: { value: name } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+}
+
+/// And what stands where the GitHub tick would have, on a Verkstead with no
+/// token saved — which is what says the card has read the settings and is taking
+/// creates.
+function noRemote(): HTMLElement | null {
+  return screen.queryByText(/needs a remote/i);
+}
+
+/// What Verkstead has been told, which the Create card asks exactly one thing
+/// of: whether a GitHub token is saved. The fixture's has one.
+const TOKENED = told as SettingsView;
+
+/// And the same with none, which is what a Verkstead nobody has told anything
+/// looks like — and what every test that is not about the tick reads.
+const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
 
 describe("the compose page", () => {
   // Per device, so every test starts on a device holding nothing — and with
@@ -852,42 +938,6 @@ describe("the device the compose page is drafting onto", () => {
     localStorage.clear();
     leaveRefusals(0, []);
   });
-
-  /// The member, and the two names beside it: this device first and then the
-  /// membership in the order it lists them — a reachable laptop, and a WSL that
-  /// did not answer the last dial.
-  const MEMBER = LINKED.members[0]!.identity;
-  const AWAY = LINKED.members[1]!.identity;
-
-  /// Where a call for that member stands. The prefix takes the place of
-  /// `/api/ui`, so the far end sees the path the browser would have written
-  /// locally — see `src/api/client.ts`, which is the one place a path is
-  /// composed.
-  const at = (path: string) => `/api/ui/members/${MEMBER.device}${path}`;
-
-  /// The Repos registered on the member, which are not this device's: a Repo id
-  /// is one Verkstead's own, so the two lists collide by construction and the
-  /// names are what says which of them a dropdown is drawn off.
-  const THEIRS: RepoEntry[] = REPOS.map((repo) => ({
-    ...repo,
-    name: `${repo.name}-on-the-laptop`,
-  }));
-
-  /// The workbench with a member linked, answering for its own registry and for
-  /// what each of its Repos was last grilled with.
-  function theCluster(...answers: Parameters<typeof serving>) {
-    return theWorkbench(
-      ...REMEMBERED,
-      whenever("/api/ui/devices", json(LINKED)),
-      whenever(at("/repos"), json(THEIRS)),
-      whenever(at("/profiles"), json(PROFILES)),
-      ...THEIRS.map((repo) =>
-        whenever(at(`/repos/${repo.id}/pairings`), json(NO_PAIRINGS)),
-      ),
-      ...answers,
-      json(null),
-    );
-  }
 
   /// Every device the select offers, and the mark each row wears.
   const marks = (): (string | null | undefined)[] =>
@@ -2326,14 +2376,6 @@ describe("making a repo from the Repo dropdown", () => {
   /// The one directory there is to browse, which is the fixture's own.
   const LISTING = listing as DirectoryListing;
 
-  /// What Verkstead has been told, which this card asks exactly one thing of:
-  /// whether a GitHub token is saved. The fixture's has one.
-  const TOKENED = told as SettingsView;
-
-  /// And the same with none, which is what a Verkstead nobody has told anything
-  /// looks like — and what every test here that is not about the tick reads.
-  const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
-
   /// The workbench with the create answered however the test says, that
   /// directory served both by name and as the server's home, and the settings
   /// saying whether there is a token.
@@ -2377,32 +2419,14 @@ describe("making a repo from the Repo dropdown", () => {
     }
   }
 
-  /// What the two fields are labelled, which is how they are found.
-  const WHERE = "Where it goes";
-  const CALLED = "What it is called";
-
-  /// And the tick beside them, where a token is saved for it to be drawn by.
+  /// The tick beside the two fields, where a token is saved for it to be drawn
+  /// by — this describe's own subject, where the labels and the fill-in above it
+  /// are shared with the cluster's copy of the same card.
   const ON_GITHUB = "Create it on GitHub too, privately";
 
   /// The tick as the card is drawing it, or `null` where it is not drawn at all.
   function tick(): HTMLInputElement | null {
     return screen.queryByLabelText(ON_GITHUB) as HTMLInputElement | null;
-  }
-
-  /// And what stands where it would have on a Verkstead with no token saved.
-  function noRemote(): HTMLElement | null {
-    return screen.queryByText(/needs a remote/i);
-  }
-
-  /// Fill them in and send them.
-  function make(parent: string, name: string): void {
-    fireEvent.input(screen.getByLabelText(WHERE), {
-      target: { value: parent },
-    });
-    fireEvent.input(screen.getByLabelText(CALLED), {
-      target: { value: name },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
   }
 
   it("puts the draft on the repo it made", async () => {
@@ -2437,7 +2461,7 @@ describe("making a repo from the Repo dropdown", () => {
   /// among what is in it rather than among its siblings, which is what the same
   /// text typed by hand would mean.
   it("opens the browse in the parent the last repo on this device went in", async () => {
-    setRepoParent("/home/ada/src");
+    setRepoParent(null, "/home/ada/src");
     const fetching = creating(json({ Made: MADE }));
     const { container } = mount("/compose");
 
@@ -2484,7 +2508,7 @@ describe("making a repo from the Repo dropdown", () => {
     make("/home/ada/src/", "widgets");
 
     await waitFor(() => expect(stored().repo).toBe(MADE.id));
-    expect(repoParent()).toBe("/home/ada/src");
+    expect(repoParent(null)).toBe("/home/ada/src");
   });
 
   /// A refusal keeps the modal up with the reason under the fields, for the
@@ -2504,7 +2528,7 @@ describe("making a repo from the Repo dropdown", () => {
       (screen.getByLabelText(CALLED) as HTMLInputElement).value,
     ).toBe("widgets");
     expect(stored().repo).toBeNull();
-    expect(repoParent()).toBe("");
+    expect(repoParent(null)).toBe("");
   });
 
   /// And the one refusal that is not a word this app has: what git would not do,
@@ -2656,6 +2680,347 @@ describe("making a repo from the Repo dropdown", () => {
     await waitFor(() =>
       expect(screen.queryByText(/Name already exists/)).toBeNull(),
     );
+  });
+});
+
+/// And the two rows on whichever device the select names: **Open repo** and
+/// **Create repo** browsing and making directories on the machine that will do
+/// the work.
+///
+/// Everything under the select reads the picked device already — the field
+/// browses through the Relay, the registration and the `git init` go out under
+/// it — so what is asked here is that being true from this page end to end,
+/// against a second machine. And the one thing that was not: where the last repo
+/// went, which is a fact about the machine it went on rather than about the
+/// browser, and which a single key answered with a path on this one.
+describe("the two repo rows on the picked device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// What the member's filesystem looks like, which is nothing like this
+  /// machine's: the fixture's `/home/ada/src` is this device's own, and the whole
+  /// point of a browse going out under the member is that what comes back is the
+  /// other machine's directories.
+  const OVER_THERE: DirectoryListing = {
+    Listed: {
+      path: "/mnt/code",
+      entries: [
+        { kind: "Directory", name: "projects", path: "/mnt/code/projects" },
+        { kind: "Directory", name: "widgets", path: "/mnt/code/widgets" },
+      ],
+    },
+  };
+
+  /// And this machine's own, which is the fixture's — served alongside so that a
+  /// browse that went to the wrong end is an assertable reading rather than a
+  /// call nothing answered.
+  const HERE = listing as DirectoryListing;
+
+  /// And the level above each of them, because a field being typed into asks for
+  /// one: the text `/mnt/code` names `/mnt` with `code` half-written in it, which
+  /// is how a browse narrows as somebody types — see `src/PathField.tsx`. A
+  /// filesystem has those levels, so the stand-in for one does too.
+  const ABOVE_THEIRS: DirectoryListing = {
+    Listed: {
+      path: "/mnt",
+      entries: [{ kind: "Directory", name: "code", path: "/mnt/code" }],
+    },
+  };
+
+  const ABOVE_HERE: DirectoryListing = {
+    Listed: {
+      path: "/home/ada",
+      entries: [{ kind: "Directory", name: "src", path: "/home/ada/src" }],
+    },
+  };
+
+  /// A repository opened on the member: none of the ones registered there, so a
+  /// draft landing on it is unmistakably the answer's doing rather than the
+  /// list's.
+  const THEIR_OPENED: RepoEntry = {
+    id: 5151,
+    name: "widgets-over-there",
+    path: "/mnt/code/widgets",
+    default_branch: "main",
+  };
+
+  /// And one a create made there, in the same place and for the same reason.
+  const THEIR_MADE: RepoView = {
+    ...(made as RepoView),
+    id: 5252,
+    name: "widgets",
+    path: "/mnt/code/widgets",
+  };
+
+  /// And one made here, for the test that leaves the select alone.
+  const MADE_HERE: RepoView = {
+    ...(made as RepoView),
+    id: 5353,
+    name: "widgets",
+    path: "/home/ada/src/widgets",
+  };
+
+  /// The workbench with a member linked, both filesystems answering, and
+  /// whatever the test is about handed in last.
+  ///
+  /// The settings among them because the Create card holds its press until they
+  /// answer: what the tick would ask of GitHub is nothing this describe is
+  /// about, so there is no token and the card says so.
+  const theirs = (...answers: Parameters<typeof serving>) =>
+    theCluster(
+      whenever("/api/ui/settings", json(UNTOKENED)),
+      whenever(listingAt(null, MEMBER.device), json(OVER_THERE)),
+      whenever(listingAt("/mnt/code", MEMBER.device), json(OVER_THERE)),
+      whenever(listingAt("/mnt", MEMBER.device), json(ABOVE_THEIRS)),
+      whenever(listingAt(null), json(HERE)),
+      whenever(listingAt("/home/ada/src"), json(HERE)),
+      whenever(listingAt("/home/ada"), json(ABOVE_HERE)),
+      ...answers,
+    );
+
+  /// Open the Create repo card off the dropdown's foot and wait for it to have
+  /// settled what it says about GitHub, the way the human filling it in does:
+  /// it takes no create until the settings have answered.
+  async function createCard(registry: RepoEntry[]): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(registry.length));
+    press("Repo", "Create repo");
+
+    await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
+    await waitFor(() => expect(noRemote()).toBeTruthy());
+  }
+
+  /// And the Open repo card beside it, which asks the settings nothing and so
+  /// has nothing to wait for but itself.
+  async function openCard(registry: RepoEntry[]): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(registry.length));
+    press("Repo", "Open repo");
+
+    await waitFor(() => expect(screen.getByLabelText(PATH)).toBeTruthy());
+  }
+
+  /// Type a path into that one and send it.
+  function register(path: string): void {
+    fireEvent.input(screen.getByLabelText(PATH), { target: { value: path } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  }
+
+  /// **Open repo**, end to end on the member: the browse is its filesystem, the
+  /// registration lands on its registry, and the dropdown behind the card is
+  /// that registry read again with what just arrived on it.
+  it("browses the member's directories and lands a repo on its registry", async () => {
+    // The registry as a registry behaves: what has been registered, which is one
+    // more thing the moment the press lands.
+    let landed = false;
+
+    const fetching = theirs(
+      whenever(at("/repos"), () =>
+        json(landed ? [...THEIRS, THEIR_OPENED] : THEIRS)(),
+      ),
+      whenever(
+        at("/repos"),
+        () => {
+          landed = true;
+          return json({ Added: THEIR_OPENED })();
+        },
+        "POST",
+      ),
+      whenever(at(`/repos/${THEIR_OPENED.id}/pairings`), json(NO_PAIRINGS)),
+      whenever(at(`/repos/${THEIR_OPENED.id}/branches`), json(BRANCHES)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await openCard(THEIRS);
+
+    // The field standing empty asks for the server's own home, and through the
+    // Relay that is the member's home: what comes down is the other machine's
+    // directories rather than this one's.
+    browse(PATH);
+    await waitFor(() =>
+      expect(browsed(PATH)).toEqual(["Up to /mnt", "projects", "widgets"]),
+    );
+    expect(askedFor(fetching, listingAt(null, MEMBER.device))).toBe(1);
+    expect(askedFor(fetching, listingAt(null))).toBe(0);
+
+    register(THEIR_OPENED.path);
+
+    // The registration went to the member's registry and to no other, and the
+    // draft is on the Repo that came back.
+    await waitFor(() => expect(stored().repo).toBe(THEIR_OPENED.id));
+    expect(sent(fetching, at("/repos"))).toEqual({ path: THEIR_OPENED.path });
+    expect(writes(fetching, "/api/ui/repos")).toBe(0);
+
+    // The card is spent and the row it was opened from has become the panel —
+    // whose list is the member's registry read again, now holding what landed,
+    // and settled on it.
+    await waitFor(() => expect(screen.queryByLabelText(PATH)).toBeNull());
+    await openRepo(container);
+    await waitFor(() => expect(rows("Repo")).toContain(THEIR_OPENED.name));
+    expect(showing("Repo")).toBe(THEIR_OPENED.name);
+  });
+
+  /// **Create repo** on the member, and the one thing that was genuinely wrong:
+  /// where the last repo went is a fact about the machine it went on, so there is
+  /// an answer per device and the browse opens in the picked one's.
+  it("makes a repo on the member, and opens where the last one there went", async () => {
+    // Two memories, one per machine: this browser has been making repositories
+    // in this device's own ~/src since before there was a cluster, and the
+    // member's code lives somewhere else entirely.
+    setRepoParent(null, "/home/ada/src");
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    const fetching = theirs(
+      whenever(at("/repos/new"), json({ Made: THEIR_MADE }), "POST"),
+      whenever(at(`/repos/${THEIR_MADE.id}/pairings`), json(NO_PAIRINGS)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    // The member's parent rather than this device's — and, because that is a
+    // path handed over rather than one being typed, the browse opens inside it.
+    expect(held(WHERE)).toBe("/mnt/code");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/mnt/code", MEMBER.device))).toBe(1),
+    );
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+
+    make("/mnt/code", "widgets");
+
+    // The directory and the repository were made over there, and the draft is on
+    // what came back.
+    await waitFor(() => expect(stored().repo).toBe(THEIR_MADE.id));
+    expect(sent(fetching, at("/repos/new"))).toEqual({
+      parent: "/mnt/code",
+      name: "widgets",
+      github: false,
+    });
+    expect(writes(fetching, "/api/ui/repos/new")).toBe(0);
+
+    // And what it came home with is remembered against the member, this device's
+    // own answer left exactly where it was.
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
+    expect(repoParent(null)).toBe("/home/ada/src");
+  });
+
+  /// And a device nothing has been made on yet starts where a first run starts,
+  /// which is the case one key got wrong: a path on this machine, offered as
+  /// somewhere to put a repository over there.
+  it("starts at the member's own home where nothing has been made on it", async () => {
+    setRepoParent(null, "/home/ada/src");
+
+    const fetching = theirs();
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    expect(held(WHERE)).toBe("");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(browsed(WHERE)).toEqual(["Up to /mnt", "projects", "widgets"]),
+    );
+    expect(askedFor(fetching, listingAt(null, MEMBER.device))).toBe(1);
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+  });
+
+  /// A refusal from over there is the far end's own outcome, said in the words
+  /// this app has for it wherever it is met: the hop is not something the human
+  /// is told about, and nothing was added to the four sentences.
+  it("says a create's refusal in its own words, not as a failed call", async () => {
+    theirs(
+      whenever(
+        at("/repos/new"),
+        json("AlreadyThere" satisfies Created),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+    make("/mnt/code", "widgets");
+
+    await waitFor(() => screen.getByText(CREATE_REFUSAL.AlreadyThere));
+
+    // And the card stays up holding what was typed, because what answers a
+    // refusal is correcting it.
+    expect(held(WHERE)).toBe("/mnt/code");
+    expect(
+      (screen.getByLabelText(CALLED) as HTMLInputElement).value,
+    ).toBe("widgets");
+    expect(stored().repo).toBeNull();
+    // And nothing is remembered: there is no repository over there to put the
+    // next one beside.
+    expect(repoParent(MEMBER.device)).toBe("");
+  });
+
+  /// The other row refuses the same way, which is what says this is the far
+  /// end's answer reaching the card rather than the Relay's account of a call.
+  it("says an open's refusal in its own words too", async () => {
+    theirs(whenever(at("/repos"), json("NotARepository"), "POST"));
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await openCard(THEIRS);
+    register("/mnt/code/notes");
+
+    await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
+    expect(held(PATH)).toBe("/mnt/code/notes");
+    expect(stored().repo).toBeNull();
+  });
+
+  /// And with this device picked — which is what an untouched browser is on,
+  /// cluster or no cluster — both rows are the rows they were before there was a
+  /// select at all: this device's home, this device's registry, this device's
+  /// memory of where the last one went.
+  it("leaves both rows on this device where nothing is picked", async () => {
+    setRepoParent(null, "/home/ada/src");
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    const fetching = theirs(
+      whenever("/api/ui/repos/new", json({ Made: MADE_HERE }), "POST"),
+      whenever(`/api/ui/repos/${MADE_HERE.id}/pairings`, json(NO_PAIRINGS)),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    // Drawn, and left alone.
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    await createCard(REPOS);
+
+    expect(held(WHERE)).toBe("/home/ada/src");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(1),
+    );
+    expect(
+      askedFor(fetching, listingAt("/home/ada/src", MEMBER.device)),
+    ).toBe(0);
+
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => expect(stored().repo).toBe(MADE_HERE.id));
+    expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+      parent: "/home/ada/src",
+      name: "widgets",
+      github: false,
+    });
+    expect(writes(fetching, at("/repos/new"))).toBe(0);
+
+    // And the member's own memory of where its code goes is untouched by a
+    // repository made here.
+    expect(repoParent(null)).toBe("/home/ada/src");
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
   });
 });
 
