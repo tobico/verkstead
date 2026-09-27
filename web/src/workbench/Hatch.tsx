@@ -66,7 +66,7 @@ import {
 } from "../api/client";
 import type { ConversationArchived, ConversationClosed } from "../api/types";
 import { useReading } from "../freshness";
-import { keyOf, useDevice } from "../reaching";
+import { keyOf, useDevice, whose } from "../reaching";
 import {
   ARCHIVE_REFUSAL,
   Action,
@@ -105,11 +105,19 @@ export function Hatch(props: {
 
     // Merged as the sidebar's is: the list is re-read constantly, and this is
     // the same cache entry.
-    freshness: { reconcile: "id" } as const,
+    freshness: { reconcile: "rank" } as const,
   }));
 
+  /// This Conversation's row on the sidebar, where the list holds one.
+  ///
+  /// The device as well as the id, the list being merged from the whole cluster:
+  /// a member's Conversation 4 is a row of it too, and a header that took that
+  /// row's branch for this one would name the wrong piece of work on the one
+  /// page whose whole job is to say which Conversation could not be read.
   const row = () =>
-    conversations.data?.find((entry) => String(entry.id) === props.id);
+    conversations.data?.find(
+      (entry) => String(entry.id) === props.id && whose(entry) === device(),
+    );
 
   /// The Conversation's id as the presses want it. The path is what the human's
   /// URL held: one that names no Conversation is answered by the server the way

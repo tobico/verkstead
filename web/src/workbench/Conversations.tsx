@@ -1,6 +1,17 @@
 //! The conversations sidebar: what there is to work on, and the ways to add
 //! to it.
 //!
+//! **One sidebar for the cluster.** The list is every device's Conversations
+//! merged by **Rank** — this device's own and each member's, the merge made by
+//! the device the browser opened out of the lists it holds of them (ADR-0020,
+//! *The opened device relays*). So this pane is not this machine's work any
+//! more, and nothing in it is addressed by a bare Conversation id: every
+//! Verkstead issues a Conversation 1, so which row is selected, which one a
+//! press was on, what the drag is holding and what the DOM carries are each a
+//! Conversation *and* a device — see `rowKey`, and [`keyFor`], which is how this
+//! pane says one. Opening a row goes to that device's own page, and the card's
+//! own menu acts on the Conversation on the machine that holds it.
+//!
 //! There is one of them: the compose page — a link at the head of the pane, and
 //! the composer with nothing behind it yet. The brief is written, the setup is
 //! settled, and the Conversation is created by the press at the end of it. See
@@ -88,6 +99,7 @@ import {
 import type { ConversationEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { Reaching, rowKey, whose, type Device } from "../reaching";
 import { CardActions } from "./Actions";
 import { ShowArchived } from "./Archived";
 import { caughtUp, pressedRows } from "./eager";
@@ -105,17 +117,36 @@ import { STATE } from "./states";
 import { Wordmark } from "./Wordmark";
 
 export function Conversations(props: {
+  /// Which Conversation the page is open on, as the URL spells its id — and the
+  /// empty string where it names none.
   selected: string;
-  open: (id: number) => void;
+
+  /// And which device that Conversation lives on, `null` for this one. Beside
+  /// the id rather than folded into it because that is how the URL carries the
+  /// pair: a row is selected when both agree, ids colliding by construction.
+  device: Device;
+
+  /// Open one, which is a Conversation *and* a device: the page it opens is
+  /// that device's own — see `openings.ts`.
+  open: (id: number, device: Device) => void;
 }): JSX.Element {
   const conversations = useReading(() => ({
     queryKey: ["conversations"],
     queryFn: listConversations,
 
-    // Merged by the id each row carries flat, because this list is re-read
+    // Merged by the Rank each row carries flat, because this list is re-read
     // constantly — a session talking moves the *working* badge on one row of
     // it — and a rebuilt row is a row whose spinner starts its animation again.
-    freshness: { reconcile: "id" },
+    //
+    // The rank rather than the id, which is what it was while this list was
+    // one device's: the list is merged from the whole cluster now and every
+    // Verkstead issues a Conversation 1, so an id names a row on no particular
+    // machine. A rank names one — every one of them carries the device that
+    // issued it, so they are distinct cluster-wide by construction (ADR-0020,
+    // *Ranks*). A row that has just been dragged is rebuilt for it, which is
+    // the row the hand is on and the one the local order below is holding
+    // steady anyway.
+    freshness: { reconcile: "rank" },
   }));
 
   /// Whether the ones put away are drawn among them, read under the key the
@@ -137,19 +168,39 @@ export function Conversations(props: {
   // says the same thing. Null the rest of the time, which is every moment
   // nobody is dragging: the order is the server's fact and this is only ever
   // the half-second before it has heard about it.
-  const [dragged, setDragged] = createSignal<number[] | null>(null);
+  //
+  // Rows rather than ids, because this list is the cluster's: every Verkstead
+  // issues a Conversation 1, so what an order of ids held would be an order of
+  // rows on no particular machine — see `rowKey`, which is what a row is here.
+  const [dragged, setDragged] = createSignal<string[] | null>(null);
 
   // Which row is under the hand, or null when none is.
-  const [held, setHeld] = createSignal<number | null>(null);
+  const [held, setHeld] = createSignal<string | null>(null);
 
   // Which card was right-clicked and where the pointer was, or null while no
   // context menu is open. A signal because the menu is drawn from it, unlike
   // the press below.
+  //
+  // The device beside the id, because the menu acts on the Conversation the card
+  // stands for and has to act on it *on its own device*: a menu that closed this
+  // device's Conversation 4 because a member's row said 4 is the whole reason
+  // every press in this pane is addressed this way.
   const [pointed, setPointed] = createSignal<{
     id: number;
+    device: Device;
     x: number;
     y: number;
   } | null>(null);
+
+  // And that device again, kept past the menu going.
+  //
+  // Every row of that menu shuts the menu and *then* posts — and one of them
+  // waits for a card over the page to be answered first — so a value that went
+  // with `pointed` above would read as this device's at the very moment the
+  // press was made, on a Conversation of a member's. Overwritten by the next
+  // right-click and never cleared, which is what `fromTouch` below is for the
+  // same reason.
+  const [pointedDevice, setPointedDevice] = createSignal<Device>(null);
 
   // The list to draw: the server's, with what a press has already said about a
   // Conversation laid over it — a row closed a moment ago, one taken off the
@@ -166,15 +217,18 @@ export function Conversations(props: {
     if (!order) return rows;
 
     const placed = order
-      .map((id) => rows.find((row) => row.id === id))
+      .map((key) => rows.find((row) => keyFor(row) === key))
       .filter((row): row is ConversationEntry => row !== undefined);
 
-    return [...rows.filter((row) => !order.includes(row.id)), ...placed];
+    return [
+      ...rows.filter((row) => !order.includes(keyFor(row))),
+      ...placed,
+    ];
   };
 
   const place = useMutation(() => ({
-    mutationFn: (put: { id: number; below: number | null }) =>
-      rankConversation(put.id, put.below),
+    mutationFn: (put: { device: Device; id: number; below: number | null }) =>
+      rankConversation(put.device, put.id, put.below),
     onSuccess: () => {
       // Read the list back, which is what lets go of the local order below.
       // The other devices hear the same news as a Nudge.
@@ -199,7 +253,7 @@ export function Conversations(props: {
 
     if (
       arrived.length === order.length &&
-      arrived.every((row, n) => row.id === order[n])
+      arrived.every((row, n) => keyFor(row) === order[n])
     ) {
       setDragged(null);
     }
@@ -225,7 +279,11 @@ export function Conversations(props: {
   // from is `held` above, and the rest of this is bookkeeping between one
   // pointer event and the next.
   let press: {
+    /// Which row, as this pane spells one — see `rowKey`.
+    row: string;
+    /// And the Conversation it stands for, which is what the save names.
     id: number;
+    device: Device;
     pointer: number;
     x: number;
     y: number;
@@ -263,8 +321,8 @@ export function Conversations(props: {
     // Held first and ordered second, in that order: the two are read together
     // by the effect above, and an order taken hold of by nobody is one it is
     // entitled to throw away.
-    setHeld(at.id);
-    setDragged(shown().map((row) => row.id));
+    setHeld(at.row);
+    setDragged(shown().map(keyFor));
 
     // The list must not scroll out from under a card being moved. A
     // `touch-action` on the card would have said so before the finger landed
@@ -278,7 +336,7 @@ export function Conversations(props: {
 
   /// A press begins somewhere on a card. Which of the three things it is — a
   /// click, a scroll or a drag — is settled by what the hand does next.
-  const grab = (event: PointerEvent, id: number) => {
+  const grab = (event: PointerEvent, entry: ConversationEntry) => {
     // Which hand this is, before anything is decided about the press: a
     // right-click leaves at the next line, and the `contextmenu` behind it is
     // the one thing that still needs to know.
@@ -304,7 +362,9 @@ export function Conversations(props: {
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
-      id,
+      row: keyFor(entry),
+      id: entry.id,
+      device: whose(entry),
       pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
@@ -382,9 +442,9 @@ export function Conversations(props: {
     if (!order || !list) return;
 
     const to = order.indexOf(under(list, event.clientY));
-    if (to < 0 || to === order.indexOf(at.id)) return;
+    if (to < 0 || to === order.indexOf(at.row)) return;
 
-    setDragged(moved(order, at.id, to));
+    setDragged(moved(order, at.row, to));
   };
 
   /// The drag is over: what is on the screen is what the human meant, so that
@@ -410,7 +470,13 @@ export function Conversations(props: {
     setHeld(null);
 
     const order = dragged();
-    if (order) place.mutate({ id: at.id, below: sitsUnder(order, at.id) });
+    if (order) {
+      place.mutate({
+        device: at.device,
+        id: at.id,
+        below: sitsUnder(order, shown(), at.row, at.device),
+      });
+    }
   };
 
   // A sidebar that goes away mid-drag takes the whole drag with it: the
@@ -428,12 +494,12 @@ export function Conversations(props: {
   ///
   /// The flag is read once and spent, so the drag it belongs to swallows the
   /// click that follows it and nothing after that.
-  const opened = (id: number) => {
+  const opened = (entry: ConversationEntry) => {
     const dragged = reordered;
     reordered = false;
 
     if (dragged) return;
-    props.open(id);
+    props.open(entry.id, whose(entry));
   };
 
   /// A right-click asks what there is to do about the Conversation the card
@@ -450,25 +516,36 @@ export function Conversations(props: {
   /// alone, the browser's own answer to it included. What tells the two apart is
   /// the pointer that started the gesture rather than this event, which carries
   /// nothing about the hand that made it.
-  const ask = (event: MouseEvent, id: number) => {
+  const ask = (event: MouseEvent, entry: ConversationEntry) => {
     if (fromTouch) return;
 
     event.preventDefault();
-    setPointed({ id, x: event.clientX, y: event.clientY });
+    setPointedDevice(whose(entry));
+    setPointed({
+      id: entry.id,
+      device: whose(entry),
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
   /// And the same move made from the keyboard, which is the whole of what a card
   /// has to offer somebody who is not dragging anything: one row up, one row
   /// down, and the row saved each time as a drag saves it.
-  const step = (id: number, by: number) => {
-    const order = shown().map((row) => row.id);
-    const from = order.indexOf(id);
+  const step = (entry: ConversationEntry, by: number) => {
+    const key = keyFor(entry);
+    const order = shown().map(keyFor);
+    const from = order.indexOf(key);
     const to = from + by;
     if (from < 0 || to < 0 || to >= order.length) return;
 
-    const put = moved(order, id, to);
+    const put = moved(order, key, to);
     setDragged(put);
-    place.mutate({ id, below: sitsUnder(put, id) });
+    place.mutate({
+      device: whose(entry),
+      id: entry.id,
+      below: sitsUnder(put, shown(), key, whose(entry)),
+    });
   };
 
   return (
@@ -505,12 +582,19 @@ export function Conversations(props: {
         </Match>
         <Match when={conversations.data}>
           <ul class={styles.conversationList} ref={list}>
+            {/* What keeps a row's own element across a re-read is the merge the
+                reading is made with, which matches by the Rank each row carries
+                — the one field that is nobody else's on a list merged from the
+                whole cluster. See the reading above. */}
             <For each={shown()}>
               {(entry) => (
                 <ConversationRow
                   entry={entry}
-                  selected={String(entry.id) === props.selected}
-                  held={held() === entry.id}
+                  selected={
+                    String(entry.id) === props.selected &&
+                    whose(entry) === props.device
+                  }
+                  held={held() === keyFor(entry)}
                   open={opened}
                   grab={grab}
                   step={step}
@@ -534,8 +618,18 @@ export function Conversations(props: {
           than one per row: it is drawn where the pointer was rather than where
           the card is, so there is nothing about it that belongs to a row — and
           the cards it can open outlive the menu, which a row being dragged
-          about underneath it would not. */}
-      <CardActions pointed={pointed()} close={() => setPointed(null)} />
+          about underneath it would not.
+
+          Under a provider naming the card's own device, because every row of
+          that menu acts on the Conversation the card stands for and has to act
+          on it on the machine that holds it: the rows read the device the way
+          every other pane does, off the context around them (see
+          `reaching.ts`), and the card that was pressed is what says which one
+          this is — held apart from `pointed` because a press shuts the menu
+          before it posts. */}
+      <Reaching.Provider value={pointedDevice}>
+        <CardActions pointed={pointed()} close={() => setPointed(null)} />
+      </Reaching.Provider>
 
       {/* And the foot of the pane, under everything the pane is a list of. Last
           in the column so that the room left over is left over its head: that
@@ -680,10 +774,10 @@ function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
   held: boolean;
-  open: (id: number) => void;
-  grab: (event: PointerEvent, id: number) => void;
-  step: (id: number, by: number) => void;
-  ask: (event: MouseEvent, id: number) => void;
+  open: (entry: ConversationEntry) => void;
+  grab: (event: PointerEvent, entry: ConversationEntry) => void;
+  step: (entry: ConversationEntry, by: number) => void;
+  ask: (event: MouseEvent, entry: ConversationEntry) => void;
 }): JSX.Element {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Closed";
@@ -693,7 +787,11 @@ function ConversationRow(props: {
       class={styles.conversationRow}
       // Read by the drag to say which row the pointer is over, which is a
       // question about the rendered list rather than about the data behind it.
-      data-id={props.entry.id}
+      //
+      // The row rather than the Conversation's id: the list is merged from the
+      // whole cluster, so a number read back off the DOM would name a row on no
+      // particular machine — see `rowKey`.
+      data-row={keyFor(props.entry)}
       classList={{
         [styles.selected!]: props.selected,
         [styles.draft!]: props.entry.state === "Draft",
@@ -704,21 +802,21 @@ function ConversationRow(props: {
       <CardButton
         class={styles.open}
         open={props.selected}
-        press={() => props.open(props.entry.id)}
+        press={() => props.open(props.entry)}
         aria-label={spoken(props.entry)}
         // What the grip's own label used to say, now that there is no second
         // control to say it in: this card can be moved, and these are the keys
         // that move it.
         aria-keyshortcuts="ArrowUp ArrowDown"
-        onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onContextMenu={(event) => props.ask(event, props.entry.id)}
+        onPointerDown={(event) => props.grab(event, props.entry)}
+        onContextMenu={(event) => props.ask(event, props.entry)}
         keys={(event) => {
           if (event.key === "ArrowUp") {
             event.preventDefault();
-            props.step(props.entry.id, -1);
+            props.step(props.entry, -1);
           } else if (event.key === "ArrowDown") {
             event.preventDefault();
-            props.step(props.entry.id, 1);
+            props.step(props.entry, 1);
           }
         }}
       >
@@ -746,25 +844,61 @@ function ConversationRow(props: {
   );
 }
 
+/// What a row is to everything in this pane that holds one: the Conversation
+/// and the device it lives on, as the one string `rowKey` writes.
+///
+/// Named here as well as imported so that the whole pane says *the row* in one
+/// word: the order a drag is holding, the card under the hand, the key the DOM
+/// carries and the entry a press is looked up under are the one thing.
+function keyFor(entry: ConversationEntry): string {
+  return rowKey(whose(entry), entry.id);
+}
+
 /// The same list with one row moved to a place in it, which is the whole of
 /// what a drag and an arrow key each do.
-function moved(order: number[], id: number, to: number): number[] {
+function moved(order: string[], row: string, to: number): string[] {
   const put = [...order];
-  put.splice(put.indexOf(id), 1);
-  put.splice(to, 0, id);
+  put.splice(put.indexOf(row), 1);
+  put.splice(to, 0, row);
   return put;
 }
 
-/// The row a moved one now sits directly under, or `null` where it has landed at
-/// the top — which is the whole of what the server is told about a move.
+/// The row a moved one now sits directly under *on its own device's list*, or
+/// `null` where it has landed at the top of it — which is the whole of what the
+/// device that owns the row is told about a move.
 ///
 /// The row above rather than the row below, because the top of the list is the
 /// one end with nothing to name: a card dropped at the foot still has a row
 /// above it.
-function sitsUnder(order: number[], id: number): number | null {
-  const at = order.indexOf(id);
+///
+/// **And the nearest one of that device's own, rather than the row the card
+/// actually landed on.** A move is said as *this row, under that one*, by an id
+/// the owning device's own database numbered — so a neighbour that belongs to
+/// another machine is nothing that device could be told about, its Conversation
+/// 4 being somebody else's. What it can be told is where the row sits among its
+/// own, which is what the merged order already says: the ranks are one order,
+/// so a row ranked under its own device's nearest neighbour above comes back in
+/// the place the human dropped it or as near to it as one rank can say.
+///
+/// Landing a row exactly between two rows of two different devices is the
+/// remaining half, and it is a rank computed here from the merged neighbours
+/// and handed to the owning device rather than a neighbour named to it — the
+/// next task of this stage.
+function sitsUnder(
+  order: string[],
+  rows: ConversationEntry[],
+  row: string,
+  device: Device,
+): number | null {
+  const at = order.indexOf(row);
 
-  return at > 0 ? order[at - 1]! : null;
+  for (let above = at - 1; above >= 0; above -= 1) {
+    const entry = rows.find((one) => keyFor(one) === order[above]);
+
+    if (entry !== undefined && whose(entry) === device) return entry.id;
+  }
+
+  return null;
 }
 
 /// Which row the pointer is over: the first whose bottom edge is below it, and
@@ -775,14 +909,14 @@ function sitsUnder(order: number[], id: number): number | null {
 /// a name wraps, and a row height written down here would go stale the first
 /// time anything in a card changed — and a drag that guessed would put the row
 /// somewhere the human was not pointing.
-function under(list: HTMLUListElement, y: number): number {
+function under(list: HTMLUListElement, y: number): string {
   const rows = [
     ...list.querySelectorAll<HTMLElement>(`.${styles.conversationRow}`),
   ];
   const over =
     rows.find((row) => y < row.getBoundingClientRect().bottom) ?? rows.at(-1);
 
-  return Number(over?.dataset.id ?? NaN);
+  return over?.dataset.row ?? "";
 }
 
 /// How far a pointer may travel and still have been a click, in pixels. A press

@@ -29,6 +29,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  ConversationArchived,
+  ConversationEntry,
   ConversationView,
   QuestionSetEvent,
   RepoEntry,
@@ -39,7 +41,7 @@ import {
   loadConversation,
   retrying,
 } from "../src/api/client";
-import { Reaching } from "../src/reaching";
+import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
 import dropdown from "../src/Menu.module.css";
@@ -48,6 +50,7 @@ import actions from "../src/workbench/Actions.module.css";
 import paneHead from "../src/workbench/PaneHead.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import steerForm from "../src/workbench/Steer.module.css";
+import sidebar from "../src/workbench/Conversations.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import {
   BRANCHES,
@@ -170,9 +173,11 @@ describe("a conversation that lives on another device", () => {
     expect(askedFor(fetching, `/api/ui/conversations/${THERE.id}`)).toBe(0);
   });
 
-  /// And the sidebar beside it is still this device's: the merged list is a
-  /// later stage, so what the rows say is the work being done here.
-  it("goes on listing this device's own work beside it", async () => {
+  /// And the sidebar beside it is read off this device as it always was: the
+  /// list is merged from the whole cluster now, but the merging is the hub's —
+  /// the browser asks the one endpoint it has always asked and never a member's
+  /// own (ADR-0020, *The opened device relays*).
+  it("reads the sidebar off this device alone, merged or not", async () => {
     const fetching = theMember();
     const { container } = mount(on(`/conversations/${THERE.id}`));
 
@@ -324,6 +329,182 @@ describe("a press on a conversation that lives on another device", () => {
       ).toHaveLength(1),
     );
     expect(askedFor(fetching, "/api/ui/repos")).toBe(0);
+  });
+});
+
+/// The sidebar as the cluster's one list: rows of this device's and rows of a
+/// member's, side by side under one set of ranks.
+///
+/// **What is asked here is that a row is a Conversation *and* a device.** Every
+/// Verkstead issues a Conversation 1, so a list merged from two of them holds
+/// two rows nothing but the device tells apart — and a press addressed by the
+/// number alone would act on whichever of the two the page found first, on the
+/// very list the press was not about.
+describe("the merged sidebar", () => {
+  /// Both devices' rows, as the hub answers them: this device's own carrying a
+  /// device block with no id, and the member's carrying its id, name and OS
+  /// word.
+  const MERGED: ConversationEntry[] = [
+    {
+      ...SIDEBAR[0]!,
+      id: SIDEBAR[0]!.id,
+      branch: "over-on-the-member",
+      rank: `Zz-${MEMBER}`,
+      device: {
+        id: MEMBER,
+        name: "the-laptop",
+        os: "macOS 15.1",
+        reachable: true,
+      },
+    },
+    ...SIDEBAR.map((row) => ({
+      ...row,
+      device: { id: null, name: "the-desk", os: "Linux", reachable: true },
+    })),
+  ];
+
+  /// The member's Conversation under the id it shares with this device's first
+  /// row, which is what the menu below reads.
+  ///
+  /// Closed and not put away, which is the state whose menu offers **Archive** —
+  /// the one row here that is a press with nothing to confirm and nowhere to
+  /// navigate, so what it proves is where the press went and nothing else.
+  const SHARED: ConversationView = {
+    ...HERE,
+    id: SIDEBAR[0]!.id,
+    branch: "over-on-the-member",
+    state: "Closed",
+    archived: false,
+  };
+
+  function theCluster(...answers: Answer[]) {
+    return serving(
+      whenever("/api/ui/conversations", json(MERGED)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/onboarding", json(SET_UP)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${SIDEBAR[0]!.id}`, json(HERE)),
+      whenever(at(`/conversations/${SHARED.id}`), json(SHARED)),
+      ...answers,
+      json({ error: "nothing serves that" }, 404),
+    );
+  }
+
+  /// Every row the sidebar drew, in the order it drew them.
+  async function rows(container: ParentNode): Promise<HTMLElement[]> {
+    await drawn(container, `.${sidebar.conversationRow}`);
+
+    return [
+      ...container.querySelectorAll<HTMLElement>(`.${sidebar.conversationRow}`),
+    ];
+  }
+
+  it("draws two rows for one number on two devices", async () => {
+    theCluster();
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+
+    expect(drawnRows).toHaveLength(MERGED.length);
+    expect(drawnRows.map((row) => row.dataset.row)).toEqual(
+      MERGED.map((row) => rowKey(row.device?.id ?? null, row.id)),
+    );
+
+    // Which is the point: the two rows of the shared number are two keys.
+    const shared = drawnRows.filter(
+      (row) => row.dataset.row?.endsWith(`/${SIDEBAR[0]!.id}`) ?? false,
+    );
+    expect(shared).toHaveLength(2);
+    expect(shared[0]!.dataset.row).not.toBe(shared[1]!.dataset.row);
+  });
+
+  it("opens a member's row at that device's own address", async () => {
+    theCluster();
+    const { container, history } = mount("/");
+
+    const drawnRows = await rows(container);
+    fireEvent.click(
+      drawnRows[0]!.querySelector<HTMLElement>(`.${sidebar.open}`)!,
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(on(`/conversations/${SHARED.id}`)),
+    );
+  });
+
+  /// And this device's own row of the same number opens where it always did,
+  /// which is the other half of the same claim.
+  it("opens this device's own row at the address it always had", async () => {
+    theCluster();
+    const { container, history } = mount("/");
+
+    const drawnRows = await rows(container);
+    fireEvent.click(
+      drawnRows[1]!.querySelector<HTMLElement>(`.${sidebar.open}`)!,
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${SIDEBAR[0]!.id}`),
+    );
+  });
+
+  /// The card's own menu is the bug this addressing is about: a close pressed on
+  /// a member's row must be about the member's Conversation, so what the menu
+  /// reads is the member's record and never this device's of the same number.
+  it("reads a member's record for a member's card menu", async () => {
+    const fetching = theCluster();
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+    fireEvent.contextMenu(
+      drawnRows[0]!.querySelector<HTMLElement>(`.${sidebar.open}`)!,
+      { clientX: 20, clientY: 20 },
+    );
+
+    await drawn(container, `.${actions.conversationActions} [role="menu"]`);
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, at(`/conversations/${SHARED.id}`)),
+      ).toBeGreaterThan(0),
+    );
+    expect(askedFor(fetching, `/api/ui/conversations/${SHARED.id}`)).toBe(0);
+  });
+
+  /// And the press it makes goes to the member too, which is the half a menu
+  /// that merely *read* the right record would still get wrong: the rows shut
+  /// the menu and post afterwards, so the card's device has to outlive the menu.
+  it("puts a press from a member's card menu to the member", async () => {
+    const fetching = theCluster(
+      whenever(
+        at(`/conversations/${SHARED.id}/archive`),
+        json("Archived" satisfies ConversationArchived),
+      ),
+    );
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+    fireEvent.contextMenu(
+      drawnRows[0]!.querySelector<HTMLElement>(`.${sidebar.open}`)!,
+      { clientX: 20, clientY: 20 },
+    );
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.conversationsPane} .${actions.conversationActions} .${actions.archive}`,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, at(`/conversations/${SHARED.id}/archive`)),
+      ).toBeGreaterThan(0),
+    );
+    expect(
+      askedFor(fetching, `/api/ui/conversations/${SHARED.id}/archive`),
+    ).toBe(0);
   });
 });
 

@@ -132,6 +132,7 @@ import toasts from "../src/Toasts.module.css";
 import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
+import { rowKey } from "../src/reaching";
 import { under } from "../src/pairing";
 // The listbox the app draws for itself, whose own names the setup row's
 // triggers are built out of — the line the reading stands on above all.
@@ -1080,6 +1081,13 @@ function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
   );
 }
 
+/// What picks out the row one of **this device's** Conversations is drawn as.
+///
+/// A row is a Conversation and a device, the sidebar being merged from the whole
+/// cluster (see `src/reaching.ts`) — and every fixture here is a lone device's,
+/// so every row of them is one of its own.
+const sidebarRow = (id: number) => `[data-row="${rowKey(null, id)}"]`;
+
 /// The cards of a sidebar drawn that way, in the order they were given.
 async function cards(container: ParentNode): Promise<HTMLElement[]> {
   await drawn(container, `.${sidebar.conversationRow}`);
@@ -1970,7 +1978,7 @@ describe("what a right-click on a card offers", () => {
   async function grillingCard(container: ParentNode): Promise<HTMLElement> {
     const rows = await cards(container);
     const row = rows.find(
-      (card) => card.dataset.id === String(GRILLING.id),
+      (card) => card.dataset.row === rowKey(null, GRILLING.id),
     );
     expect(row, "the fixture sidebar should hold the grilling conversation")
       .toBeTruthy();
@@ -2335,7 +2343,7 @@ describe("a press that takes the open conversation off the list", () => {
     id: number,
   ): Promise<HTMLElement> {
     const rows = await cards(container);
-    const row = rows.find((card) => card.dataset.id === String(id));
+    const row = rows.find((card) => card.dataset.row === rowKey(null, id));
     expect(row, `the fixture sidebar should hold conversation ${id}`)
       .toBeTruthy();
     return row!.querySelector<HTMLElement>(`.${sidebar.open}`)!;
@@ -3277,12 +3285,12 @@ describe("the escape hatch on a conversation that will not load", () => {
     const { container, history } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy();
+    expect(container.querySelector(sidebarRow(OPEN.id))).toBeTruthy();
 
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeNull();
+    expect(container.querySelector(sidebarRow(OPEN.id))).toBeNull();
   });
 
   /// A refusal is said in a toast, and what it takes back is the row: there is
@@ -3318,7 +3326,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     // the list is back.
     expect(history.get()).toBe("/");
     await waitFor(() =>
-      expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy(),
+      expect(container.querySelector(sidebarRow(OPEN.id))).toBeTruthy(),
     );
   });
 
@@ -9732,7 +9740,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(sent(fetching, CLOSING_AWAY)).toEqual({}));
     await waitFor(() =>
-      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+      expect(container.querySelector(sidebarRow(GRILLING.id))).toBeNull(),
     );
 
     // And the page goes where the eye already is: the row above the one that has
@@ -9780,7 +9788,7 @@ describe("a close pressed over a run in flight", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const rows = await cards(container);
-    const row = rows.find((card) => card.dataset.id === String(GRILLING.id));
+    const row = rows.find((card) => card.dataset.row === rowKey(null, GRILLING.id));
     expect(row, "the fixture sidebar should hold the grilling conversation")
       .toBeTruthy();
 
@@ -9875,7 +9883,7 @@ describe("archiving a conversation", () => {
     expect(refusal()).toBeNull();
 
     await waitFor(() =>
-      expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy(),
+      expect(container.querySelector(sidebarRow(OPEN.id))).toBeTruthy(),
     );
   });
 });
@@ -9968,7 +9976,7 @@ describe("unarchiving a conversation", () => {
 /// Failing rather than answering where there is no such row, so that a test
 /// asking what a row says cannot pass by finding none.
 function spokenRow(container: ParentNode, id: number): string {
-  const row = container.querySelector(`[data-id="${id}"] button`);
+  const row = container.querySelector(`${sidebarRow(id)} button`);
   expect(
     row,
     `the sidebar should be drawing a row for conversation ${id}`,
@@ -10101,7 +10109,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeTruthy();
+    expect(container.querySelector(sidebarRow(GRILLING.id))).toBeTruthy();
 
     fireEvent.click(
       await drawn(
@@ -10111,7 +10119,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(() =>
-      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+      expect(container.querySelector(sidebarRow(GRILLING.id))).toBeNull(),
     );
   });
 
@@ -10131,7 +10139,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeNull();
+    expect(container.querySelector(sidebarRow(OPEN.id))).toBeNull();
 
     fireEvent.click(
       await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`),
@@ -10141,8 +10149,8 @@ describe("a press whose outcome is drawn before the server has answered", () => 
       expect(spokenRow(container, OPEN.id)).toContain(OPEN.branch),
     );
     expect(
-      nodes(container, `.${sidebar.conversationRow}`)[0]!.getAttribute("data-id"),
-    ).toBe(String(OPEN.id));
+      nodes(container, `.${sidebar.conversationRow}`)[0]!.getAttribute("data-row"),
+    ).toBe(rowKey(null, OPEN.id));
   });
 
   /// A Nudge landing while the request is still out does not flick the page
@@ -10298,7 +10306,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
 
     // Drawn as put away at once, as everything here is — and not yet sent.
     await waitFor(() =>
-      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+      expect(container.querySelector(sidebarRow(GRILLING.id))).toBeNull(),
     );
     expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
 
@@ -18745,7 +18753,7 @@ describe("the selection following the end of the record", () => {
   /// name would be two things by then.
   async function opened(container: ParentNode): Promise<void> {
     const rows = await cards(container);
-    const row = rows.find((row) => row.dataset.id === String(GRILLING.id));
+    const row = rows.find((row) => row.dataset.row === rowKey(null, GRILLING.id));
     if (row === undefined) {
       throw new Error("the sidebar should be holding the grilling conversation");
     }

@@ -1508,6 +1508,54 @@ a third one told it would be saying that news was its own.
 _Avoid_: proxy, forwarding, tunnel, the bridge (which is the socket half of it
 alone), remote mode
 
+**Merged List**:
+The conversations sidebar of a device that is in a cluster: every **Member**'s
+Conversations and its own, in one list ordered by **Rank** (ADR-0020, *The
+opened device relays*). So the sidebar is not one machine's work any more — it
+reads the same from every device in the cluster, and the workbench is entered
+from whichever one is to hand.
+**Served from the device the browser opened, out of memory.** That device holds
+the list each of its members last answered — that member's own
+`/api/ui/conversations`, read over the **Relay** — and merges it with its own at
+the moment the sidebar is asked for. Fanning out per load was rejected: it is a
+round trip per device per read, the sidebar is re-read constantly, and a member
+that is switched off would stall the whole list behind a dial down its
+addresses. Nothing of it is stored: every row in it is a Conversation of
+somebody else's, and what a restart costs is the lists being read again.
+**Refreshed on that member's own Nudges**, which is what keeps it fresh without
+a poll: the list is read when the **Nudge** stream to that member is taken up,
+and again whenever a Nudge announced under it is one an open sidebar would
+re-read on — `conversations`, `conversation`, `set` and `everything`. A member
+printing a line of transcript is not one of them.
+**Ordered by Rank alone, and that is the whole of the merge.** Every rank
+carries the **Device Id** of the device that issued it, so the keys are distinct
+cluster-wide and the merged order is total with no tiebreaker — which is why the
+rank rides out on the row rather than staying in the `ORDER BY`: a list that had
+been ordered and then had its keys taken off could not be merged with another.
+**Every row says whose it is**, its own device's rows included, so the list reads
+as one list rather than as this device's work with somebody else's mixed in. What
+a row carries is the Device Id — nothing at all for this device's own, which is
+the shape the viewer keys and composes paths by — with the name and the OS word
+of that machine beside it, so the viewer draws a row without joining it against
+the **Devices** section. Whether a row says anything at all is the server's call
+and the membership decides it: a device linked to nothing draws the sidebar it
+always drew.
+**A member that stops answering keeps its rows**, from the last list held and
+drawn dimmed, the row's own flag saying the device is not there — while a member
+never reached holds nothing and contributes nothing.
+**And a row is addressed by its device everywhere in the sidebar**, ids being
+each device's own and colliding by construction: which row is selected, which
+one a press was on, what a drag is holding and what the DOM carries are each a
+Conversation *and* a device. Opening one goes to that device's own
+`/devices/{device}/conversations/{id}`, and a card's right-click menu acts on the
+Conversation on the machine that holds it — a menu that closed this device's
+Conversation 4 because a member's row said 4 is what the addressing is against.
+**And what a member is answered over the Peer Listener is this device's own rows
+alone**, with no device on them. The viewer's namespace is one router mounted
+twice, so a member reading it would otherwise get a merge of merges and two
+devices would each claim the other's rows as their own.
+_Avoid_: the cluster list, the global sidebar, syncing
+
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.

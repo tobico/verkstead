@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 
+use axum::Extension;
 use axum::Json;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
@@ -55,6 +56,7 @@ use verkstead_render::{
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
+use crate::peer::workbench::OverTheLink;
 use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
 use crate::{AppState, store};
 
@@ -1095,7 +1097,7 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
     Json(crate::stages::abandoned(repos).await).into_response()
 }
 
-/// `GET /api/ui/conversations` — the sidebar, newest first.
+/// `GET /api/ui/conversations` — the sidebar, in the order the human put it in.
 ///
 /// Three facts ride out on every row beyond what the store holds: whether a
 /// session is running on it, whether that session has gone quiet, and whether
@@ -1105,7 +1107,24 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 /// what is waiting is an `OR` the store computes over rows that move on their
 /// own. Which mark they come out as is the viewer's, and the rule there is one
 /// line: waiting wins over both of the others.
-async fn conversations(State(state): State<AppState>) -> HttpResponse {
+///
+/// **And this is where the cluster's one sidebar is answered**: every member's
+/// list, held in this device's memory, merged with the rows below by **Rank**,
+/// each row saying which device owns it (ADR-0020, *The opened device relays*)
+/// — see [`crate::merging`], which holds the lists and does the merging.
+///
+/// **Except over the Peer Listener, where it is this device's own rows alone.**
+/// The viewer's namespace is one router mounted twice, so a member reading this
+/// endpoint would otherwise be handed a merge of merges — and two hubs would
+/// each claim the other's rows as their own, every row of the answer carrying a
+/// device that means something else on the machine reading it. Which listener
+/// this is, is [`OverTheLink`], the same extension the Nudge stream tells the
+/// two apart by and for the same kind of reason: a filter over what an answer
+/// holds rather than a second route to keep.
+async fn conversations(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
         Err(error) => {
@@ -1177,11 +1196,25 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // written down rather than read off anything here, being a fact
                 // about the person rather than about the work.
                 unseen: conversation.unseen,
+                // And where the row sits, which rides out because the device
+                // that merges the lists cannot order them without it — see
+                // [`ConversationEntry::rank`].
+                rank: conversation.rank,
+                // And whose the row is, which the merge below says: nothing
+                // here, because this half of the answer is this device's own
+                // work and a row over the link says no device at all.
+                device: None,
             }
         })
         .collect();
 
-    Json(rows).into_response()
+    // A member asked, so what it gets is this device's own rows exactly as they
+    // stand — see this function's own documentation.
+    if over_the_link.is_some() {
+        return Json(rows).into_response();
+    }
+
+    Json(crate::merging::merged(&state, rows).await).into_response()
 }
 
 /// `POST /api/ui/conversations` — start one against a registered Repo.

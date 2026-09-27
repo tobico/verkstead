@@ -265,9 +265,12 @@ export function Workbench(): JSX.Element {
   ///
   /// The whole of the device dimension on this page: everything below reads it
   /// from here, and every pane that talks to the server is handed it through the
-  /// provider around the two panes the Conversation is drawn in. The sidebar is
-  /// deliberately outside that provider — it lists this device's own work
-  /// whichever Conversation is open beside it (see `reaching.ts`).
+  /// provider around the two panes the Conversation is drawn in.
+  ///
+  /// The sidebar is outside that provider and is handed this as a prop instead,
+  /// because it is not about one device at all: the list is the cluster's,
+  /// merged from every member, and what this says to it is which of its rows is
+  /// the one open beside it (see `reaching.ts`).
   const device = createMemo((): Device => params.device ?? null);
 
   /// And what the details pane is showing, where anything is open: a Timeline
@@ -699,7 +702,8 @@ export function Workbench(): JSX.Element {
           maximised() ? undefined : (
             <Conversations
               selected={selected()}
-              open={(id) => navigate(pathOf(id))}
+              device={device()}
+              open={(id, whose) => navigate(pathOf(id, whose))}
             />
           )
         }

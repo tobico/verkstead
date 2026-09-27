@@ -204,7 +204,11 @@ export function ComposePage(): JSX.Element {
         middleLabel="Timeline"
         conversations={
           zero().holds ? undefined : (
-            <Conversations selected="" open={(id) => navigate(pathOf(id))} />
+            <Conversations
+              selected=""
+              device={null}
+              open={(id, whose) => navigate(pathOf(id, whose))}
+            />
           )
         }
         details={

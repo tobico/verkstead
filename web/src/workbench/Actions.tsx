@@ -163,7 +163,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
-import { keyOf, useDevice, type Device } from "../reaching";
+import { keyOf, useDevice, whose, type Device } from "../reaching";
 import styles from "./Actions.module.css";
 import { eagerly, pressed, pressedRows, rowFor } from "./eager";
 import { pathOf, pathTo } from "./openings";
@@ -503,10 +503,11 @@ function actions(): {
   /// And which device the Conversation a press is about lives on.
   ///
   /// The page's where these rows are the Timeline header's — the menu acts on
-  /// the Conversation being read — and `null` where they are a sidebar card's,
-  /// the sidebar listing this device's own work whichever Conversation is open
-  /// beside it. One accessor for both, because the provider is what differs
-  /// rather than the menu (see `reaching.ts`).
+  /// the Conversation being read — and the *card's own* where they are a sidebar
+  /// card's: the list is merged from the whole cluster, so a card stands for a
+  /// Conversation on whichever machine holds it, and the pane puts a provider
+  /// naming that device around this menu. One accessor for both, because the
+  /// provider is what differs rather than the menu (see `reaching.ts`).
   const device = useDevice();
 
   /// Whether a Conversation is the one the page is standing on, which is the id
@@ -530,7 +531,7 @@ function actions(): {
 
     // Merged as the sidebar's is: the list is re-read constantly, and this is
     // the same cache entry.
-    freshness: { reconcile: "id" } as const,
+    freshness: { reconcile: "rank" } as const,
   }));
 
   /// And whether the ones put away are drawn among them, read the same way
@@ -566,22 +567,19 @@ function actions(): {
     if (!isOpen(conversation)) return;
     if (archived.data?.showing ?? false) return;
 
-    // A member's Conversation is on no list of this device's — the sidebar's
-    // rows are its own until the lists are merged — so there is no row above it
-    // to land on, and what the page leaves to is the bare workbench.
-    if (device() !== null) {
-      navigate("/", { replace: true });
-      return;
-    }
-
+    // The merged list, so the row above may be a member's — and where it is,
+    // that is where the eye goes: the list is one list, and the row over the one
+    // that has gone is whatever the ranks put there whoever owns it.
     const rows = pressedRows(conversations.data ?? [], false);
-    const at = rows.findIndex((row) => row.id === conversation.id);
+    const at = rows.findIndex(
+      (row) => row.id === conversation.id && whose(row) === device(),
+    );
     const above = at > 0 ? rows[at - 1] : undefined;
 
     // Replacing rather than pushing: the human pressed a row rather than
     // navigating, and a Back that landed on the Conversation they have just put
     // away would hand it straight back.
-    navigate(above === undefined ? "/compose" : pathOf(above.id), {
+    navigate(above === undefined ? "/compose" : pathOf(above.id, whose(above)), {
       replace: true,
     });
   };
@@ -1080,7 +1078,13 @@ export function Actions(props: {
 export function CardActions(props: {
   /// Which card was right-clicked and where the pointer was, or `null` while
   /// nothing is open.
-  pointed: { id: number; x: number; y: number } | null;
+  ///
+  /// The device is the card's own and is on it for the reason every press in the
+  /// sidebar carries one: the list is merged from the whole cluster, so the
+  /// Conversation this menu is about is a number *on a machine*. What reads it is
+  /// the provider the pane puts around this component — see `Conversations.tsx`
+  /// — rather than anything here.
+  pointed: { id: number; device: Device; x: number; y: number } | null;
   /// Said whenever the menu should go.
   close: () => void;
 }): JSX.Element {
@@ -1101,13 +1105,15 @@ export function CardActions(props: {
     /// they were reading. Read off the key instead, the fetch is what the key
     /// says it is, whoever asks for it and whenever.
     const of = props.pointed === null ? "" : String(props.pointed.id);
+    const whose = props.pointed?.device ?? null;
 
     return {
       // The key the Conversation pane reads under, so the open one is already
-      // in hand and any other is in hand for the pane that opens it next.
-      // This device's own, the card being a row of its sidebar.
-      queryKey: ["conversation", of],
-      queryFn: () => loadConversation(null, of),
+      // in hand and any other is in hand for the pane that opens it next. The
+      // card's own device leads it, which is what keeps a member's Conversation
+      // 4 and this device's two entries rather than one — see `reaching.ts`.
+      queryKey: keyOf(whose, "conversation", of),
+      queryFn: () => loadConversation(whose, of),
       enabled: of !== "",
 
       // Merged, as the pane's own read of this is: a Nudge landing while the

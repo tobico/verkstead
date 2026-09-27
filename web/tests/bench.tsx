@@ -114,7 +114,9 @@ export function mountSidebar(at: string) {
         <MemoryRouter history={history}>
           <Route
             path="*"
-            component={() => <Conversations selected="" open={() => {}} />}
+            component={() => (
+              <Conversations selected="" device={null} open={() => {}} />
+            )}
           />
         </MemoryRouter>
       </QueryClientProvider>

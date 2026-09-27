@@ -202,6 +202,73 @@ pub struct ConversationEntry {
     /// *something wants you* against *there is news here*. Cleared by opening
     /// the Conversation, which the browser says in a call of its own.
     pub unseen: bool,
+
+    /// Where this row sits: its **Rank**, which is the whole of what the list
+    /// is ordered by (ADR-0020, *Ranks*).
+    ///
+    /// **It rides out on the row because the merge cannot be made without
+    /// it.** The device the browser opened holds each member's list and merges
+    /// it with its own, and what it merges by is this string — every rank
+    /// carries the device that issued it, so the keys are distinct
+    /// cluster-wide and the merged order is total with no tiebreaker of its
+    /// own. A hub holding the rows and not the keys could not put them in an
+    /// order at all.
+    ///
+    /// **And it is what one merged row is told apart from another by**, which
+    /// is the other thing it is read for: ids are each device's own and
+    /// collide by construction, and this is the one field on a merged list
+    /// that is nobody else's.
+    ///
+    /// Empty where the row has none, which is a database written before there
+    /// were ranks and not yet rewritten — it sorts first, exactly where the
+    /// list a device draws of its own rows puts it. No served answer carries
+    /// one: a serve ranks every Conversation before it answers anything.
+    pub rank: String,
+
+    /// The device this row belongs to, or `null` where there is no cluster and
+    /// nothing to say — a lone device draws no device on any row.
+    ///
+    /// **The server's call rather than the page's**, the membership being what
+    /// decides it: a Verkstead linked to nothing draws the sidebar it has
+    /// always drawn, and one that is linked says whose every row is — its own
+    /// included, so that the list reads as one list rather than as this
+    /// device's work with somebody else's mixed in.
+    pub device: Option<RowDevice>,
+}
+
+/// Which device a sidebar row belongs to, as the row itself says it.
+///
+/// **The name and the OS word are the hub's own**, answered on every row
+/// rather than left to be joined against another reading: the hub holds them
+/// for each member and reads its own machine for itself, so nothing in the
+/// viewer needs the Devices section in hand to draw a row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RowDevice {
+    /// The **Device Id**, or `null` for this device's own rows.
+    ///
+    /// Which is the shape the viewer already keys its queries and composes its
+    /// paths by — `null` is *this device*, and a local URL keeps the shape it
+    /// has always had. A row naming this device by its id would be a second
+    /// spelling of every local call.
+    pub id: Option<String>,
+
+    /// What it is shown as: the hostname of the machine, as that machine last
+    /// said it.
+    pub name: String,
+
+    /// And the word for its operating system, which is what draws the mark
+    /// beside the name. *Linux (WSL)* is the one that is not a bare platform
+    /// name, and it is the whole reason the word is carried rather than a
+    /// flag.
+    pub os: String,
+
+    /// And whether the device is answering. `false` is the row drawn dimmed,
+    /// from the last list this device held of that member.
+    ///
+    /// Always `true` on this device's own rows: a device that could not reach
+    /// itself would not be answering this call.
+    pub reachable: bool,
 }
 
 /// A running session that has gone quiet without asking: how long it has been

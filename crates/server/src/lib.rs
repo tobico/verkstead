@@ -134,6 +134,9 @@ mod mcp;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
 mod merges;
+/// One sidebar for the cluster: every member's Conversations held in memory and
+/// merged with this device's own by Rank (ADR-0020, *The opened device relays*).
+mod merging;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
 /// Public for the one thing a Nudge is announced about from outside the
@@ -425,6 +428,15 @@ pub(crate) struct AppState {
     /// is refused there rather than answered about a device that does not
     /// exist, the way **Reset key** is refused where there is no key.
     devices: Option<device::Devices>,
+
+    /// And the list each of those members last answered, which is what the
+    /// sidebar is merged out of — see [`merging`].
+    ///
+    /// Held rather than fetched per load, and in memory rather than in the
+    /// store: every row in it is a Conversation of somebody else's, and what
+    /// keeps it fresh is that member's own Nudges. Empty on every router with no
+    /// identity, there being no member to hold a list of.
+    merged: merging::MemberLists,
 
     /// What this device is called by every record written through this state:
     /// the Device Id, which is the suffix on every Rank a start mints — see
@@ -1047,6 +1059,48 @@ pub fn router_answering_devices_telling(
     )
 }
 
+/// And **both** of that device's routers over **one** state, which is what a
+/// running server serves: the workbench its own browser asks, and the slice of
+/// it a member reaches over the link (see [`Routers`]).
+///
+/// A constructor of its own because one endpoint in that namespace now answers
+/// the two listeners differently and the difference is about the *state*: the
+/// sidebar is this device's own Conversations merged with the lists it holds of
+/// its members, and what a member gets is this device's own rows alone — see
+/// [`merging`], and [`ui::conversations`]. Two routers built separately would be
+/// two devices asked the one question, each holding its own memory of the
+/// cluster.
+///
+/// The peer half is handed to [`peer::router`] the way [`router_over_the_link`]'s
+/// is, which is what puts the Member Gate in front of it.
+pub fn routers_answering_devices_telling(
+    pool: SqlitePool,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+) -> Routers {
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &gate,
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
+}
+
 /// The Tailscale of a router that was not stood up to be reached from a phone:
 /// the host's own binary, in front of the port the workbench takes when nobody
 /// has said otherwise.
@@ -1272,6 +1326,11 @@ fn standing(
         // and a router with nowhere to have invented it has no device to draw.
         devices,
 
+        // And nothing held of any member yet, which is what a start is: the
+        // lists arrive as the Nudge streams to them are taken up, and the loop
+        // below is what listens for that — see [`merging`].
+        merged: merging::MemberLists::none(),
+
         // And the key the gate below stands on, so that the one press that
         // re-issues it goes through the very handle every request is checked
         // against — see [`key::Gate::held`].
@@ -1344,6 +1403,15 @@ fn standing(
     // because a nudge sent from one and silently not from the other is a session
     // waiting for a line nobody is going to type.
     nudging::listening(&state);
+
+    // And the lists this device holds of its members, which is what the sidebar
+    // is merged out of: read once now, and again whenever a member says
+    // something its own sidebar would be re-read on (ADR-0020, *The opened
+    // device relays*) — see [`merging`]. Here rather than beside the streams
+    // themselves, which are held by a task spawned before this state exists:
+    // what the two share is the one Nudge channel, and this end of it is the
+    // one that needs the state.
+    merging::refreshing(&state);
 
     // And the verdict about the machine itself, which is the one sweep here
     // that decides something rather than tidying something: whether this

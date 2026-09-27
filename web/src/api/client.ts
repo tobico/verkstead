@@ -415,14 +415,21 @@ export function listConversations(): Promise<ConversationEntry[]> {
 /// key that says where it sits is minted on the server, so nothing here knows
 /// what a rank looks like.
 ///
+/// **Addressed to the device that owns the row.** The sidebar is merged from the
+/// whole cluster, so a rank written here would be a rank written on whatever
+/// this device happens to number the same — and the ids `below` names are that
+/// device's own, which is why the row above is the nearest one of its own rows
+/// rather than whatever the card landed on (see `Conversations.tsx`).
+///
 /// Answered with nothing at all — there is no outcome to read. A neighbour that
 /// has gone since this list was drawn is not a refusal on the other side, which
 /// is what a list drawn a moment ago is allowed to carry.
 export async function rankConversation(
+  device: Device,
   id: number,
   below: number | null,
 ): Promise<void> {
-  const at = `/api/ui/conversations/${id}/rank`;
+  const at = on(device, `/api/ui/conversations/${id}/rank`);
 
   await refused(
     at,

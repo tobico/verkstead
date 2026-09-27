@@ -745,6 +745,34 @@ impl Devices {
         self.device.id()
     }
 
+    /// And what the machine it is on is called, read at the moment of asking —
+    /// see [`reading::Reading::name`].
+    ///
+    /// Beside the id because a sidebar row says both: the merged list carries
+    /// the name and the OS word of every device it has rows from, this one
+    /// included, so that nothing in the viewer has to join a row against the
+    /// Devices section to draw it (ADR-0020, *The opened device relays*).
+    pub(crate) fn name(&self) -> String {
+        self.reading.name()
+    }
+
+    /// And the word for its operating system, which is what draws the mark
+    /// beside that name — see [`reading::Reading::os`].
+    pub(crate) fn os(&self) -> String {
+        self.reading.os()
+    }
+
+    /// The membership itself, for the readings that are about who this device
+    /// is linked to rather than about what it is.
+    ///
+    /// What asks is the merged list: a row of a member's carries that member's
+    /// name, its OS word and whether the last dial to it got through, and all
+    /// three are columns on the row this handle reads — see
+    /// [`crate::merging`].
+    pub(crate) fn membership(&self) -> &Members {
+        &self.members
+    }
+
     /// The same, browsing the LAN for the devices this one is not linked to — see
     /// [`crate::discovery::Browse`], which is where the Discovered list comes
     /// from.

@@ -191,7 +191,11 @@ export function SettingsPage(): JSX.Element {
       pane={pane()}
       middleLabel="Settings"
       conversations={
-        <Conversations selected="" open={(id) => navigate(pathOf(id))} />
+        <Conversations
+          selected=""
+          device={null}
+          open={(id, whose) => navigate(pathOf(id, whose))}
+        />
       }
       middle={
         <Settings

@@ -72,6 +72,7 @@ import {
   profileOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
+import { rowKey } from "../src/reaching";
 import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
@@ -1464,9 +1465,12 @@ describe("the settings page", () => {
   it("opens a conversation from the pane beside it", async () => {
     const { container, history } = thePage();
 
+    // A row is a Conversation and a device, the sidebar being merged from the
+    // whole cluster — and this fixture is a lone device's (see `reaching.ts`).
+    const at = `[data-row="${rowKey(null, SIDEBAR[0]!.id)}"]`;
     const row = await drawn<HTMLElement>(
       container,
-      `[data-id="${SIDEBAR[0]!.id}"] [role="button"], [data-id="${SIDEBAR[0]!.id}"] button`,
+      `${at} [role="button"], ${at} button`,
     );
     fireEvent.click(row);
 

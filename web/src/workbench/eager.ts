@@ -46,18 +46,12 @@
 import { createSignal } from "solid-js";
 
 import { toast } from "../Toasts";
-import type { ConversationEntry, ConversationView } from "../api/types";
-import type { Device } from "../reaching";
-
-/// Which Conversation an entry is about: the device it lives on and its own id.
-///
-/// Ids are each device's own and collide by construction (see `reaching.ts`), so
-/// an overlay keyed by the id alone would draw a close pressed on a member's
-/// Conversation 4 over this device's Conversation 4 — on the very list the press
-/// was not about.
-function of(device: Device, conversation: number): string {
-  return `${device ?? ""}/${conversation}`;
-}
+import type {
+  ConversationEntry,
+  ConversationView,
+  RowDevice,
+} from "../api/types";
+import { rowKey, whose, type Device } from "../reaching";
 
 /// What the presses have said about one Conversation, ahead of the server.
 ///
@@ -169,7 +163,7 @@ export function pressed(
   device: Device,
   view: ConversationView,
 ): ConversationView {
-  const over = said()[of(device, view.id)];
+  const over = said()[rowKey(device, view.id)];
   if (over === undefined) return view;
 
   return {
@@ -187,19 +181,22 @@ export function pressed(
 /// row off the list at all. It is the server's rule for the same list, read the
 /// same way (see the store's `conversations`), so a press and the read behind
 /// it say the same thing about the same row.
+///
+/// **Every device's rows, each under its own key.** The list is merged from the
+/// whole cluster (ADR-0020, *The opened device relays*), so a press made on a
+/// member's card is about a row of this very list — and an overlay looked up by
+/// the id alone would lay a close pressed on B's Conversation 4 over this
+/// device's Conversation 4, on the one list they are both rows of. See `rowKey`.
 export function pressedRows(
   rows: ConversationEntry[],
   archived: boolean,
 ): ConversationEntry[] {
   const over = said();
-  const ids = Object.keys(over);
-  if (ids.length === 0) return rows;
+  const keys = Object.keys(over);
+  if (keys.length === 0) return rows;
 
-  // This device's own entries throughout: the sidebar lists the work being done
-  // here, whichever Conversation is open beside it, so a press made on a
-  // member's says nothing about any row on it.
   const drawn = rows.flatMap((row) => {
-    const on = over[of(null, row.id)];
+    const on = over[rowKey(whose(row), row.id)];
     if (on === undefined) return [row];
     if (on.archived === true && !archived) return [];
 
@@ -210,24 +207,37 @@ export function pressedRows(
   // which is where a Conversation the order says nothing about goes here and on
   // the server both.
   //
-  // Off this device's own entries, read under the very keys they were written
-  // under. A member's press is on the same list of presses and carries a row of
-  // that member's Conversation — and an entry found by an id taken back off
-  // *that* row would be this device's press of the same number, ids colliding
-  // by construction (see [`of`]). Which would put a member's row on a list it
-  // is on no account of, under an id this device's own sidebar already means
-  // something else by.
-  const back = ids.flatMap((id) => {
-    const on = over[id]!;
+  // Read under the very keys they were written under, and stamped with the
+  // device block the rest of that device's rows carry: the row a press built
+  // came off a Conversation's own reading, which says nothing about whose
+  // machine it is — that is the merged list's own addition, and a row put back
+  // without it would be a member's Conversation drawn as one of this device's.
+  // Where the device has no other row to take the block off, the row waits for
+  // the server's own list rather than going on under the wrong device: it is a
+  // Nudge away, and the press is what asked for it.
+  const back = keys.flatMap((key) => {
+    const on = over[key]!;
 
-    if (on.device !== null || on.row === undefined || on.archived !== false) {
-      return [];
-    }
+    if (on.row === undefined || on.archived !== false) return [];
+    if (drawn.some((one) => rowKey(whose(one), one.id) === key)) return [];
 
-    return drawn.some((one) => one.id === on.row!.id) ? [] : [on.row];
+    const block = blockOf(rows, on.device);
+    if (on.device !== null && block === null) return [];
+
+    return [{ ...on.row, device: block }];
   });
 
   return back.length === 0 ? drawn : [...back, ...drawn];
+}
+
+/// The device block the rows of `device` carry, or `null` where the list holds
+/// none of them.
+///
+/// Which is two answers at once for this device's own: `null` is both *there is
+/// no cluster* and *there is nothing of this device's on the list*, and a row of
+/// this device's carries no block in either case.
+function blockOf(rows: ConversationEntry[], device: Device): RowDevice | null {
+  return rows.find((row) => whose(row) === device)?.device ?? null;
 }
 
 /// Let go of every press a read has since caught up with, which is the one thing
@@ -288,9 +298,15 @@ export function caughtUp(readAt: number): void {
 /// server's own list arrives with one.
 ///
 /// Off the reading the press was made against, which carries every field a row
-/// does but the marks — and the marks are all off: unarchiving is offered on a
-/// closed Conversation, and nothing on one of those is running, waiting, or
-/// news the human has not read.
+/// does but the marks and the two the merged list adds — and the marks are all
+/// off: unarchiving is offered on a closed Conversation, and nothing on one of
+/// those is running, waiting, or news the human has not read.
+///
+/// The rank is empty and the device is nothing, neither being anything a
+/// Conversation's own reading says: a rank is where the row sits in a list this
+/// one is not on yet, and whose the row is is the merged list's own addition —
+/// see [`pressedRows`], which stamps the device on as it puts the row back, and
+/// puts it at the top whatever the rank says.
 export function rowFor(view: ConversationView): ConversationEntry {
   return {
     id: view.id,
@@ -305,13 +321,15 @@ export function rowFor(view: ConversationView): ConversationEntry {
     waiting_on_checks: false,
     parked: null,
     unseen: false,
+    rank: "",
+    device: null,
   };
 }
 
 /// One press whose outcome the page is already drawing.
 export type Press<Outcome> = {
   /// Which Conversation it is about, and which device that Conversation lives
-  /// on — see [`of`], which is why both are asked for.
+  /// on — see `rowKey`, which is why both are asked for.
   device: Device;
   conversation: number;
 
@@ -343,7 +361,7 @@ export type Press<Outcome> = {
 /// Make one: what it says goes on the page now, and the request goes out behind
 /// whatever is already in flight on the same Conversation.
 export function eagerly<Outcome>(press: Press<Outcome>): void {
-  const id = of(press.device, press.conversation);
+  const id = rowKey(press.device, press.conversation);
 
   setSaid((standing) => {
     // Whatever a press before this one said, and this press over it — but not

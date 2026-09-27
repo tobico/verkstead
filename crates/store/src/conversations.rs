@@ -500,6 +500,21 @@ pub struct ConversationRow {
     /// Read here rather than asked for per row, the way the two above are: the
     /// mark is one `EXISTS` over a table with a row per Conversation at most.
     pub unseen: bool,
+
+    /// And where the row sits: its **Rank**, which is what this list is ordered
+    /// by — see [`super::ranks`].
+    ///
+    /// **Carried out rather than left in the `ORDER BY`**, because the device
+    /// the browser opened merges its members' lists with its own by exactly
+    /// this string, and a list that had been ordered and then had the keys
+    /// taken off it could not be merged with another (ADR-0020, *The opened
+    /// device relays*).
+    ///
+    /// Empty where the column is null, which is a database the rewrite has not
+    /// reached yet — and it sorts first, which is where `ORDER BY c.rank` puts
+    /// a null too. A serve ranks every row before it answers anything, so no
+    /// answer of a running server carries one.
+    pub rank: String,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1928,6 +1943,12 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// see [`super::ranks`] — so ordering this list is reading one column, and a
 /// drag writes one row rather than renumbering the table.
 ///
+/// **And the rank comes out on the row as well as into the `ORDER BY`.** This
+/// list is merged with the lists a device holds of its members, and whoever does
+/// that merging needs the keys: a list ordered here and then stripped of them
+/// could not be put in order with another (ADR-0020, *The opened device
+/// relays*).
+///
 /// **There is no unplaced Conversation for the order to make a case of.** A
 /// start mints a rank above everything — see [`started`] — so the row nobody
 /// has had the chance to move is at the top because its own rank says so,
@@ -1973,7 +1994,18 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// with nothing to press on any of them.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     /// The columns in the order the query below selects them.
-    type Row = (i64, String, bool, bool, String, String, bool, bool, bool);
+    type Row = (
+        i64,
+        String,
+        bool,
+        bool,
+        String,
+        String,
+        bool,
+        bool,
+        bool,
+        String,
+    );
 
     let rows: Vec<Row> = sqlx::query_as(&format!(
         "SELECT c.id, COALESCE(c.named_branch, c.branch),
@@ -1997,7 +2029,8 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 EXISTS (
                     SELECT 1 FROM unseen_conversations u
                     WHERE u.conversation_id = c.id
-                ) AS unseen
+                ) AS unseen,
+                COALESCE(c.rank, '') AS rank
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          WHERE EXISTS (SELECT 1 FROM shown_archives)
@@ -2024,6 +2057,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 waiting,
                 narrowed_to_checks,
                 unseen,
+                rank,
             )| ConversationRow {
                 id,
                 branch,
@@ -2041,6 +2075,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 waiting,
                 narrowed_to_checks,
                 unseen,
+                rank,
             },
         )
         .collect())
