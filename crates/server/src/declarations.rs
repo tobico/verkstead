@@ -33,6 +33,7 @@
 //! list's tail is whatever it always was.
 
 use crate::checklist;
+use crate::platform::Platform;
 
 /// What a stage's line says it stands on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,11 +225,13 @@ pub(crate) struct Declared {
     /// judging.
     pub(crate) stands_on: Vec<String>,
 
-    /// The platform it wants, where it named one.
+    /// The platform it wants, where it named one — the crate's own
+    /// [`crate::platform::Platform`], which is what a device's OS will be read
+    /// as when something finally places a stage by it. See [`PLATFORMS`].
     pub(crate) platform: Option<Platform>,
 }
 
-/// The platforms a stage can ask for.
+/// The three platforms a stage can ask for, by the word a roadmap writes.
 ///
 /// Rust's own `target_os` names, which are what the repository's `#[cfg]`s and
 /// its CI runners already say. Three words rather than free text, because the
@@ -236,27 +239,23 @@ pub(crate) struct Declared {
 /// would place a stage nowhere at all — cluster mode's free-text *Linux (WSL)*
 /// for drawing an icon beside a hostname is a different thing, and neither of
 /// them should be made to serve the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Platform {
-    Linux,
-    Macos,
-    Windows,
-}
-
-/// The three of them, by the word a roadmap writes.
+///
+/// And [`crate::platform::Platform`] rather than three of our own, it being the
+/// crate's name for an operating system already: what a declared platform is for
+/// is being matched against the OS of a device, and
+/// [`crate::platform::Platform::HERE`] is exactly that. A second enum of the
+/// same three would be a conversion waiting to be written.
 const PLATFORMS: [(&str, Platform); 3] = [
     ("linux", Platform::Linux),
-    ("macos", Platform::Macos),
+    ("macos", Platform::MacOs),
     ("windows", Platform::Windows),
 ];
 
-impl Platform {
-    /// The platform `word` names, or `None` where it names none of them.
-    fn matching(word: &str) -> Option<Platform> {
-        PLATFORMS
-            .iter()
-            .find_map(|(named, platform)| is(word, named).then_some(*platform))
-    }
+/// The platform `word` names, or `None` where it names none of the three.
+fn matching(word: &str) -> Option<Platform> {
+    PLATFORMS
+        .iter()
+        .find_map(|(named, platform)| is(word, named).then_some(*platform))
 }
 
 /// What `list` — a whole `ROADMAP.md` — declares, judged as one thing.
@@ -330,7 +329,7 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
 
     for (entry, read) in &lines {
         if let Some(word) = read.platform
-            && Platform::matching(word).is_none()
+            && matching(word).is_none()
         {
             return Judgement::Refused(format!(
                 "stage {} of the {roadmap} roadmap says `on {word}`, which is not a platform: it \
@@ -378,7 +377,7 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
                     }
                     _ => Vec::new(),
                 },
-                platform: read.platform.and_then(Platform::matching),
+                platform: read.platform.and_then(matching),
             })
             .collect(),
     )
