@@ -1883,7 +1883,9 @@ fn steer(target: Lifecycle) -> Steer<'static> {
 ///
 /// Every one of the three answers, and each of them from a Conversation that got
 /// where it is the way a real one does: still implementing, finished, closed from
-/// a wrap-up, and closed before there was one.
+/// a wrap-up, and closed before there was one. And settled read as *ever in Done*
+/// rather than *in Done now*, which is what the two halves at the foot of this
+/// are.
 #[tokio::test]
 async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were_abandoned() {
     let (_dir, pool) = fresh_pool().await;
@@ -1906,8 +1908,8 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
     close_conversation(&pool, closed_part_way).await.unwrap();
 
     // And one nothing has finished with, left implementing, which is where every
-    // stage starts and is nobody's to steer from here.
-    stage(&pool, repo_id, "mvp", "04").await;
+    // stage starts.
+    let implementing = stage(&pool, repo_id, "mvp", "04").await;
 
     let standings = stage_standings(&pool, repo_id).await.unwrap();
 
@@ -1938,9 +1940,11 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
          what leaves its box to speak for it",
     );
 
-    // The other half of the human's say: nothing may rebase onto a branch that is
-    // moving again, so a stage steered out of Done is in flight once more however
-    // far it once got.
+    // And settled once is settled: a stage steered out of Done — put back to work,
+    // or followed up on months after it merged — has finished its work all the
+    // same. Whether its branch is moving again is the chain's question rather than
+    // this reading's, and reading it as in flight is what stopped the adoption
+    // dead at a stage that was done.
     steer_conversation(&pool, done, steer(Lifecycle::Implementing))
         .await
         .unwrap();
@@ -1950,6 +1954,21 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
             .await
             .unwrap()
             .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+
+    // Where *never in Done* is the whole of what in flight means: the stage still
+    // being implemented has been nowhere else, and steering it into Wrapping — one
+    // rung short — leaves it there.
+    steer_conversation(&pool, implementing, steer(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "04"),
         Some(StageStanding::InFlight),
     );
 }

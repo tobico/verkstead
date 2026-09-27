@@ -5739,26 +5739,34 @@ pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<StageOf>
 /// are not each other's opposite: a stage whose Conversation was closed part-way
 /// through is neither, and what happens to it is neither reading's business.
 ///
-/// The human's own two halves are what decide the first: a Conversation in Done
-/// has settled, and one Closed from a wrap-up has settled too, because closing a
-/// Conversation that got as far as a pull request is the human saying they are
-/// finished with it. Nothing here is about a pull request having merged — a stage
-/// whose branch is still open is a stage the one after it stacks on, which is the
-/// whole of how a roadmap runs.
+/// The human's own two halves are what decide the first: a Conversation that
+/// reached Done has settled, and one Closed from a wrap-up has settled too,
+/// because closing a Conversation that got as far as a pull request is the human
+/// saying they are finished with it. Nothing here is about a pull request having
+/// merged — a stage whose branch is still open is a stage the one after it stacks
+/// on, which is the whole of how a roadmap runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageStanding {
-    /// Its work is finished: it is in Done now, or it was closed having reached
-    /// Wrapping or Done at some point.
+    /// Its work is finished: it reached Done at some point, or it was closed
+    /// having reached Wrapping or Done.
     ///
-    /// Read off the state as it stands rather than off the Timeline alone, which
-    /// is what makes the other half of the human's say work: nothing may rebase
-    /// onto a branch that is moving again, so a stage steered out of Done is in
-    /// flight once more however far it once got.
+    /// **Once rather than now**, which is what keeps a stage that has finished
+    /// from reading as open again. A Steer into Follow-up is offered from Done and
+    /// one into Implementing puts a settled stage back to work, so a stage merged
+    /// months ago that somebody is following something up on would otherwise read
+    /// as in flight — and a stage that is not done is what the adoption stops at,
+    /// which took the whole roadmap out of the notice and had the press refuse
+    /// about a stage nobody was on.
+    ///
+    /// Whether its branch is **moving again** is a different question, and it is
+    /// asked where it matters rather than answered here: nothing may rebase onto a
+    /// branch that has started moving, which is the chain's own reading to make
+    /// when the chain is built.
     Settled,
 
-    /// Somebody — or some unattended run — is on it: implementing, wrapping up,
-    /// waiting on a question, being followed up. Anything that is not Closed and
-    /// has not settled.
+    /// Somebody — or some unattended run — is on it and it has not finished yet:
+    /// implementing, wrapping up, waiting on a question. Anything that is not
+    /// Closed and has never reached Done.
     InFlight,
 
     /// Closed without ever having wrapped up: abandoned part-way through.
@@ -5854,13 +5862,19 @@ impl StageStandings {
 /// the roadmap — so it is left out of this and the box goes on speaking for
 /// whichever it was; see [`StageOf::stage`].
 ///
-/// Whether a Closed Conversation ever wrapped up is the Timeline's to answer,
-/// every move being written on it — see [`moved`]. The state column says where it
-/// is now and the Timeline says where it has been, and it takes both: a stage
-/// steered out of Done is in flight again, and a stage closed from Done settled.
+/// **Where each of them has been** is the Timeline's to answer, every move being
+/// written on it — see [`moved`] — and the state column says where it is now. It
+/// takes both, and the two questions the Timeline is asked are different ones: a
+/// Conversation that ever reached **Done** has finished its work, whatever it was
+/// steered into afterwards, and one that is **Closed** settled where it ever
+/// reached Wrapping or Done and was abandoned where it did not.
 pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
-    let rows: Vec<(String, String, String, bool)> = sqlx::query_as(
+    let rows: Vec<(String, String, String, bool, bool)> = sqlx::query_as(
         "SELECT r.roadmap, r.stage, c.state,
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body = ?
+                ),
                 EXISTS (
                     SELECT 1 FROM timeline_events e
                     WHERE e.conversation_id = c.id AND e.kind = ? AND e.body IN (?, ?)
@@ -5870,6 +5884,8 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
          WHERE c.repo_id = ? AND r.stage IS NOT NULL
          ORDER BY r.conversation_id",
     )
+    .bind(Event::Moved(Lifecycle::Done).kind())
+    .bind(Lifecycle::Done.stored())
     .bind(Event::Moved(Lifecycle::Wrapping).kind())
     .bind(Lifecycle::Wrapping.stored())
     .bind(Lifecycle::Done.stored())
@@ -5880,11 +5896,17 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
 
     let mut standings = StageStandings::default();
 
-    for (roadmap, label, state, wrapped) in rows {
-        let standing = match (Lifecycle::read(&state)?, wrapped) {
-            (Lifecycle::Done, _) => StageStanding::Settled,
-            (Lifecycle::Closed, true) => StageStanding::Settled,
-            (Lifecycle::Closed, false) => StageStanding::Abandoned,
+    for (roadmap, label, state, finished, wrapped) in rows {
+        let standing = match (Lifecycle::read(&state)?, finished, wrapped) {
+            // In Done, however it got there — including a database in which the
+            // move was never written.
+            (Lifecycle::Done, ..) => StageStanding::Settled,
+            (Lifecycle::Closed, _, true) => StageStanding::Settled,
+            (Lifecycle::Closed, _, false) => StageStanding::Abandoned,
+            // Somewhere else, having been in Done before: the work finished and
+            // something was taken up about it afterwards. Which is a stage done —
+            // see [`StageStanding::Settled`], where *once rather than now* is.
+            (_, true, _) => StageStanding::Settled,
             _ => StageStanding::InFlight,
         };
 
