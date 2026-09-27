@@ -9947,8 +9947,7 @@ async fn a_review_over_a_branch_another_conversation_has_a_pull_request_on_leads
     // which is what leaves the branch standing with nobody on it: the worktree
     // goes with the close and the record of the pull request does not.
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.
-", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
 
     assert_eq!(close(&app, first).await, ConversationClosed::Closed);
