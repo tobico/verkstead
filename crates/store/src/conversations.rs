@@ -3718,11 +3718,6 @@ pub enum Switched {
     /// roadmap.
     Adopting,
 
-    /// It is holding a pull request, and a pull request is a branch in the
-    /// repository it was opened in: moving the work would leave it holding a
-    /// number that means something else over there, or nothing at all.
-    HoldingPullRequest,
-
     /// There is no Repo with that id on the registry.
     NoSuchRepo,
 }
@@ -3744,6 +3739,17 @@ pub enum Switched {
 /// adoption is in was settled by the row that started it rather than by the
 /// human, so it is not theirs to change afterwards; what is, is putting the
 /// roadmap down and composing work of their own.
+///
+/// **And off nothing about what it is pointed at**, unlike an adoption. A
+/// **Review**'s Target is a string the human owns, and what it means follows the
+/// Repo the way the field's own rule says it does: a bare `#41` is the number of
+/// whichever repository it is read in, and a URL naming a repository this Repo's
+/// origin is not is refused at Start by name — see the server's `resolve`. So a
+/// Draft from before there were Processes, which is pointed at a pull request by
+/// the row that made it rather than by a field, moves like any other and is told
+/// at the press if the move made its target somebody else's. Refusing here would
+/// be a control the panel cannot draw as refused: nothing on the wire tells that
+/// Draft apart from a Review somebody typed the same URL into.
 ///
 /// Three things follow from the move, and they are here rather than in the
 /// caller because a Conversation between them would be one nothing could read:
@@ -3770,15 +3776,6 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
 
     if adopting(pool, id).await?.is_some() {
         return Ok(Switched::Adopting);
-    }
-
-    // And the same fact about the other thing a Draft adopts. A pull request is
-    // a number in one repository — `#41` names something else in the next one
-    // along, or nothing — so which repository it is in was settled by the row
-    // that started the Conversation rather than by the human, exactly as a
-    // roadmap's was.
-    if adopted_pull_request(pool, id).await?.is_some() {
-        return Ok(Switched::HoldingPullRequest);
     }
 
     // On the registry rather than merely in the table, for the reason a

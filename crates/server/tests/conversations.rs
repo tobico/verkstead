@@ -7437,11 +7437,16 @@ async fn a_draft_from_before_is_a_review_pointed_at_the_pull_request_it_holds() 
     assert_eq!(view.worktree, None);
 }
 
-/// And the Repo picker on that Draft refuses a move by name: `#41` is a fact
-/// about one repository, and the same number over there is a different pull
-/// request or none at all.
+/// And the Repo picker on that Draft moves it like any other, the Target's
+/// meaning being the Target's to follow: moved, the URL it is pointed at still
+/// names the repository it always named, and the press says so by name.
+///
+/// Which is what makes the picker honest rather than a control drawn as if it
+/// worked. Nothing on the wire tells this Draft apart from a Review somebody typed
+/// the same URL into — the adoption row does not travel — so a refusal here would
+/// be one the panel could not grey the picker for.
 #[tokio::test]
-async fn a_draft_holding_a_pull_request_refuses_a_repo_move() {
+async fn a_draft_holding_a_pull_request_moves_repo_and_is_told_at_the_press() {
     let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
 
     let askance = repository(elsewhere.path().join("askance"));
@@ -7469,8 +7474,15 @@ async fn a_draft_holding_a_pull_request_refuses_a_repo_move() {
     )
     .await;
 
-    assert_eq!(moved, RepoSwitched::HoldingPullRequest);
-    assert_eq!(opened(&app, id).await.repo.id, repo_id);
+    assert_eq!(moved, RepoSwitched::Switched);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.repo.id, elsewhere_id);
+    assert_eq!(
+        view.target.as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
+        "and pointed where it always was, which is now another repository",
+    );
 }
 
 /// A Draft as the retired *Wrap up a pull request* level left one: started the

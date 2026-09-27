@@ -142,8 +142,6 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
     "The branch exists by now, so which repo the work is in is settled.",
   Adopting:
     "The stage being continued is in this repo, so the work cannot be moved off it.",
-  HoldingPullRequest:
-    "The pull request being wrapped up is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
 };
 

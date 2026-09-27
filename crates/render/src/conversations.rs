@@ -3443,13 +3443,6 @@ pub enum RepoSwitched {
     /// the roadmap down, not carrying it across.
     Adopting,
 
-    /// The Conversation is holding a pull request, which is a branch and a
-    /// number in the Repo it was opened in: `#41` names something else in the
-    /// next repository along, or nothing at all. Which repository it is in was
-    /// settled by the row that started the Conversation, exactly as an
-    /// adoption's was.
-    HoldingPullRequest,
-
     /// There is no registered Repo with that id — taken off the registry between
     /// the panel listing it and the press that picked it.
     NoSuchRepo,

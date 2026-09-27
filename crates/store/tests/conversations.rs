@@ -790,13 +790,19 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     assert_eq!(adopting(&pool, id).await.unwrap().as_deref(), Some("mvp"));
 }
 
-/// And the same freeze over a Draft from before there were Processes. A pull
-/// request is a number in the repository it was opened in — `#41` names
-/// something else in the next one along, or nothing — so which repository the
-/// work is in was settled by the row that started the Conversation rather than
-/// by the human.
+/// And *not* the same freeze over a Draft from before there were Processes,
+/// unlike a roadmap: a Draft holding a pull-request adoption moves like any other.
+///
+/// What it is pointed at is the Target field, and a Target is a string whose
+/// meaning follows the Repo — a bare `#41` is the number of whichever repository
+/// it is read in, and a URL naming somewhere else is refused at Start by name.
+/// Which is what such a Draft's target is, its adoption row being read as that
+/// pull request's URL: moved onto another Repo it still names the repository it
+/// always did, and the press says so. Refusing here would be a refusal nothing
+/// could draw — nothing on the wire tells this Draft apart from a Review somebody
+/// typed the same URL into.
 #[tokio::test]
-async fn a_repo_switch_is_refused_while_a_pull_request_is_being_held() {
+async fn a_repo_switch_goes_through_over_a_held_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
@@ -805,11 +811,12 @@ async fn a_repo_switch_is_refused_while_a_pull_request_is_being_held() {
 
     assert_eq!(
         switch_repo(&pool, id, askance).await.unwrap(),
-        Switched::HoldingPullRequest
+        Switched::Switched
     );
 
-    // And nothing moved: the number still names the pull request it was listed
-    // as.
+    // Moved, and still pointed at the pull request it always was — which is a
+    // URL, so what the press will say about it is that it is another
+    // repository's.
     assert_eq!(
         load_conversation(&pool, id)
             .await
@@ -817,14 +824,11 @@ async fn a_repo_switch_is_refused_while_a_pull_request_is_being_held() {
             .unwrap()
             .repo
             .name,
-        "verkstead",
+        "askance",
     );
     assert_eq!(
-        adopted_pull_request(&pool, id)
-            .await
-            .unwrap()
-            .map(|held| held.number),
-        Some(41),
+        target(&pool, id).await.unwrap().as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
     );
 }
 

@@ -2757,16 +2757,30 @@ describe("the page of a draft from before, holding a pull request", () => {
     expect(screen.queryByLabelText("Base branch")).toBeNull();
   });
 
-  /// The repo is still the pull request's own — `#41` is a number in one
-  /// repository and something else entirely in the next — so the picker reads
-  /// settled, and the refusal behind it is named for what refused it.
+  /// And the repo picker is the human's, like every other draft's: what the work
+  /// is pointed at is a string whose meaning follows the Repo, and a Target the
+  /// move made somebody else's is refused at the press by name.
   ///
-  /// That the server gives that refusal is
-  /// `crates/server/tests/conversations.rs`'s; what is asked here is that the
-  /// name has a sentence to be read as.
-  it("has a sentence for the refusal a repo move comes back with", () => {
+  /// What is asked here is that the control is drawn as one that works, the rule
+  /// being that what a control cannot do it does not draw. That the server lets
+  /// the move through is `crates/server/tests/conversations.rs`'s.
+  it("leaves the repo picker open, as every other draft's is", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await openComposer(container);
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    expect(picker.disabled).toBe(false);
+
+    // And every refusal the move can come back with has a sentence to be read
+    // as, which is the list this draws them off.
     const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
-    expect(said.HoldingPullRequest).toContain("pull request");
+    expect(said.Adopting).toContain("repo");
   });
 
   /// And its Start is the Review's own: one *Start work* under the box, reaching

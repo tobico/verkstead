@@ -991,7 +991,6 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
         store::Switched::NotDrafting => RepoSwitched::NotDrafting,
         store::Switched::Adopting => RepoSwitched::Adopting,
-        store::Switched::HoldingPullRequest => RepoSwitched::HoldingPullRequest,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
 }
