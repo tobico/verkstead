@@ -410,9 +410,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
         ["conversations"],
       ];
 
-    // The sidebar's own list, which is this device's work whichever member's
-    // news arrived — the merged list is a later stage. Unkeyed for that reason,
-    // as it is in the three kinds above.
+    // The sidebar's own list, which is the *cluster's* — this device's work and
+    // every member's, merged by Rank on the device the browser opened (ADR-0020,
+    // *The opened device relays*). So it is unkeyed, and has to be: one list is
+    // one query however many devices it draws rows from, and a member's news
+    // about its own Conversations is news about this one list. The three kinds
+    // above name it unkeyed for that same reason.
     case "conversations":
       return [["conversations"]];
 

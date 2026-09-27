@@ -30,8 +30,8 @@
 //! announced for a dial that reached nowhere: the page keeps what it last read
 //! and goes stale, exactly as it does when its own stream is down, and a press
 //! on it is refused by name by the hop. The row dimmed *unreachable* is the
-//! dial's own doing — see [`Peers::relay`] — and the merged list that keeps a
-//! member's last rows is stage 06's.
+//! dial's own doing — see [`Peers::relay`] — and what keeps a member's last rows
+//! on the sidebar meanwhile is [`crate::merging`], which holds them.
 //!
 //! **The membership is read again rather than held**, for the reason every other
 //! reader of it does: a device linked while this server is up is one to hold a

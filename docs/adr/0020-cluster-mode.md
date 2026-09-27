@@ -224,9 +224,27 @@ reads `key-<device>`: a rank between `a0-A` and `a0-B` would take a device id
 sorting between those two, and the row being moved carries its own. There is no
 such rank, and stage 05 refuses rather than inventing one. It cannot arise on
 one device, whose own keys are distinct — on a merged list it is the first rows
-of two devices, and the stage that merges settles what a drag into that one gap
-does: re-ranking one of the pair through its own device, or landing the row
-beside them rather than between them.
+of two devices, sitting at the top of the list where cards are dropped most.
+
+**A card dropped between them lands there all the same, the hub opening the gap
+first.** It re-ranks the *lower* of the pair through that row's own device — a
+key between the pair's shared one and whatever is under it — and then mints the
+dropped row into the gap that opened, so two devices are written to in that one
+case and one in every other. It does not recur at that spot, the pair no longer
+sharing a key; and where the lower row's own device cannot be reached the gap
+cannot be opened, so the drag is refused and the sidebar says which device it
+was. Landing the row beside the pair rather than between them was the other way
+and was rejected: it puts the card somewhere the human did not drop it, and
+leaves the pair to be met again on the next drop.
+
+**Two drops into one gap are held apart on the hub**, a mint off a list held in
+memory having no transaction around it. What that lock does not reach is a
+Conversation *started* on a member while the hub is minting for that member: a
+second key computed over there off the same top row and carrying the same
+suffix, so the two rows can land at one rank. They are still drawn in a stated
+order, and a later drag between them is refused the way any pair at one key is
+until one of them is re-ranked. It is the price of serving the merge from memory
+rather than a round trip per row.
 
 A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule
