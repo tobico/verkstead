@@ -196,6 +196,9 @@ mod profiles;
 /// GitHub.
 mod publishing;
 mod push;
+/// Where the human just dropped one row of the merged sidebar: the **Rank**
+/// minted here and written to the device that owns the row.
+mod ranking;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
 /// A call for one of this device's members, put to that member over the Peer
@@ -437,6 +440,10 @@ pub(crate) struct AppState {
     /// keeps it fresh is that member's own Nudges. Empty on every router with no
     /// identity, there being no member to hold a list of.
     merged: merging::MemberLists,
+
+    /// And what holds two drops onto that list apart, which is the transaction
+    /// a mint off a held merge no longer has — see [`ranking`].
+    minting: ranking::Minting,
 
     /// What this device is called by every record written through this state:
     /// the Device Id, which is the suffix on every Rank a start mints — see
@@ -1330,6 +1337,10 @@ fn standing(
         // lists arrive as the Nudge streams to them are taken up, and the loop
         // below is what listens for that — see [`merging`].
         merged: merging::MemberLists::none(),
+
+        // And nothing being minted against it, which is what a start is there
+        // too: this is a lock rather than a record — see [`ranking::Minting`].
+        minting: ranking::Minting::new(),
 
         // And the key the gate below stands on, so that the one press that
         // re-issues it goes through the very handle every request is checked

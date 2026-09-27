@@ -23,11 +23,11 @@ use crate::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, FileDeleted, FileDeleting,
-    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
-    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress,
-    LinkedDevice, Locked, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank,
-    OnboardingView, PendingJoin, PrefillView, ProcessChoice, ProcessPicked, ProfileChoice,
+    DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow, FileDeleted,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion, NewConversation, NewJoin,
+    NewRank, OnboardingView, PendingJoin, PrefillView, ProcessChoice, ProcessPicked, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
     PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
     RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
@@ -107,6 +107,10 @@ fn the_viewers_types_are_written_from_these() {
 
     // And where they have just dragged one row of that sidebar to, which is the
     // one thing they say about the list itself rather than about anything on it.
+    // Two shapes, because a drag is said twice: the drop, named by device and id
+    // at both ends, and the rank that comes of it, which is what the device
+    // owning the row is told — see `crate::DroppedRow`.
+    DroppedRow::export_all(&config).unwrap();
     NewRank::export_all(&config).unwrap();
 
     // And the other: whether what has been put away is drawn among them, which

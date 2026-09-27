@@ -322,6 +322,20 @@ impl Streamed {
         )))))
     }
 
+    /// A body this device is sending of its own accord: bytes it has in hand
+    /// rather than a browser's stream.
+    ///
+    /// The one call in this tree that puts something *to* a member without a
+    /// browser behind it — a rank written to the device that owns a row, see
+    /// [`crate::ranking`] — and it is a couple of dozen bytes. So it is held
+    /// rather than streamed, which the type below is built for anyway: a stream
+    /// of one chunk is read by whichever attempt gets far enough to ask.
+    pub(crate) fn saying(body: Vec<u8>) -> Streamed {
+        Streamed::Bytes(Arc::new(TheOneStream(Mutex::new(Box::pin(
+            tokio_stream::iter([Ok(Bytes::from(body))]),
+        )))))
+    }
+
     /// The body for one attempt at one address.
     ///
     /// Every attempt gets a handle on the one stream rather than a copy of it,

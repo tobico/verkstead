@@ -2094,104 +2094,62 @@ pub async fn conversations(
         .collect())
 }
 
-/// Put one Conversation where the human just dropped it: a new **Rank** on that
-/// row and on nothing else.
+/// Write one Conversation's **Rank**: the key the device that merges the lists
+/// minted for it, put on that row and on nothing else.
 ///
-/// `below` is the row it now sits directly under, as the sidebar was drawn when
-/// they let go, and `None` is the top of the list. What is minted is a key
-/// strictly between that row's rank and the rank of whatever is next below it —
-/// see [`super::ranks`] — so the whole of a drag is one string on one row. That
-/// is what lets a drag on a list merged from several devices be written to the
-/// device that owns the row and to nobody else.
+/// **The sentence is *this row's rank is now this*** rather than *this row,
+/// under that one*, and that is the whole of what changed when the sidebar
+/// became the cluster's. A neighbour on a merged list may be a row this database
+/// has never heard of — ids are numbered per device, so the `7` a hub means is
+/// not the `7` found here — and the one thing that crosses a device boundary
+/// intact is the key itself. So the hub reads both neighbours off the merged
+/// list it holds, mints between them, and hands the row's owner the answer. See
+/// `server::ranking`, which is the one place a key is minted for a row that
+/// already has one, and [`super::ranks`], which is the arithmetic.
 ///
-/// **The row it moves is left out of the search for the row under the gap.** It
-/// may be sitting in that gap already — a card put back roughly where it came
-/// from — and a row ranked between its neighbour and itself would have moved
-/// nowhere at all.
+/// **The suffix on it is the owner's**, which is what makes the rank that
+/// arrives here this device's own to keep: the hub mints with the Device Id of
+/// the row that moved, whoever its neighbours belong to. Nothing here checks it
+/// — a rank is an opaque string to everything but the arithmetic, and a device
+/// sending a key of some other shape would be one this device is not in a
+/// cluster with.
 ///
-/// **A neighbour that has gone since the list was drawn is not a refusal.** A
+/// **An id naming no Conversation writes nothing, and is not a refusal.** A
 /// viewer sends the list it drew and a Conversation can be closed and swept from
-/// under it, the way an id in the order this replaces could name a row that was
-/// no longer there. There is nothing left to rank against, so the list stays as
-/// the rest of it says and the call is taken. An id naming no Conversation at
-/// all goes the same way: the `UPDATE` finds nothing and writes nothing.
+/// under it, so the `UPDATE` finding nothing is the ordinary end of a drag that
+/// was overtaken rather than something to report.
 ///
-/// **The rank this writes carries `device`**, which on every call there is today
-/// is the device serving it — a device ranks its own Conversations, so the moved
-/// row comes back with its own device's suffix whoever its neighbours belong to.
-///
-/// **`below` is an id, and an id is this database's own.** Conversations are
-/// numbered per device, so the row a hub means by `7` is not the row the device
-/// it relays to would find under that number — which is why every call in the
-/// viewer's client is addressed through a device. So this is the shape a drag on
-/// one device's own list takes, and it is not the shape a drag across devices can
-/// take: the stage that merges the lists has to tell the owning device the rank
-/// itself, computed by the hub from the merged neighbours, rather than a
-/// neighbour it cannot name. What the id buys is the paragraph below — both
-/// neighbours read inside the transaction the rank is written in.
-///
-/// Read and written in one transaction, for [`started`]'s reason: two rows
-/// dropped into the same gap a moment apart would otherwise read the same pair
-/// of neighbours and mint the same key, and they would carry the same suffix.
-pub async fn rank_conversation(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    below: Option<i64>,
-    device: &str,
-) -> Result<()> {
-    let mut tx = super::writing(pool, "ranking a Conversation").await?;
-
-    // The rank of the row it was dropped under, where a row was named at all.
-    let above: Option<String> = match below {
-        None => None,
-        Some(neighbour) => {
-            let rank: Option<String> = sqlx::query_scalar(
-                "SELECT rank FROM conversations WHERE id = ? AND rank IS NOT NULL",
-            )
-            .bind(neighbour)
-            .fetch_optional(&mut *tx)
-            .await
-            .with_context(|| format!("reading the rank of Conversation {neighbour}"))?;
-
-            // Gone, or from a database nothing has ranked yet. Either way there
-            // is nothing to rank against — see above.
-            let Some(rank) = rank else {
-                return Ok(());
-            };
-
-            Some(rank)
-        }
-    };
-
-    // And the rank under the gap: the lowest rank above the neighbour's, the
-    // moved row itself left out. `COALESCE` is what makes the two cases one
-    // query — every rank sorts above the empty string, so a top of the list
-    // asks for the first rank there is.
-    let under: Option<String> = sqlx::query_scalar(
-        "SELECT rank FROM conversations
-         WHERE rank IS NOT NULL AND id <> ? AND rank > COALESCE(?, '')
-         ORDER BY rank LIMIT 1",
-    )
-    .bind(conversation_id)
-    .bind(above.as_deref())
-    .fetch_optional(&mut *tx)
-    .await
-    .context("reading the rank under where a Conversation was dropped")?;
-
-    let rank = super::ranks::between(above.as_deref(), under.as_deref(), device)?;
-
+/// One statement rather than a transaction, there being nothing to read: what
+/// used to be read here — the two neighbours, inside the write, so that two
+/// drops into one gap could not mint one key — is read on the hub now and held
+/// apart there. See `server::ranking`, where what that costs is set out.
+pub async fn rank_conversation(pool: &SqlitePool, conversation_id: i64, rank: &str) -> Result<()> {
     sqlx::query("UPDATE conversations SET rank = ? WHERE id = ?")
-        .bind(&rank)
+        .bind(rank)
         .bind(conversation_id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("ranking Conversation {conversation_id}"))?;
-
-    tx.commit()
+        .execute(pool)
         .await
         .with_context(|| format!("ranking Conversation {conversation_id}"))?;
 
     Ok(())
+}
+
+/// Every Conversation's **Rank**, by the id this database numbered it.
+///
+/// This device's half of the table a mint is made against — see
+/// `server::ranking`. Every row rather than the sidebar's, the archived and the
+/// closed alike: what a mint needs beyond the neighbour named is the rank *under
+/// the gap*, and a row the switch is hiding still sits in the order. A key
+/// minted over a list with the hidden rows left out could land on one of them.
+///
+/// Rows from a database the rewrite has not reached carry no rank and are left
+/// out, there being nothing to order them by. No served answer holds one: a
+/// serve ranks every Conversation before it answers anything.
+pub async fn conversation_ranks(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as("SELECT id, rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank")
+        .fetch_all(pool)
+        .await
+        .context("reading where every Conversation sits")
 }
 
 /// How much work is on one Repo, counted by whether it is over.

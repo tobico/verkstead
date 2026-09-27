@@ -234,19 +234,43 @@ by device — and what keeps a key minted between two neighbours between them on
 the suffixes are on. What it does not buy is room *between* two rows at one key:
 those two sort apart, but every rank at that key names a device and the row being
 moved carries its own, so nothing sorts between them and minting is refused.
-Only a merged list reaches it, and stage 06 settles what a drag into that gap
-does.
+Only a merged list reaches it, and it is the first rows of two devices rather than
+a rare case — see *the gap is opened first* below.
 **A drag writes one row.** The viewer says which Conversation moved and which row
-it now sits under — nothing at all being the top of the list — and the server
-mints the key between that row's rank and the rank under the gap. So the
-arithmetic exists once, in one language, the viewer never learns what a key looks
-like, and a drag on a list merged from several devices is a write to the device
-that owns the row and to nobody else. A neighbour that has gone since the list was
-drawn is not a refusal: there is nothing left to rank against, so the order stays
-as the rest of the list says.
+it now sits under — nothing at all being the top of the list, and each of the two
+named by **Device Id** and id, a bare id naming a row on no particular machine —
+and the device the browser opened mints the key between that row's rank and the
+rank under the gap, out of the merged list it holds. So the arithmetic exists
+once, in one language, the viewer never learns what a key looks like, and a drag
+on a list merged from several devices is a write to the device that owns the row
+and to nobody else. A neighbour that has gone since the list was drawn is not a
+refusal: there is nothing left to rank against, so the order stays as the rest of
+the list says.
 **The rank a row comes back with is its own device's**, whoever its neighbours
 belong to: a device ranks its own Conversations, and a hub that computes a key for
-somebody else's hands it to that device to write.
+somebody else's hands it to that device to write. What it hands over is the *rank*
+rather than a neighbour — *this row, under that one* cannot cross a device
+boundary, the neighbour being a row the far end may never have heard of — and the
+hub tells itself the same way for its own rows, so there is one way a rank is
+written.
+**And into the one gap there is not, the gap is opened first.** Two devices each
+ranking above their own top mint the same key, so their first rows are two rows at
+one key, sitting at the top of the list where cards are dropped most. A card
+dropped between them lands where it was dropped all the same: the hub re-ranks the
+*lower* of the pair through its own device — a key between the pair's shared one
+and whatever is under that row — and then mints the dropped row into the gap that
+opened. Two devices are written to in that one case and one in every other, and it
+does not recur at that spot, the pair no longer sharing a key. Where the lower
+row's own device cannot be reached the gap cannot be opened, so the drag is
+refused and the sidebar says which device it was.
+**Two drops into one gap are held apart on the hub**, a mint off a held merge
+having no transaction around it. What that lock does not reach is a Conversation
+*started* on a member while the hub is minting for that member: it is a second key
+computed over there off the same top row and carrying the same suffix, so the two
+rows can land at one rank. They are still drawn in a stated order, and a later drag
+between them is refused the way any pair at one key is until one of them is
+re-ranked. It is the price of serving the merge from memory rather than a round
+trip per row.
 _Avoid_: position, index, place, sort order, priority
 
 **Worktree**:

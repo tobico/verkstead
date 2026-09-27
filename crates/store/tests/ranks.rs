@@ -13,9 +13,15 @@
 //! which is what the suffix is for.
 //!
 //! And the sidebar's own order is the rank, so what the placement tests used to
-//! ask is asked here: the order the human made comes back to them, a reorder
-//! names one row rather than the list, and a neighbour that has gone since the
-//! list was drawn is passed over rather than refused.
+//! ask is asked here: the order the human made comes back to them, and it comes
+//! back after a restart, a rank being a column rather than a memory.
+//!
+//! **What a drag *is* is asked on the server**, which is where the key is minted
+//! now: the list a drop lands on is merged from the whole cluster, so the two
+//! neighbours may belong to two machines and only the device the browser opened
+//! has both in hand. See the server's `ranking` module and its
+//! `tests/merging.rs`. What is left here is what this database does with the
+//! answer it is handed.
 //!
 //! The places themselves go once they have become ranks, which is the rest of
 //! that rewrite: a database from before comes out of it with the table taken
@@ -31,8 +37,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    archive_conversation, close_conversation, conversations, open_database, rank_conversation,
-    rank_the_conversations, register_repo, start_conversation,
+    archive_conversation, close_conversation, conversation_ranks, conversations, open_database,
+    rank_conversation, rank_the_conversations, register_repo, start_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -435,93 +441,50 @@ async fn rank(pool: &SqlitePool, id: i64) -> String {
         .unwrap()
 }
 
-/// The whole of what a drag says: this Conversation now sits under that one.
-async fn dropped(pool: &SqlitePool, id: i64, below: Option<i64>) {
-    rank_conversation(pool, id, below, THIS_DEVICE)
-        .await
-        .unwrap();
+/// A rank written the way the device that merges the lists writes one: a key
+/// minted between two neighbours, handed to the device that owns the row.
+///
+/// The mint itself lives on the hub now — see the server's `ranking` module,
+/// where the drag is tested end to end against two devices. What is asked here
+/// is what this database does with the answer.
+async fn ranked(pool: &SqlitePool, id: i64, above: Option<&str>, below: Option<&str>) -> String {
+    let rank = verkstead_store::ranks::between(above, below, THIS_DEVICE).unwrap();
+
+    rank_conversation(pool, id, &rank).await.unwrap();
+
+    rank
 }
 
-/// A card let go at the top of the list, which is the one drop with no row to
-/// name: the key minted is outside the range rather than between two of them.
+/// What a drag comes to here: the row comes back where the rank put it, ordered
+/// by the one column and nothing else.
 #[tokio::test]
-async fn a_row_dropped_at_the_top_is_ranked_above_everything() {
+async fn a_row_carries_the_rank_it_was_written() {
     let (_dir, pool) = fresh_pool().await;
     let (_repo, first, second, third) = three(&pool).await;
 
-    dropped(&pool, first, None).await;
-
-    assert_eq!(sidebar(&pool).await, vec![first, third, second]);
-    assert!(
-        rank(&pool, first).await < rank(&pool, third).await,
-        "the row that moved is above the one that was the top",
-    );
-}
-
-/// And one let go at the foot, which is the other end of the same thing: the row
-/// it lands under is the last one there is, so there is nothing under the gap.
-#[tokio::test]
-async fn a_row_dropped_at_the_foot_is_ranked_below_everything() {
-    let (_dir, pool) = fresh_pool().await;
-    let (_repo, first, second, third) = three(&pool).await;
-
-    dropped(&pool, third, Some(first)).await;
-
-    assert_eq!(sidebar(&pool).await, vec![second, first, third]);
-    assert!(
-        rank(&pool, third).await > rank(&pool, first).await,
-        "the row that moved is under the one that was the foot",
-    );
-}
-
-/// The drop everything else is a special case of: the key minted sorts between
-/// its two neighbours **with the suffixes on**, which is what the separator is
-/// there to buy — the arithmetic never sees a device, and the strings the
-/// database sorts always carry one.
-#[tokio::test]
-async fn a_row_dropped_between_two_sorts_between_them() {
-    let (_dir, pool) = fresh_pool().await;
-    let (_repo, first, second, third) = three(&pool).await;
-
-    // The top row, dropped into the gap the other two leave.
-    dropped(&pool, third, Some(second)).await;
+    // The top row, into the gap the other two leave — which is the key the hub
+    // would have minted off the merged list.
+    let between = ranked(
+        &pool,
+        third,
+        Some(&rank(&pool, second).await),
+        Some(&rank(&pool, first).await),
+    )
+    .await;
 
     assert_eq!(sidebar(&pool).await, vec![second, third, first]);
-
-    let moved = rank(&pool, third).await;
-
-    assert!(
-        rank(&pool, second).await < moved && moved < rank(&pool, first).await,
-        "the minted rank sorts between its neighbours, suffixes and all: {moved}",
-    );
-    assert!(
-        moved.ends_with(THIS_DEVICE),
-        "and the row that moved carries its own device: {moved}",
-    );
+    assert_eq!(rank(&pool, third).await, between);
 }
 
-/// A viewer sends the list it drew, and a row can be gone by the time it lands —
-/// the way an id in the whole-list order it replaces was passed over rather than
-/// refusing the drag it was only partly about. There is nothing left to rank
-/// against, so the list stays as the rest of it says.
-#[tokio::test]
-async fn a_neighbour_that_has_gone_is_not_a_refusal() {
-    let (_dir, pool) = fresh_pool().await;
-    let (_repo, first, second, third) = three(&pool).await;
-
-    dropped(&pool, third, Some(9_999)).await;
-
-    assert_eq!(sidebar(&pool).await, vec![third, second, first]);
-}
-
-/// And an id naming no Conversation at all is the same non-event from the other
-/// side: nothing is written, and nothing is refused.
+/// An id naming no Conversation is a non-event rather than a refusal: a viewer
+/// sends the list it drew, and a row can be closed and swept from under it
+/// before the rank lands.
 #[tokio::test]
 async fn ranking_a_conversation_that_is_not_there_changes_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let (_repo, first, second, third) = three(&pool).await;
 
-    dropped(&pool, 9_999, Some(second)).await;
+    ranked(&pool, 9_999, Some(&rank(&pool, second).await), None).await;
 
     assert_eq!(sidebar(&pool).await, vec![third, second, first]);
 }
@@ -537,7 +500,7 @@ async fn the_order_a_drag_made_survives_a_restart() {
 
     let (_repo, first, second, third) = three(&pool).await;
 
-    dropped(&pool, second, Some(first)).await;
+    ranked(&pool, second, Some(&rank(&pool, first).await), None).await;
 
     let after = vec![third, first, second];
     assert_eq!(sidebar(&pool).await, after);
@@ -553,19 +516,6 @@ async fn the_order_a_drag_made_survives_a_restart() {
     );
 }
 
-/// A row dropped where it already is has to be a row that has not moved. It is
-/// its own neighbour's neighbour, and a key minted between a row and itself is
-/// one the arithmetic has nothing to compute.
-#[tokio::test]
-async fn a_row_dropped_where_it_already_sits_stays_there() {
-    let (_dir, pool) = fresh_pool().await;
-    let (_repo, first, second, third) = three(&pool).await;
-
-    dropped(&pool, second, Some(third)).await;
-
-    assert_eq!(sidebar(&pool).await, vec![third, second, first]);
-}
-
 /// And a Conversation started while the sidebar is open arrives at the top of
 /// whatever the human has dragged it into, rather than under it: every start
 /// ranks above everything, which is the rule that replaces *the unplaced float
@@ -575,9 +525,36 @@ async fn a_conversation_started_after_a_drag_lands_at_the_top() {
     let (_dir, pool) = fresh_pool().await;
     let (repo, first, second, third) = three(&pool).await;
 
-    dropped(&pool, third, Some(first)).await;
+    ranked(&pool, third, Some(&rank(&pool, first).await), None).await;
 
     let fourth = start(&pool, repo, "fourth").await;
 
     assert_eq!(sidebar(&pool).await, vec![fourth, second, first, third]);
+}
+
+/// What the hub mints against: every rank this database holds, in order — the
+/// archived among them, because a row the switch is hiding still sits in the
+/// order and a key minted over a list without it could land on it.
+#[tokio::test]
+async fn every_rank_is_answered_for_the_mint_the_archived_included() {
+    let (_dir, pool) = fresh_pool().await;
+    let (_repo, first, second, third) = three(&pool).await;
+
+    close_conversation(&pool, second).await.unwrap();
+    archive_conversation(&pool, second).await.unwrap();
+
+    assert_eq!(
+        sidebar(&pool).await,
+        vec![third, first],
+        "the archived row is off the sidebar",
+    );
+
+    let held = conversation_ranks(&pool).await.unwrap();
+
+    assert_eq!(
+        held.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![third, second, first],
+        "and on the table a rank is minted against, in rank order",
+    );
+    assert_eq!(held[0].1, rank(&pool, third).await);
 }

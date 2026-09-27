@@ -7,15 +7,15 @@
 //! nothing above means above everything and nothing below means below
 //! everything. Ordering by rank is what the sidebar's order comes to: a row is
 //! moved by writing one string on one row rather than by renumbering the whole
-//! list, which is what will let a drag on a merged list be written to the device
+//! list, which is what lets a drag on a merged list be written to the device
 //! that owns the row and nothing else.
 //!
 //! **And the order-by is this column**, so what a drag saves is one row: the
-//! viewer says which row it landed under, and the server reads that row's rank
-//! and the rank under the gap and mints between the two — see
-//! [`super::rank_conversation`], which is the one place a key is minted for a
-//! row that already has one, and [`super::conversations::conversations`], whose
-//! `ORDER BY` this is.
+//! viewer says which row it landed under, the device the browser opened reads
+//! that row's rank and the rank under the gap off the merged list it holds, and
+//! mints between the two — see `server::ranking`, which is the one place a key
+//! is minted for a row that already has one, and
+//! [`super::conversations::conversations`], whose `ORDER BY` this is.
 //!
 //! **Fractional indexing rather than a dense integer**, for the reason the ADR
 //! gives: a key between any two keys always exists, so a drag between two rows
@@ -100,10 +100,13 @@ const SMALLEST: &str = "A00000000000000000000000000";
 /// and the row that moved carries its own. There is nothing to hand back, so
 /// this refuses.
 ///
-/// **A merged list is where that will be met**, and settling what a drag into
-/// that one gap does is stage 06's — re-ranking one of the pair through its own
-/// device, or landing the row beside them rather than between them. Nothing on
-/// one device reaches it: this device's own keys are distinct, two starts a
+/// **A merged list is where it is met, and the hub opens the gap first.** The
+/// device the browser opened re-ranks the lower of the pair through its own
+/// device — a key between the pair's shared one and whatever is under that row —
+/// and then mints the dropped row into the gap that opened, which is two writes
+/// where every other drag is one. See `server::ranking`, where that is done, and
+/// [`at_one_key`], which is how it is recognised before this is asked. Nothing
+/// on one device reaches it: this device's own keys are distinct, two starts a
 /// moment apart never minting one because the read and the write are inside a
 /// single transaction.
 pub fn between(above: Option<&str>, below: Option<&str>, device: &str) -> Result<String> {
@@ -117,6 +120,18 @@ pub fn between(above: Option<&str>, below: Option<&str>, device: &str) -> Result
     })?;
 
     Ok(format!("{key}{SEPARATOR}{device}"))
+}
+
+/// Whether two ranks are the one key under two different devices, which is the
+/// one pair [`between`] has nothing to hand back for.
+///
+/// Asked before the mint rather than read off the refusal, because what follows
+/// is a course of action rather than a report: the hub re-ranks the lower of the
+/// pair to open a gap and then mints into it — see `server::ranking`. Two ranks
+/// that are equal outright are not this: that is one row named twice, and there
+/// is nothing to open.
+pub fn at_one_key(above: &str, below: &str) -> bool {
+    above != below && key_of(above) == key_of(below)
 }
 
 /// The key half of a rank: everything before the separator, or the whole of it
@@ -601,8 +616,8 @@ mod tests {
     /// And nothing sorts between two rows at one key, which the suffix makes
     /// sort apart without making room between them: said as a refusal rather
     /// than as a rank that would read differently on two devices. A merged list
-    /// is where it will be met — see [`between`], where what stage 06 has to
-    /// settle about it is.
+    /// is where it is met, and what the hub does about it is to open the gap
+    /// first — see [`at_one_key`], which is how it knows to.
     #[test]
     fn two_rows_at_one_key_have_nothing_between_them() {
         let mine = format!("a0{SEPARATOR}{THIS_DEVICE}");
@@ -614,6 +629,22 @@ mod tests {
             format!("{refused:#}").contains("two rows at one key"),
             "{refused:#}",
         );
+        assert!(
+            at_one_key(&mine, &theirs),
+            "and it is said before it is met"
+        );
+    }
+
+    /// And what that reading does *not* say: two ranks with room between them,
+    /// and one rank named twice — which is a row being ranked against itself
+    /// rather than a gap to open.
+    #[test]
+    fn two_ranks_with_room_between_them_are_not_one_key() {
+        let mine = format!("a0{SEPARATOR}{THIS_DEVICE}");
+        let lower = format!("a1{SEPARATOR}{ANOTHER_DEVICE}");
+
+        assert!(!at_one_key(&mine, &lower));
+        assert!(!at_one_key(&mine, &mine));
     }
 
     /// A rank the wrong way round is a refusal rather than a key somewhere else

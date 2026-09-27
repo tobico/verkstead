@@ -40,6 +40,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  DroppedRow,
   FileDeleted,
   FileListsView,
   FileMade,
@@ -53,7 +54,6 @@ import type {
   FolderListing,
   GrillingStarted,
   Merging,
-  NewRank,
   NoticeEvent,
   Nudge,
   PendingSteerView,
@@ -715,26 +715,31 @@ function sent(
   return JSON.parse(String(written[which]![1]?.body));
 }
 
-/// The path a move is saved to: one Conversation, and where the human just put
-/// it.
-const RANK = /^\/api\/ui\/conversations\/(\d+)\/rank$/;
+/// The path a move is saved to: the list itself, because the list is the
+/// cluster's and the row that moved is named in the body rather than in the
+/// path.
+const RANK = "/api/ui/conversations/rank";
 
 /// Every move the sidebar saved, in the order it saved them: which Conversation
 /// moved, and the row it said that one now sits under — `null` being the top of
 /// the list.
 ///
-/// Read off the path as well as the body, because *one row* is half of what a
-/// reorder is now: what goes out names the Conversation that moved and nothing
-/// else on the list.
+/// The ids alone, this file's sidebar being one device's: which device each row
+/// belongs to is `reaching.test.tsx`, where the list is merged from two.
 function ranked(
   fetching: ReturnType<typeof serving>,
 ): Array<{ id: number; below: number | null }> {
+  return dropped(fetching).map((drop) => ({
+    id: drop.row.id,
+    below: drop.below?.id ?? null,
+  }));
+}
+
+/// The same, whole: both rows as they were named, device and all.
+function dropped(fetching: ReturnType<typeof serving>): DroppedRow[] {
   return fetching.mock.calls
-    .filter(([asked, init]) => init?.method === "PUT" && RANK.test(String(asked)))
-    .map(([asked, init]) => ({
-      id: Number(RANK.exec(String(asked))![1]),
-      below: (JSON.parse(String(init?.body)) as NewRank).below,
-    }));
+    .filter(([asked, init]) => init?.method === "PUT" && String(asked) === RANK)
+    .map(([, init]) => JSON.parse(String(init?.body)) as DroppedRow);
 }
 
 /// How many times the page wrote to `path`, for the tests about *when* a save
@@ -1503,12 +1508,10 @@ describe("the order the human puts the sidebar in", () => {
           })),
         ),
       ),
-      ...[1, 2, 3].map((id) =>
-        whenever(
-          `/api/ui/conversations/${id}/rank`,
-          () => Promise.resolve(new Response(null, { status: 204 })),
-          "PUT",
-        ),
+      whenever(
+        RANK,
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "PUT",
       ),
       ...answers,
     );
@@ -1933,7 +1936,7 @@ describe("the order the human puts the sidebar in", () => {
   it("says so and puts the list back when the order will not save", async () => {
     three(
       whenever(
-        "/api/ui/conversations/3/rank",
+        RANK,
         json({ error: "the server is not taking orders" }, 503),
         "PUT",
       ),

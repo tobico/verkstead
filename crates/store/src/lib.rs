@@ -50,7 +50,14 @@ mod pending_steers;
 mod profiles;
 mod pull_requests;
 mod push;
-mod ranks;
+/// The arithmetic the sidebar's order is made of: a **Rank** strictly between
+/// two others.
+///
+/// Public because the mint is no longer this crate's. The device the browser
+/// opened mints between two rows of a list merged from the whole cluster, and
+/// hands the answer to whichever device owns the row that moved — see
+/// `server::ranking`. What is written down here is the key and nothing else.
+pub mod ranks;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -90,17 +97,17 @@ pub use conversations::{
     Investigated, Landed, Landing, Lifecycle, Process, Rebuilding, Resolving, Role, RowState,
     SetOnTimeline, Settling, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
     adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
-    conversation_branch, conversations, fill_target, follow_branch, follow_up_done, follow_up_over,
-    hold_pull_request, implement_again, investigation_over, last_batch_proposal, last_proposal,
-    load_conversation, note, open_set, opened_at, pick_direction, picked_direction, process,
-    rank_conversation, record_backlog, record_handoff, record_roadmap, recorded_conversations,
-    recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts, save_brief,
-    set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing, set_process,
-    set_review_pairing, set_state, set_target, settle_naming, skip_review, stacks_on,
-    stage_roadmap, start_adoption, start_conversation, start_grilling, start_implementing,
-    start_investigating, start_stage, start_tinkering, start_unnamed_conversation, state,
-    steer_conversation, switch_repo, take_up, target, timeline, unfinished_conversations, waiting,
-    work_on_repo,
+    conversation_branch, conversation_ranks, conversations, fill_target, follow_branch,
+    follow_up_done, follow_up_over, hold_pull_request, implement_again, investigation_over,
+    last_batch_proposal, last_proposal, load_conversation, note, open_set, opened_at,
+    pick_direction, picked_direction, process, rank_conversation, record_backlog, record_handoff,
+    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
+    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
+    set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
+    settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption, start_conversation,
+    start_grilling, start_implementing, start_investigating, start_stage, start_tinkering,
+    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, target, timeline,
+    unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};

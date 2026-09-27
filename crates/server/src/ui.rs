@@ -38,9 +38,9 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, DevicesView, FileDeleted, FileDeleting, FileListsView,
-    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    ConversationView, Creation, Cursor, DevicesView, DroppedRow, FileDeleted, FileDeleting,
+    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
+    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
     McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
     NewRank, PairingView, Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked,
@@ -122,10 +122,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(conversations).post(start_conversation),
         )
         // And where one row of that list has just been dropped, which is the
-        // whole of what letting go of a card says. Under the Conversation rather
-        // than under the list, because one row is the whole of what a drag moves:
-        // its **Rank** is the list's order, and the row it landed under is all
-        // the server needs to mint one (ADR-0020, *Ranks*).
+        // whole of what letting go of a card says. Under the list rather than
+        // under a Conversation, because the list is the cluster's: both the row
+        // that moved and the row it landed under are named by device *and* id,
+        // an id alone naming a row on no particular machine — see
+        // [`crate::ranking`], which mints the key between them.
+        .route("/api/ui/conversations/rank", put(rank_dropped_row))
+        // And the other half of that sentence, said to the device that owns the
+        // row: its new **Rank**, minted by whichever device merged the lists.
+        // Under the Conversation because it is one row's own field, and reached
+        // over the Relay for a member's row exactly as every other call is
+        // (ADR-0020, *Ranks*).
         .route("/api/ui/conversations/{id}/rank", put(rank_conversation))
         // And whether that list is drawing what has been archived, which is
         // about the sidebar in exactly the same way — the human's standing
@@ -1268,31 +1275,59 @@ async fn start_conversation(
     }
 }
 
-/// `PUT /api/ui/conversations/{id}/rank` — where the human just dropped this
-/// one.
+/// `PUT /api/ui/conversations/rank` — where the human just dropped one row of
+/// the merged sidebar.
 ///
-/// `below` is the row it now sits directly under, and nothing at all is the top
-/// of the list. The key between that row's rank and the rank under the gap is
+/// `row` is the Conversation that moved and `below` is the row it now sits
+/// directly under, each named by **device and id** because an id alone is not a
+/// row on a list merged from the whole cluster; nothing at all is the top of the
+/// list. The key between that neighbour's rank and the rank under the gap is
 /// minted here rather than in the browser, so the arithmetic exists once and in
-/// one language — see [`store::rank_conversation`], which does the reading and
-/// the writing in one transaction.
+/// one language — see [`crate::ranking`], which does the reading, the minting
+/// and the writing, and holds two drops apart while it does.
 ///
-/// Refused for nothing. A neighbour that has gone since the list was drawn
-/// leaves the order where the rest of the list puts it, and an id naming no
-/// Conversation writes nothing: a viewer sends what it drew, and by the time it
-/// lands a row may have been closed and swept. There is nothing to answer with
-/// beyond that it was taken, so it answers with nothing.
+/// **This device mints and the owner writes.** The rank carries the Device Id of
+/// the row that moved, whoever its neighbours belong to, and it is written
+/// through the route below — on a member over the Relay, and on this device by
+/// the very function that route's handler calls.
 ///
-/// The rank carries this device's id, which is the device that owns the row —
-/// and `below` names that row's neighbour by an id this database numbered, so
-/// this is a drag on one device's own list. A drag across a merged list cannot
-/// be said this way: the neighbour may be a row this device has never heard of,
-/// and the id that named it on the hub names something else here. What the stage
-/// that merges the lists sends the owning device is the rank itself — see
-/// [`store::rank_conversation`], where that is set out.
+/// Refused for a member that could not be told, and for nothing else. A
+/// neighbour that has gone since the list was drawn leaves the order where the
+/// rest of the list puts it, and an id naming no Conversation writes nothing: a
+/// viewer sends what it drew, and by the time it lands a row may have been closed
+/// and swept.
 ///
 /// The Nudge is what carries it to the other devices: a row that moved is the
 /// one thing every open sidebar has to read again.
+async fn rank_dropped_row(
+    State(state): State<AppState>,
+    Json(moved): Json<DroppedRow>,
+) -> HttpResponse {
+    match crate::ranking::dropped(&state, moved).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(refusal) => {
+            tracing::warn!("a drag was not saved: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
+/// `PUT /api/ui/conversations/{id}/rank` — this row's **Rank** is now this.
+///
+/// The sentence the device that merged the lists says to the device that owns a
+/// row it has just minted a key for: the key itself, which means the same thing
+/// on every machine in the cluster where *this row, under that one* would not —
+/// ids are numbered per device, so a neighbour named to the wrong machine names
+/// somebody else's work.
+///
+/// **Reached two ways and written one way.** A member's row comes here over the
+/// Relay, at `/api/ui/members/{device}/conversations/{id}/rank`, and one of this
+/// device's own comes through [`crate::ranking::stated`] — which is the function
+/// this handler calls, so the local case is not a second way of writing a rank.
+///
+/// An id naming no Conversation writes nothing and is not a refusal: a viewer
+/// sends the list it drew, and by the time a rank lands a row may have been
+/// closed and swept.
 async fn rank_conversation(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1302,11 +1337,8 @@ async fn rank_conversation(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    match store::rank_conversation(&state.pool, id, ranked.below, &state.device).await {
-        Ok(()) => {
-            state.nudges.announce(Nudge::Conversations);
-            StatusCode::NO_CONTENT.into_response()
-        }
+    match crate::ranking::stated(&state, id, &ranked.rank).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "ranking a Conversation failed");
             unavailable("the order could not be saved")

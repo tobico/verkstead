@@ -33,6 +33,7 @@ import type {
   ConversationEntry,
   ConversationView,
   DevicesView,
+  DroppedRow,
   QuestionSetEvent,
   RepoEntry,
   Submitted,
@@ -422,6 +423,17 @@ describe("the merged sidebar", () => {
     );
   }
 
+  /// Where a move on the merged list is saved: the list's own path on the
+  /// device the browser opened, whoever owns the row that moved.
+  const RANK = "/api/ui/conversations/rank";
+
+  /// Every move the sidebar saved, whole — both rows as they were named.
+  function dropped(fetching: ReturnType<typeof serving>): DroppedRow[] {
+    return fetching.mock.calls
+      .filter(([asked, init]) => init?.method === "PUT" && String(asked) === RANK)
+      .map(([, init]) => JSON.parse(String(init?.body)) as DroppedRow);
+  }
+
   /// Every row the sidebar drew, in the order it drew them.
   async function rows(container: ParentNode): Promise<HTMLElement[]> {
     await drawn(container, `.${sidebar.conversationRow}`);
@@ -535,6 +547,46 @@ describe("the merged sidebar", () => {
     );
     expect(
       askedFor(fetching, `/api/ui/conversations/${SHARED.id}/archive`),
+    ).toBe(0);
+  });
+
+  /// And a card moved on the merged list says both rows by device and id, to
+  /// **this** device rather than to the one that owns the row.
+  ///
+  /// Which is the whole of the cross-device drag from this end: an id alone
+  /// names a row on no particular machine, and the device the browser opened is
+  /// the one holding every rank in the cluster — so it is the one that can mint
+  /// a key between two neighbours belonging to two machines. Writing it to the
+  /// owner is its business rather than the page's, and nothing here knows what a
+  /// rank looks like. See `ranking.rs`.
+  it("says a moved row and its neighbour by device, to this device", async () => {
+    const fetching = theCluster(
+      whenever(
+        RANK,
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "PUT",
+      ),
+    );
+    const { container } = mount("/");
+
+    const drawnRows = await rows(container);
+
+    // The member's row, one step down — which puts it under this device's own
+    // row of the very same number.
+    fireEvent.keyDown(
+      drawnRows[0]!.querySelector<HTMLElement>(`.${sidebar.open}`)!,
+      { key: "ArrowDown" },
+    );
+
+    await waitFor(() => expect(dropped(fetching)).toHaveLength(1));
+
+    expect(dropped(fetching)[0]).toEqual({
+      row: { device: MEMBER, id: SHARED.id },
+      below: { device: null, id: SIDEBAR[0]!.id },
+    });
+    expect(
+      askedFor(fetching, at("/conversations/rank")),
+      "the mint is the opened device's, not the member's",
     ).toBe(0);
   });
 

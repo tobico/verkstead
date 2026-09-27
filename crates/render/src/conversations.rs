@@ -3167,22 +3167,59 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
-/// Where the human has just put one Conversation: the row it now sits directly
-/// under, or nothing at all for the top of the list.
+/// One row of the merged sidebar, as a caller names one: the device it lives on
+/// and the id that device numbered it.
 ///
-/// One row rather than the whole list, because one row is what moved. The
-/// server mints the key between that neighbour and whatever is next below it,
-/// so the arithmetic exists once, in one language, and the viewer never learns
-/// what a rank looks like (ADR-0020, *Ranks*). It is also what lets a drag on a
-/// list merged from several devices be written to the device that owns the row
-/// and to nobody else.
+/// **An id alone is not a row on a merged list.** Every Verkstead issues a
+/// Conversation 1, so the pair is the whole of what names one (ADR-0020, *The
+/// opened device relays*) — the same pair the viewer keys every row by. `null`
+/// is the device the browser opened, which is the one device a page never has an
+/// id for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct MergedRow {
+    pub device: Option<String>,
+    pub id: i64,
+}
+
+/// Where the human has just dropped one row of the merged sidebar: which row
+/// moved, and the row it now sits directly under — nothing at all being the top
+/// of the list.
+///
+/// One row rather than the whole list, because one row is what moved. The device
+/// the browser opened mints the key between that neighbour and whatever is next
+/// below it, out of the merged list it holds, so the arithmetic exists once, in
+/// one language, and the viewer never learns what a rank looks like (ADR-0020,
+/// *Ranks*).
+///
+/// **Both rows are named by device and id**, because either of them may belong
+/// to any device in the cluster: the hub has every rank in hand — its own in its
+/// store and each member's in the list it holds — so it mints the key itself and
+/// never asks a member what its neighbours are. What the owning device is told
+/// afterwards is the rank, which is [`NewRank`].
 ///
 /// A neighbour that has gone since the list was drawn is not a refusal — see
-/// `store::rank_conversation`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `server::ranking`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DroppedRow {
+    pub row: MergedRow,
+    pub below: Option<MergedRow>,
+}
+
+/// And what the device that owns a moved row is told: its new **Rank**, minted
+/// by the device that merges the lists.
+///
+/// **The other sentence a drag is said in.** *This row, under that one* cannot
+/// cross a device boundary — the neighbour may be a row the far end has never
+/// heard of — so what travels is the key itself, which means the same thing on
+/// every machine in the cluster. Reached on a member through the Relay, and used
+/// by the hub on itself for its own rows too, so there is one way a rank is
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct NewRank {
-    pub below: Option<i64>,
+    pub rank: String,
 }
 
 /// What became of starting one.

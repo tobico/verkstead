@@ -47,6 +47,7 @@ import type {
   DevicesView,
   DirectoryListing,
   DiscoveredDevice,
+  DroppedRow,
   FileDeleted,
   FileDeleting,
   FileListsView,
@@ -61,7 +62,7 @@ import type {
   FileWritten,
   FolderListing,
   GrillingStarted,
-  NewRank,
+  MergedRow,
   OnboardingView,
   PrefillView,
   Process,
@@ -407,29 +408,31 @@ export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");
 }
 
-/// Say where one Conversation now sits, which is what letting go of a dragged
-/// card does — and what an arrow key on one does.
+/// Say where one row of the merged sidebar now sits, which is what letting go of
+/// a dragged card does — and what an arrow key on one does.
 ///
-/// `below` is the row it landed directly under, or `null` for the top of the
-/// list. One row rather than the whole order: the row is what moved, and the
-/// key that says where it sits is minted on the server, so nothing here knows
-/// what a rank looks like.
+/// `row` is the Conversation that moved and `below` is the row it landed
+/// directly under, `null` being the top of the list. One row rather than the
+/// whole order: the row is what moved, and the key that says where it sits is
+/// minted on the server, so nothing here knows what a rank looks like.
 ///
-/// **Addressed to the device that owns the row.** The sidebar is merged from the
-/// whole cluster, so a rank written here would be a rank written on whatever
-/// this device happens to number the same — and the ids `below` names are that
-/// device's own, which is why the row above is the nearest one of its own rows
-/// rather than whatever the card landed on (see `Conversations.tsx`).
+/// **Both rows are named by device and id, and the call is to this device.** The
+/// sidebar is merged from the whole cluster, so an id alone names a row on no
+/// particular machine — and the device the browser opened is the one that holds
+/// every rank, its own and each member's, so it is the one that can mint between
+/// two neighbours that belong to two machines. What it does with the answer is
+/// its own business: the owning device is told, over the link where that is
+/// somebody else (see `ranking.rs`).
 ///
-/// Answered with nothing at all — there is no outcome to read. A neighbour that
-/// has gone since this list was drawn is not a refusal on the other side, which
-/// is what a list drawn a moment ago is allowed to carry.
+/// Answered with nothing at all where it was taken. A neighbour that has gone
+/// since this list was drawn is not a refusal, which is what a list drawn a
+/// moment ago is allowed to carry; a member that could not be told is, and what
+/// comes back says which device it was.
 export async function rankConversation(
-  device: Device,
-  id: number,
-  below: number | null,
+  row: MergedRow,
+  below: MergedRow | null,
 ): Promise<void> {
-  const at = on(device, `/api/ui/conversations/${id}/rank`);
+  const at = "/api/ui/conversations/rank";
 
   await refused(
     at,
@@ -439,7 +442,7 @@ export async function rankConversation(
         accept: "application/json",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ below } satisfies NewRank),
+      body: JSON.stringify({ row, below } satisfies DroppedRow),
     }),
   );
 }

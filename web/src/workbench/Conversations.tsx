@@ -52,9 +52,12 @@
 //! One row rather than the whole list, because one row is what moved: the order
 //! is a **Rank** per Conversation, and the key that says where this one sits is
 //! minted on the server, between the ranks of the two rows it landed between.
-//! Nothing here knows what a rank looks like, and a drag on a list merged from
-//! several devices is a write to the device that owns the row and to nobody
-//! else.
+//! Nothing here knows what a rank looks like. Both rows are named by device and
+//! id all the same — a bare id names a row on no particular machine — and the
+//! device the browser opened is the one that mints, holding every rank in the
+//! cluster; what it does with the answer is write it to the device that owns the
+//! row and to nobody else. See `ranking.rs`, and the error line under the list,
+//! which is where a member that could not be told is named.
 //!
 //! A card also answers a right-click with what there is to do about the
 //! Conversation it stands for — the same rows the status button at the head of
@@ -107,7 +110,7 @@ import {
   rankConversation,
   showingArchived,
 } from "../api/client";
-import type { ConversationEntry } from "../api/types";
+import type { ConversationEntry, MergedRow } from "../api/types";
 import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -239,8 +242,8 @@ export function Conversations(props: {
   };
 
   const place = useMutation(() => ({
-    mutationFn: (put: { device: Device; id: number; below: number | null }) =>
-      rankConversation(put.device, put.id, put.below),
+    mutationFn: (put: { row: MergedRow; below: MergedRow | null }) =>
+      rankConversation(put.row, put.below),
     onSuccess: () => {
       // Read the list back, which is what lets go of the local order below.
       // The other devices hear the same news as a Nudge.
@@ -484,9 +487,8 @@ export function Conversations(props: {
     const order = dragged();
     if (order) {
       place.mutate({
-        device: at.device,
-        id: at.id,
-        below: sitsUnder(order, shown(), at.row, at.device),
+        row: { device: at.device, id: at.id },
+        below: sitsUnder(order, shown(), at.row),
       });
     }
   };
@@ -554,9 +556,8 @@ export function Conversations(props: {
     const put = moved(order, key, to);
     setDragged(put);
     place.mutate({
-      device: whose(entry),
-      id: entry.id,
-      below: sitsUnder(put, shown(), key, whose(entry)),
+      row: { device: whose(entry), id: entry.id },
+      below: sitsUnder(put, shown(), key),
     });
   };
 
@@ -928,39 +929,31 @@ function moved(order: string[], row: string, to: number): string[] {
   return put;
 }
 
-/// The row a moved one now sits directly under *on its own device's list*, or
-/// `null` where it has landed at the top of it — which is the whole of what the
-/// device that owns the row is told about a move.
+/// The row a moved one now sits directly under, or `null` where it has landed
+/// at the top of the list — which is the whole of what the server is told about
+/// a move.
 ///
 /// The row above rather than the row below, because the top of the list is the
 /// one end with nothing to name: a card dropped at the foot still has a row
 /// above it.
 ///
-/// **And the nearest one of that device's own, rather than the row the card
-/// actually landed on.** A move is said as *this row, under that one*, by an id
-/// the owning device's own database numbered — so a neighbour that belongs to
-/// another machine is nothing that device could be told about, its Conversation
-/// 4 being somebody else's. What it can be told is where the row sits among its
-/// own, which is what the merged order already says: the ranks are one order,
-/// so a row ranked under its own device's nearest neighbour above comes back in
-/// the place the human dropped it or as near to it as one rank can say.
-///
-/// Landing a row exactly between two rows of two different devices is the
-/// remaining half, and it is a rank computed here from the merged neighbours
-/// and handed to the owning device rather than a neighbour named to it — the
-/// next task of this stage.
+/// **Whichever device it belongs to**, named by that device and its id: the list
+/// is one list, so the row a card landed under is the row a card landed under.
+/// The device the browser opened holds every rank in the cluster — its own and
+/// each member's — so it mints the key between the two merged neighbours itself
+/// and hands the answer to whichever device owns the row that moved (see
+/// `ranking.rs`). Nothing here has to find a neighbour the owner would recognise.
 function sitsUnder(
   order: string[],
   rows: ConversationEntry[],
   row: string,
-  device: Device,
-): number | null {
+): MergedRow | null {
   const at = order.indexOf(row);
 
   for (let above = at - 1; above >= 0; above -= 1) {
     const entry = rows.find((one) => keyFor(one) === order[above]);
 
-    if (entry !== undefined && whose(entry) === device) return entry.id;
+    if (entry !== undefined) return { device: whose(entry), id: entry.id };
   }
 
   return null;

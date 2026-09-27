@@ -58,6 +58,11 @@ const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// And the device whose work is merged into them.
 const B: &str = "0011223344556677889900aabbccddee";
 
+/// And the same device under an id that sorts *after* A's, which is the one
+/// thing a Device Id decides: two rows at one key are ordered by it, so this is
+/// the member whose row sits under A's rather than over it — see [`pair`].
+const LATER: &str = "ff11223344556677889900aabbccddee";
+
 /// What B is written down as on A: the name and the OS word A holds against B's
 /// row, which is what a merged row of B's says.
 ///
@@ -314,6 +319,64 @@ impl Verkstead {
         rows(&member.workbench, &through(self.device.id(), SIDEBAR)).await
     }
 
+    /// Where the human has just dropped one row of the merged list, which is the
+    /// press a browser makes on letting go of a card: the row that moved and the
+    /// row it landed under, each named by device and id — `None` being this
+    /// device's own, and no row at all being the top of the list.
+    ///
+    /// Answered with whatever the endpoint said, refusals included: a drag that
+    /// could not be saved is a sentence the sidebar draws under the list.
+    async fn drags(
+        &self,
+        row: (Option<&str>, i64),
+        below: Option<(Option<&str>, i64)>,
+    ) -> (StatusCode, String) {
+        let saying = serde_json::json!({
+            "row": named(row),
+            "below": below.map(named),
+        });
+
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("{SIDEBAR}/rank"))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_vec(&saying).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The same, asserted to have been taken.
+    async fn drops(&self, row: (Option<&str>, i64), below: Option<(Option<&str>, i64)>) {
+        let (status, said) = self.drags(row, below).await;
+
+        assert_eq!(
+            status,
+            StatusCode::NO_CONTENT,
+            "the drag was refused: {said}"
+        );
+    }
+
+    /// The rank one row of the merged list carries, by the branch it is on.
+    async fn rank_on(&self, branch: &str) -> String {
+        self.sidebar()
+            .await
+            .into_iter()
+            .find(|row| row.branch == branch)
+            .unwrap_or_else(|| panic!("{branch} is on the merged list"))
+            .rank
+    }
+
     /// The merged list once it says what the test is waiting for, or a panic
     /// saying what it did say instead.
     ///
@@ -378,8 +441,20 @@ fn this_machine() -> (String, String) {
 /// Both ways because a link is both ways: A dials B pinned on B's fingerprint,
 /// and B admits A because A's certificate is one it holds a membership for.
 async fn linked(reaching: impl Fn(&Verkstead) -> String) -> (Verkstead, Verkstead) {
+    pair(B, reaching).await
+}
+
+/// The same, with the member under a Device Id of the caller's choosing.
+///
+/// Which matters for exactly one question: **which of two rows at one key is the
+/// lower**. A rank is the key and then the device, so the pair's order is the
+/// two ids' order — and [`B`] sorts above [`A`], so the lower of the pair at the
+/// top of this suite's lists is always A's own row. [`LATER`] is a member the
+/// other way round, which is what puts a member's row under A's and so puts the
+/// gap-opening write over the link.
+async fn pair(member: &str, reaching: impl Fn(&Verkstead) -> String) -> (Verkstead, Verkstead) {
     let a = Verkstead::answering(A).await;
-    let b = Verkstead::answering(B).await;
+    let b = Verkstead::answering(member).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![reaching(&b)])
         .await;
@@ -523,6 +598,11 @@ async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
     assert!(status.is_success(), "POST {path}: {status} {said}");
 
     said
+}
+
+/// One row of the merged list as a drag names one: the device and the id.
+fn named(row: (Option<&str>, i64)) -> serde_json::Value {
+    serde_json::json!({ "device": row.0, "id": row.1 })
 }
 
 /// Which row is which, for an assertion to name one by: the branch it is on.
@@ -906,4 +986,304 @@ async fn archiving_a_members_conversation_takes_its_row_off_the_merged_list() {
     let back = a.sidebar_saying(|rows| rows.len() == 2).await;
 
     assert_eq!(branches(&back), ["still-going", "finished-with"]);
+}
+
+/// A member's row dragged between two of this device's holds, and it holds on
+/// both devices: the rank is minted here off the merged list and written to the
+/// device that owns the row, which reads its own list back afterwards saying the
+/// same thing.
+#[tokio::test]
+async fn a_members_row_dragged_between_two_of_this_devices_holds_on_both() {
+    let (a, b) = linked_up().await;
+    let _here = a.holding();
+    let _there = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    a.starts(here, "a-one").await;
+    a.starts(here, "a-two").await;
+    a.starts(here, "a-three").await;
+    let moved = b.starts(there, "b-one").await;
+
+    let before = a.sidebar_saying(|rows| rows.len() == 4).await;
+
+    assert_eq!(branches(&before), ["a-three", "a-two", "b-one", "a-one"]);
+
+    let untouched: Vec<String> = ["a-one", "a-two", "a-three"]
+        .into_iter()
+        .map(|branch| {
+            before
+                .iter()
+                .find(|row| row.branch == branch)
+                .unwrap()
+                .rank
+                .clone()
+        })
+        .collect();
+
+    // B's row, dropped under the top row of A's — which is between two of A's
+    // own, and so a neighbour on either side that B has never heard of.
+    a.drops((Some(B), moved), Some((None, id_on(&before, "a-three"))))
+        .await;
+
+    let after = a
+        .sidebar_saying(|rows| branches(rows) == ["a-three", "b-one", "a-two", "a-one"])
+        .await;
+
+    // The rank that moved is B's own, whoever its neighbours belong to — which
+    // is what makes it B's to keep.
+    let minted = after
+        .iter()
+        .find(|row| row.branch == "b-one")
+        .unwrap()
+        .rank
+        .clone();
+
+    assert!(
+        minted.ends_with(&format!("-{B}")),
+        "the row that moved carries its own device: {minted}",
+    );
+
+    // And nothing of A's was written: the only device told anything is the one
+    // that owns the row.
+    for (branch, rank) in ["a-one", "a-two", "a-three"].into_iter().zip(untouched) {
+        assert_eq!(
+            after.iter().find(|row| row.branch == branch).unwrap().rank,
+            rank,
+            "{branch} was not rewritten",
+        );
+    }
+
+    // And B says the same order, which is the whole claim: B's own store holds
+    // the rank now, and B merges A's rows around it for itself.
+    let over_there = b
+        .sidebar_saying(|rows| branches(rows) == ["a-three", "b-one", "a-two", "a-one"])
+        .await;
+
+    assert_eq!(
+        over_there
+            .iter()
+            .find(|row| row.branch == "b-one")
+            .unwrap()
+            .rank,
+        minted,
+        "the rank B is holding is the one A minted for it",
+    );
+}
+
+/// And one of this device's dragged between two of a member's, which is the same
+/// sentence the other way round: the neighbours are B's and the write is A's own
+/// store.
+#[tokio::test]
+async fn one_of_this_devices_rows_dragged_between_two_of_a_members_holds_on_both() {
+    let (a, b) = linked_up().await;
+    let _here = a.holding();
+    let _there = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    b.starts(there, "b-one").await;
+    let under = b.starts(there, "b-two").await;
+    let moved = a.starts(here, "a-one").await;
+
+    let before = a.sidebar_saying(|rows| rows.len() == 3).await;
+
+    assert_eq!(branches(&before), ["b-two", "b-one", "a-one"]);
+
+    let theirs: Vec<String> = before
+        .iter()
+        .filter(|row| row.branch.starts_with("b-"))
+        .map(|row| row.rank.clone())
+        .collect();
+
+    a.drops((None, moved), Some((Some(B), under))).await;
+
+    let after = a
+        .sidebar_saying(|rows| branches(rows) == ["b-two", "a-one", "b-one"])
+        .await;
+
+    assert!(
+        after
+            .iter()
+            .find(|row| row.branch == "a-one")
+            .unwrap()
+            .rank
+            .ends_with(&format!("-{A}")),
+        "A's row carries A's own device",
+    );
+    assert_eq!(
+        after
+            .iter()
+            .filter(|row| row.branch.starts_with("b-"))
+            .map(|row| row.rank.clone())
+            .collect::<Vec<_>>(),
+        theirs,
+        "and nothing of B's was written",
+    );
+
+    let over_there = b
+        .sidebar_saying(|rows| branches(rows) == ["b-two", "a-one", "b-one"])
+        .await;
+
+    assert_eq!(whose(&over_there), [None, Some(A), None]);
+}
+
+/// The two rows the devices minted at one key — their first Conversations — with
+/// a card dropped between them: no rank sits there, so the lower of the pair is
+/// re-ranked first and the card lands where it was dropped. And a second drop
+/// into that same gap needs no gap opened, the pair no longer sharing a key.
+#[tokio::test]
+async fn a_row_dropped_between_two_rows_at_one_key_lands_there() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    a.starts(here, "a-one").await;
+    let moved = a.starts(here, "a-two").await;
+    let top = b.starts(there, "b-one").await;
+
+    let before = a.sidebar_saying(|rows| rows.len() == 3).await;
+
+    assert_eq!(branches(&before), ["a-two", "b-one", "a-one"]);
+
+    // The two first rows are the one key under two devices, which is what the
+    // whole exception is about.
+    let pair = (a.rank_on("b-one").await, a.rank_on("a-one").await);
+
+    assert_eq!(
+        pair.0.split_once('-').unwrap().0,
+        pair.1.split_once('-').unwrap().0,
+        "two devices ranking above their own top minted the same key: {pair:?}",
+    );
+
+    a.drops((None, moved), Some((Some(B), top))).await;
+
+    let after = a
+        .sidebar_saying(|rows| branches(rows) == ["b-one", "a-two", "a-one"])
+        .await;
+
+    assert_eq!(
+        branches(&after),
+        ["b-one", "a-two", "a-one"],
+        "the card is where it was dropped",
+    );
+
+    // The lower of the pair moved down to make the room, and it is A's own row,
+    // so A wrote twice and B not at all.
+    let opened = a.rank_on("a-one").await;
+
+    assert_ne!(opened, pair.1, "the lower of the pair was re-ranked");
+    assert_eq!(a.rank_on("b-one").await, pair.0, "and the upper was not");
+    assert!(
+        opened.ends_with(&format!("-{A}")),
+        "re-ranked through its own device: {opened}",
+    );
+
+    // And the second drop into that same gap: nothing is re-ranked, because the
+    // pair is a pair no longer.
+    let again = a.starts(here, "a-three").await;
+
+    a.sidebar_saying(|rows| rows.len() == 4).await;
+    a.drops((None, again), Some((Some(B), top))).await;
+
+    let settled = a
+        .sidebar_saying(|rows| branches(rows) == ["b-one", "a-three", "a-two", "a-one"])
+        .await;
+
+    assert_eq!(branches(&settled), ["b-one", "a-three", "a-two", "a-one"]);
+    assert_eq!(
+        a.rank_on("a-one").await,
+        opened,
+        "the second drop opened no gap: nothing under it moved",
+    );
+    assert_eq!(a.rank_on("b-one").await, pair.0);
+}
+
+/// And where the lower of the pair is a member's row and that member is not
+/// answering, the gap cannot be opened — so the drag is refused, the sidebar is
+/// told which device it was, and nothing at all is written.
+#[tokio::test]
+async fn a_gap_that_needs_a_member_that_is_not_there_is_refused_by_name() {
+    let b = Verkstead::answering(LATER).await;
+    let link = Link::to(b.address).await;
+
+    let a = Verkstead::answering(A).await;
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![link.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let _holding = a.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    let first = a.starts(here, "a-one").await;
+    let moved = a.starts(here, "a-two").await;
+    b.starts(there, "b-one").await;
+
+    let before = a.sidebar_saying(|rows| rows.len() == 3).await;
+
+    // This member's id sorts after A's, so of the two rows at one key its is the
+    // lower — which is the row that would have to be re-ranked.
+    assert_eq!(branches(&before), ["a-two", "a-one", "b-one"]);
+
+    let held = (a.rank_on("a-one").await, a.rank_on("a-two").await);
+
+    link.off();
+
+    let (status, said) = a.drags((None, moved), Some((None, first))).await;
+
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "a gap that cannot be opened is a drag that cannot be saved: {said}",
+    );
+    assert!(
+        said.contains(B_MACHINE),
+        "and the sidebar is told which device it was: {said}",
+    );
+
+    assert_eq!(
+        (a.rank_on("a-one").await, a.rank_on("a-two").await),
+        held,
+        "and nothing was written",
+    );
+    assert_eq!(branches(&a.sidebar().await), ["a-two", "a-one", "b-one"]);
+}
+
+/// A neighbour that has gone since the list was drawn is not a refusal: there is
+/// nothing left to rank against, so the order stays as the rest of the list says
+/// and the press is taken.
+#[tokio::test]
+async fn a_neighbour_that_has_gone_is_still_taken() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    let moved = a.starts(here, "a-one").await;
+    b.starts(there, "b-one").await;
+
+    let before = a.sidebar_saying(|rows| rows.len() == 2).await;
+
+    assert_eq!(branches(&before), ["b-one", "a-one"]);
+
+    a.drops((None, moved), Some((Some(B), 9_999))).await;
+
+    assert_eq!(branches(&a.sidebar().await), ["b-one", "a-one"]);
+}
+
+/// Which row on the merged list is which, by the branch it is on.
+fn id_on(rows: &[ConversationEntry], branch: &str) -> i64 {
+    rows.iter()
+        .find(|row| row.branch == branch)
+        .unwrap_or_else(|| panic!("{branch} is on the merged list"))
+        .id
 }

@@ -152,6 +152,33 @@ impl MemberLists {
         self.held().insert(device.to_owned(), held);
     }
 
+    /// Put a rank this device has just written to `device` onto the row it was
+    /// written for, in the list held of that member.
+    ///
+    /// **Because the held list is a moment behind and a drag is not.** A rank
+    /// written over the Relay reaches this device again on that member's next
+    /// Nudge, which is a round trip away — and two drops into one gap are the
+    /// ordinary case, so a second mint read off the list as it stood before the
+    /// first would land on the very key it just wrote. What this device knows and
+    /// the held list does not is the rank it has itself just handed over, so it
+    /// says so here. See [`crate::ranking`], which writes it.
+    ///
+    /// Nothing at all where that member is not held or the row is not in what it
+    /// last said: a list that has moved on is one the next read settles.
+    pub(crate) fn ranked(&self, device: &str, id: i64, rank: &str) {
+        let mut held = self.held();
+
+        let Some(held) = held.get_mut(device) else {
+            return;
+        };
+
+        for row in &mut held.rows {
+            if row.id == id {
+                row.rank = rank.to_owned();
+            }
+        }
+    }
+
     /// What is held of each of `members`, and nothing of anybody else.
     ///
     /// **The membership is what prunes this.** A device that has been unlinked
@@ -614,6 +641,70 @@ pub(crate) async fn merged(
     rows.sort_by(|one, other| one.rank.cmp(&other.rank));
 
     rows
+}
+
+/// One row of the merged list as a mint sees it: which device owns it, which id
+/// that device numbered it, and where it sits.
+///
+/// The three fields a **Rank** is computed from and written by, and nothing
+/// else: [`crate::ranking`] needs to find two neighbours and name the owner of
+/// one row, and a branch name or a state would be a list to keep fresh for no
+/// reader.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Ranked {
+    /// `None` for this device's own rows, which is how the viewer names it too
+    /// — see [`verkstead_render::MergedRow`].
+    pub(crate) device: Option<String>,
+    pub(crate) id: i64,
+    pub(crate) rank: String,
+}
+
+/// Every rank on the merged list, in order: this device's own out of its store,
+/// and each member's out of the list held of it.
+///
+/// **What a cross-device drag is minted against.** The hub has every rank in
+/// hand, so it never asks a member what its neighbours are — see
+/// [`crate::ranking`].
+///
+/// **This device's own rows unfiltered**, archived and closed alike, where a
+/// member's are whatever the switch had it answer: what a mint needs beyond the
+/// neighbour named is the rank *under the gap*, and a row the switch is hiding
+/// still sits in the order. That is as tight as a held list can be made — a
+/// member's archived rows are not here to be ranked around while the switch is
+/// off, which is the cost of the merge being served from memory.
+///
+/// Sorted, because a mint reads the rank under a gap off it and every caller
+/// wants the same order the sidebar is in.
+pub(crate) async fn ranks(state: &AppState) -> anyhow::Result<Vec<Ranked>> {
+    let mut rows: Vec<Ranked> = store::conversation_ranks(&state.pool)
+        .await?
+        .into_iter()
+        .map(|(id, rank)| Ranked {
+            device: None,
+            id,
+            rank,
+        })
+        .collect();
+
+    if let Some(devices) = state.devices.as_ref() {
+        let members = devices.membership().rows().await?;
+
+        for (member, Held { rows: held, .. }) in state.merged.held_of(&members) {
+            rows.extend(
+                held.into_iter()
+                    .filter(|row| !row.rank.is_empty())
+                    .map(|row| Ranked {
+                        device: Some(member.device.clone()),
+                        id: row.id,
+                        rank: row.rank,
+                    }),
+            );
+        }
+    }
+
+    rows.sort_by(|one, other| one.rank.cmp(&other.rank));
+
+    Ok(rows)
 }
 
 /// Whether anything is archived anywhere in the cluster: `own`, or any member's
