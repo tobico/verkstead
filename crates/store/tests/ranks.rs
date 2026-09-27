@@ -81,7 +81,7 @@ async fn by_rank(pool: &SqlitePool) -> Vec<i64> {
 /// And the sidebar as the human sees it, which is that same order with what has
 /// been put away left out.
 async fn sidebar(pool: &SqlitePool) -> Vec<i64> {
-    conversations(pool)
+    conversations(pool, false)
         .await
         .unwrap()
         .into_iter()

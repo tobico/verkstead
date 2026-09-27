@@ -200,6 +200,12 @@ pub async fn archived(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// draw it under. So the endpoint that answers where the switch stands answers
 /// this beside it, and the page reads one fact rather than two.
 ///
+/// **This machine's own alone**, which is half the answer in a cluster: the list
+/// the switch governs is the merged one, so a device with nothing of its own
+/// still draws the switch while a member has something behind it. What folds
+/// this with each member's answer to it is `crate::merging` — see
+/// [`super::conversations`], whose position is handed in for the same reason.
+///
 /// One row is the whole of the answer, which is what the `LIMIT` is for: how
 /// many there are is nothing anybody asks.
 pub async fn any_archived(pool: &SqlitePool) -> Result<bool> {
@@ -213,6 +219,12 @@ pub async fn any_archived(pool: &SqlitePool) -> Result<bool> {
 }
 
 /// Whether the sidebar is drawing what has been archived.
+///
+/// **One switch for the whole merged list**, and it is the one the device the
+/// browser opened holds: what a member is asked with is this position, and
+/// nothing a hub does writes the row on a member — that row is the member's own
+/// standing choice for the browser in front of *it*, and a hub writing it would
+/// be one device changing what another one sees.
 pub async fn showing_archived(pool: &SqlitePool) -> Result<bool> {
     let row: Option<(i64,)> = sqlx::query_as("SELECT only_row FROM shown_archives")
         .fetch_optional(pool)

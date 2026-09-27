@@ -21,6 +21,6 @@ Roadmap stage: [06: The merged list](docs/roadmaps/cluster-mode/06-the-merged-li
 
 - [x] 01: Member lists in memory, merged by rank — [details](01-member-lists-merged-by-rank.md)
 - [x] 02: The row, the header and the spoken row — [details](02-the-row-the-header-and-the-spoken-row.md)
-- [ ] 03: The hub's archived switch governs — [details](03-the-archived-switch-governs.md)
+- [x] 03: The hub's archived switch governs — [details](03-the-archived-switch-governs.md)
 - [ ] 04: The cross-device drag — [details](04-the-cross-device-drag.md)
 - [ ] 05: The push relay — [details](05-the-push-relay.md)

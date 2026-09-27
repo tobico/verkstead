@@ -43,24 +43,49 @@
 //! no row carries one where there is no cluster, a lone device having nothing
 //! to say about whose work it is drawing. Which of the two it is is the
 //! membership's to decide and so the server's, rather than the page's.
+//!
+//! **And *Show archived conversations* is one switch for the whole of it.** It
+//! is the human's standing choice about a list rather than a setting on a
+//! machine, and the list they are looking at is the cluster's — so the position
+//! this device's switch stands at is what every member is read with, on the
+//! query [`crate::ui::conversations`] takes, and a member answers accordingly
+//! **without its own row being touched**: that row is its own standing choice
+//! for the browser in front of *it*, and a hub writing it would be one device
+//! changing what another one sees. Which also means every held list was fetched
+//! under the position the switch was in at the time, so the moment it moves they
+//! are all read again — see [`afresh`].
+//!
+//! **Whether there is anything archived at all folds across the cluster**, and
+//! it is the one thing a filtered list cannot say for itself. So each member's
+//! answer to it is held beside the list held of that member and refreshed with
+//! it, which is what lets a device with nothing archived of its own draw the
+//! switch while a member has something behind it — see [`anything_archived`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio_stream::StreamExt;
-use verkstead_render::{ConversationEntry, RowDevice};
+use verkstead_render::{ConversationEntry, RowDevice, ShowingArchived};
 use verkstead_schema::Nudge;
 use verkstead_store::Member;
 
-use crate::AppState;
-use crate::device::Unrelayed;
+use crate::device::{Devices, Unrelayed};
 use crate::relaying::{Call, Streamed};
+use crate::{AppState, store};
 
 /// The path a member's own sidebar list is read at, which is the path this
 /// device serves its own at: the namespace is one router mounted twice, so the
 /// list a member answers here and the list this device answers a browser are
 /// the same endpoint seen from the two ends.
 const LIST: &str = "/api/ui/conversations";
+
+/// And the path the other half of a member's answer is read at: whether it has
+/// anything archived, which is the one thing its list cannot say.
+///
+/// The endpoint the switch's own pane reads, asked of a member here — see
+/// [`crate::ui::showing_archived`]. Its position is that member's own business
+/// and is thrown away; what is held is the `any` beside it.
+const ARCHIVES: &str = "/api/ui/conversations/archived";
 
 /// The most a member's list may be before it is dropped rather than held:
 /// **four megabytes**.
@@ -90,7 +115,26 @@ const MOST_A_LIST_IS: usize = 4 * 1024 * 1024;
 /// one, because the reading writes too — it is where a departed member's rows
 /// are dropped, see [`MemberLists::held_of`].
 #[derive(Debug, Clone, Default)]
-pub(crate) struct MemberLists(Arc<Mutex<HashMap<String, Vec<ConversationEntry>>>>);
+pub(crate) struct MemberLists(Arc<Mutex<HashMap<String, Held>>>);
+
+/// What is held of one member: the rows it last answered, and whether it said it
+/// had anything archived.
+///
+/// **The two are one answer**, read a moment apart over the one link and kept or
+/// dropped together: the rows are the merged list's and the flag is the switch's,
+/// and a member that answered one of the questions and not the other has said
+/// nothing this device can act on — see [`read_member`].
+#[derive(Debug, Clone, Default)]
+struct Held {
+    /// That member's own sidebar, drawn at the position this device's switch
+    /// stood at when it was asked.
+    rows: Vec<ConversationEntry>,
+
+    /// And whether it has anything archived at all, whatever the switch was.
+    /// Which is not a thing the rows above can say: the list is filtered, so an
+    /// empty one is the same empty list either way.
+    any_archived: bool,
+}
 
 impl MemberLists {
     /// Nothing held of anybody, which is every start and every router stood up
@@ -104,8 +148,8 @@ impl MemberLists {
     /// Wholesale rather than merged, because a list is the answer to one
     /// question: a Conversation closed and swept on that machine is a row that
     /// has to go, and a merge would keep it for ever.
-    fn keep(&self, device: &str, rows: Vec<ConversationEntry>) {
-        self.held().insert(device.to_owned(), rows);
+    fn keep(&self, device: &str, held: Held) {
+        self.held().insert(device.to_owned(), held);
     }
 
     /// What is held of each of `members`, and nothing of anybody else.
@@ -115,7 +159,7 @@ impl MemberLists {
     /// the reading that has the membership in hand, the merge being made
     /// against it. So the lists a departed device left are dropped here rather
     /// than held until the server restarts.
-    fn held_of(&self, members: &[Member]) -> Vec<(Member, Vec<ConversationEntry>)> {
+    fn held_of(&self, members: &[Member]) -> Vec<(Member, Held)> {
         let mut held = self.held();
 
         held.retain(|device, _| members.iter().any(|member| &member.device == device));
@@ -124,17 +168,32 @@ impl MemberLists {
             .iter()
             .filter_map(|member| {
                 held.get(&member.device)
-                    .map(|rows| (member.clone(), rows.clone()))
+                    .map(|held| (member.clone(), held.clone()))
             })
             .collect()
     }
 
-    /// The table itself, for the two callers above.
+    /// Whether any of `members` last said it had something archived.
     ///
-    /// Never held across an await, there being none to hold it across: both of
-    /// them take it, do a little arithmetic over a handful of rows, and give it
-    /// back.
-    fn held(&self) -> MutexGuard<'_, HashMap<String, Vec<ConversationEntry>>> {
+    /// The membership again, and for the second half of [`held_of`]'s reason: a
+    /// device that has been unlinked is not one whose archives say anything about
+    /// this cluster's switch. Nothing is pruned here — the merge above is what
+    /// does that, and it runs every time a sidebar is drawn.
+    fn anything_archived_of(&self, members: &[Member]) -> bool {
+        let held = self.held();
+
+        members.iter().any(|member| {
+            held.get(&member.device)
+                .is_some_and(|held| held.any_archived)
+        })
+    }
+
+    /// The table itself, for the three callers above.
+    ///
+    /// Never held across an await, there being none to hold it across: each of
+    /// them takes it, does a little arithmetic over a handful of rows, and gives
+    /// it back.
+    fn held(&self) -> MutexGuard<'_, HashMap<String, Held>> {
         self.0.lock().expect("nothing panics holding this")
     }
 }
@@ -155,6 +214,31 @@ pub(crate) fn refreshing(state: &AppState) {
     let state = state.clone();
 
     tokio::spawn(async move { held(state).await });
+}
+
+/// Read every member's list again, because this device's own switch has moved.
+///
+/// **The held lists were fetched under the position it was in**, each of them
+/// asked with it — see [`read_member`] — so the moment the human moves the switch
+/// the whole of what this device holds is a merged list filtered by a choice they
+/// have just changed. A Nudge is no use here: the sidebar's own re-read draws out
+/// of these lists, and nothing about the position is stored on them to re-filter.
+///
+/// Spawned rather than waited on, for [`refreshing`]'s reason: it is a dial per
+/// member, some of which are laptops that are shut, and the press that moved the
+/// switch is answered before any of them has been made. What the browser sees as
+/// each one lands is the Nudge the press sends about the list.
+///
+/// Nothing at all where there is no cluster: a lone device holds nobody's list,
+/// and its own rows are read out of the store at the moment the sidebar is drawn.
+pub(crate) fn afresh(state: &AppState) {
+    if state.devices.is_none() {
+        return;
+    }
+
+    let state = state.clone();
+
+    tokio::spawn(async move { read_every_member(&state).await });
 }
 
 /// The loop itself: every member read once, and then whatever a Nudge says to
@@ -250,26 +334,103 @@ async fn read_every_member(state: &AppState) {
 
 /// Read one member's list and hold what it said.
 ///
+/// **Asked with the position this device's switch stands at**, which is the whole
+/// of *the hub's archived switch governs*: what comes back is that member's rows
+/// filtered by the human's standing choice about the list they are looking at,
+/// and nothing here writes that member's own row — see [`crate::ui::conversations`].
+///
+/// **And whether it has anything archived is read beside the list**, that being
+/// the one thing a filtered list cannot say for itself: the switch is drawn while
+/// anything anywhere in the cluster is behind it, so the answer is held here
+/// rather than dialled for when somebody asks — see [`anything_archived`].
+///
 /// **A read that could not be made leaves the held list alone.** A member that
 /// is switched off, a link that is down, a machine that has moved: its rows
 /// stay on the merged list from the last time it answered, drawn dimmed by the
 /// flag the row carries. A member never reached holds nothing and so draws
-/// nothing, which is the same rule seen from its other end.
+/// nothing, which is the same rule seen from its other end. Both halves go that
+/// way together — a member that answered its list and then stopped answering has
+/// said nothing whole, and half an answer is worse than the last one.
 async fn read_member(state: &AppState, device: &str) {
     let Some(devices) = state.devices.as_ref() else {
         return;
     };
 
-    let answered = match devices.relay(device, asking()).await {
+    // Where the human put the switch on *this* device, which is what the member
+    // is asked with. Read per member rather than once for the round, because a
+    // Nudge refreshes one of them and the position is a row away.
+    let showing = match store::showing_archived(&state.pool).await {
+        Ok(showing) => showing,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                device,
+                "whether the archived Conversations are shown could not be read, so that \
+                 member's list was not read and what it last said stands",
+            );
+            return;
+        }
+    };
+
+    let Some(said) = read_of(devices, device, asking(showing), "Conversations").await else {
+        return;
+    };
+
+    let rows = match serde_json::from_slice::<Vec<ConversationEntry>>(&said) {
+        Ok(rows) => rows,
+
+        // A member running a Verkstead this one cannot read the list of.
+        // What it last said stands, which is the same stance a read that
+        // never landed takes: this device has no better account of that
+        // machine's work than the one it already holds.
+        Err(why) => {
+            tracing::warn!(
+                device,
+                "a member answered a list of Conversations this device cannot read, so what it \
+                 last said stands: {why}",
+            );
+            return;
+        }
+    };
+
+    let Some(said) = read_of(devices, device, asking_about_archives(), "archives").await else {
+        return;
+    };
+
+    let any_archived = match serde_json::from_slice::<ShowingArchived>(&said) {
+        // The member's own position is its own: what is held is whether it has
+        // anything behind it.
+        Ok(archives) => archives.any,
+
+        Err(why) => {
+            tracing::warn!(
+                device,
+                "a member answered its archives in a way this device cannot read, so what it last \
+                 said stands: {why}",
+            );
+            return;
+        }
+    };
+
+    state.merged.keep(device, Held { rows, any_archived });
+}
+
+/// One of those two reads, up to the bound: what `device` said, or nothing and a
+/// line in the log saying why what it last said stands.
+///
+/// `about` is what the call was for, in a word, so that the two reads are told
+/// apart in the log without being written out twice.
+async fn read_of(devices: &Devices, device: &str, asking: Call, about: &str) -> Option<Vec<u8>> {
+    let answered = match devices.relay(device, asking).await {
         Ok(answered) => answered,
         Err(why) => {
             tracing::debug!(
                 device,
-                "a member's Conversations could not be read for the merged list, so what it last \
-                 said stands: {}",
+                "a member's {about} could not be read for the merged list, so what it last said \
+                 stands: {}",
                 unrelayed(&why),
             );
-            return;
+            return None;
         }
     };
 
@@ -277,30 +438,20 @@ async fn read_member(state: &AppState, device: &str) {
         tracing::warn!(
             device,
             status = %answered.status(),
-            "a member refused the read of its Conversations, so what it last said stands",
+            "a member refused the read of its {about}, so what it last said stands",
         );
-        return;
+        return None;
     }
 
     match bounded(answered).await {
-        Ok(body) => match serde_json::from_slice::<Vec<ConversationEntry>>(&body) {
-            Ok(rows) => state.merged.keep(device, rows),
-
-            // A member running a Verkstead this one cannot read the list of.
-            // What it last said stands, which is the same stance a read that
-            // never landed takes: this device has no better account of that
-            // machine's work than the one it already holds.
-            Err(why) => tracing::warn!(
+        Ok(body) => Some(body),
+        Err(why) => {
+            tracing::warn!(
                 device,
-                "a member answered a list of Conversations this device cannot read, so what it \
-                 last said stands: {why}",
-            ),
-        },
-
-        Err(why) => tracing::warn!(
-            device,
-            "a member's Conversations could not be read to the end: {why:#}",
-        ),
+                "a member's {about} could not be read to the end: {why:#}",
+            );
+            None
+        }
     }
 }
 
@@ -322,14 +473,31 @@ fn unrelayed(why: &Unrelayed) -> String {
     }
 }
 
-/// The call the list is read with: the member's own `/api/ui/conversations`.
+/// The call the list is read with: the member's own `/api/ui/conversations`,
+/// asked at the position this device's switch stands at.
 ///
 /// The same [`Call`] a browser's relayed request is put over, because it is the
 /// same dial. What is different is who asked: nobody. This is one of the two
 /// calls in the namespace this device makes of its own accord — the other being
 /// the Nudge stream it holds — so it carries no header of a browser's and no
 /// body at all.
-fn asking() -> Call {
+///
+/// **The position rides on the query rather than in a body**, this being a read:
+/// `?archived=true` is the hub saying where its own switch stands, and a member
+/// that is asked nothing answers at its own — see [`crate::ui::conversations`].
+fn asking(showing_archived: bool) -> Call {
+    call(format!("{LIST}?archived={showing_archived}"))
+}
+
+/// And the call the other half is read with: that member's own archives, whose
+/// position is thrown away and whose `any` is held.
+fn asking_about_archives() -> Call {
+    call(ARCHIVES.to_owned())
+}
+
+/// What the two have in common: a `GET` of `onwards` asking for JSON, on nobody's
+/// behalf.
+fn call(onwards: String) -> Call {
     let mut headers = axum::http::HeaderMap::new();
 
     headers.insert(
@@ -339,7 +507,7 @@ fn asking() -> Call {
 
     Call {
         method: reqwest::Method::GET,
-        onwards: LIST.to_owned(),
+        onwards,
         headers,
         body: Streamed::Nothing,
     }
@@ -425,7 +593,7 @@ pub(crate) async fn merged(
         })
         .collect();
 
-    for (member, held) in state.merged.held_of(&members) {
+    for (member, Held { rows: held, .. }) in state.merged.held_of(&members) {
         // The name, the OS word and whether the last dial got through are this
         // device's own readings of that machine rather than anything the list
         // said: a member answers its own Conversations and has no idea who is
@@ -446,6 +614,51 @@ pub(crate) async fn merged(
     rows.sort_by(|one, other| one.rank.cmp(&other.rank));
 
     rows
+}
+
+/// Whether anything is archived anywhere in the cluster: `own`, or any member's
+/// answer to the same question.
+///
+/// **What decides whether the switch is worth drawing**, and in a cluster it is
+/// *anything archived anywhere*: the list the switch governs is the merged one,
+/// so a device with nothing of its own still draws it while a member has
+/// something behind it — and a hub that drew none would be a hub with no way of
+/// bringing a member's archived rows back.
+///
+/// Out of what is held rather than dialled for: each member's answer is read
+/// beside its list and kept with it, so this is the membership and a lock. Which
+/// matters because the switch's own pane is read on every load of every page that
+/// draws a sidebar.
+///
+/// `own` is [`store::any_archived`] read a moment ago by the caller — this
+/// device's own half of the fold, which is the whole answer where there is no
+/// cluster.
+pub(crate) async fn anything_archived(state: &AppState, own: bool) -> bool {
+    if own {
+        return true;
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return own;
+    };
+
+    let members = match devices.membership().rows().await {
+        Ok(members) => members,
+
+        // As the merge does with the same failure: what this device is sure of is
+        // its own answer, and a switch drawn on less than the truth is better
+        // than a reading that failed.
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                "the devices this one is linked to could not be read, so whether anything is \
+                 archived is this device's own answer alone",
+            );
+            return own;
+        }
+    };
+
+    state.merged.anything_archived_of(&members)
 }
 
 #[cfg(test)]

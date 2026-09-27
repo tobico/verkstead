@@ -97,7 +97,11 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
 /// nobody watching, and what it has to say it says on the Timeline or in the
 /// log.
 async fn sweep(state: &AppState) {
-    let conversations = match store::conversations(&state.pool).await {
+    // Archived Conversations and all, whatever the switch stands at: a stall is
+    // a fact about work in a driven state, and what has been archived is Closed
+    // — passed over below for its state rather than left off the list for having
+    // been put away.
+    let conversations = match store::conversations(&state.pool, true).await {
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "listing the Conversations to look for a stall among failed");

@@ -31,12 +31,14 @@
 //! to have it* — the same distinction the Member Gate's own refusal is a
 //! `Forbidden` rather than a `Not Found` for.
 //!
-//! **And one endpoint in it answers a member differently from a browser**: the
+//! **And three endpoints in it answer a member differently from a browser**: the
 //! Nudge stream, which carries this device's own news over the link and that plus
-//! every member's to a browser — see [`crate::nudge::nudges`], and
-//! [`OverTheLink`], which is how it knows. The one exception to *one router of
-//! routes*, and a filter over what goes down a stream rather than a second route
-//! to keep.
+//! every member's to a browser — see [`crate::nudge::nudges`] — and the
+//! Conversations list and the archived switch beside it, which answer this
+//! device's own rows and its own archives where a browser is answered the
+//! cluster's merged (see [`crate::ui::conversations`]). Each of them is a filter
+//! over what an answer holds rather than a second route to keep, which is what
+//! keeps *one router of routes* true; [`OverTheLink`] is how they know.
 //!
 //! **And the agents' half is not here.** A session's Conversation-scoped API
 //! answers the loopback and the named pipe, which is all a session ever dials,
@@ -71,9 +73,10 @@ pub(crate) const KEPT_TO_ITSELF: [&str; 3] = ["/api/ui/remote", "/api/ui/devices
 /// What says a request arrived over the Peer Listener rather than from this
 /// device's own browser, put beside every request this router answers.
 ///
-/// **One endpoint reads it, and reads it to answer less**: the Nudge stream,
-/// which carries this device's own news over the link and that plus every
-/// member's to a browser — see [`crate::nudge::nudges`], which is where the
+/// **Three endpoints read it, and read it to answer less**: the Nudge stream,
+/// the Conversations list and the archived switch beside it — each of them
+/// answering this device's own where a browser is answered the cluster's, see
+/// [`crate::nudge::nudges`] and [`crate::ui::conversations`], which is where the
 /// reasoning is. Everything else in the namespace answers the same whoever
 /// asked, which is the whole point of mounting one router twice.
 ///

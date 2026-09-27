@@ -43,7 +43,7 @@ async fn conversation(pool: &SqlitePool, branch: &str) -> i64 {
 
 /// Whether the sidebar says there is news on one.
 async fn unseen(pool: &SqlitePool, id: i64) -> bool {
-    conversations(pool)
+    conversations(pool, false)
         .await
         .unwrap()
         .into_iter()

@@ -1567,7 +1567,13 @@ Conversation 4 because a member's row said 4 is what the addressing is against.
 **And what a member is answered over the Peer Listener is this device's own rows
 alone**, with no device on them. The viewer's namespace is one router mounted
 twice, so a member reading it would otherwise get a merge of merges and two
-devices would each claim the other's rows as their own.
+devices would each claim the other's rows as their own. Which is the same rule
+the switch below is answered by, and there for a second reason: a member folding
+its own members' archives in would be folding the hub that asked it.
+**The hub's *Show archived* switch governs the whole of it**, each member being
+read with the position that switch stands at and a device with nothing archived
+of its own drawing the switch while a member has something behind it — see
+**Archived**.
 _Avoid_: the cluster list, the global sidebar, syncing
 
 **Onboarding Mode**:
@@ -3659,6 +3665,19 @@ conversations** is a way of looking rather than a change to anything: with it
 on, what has been archived is drawn in its ordinary place; with it off, it is
 not. That is the human's standing choice rather than a device's, so it is kept
 beside the archivings and read back on every load.
+
+**In a cluster that switch is one switch for the whole Merged List, and it is
+the opened device's.** The choice is about a list, and the list in front of them
+is every **Member**'s merged with that device's own — so the position that
+device's switch stands at is what governs every member's rows, and each member
+is *asked* with it rather than told to change its own: a member's own switch is
+its standing choice for the browser in front of *it*, and a hub writing it would
+be one device changing what another one sees. The moment the switch moves, every
+list the hub holds is read again, each of them having been fetched under the
+position before it. And whether the switch is worth drawing folds the same way —
+*anything archived anywhere* — so a device with nothing of its own still draws
+it while a member has something behind it, that being the only way a member's
+archived rows could be brought back.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)

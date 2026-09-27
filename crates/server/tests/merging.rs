@@ -32,6 +32,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
@@ -39,7 +40,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
-use verkstead_render::ConversationEntry;
+use verkstead_render::{ConversationEntry, ShowingArchived};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
@@ -71,6 +72,10 @@ const B_OS: &str = "macOS 15.1";
 
 /// The sidebar itself, which is the path every assertion here reads.
 const SIDEBAR: &str = "/api/ui/conversations";
+
+/// And where the **Show archived conversations** switch is read and moved: one
+/// switch for the whole merged list, held by the device the browser opened.
+const ARCHIVES: &str = "/api/ui/conversations/archived";
 
 /// How long one address has to answer here, rather than the two seconds a
 /// running server gives one.
@@ -225,6 +230,76 @@ impl Verkstead {
         self.nudges.announce(Nudge::Conversations);
 
         conversation
+    }
+
+    /// One of its Conversations closed and put away on it, and the same Nudge
+    /// its own handlers send about either.
+    ///
+    /// Closed first because that is what archiving is offered on, and by the
+    /// store rather than through the endpoint for [`starts`]'s reason: a close
+    /// through the endpoint would be ending a session and a worktree that were
+    /// never made.
+    async fn puts_away(&self, conversation: i64) {
+        store::close_conversation(&self.pool, conversation)
+            .await
+            .unwrap();
+
+        store::archive_conversation(&self.pool, conversation)
+            .await
+            .unwrap();
+
+        self.nudges.announce(Nudge::Conversations);
+    }
+
+    /// And taken back out again.
+    async fn takes_back(&self, conversation: i64) {
+        store::unarchive_conversation(&self.pool, conversation)
+            .await
+            .unwrap();
+
+        self.nudges.announce(Nudge::Conversations);
+    }
+
+    /// Where its **Show archived conversations** switch is put, which is the
+    /// press a browser makes on the switch under the sidebar.
+    async fn switches_archives(&self, showing: bool) {
+        press(
+            &self.workbench,
+            ARCHIVES,
+            Some(&format!(r#"{{"showing":{showing}}}"#)),
+        )
+        .await;
+    }
+
+    /// And what that switch reads back: where it stands, and whether there is
+    /// anything anywhere in the cluster behind it.
+    async fn archives(&self) -> ShowingArchived {
+        reading(&self.workbench, ARCHIVES).await
+    }
+
+    /// The same once it says what the test is waiting for, for
+    /// [`sidebar_saying`]'s reason: a member's archives are read back over the
+    /// link the way its list is.
+    async fn archives_saying(&self, what: impl Fn(&ShowingArchived) -> bool) -> ShowingArchived {
+        let mut last = ShowingArchived {
+            showing: false,
+            any: false,
+        };
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = self.archives().await;
+
+                if what(&last) {
+                    return last;
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the switch never said it: {last:#?}"))
     }
 
     /// The sidebar as this device's own browser reads it.
@@ -407,6 +482,11 @@ fn through(device: &str, path: &str) -> String {
 
 /// A read of a list of rows, made the way the browser makes one.
 async fn rows(app: &Router, path: &str) -> Vec<ConversationEntry> {
+    reading(app, path).await
+}
+
+/// A read of whatever `path` answers, made the way the browser makes one.
+async fn reading<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
     let answered = app
         .clone()
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
@@ -420,6 +500,29 @@ async fn rows(app: &Router, path: &str) -> Vec<ConversationEntry> {
     assert_eq!(status, StatusCode::OK, "GET {path}: {said}");
 
     serde_json::from_str(&said).unwrap_or_else(|why| panic!("GET {path} answered {said}: {why}"))
+}
+
+/// And a press on `path`, with a body where the endpoint takes one: what it
+/// answered, once it has answered something that is not a refusal.
+async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
+    let asking = Request::builder().method("POST").uri(path);
+
+    let asking = match saying {
+        Some(body) => asking
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned())),
+        None => asking.body(Body::empty()),
+    };
+
+    let answered = app.clone().oneshot(asking.unwrap()).await.unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert!(status.is_success(), "POST {path}: {status} {said}");
+
+    said
 }
 
 /// Which row is which, for an assertion to name one by: the branch it is on.
@@ -654,4 +757,153 @@ async fn a_member_reading_the_sidebar_gets_this_devices_own_rows_alone() {
         over_the_link[0].rank.ends_with(&format!("-{A}")),
         "while the rank rides out, which is what the reader merges by",
     );
+}
+
+/// The hub's switch governs the whole merged list: turned on, a member's
+/// archived Conversations are on it in their ordinary places, and turned off
+/// they are not — with the member's own switch untouched throughout.
+#[tokio::test]
+async fn the_hubs_switch_governs_a_members_archived_rows() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let there = b.holding_a_repo().await;
+
+    // Three of B's, in the order a start ranks them: the one put away lands
+    // between the two that are not, which is where *its ordinary place* is.
+    b.starts(there, "under").await;
+    let away = b.starts(there, "away").await;
+    b.starts(there, "over").await;
+
+    b.puts_away(away).await;
+
+    // A's switch is off, which is where every switch starts.
+    let hidden = a
+        .sidebar_saying(|rows| branches(rows) == ["over", "under"])
+        .await;
+
+    assert_eq!(whose(&hidden), [Some(B), Some(B)]);
+
+    a.switches_archives(true).await;
+
+    let shown = a.sidebar_saying(|rows| rows.len() == 3).await;
+
+    assert_eq!(
+        branches(&shown),
+        ["over", "away", "under"],
+        "a member's archived row is on the merged list in its ordinary place",
+    );
+
+    // And the member's own switch has not moved: that row is B's standing choice
+    // for the browser in front of B, and A asking for its rows is not A writing
+    // it.
+    assert!(
+        !store::showing_archived(&b.pool).await.unwrap(),
+        "the hub asks with its position rather than putting the member's switch there",
+    );
+    assert_eq!(
+        branches(&b.sidebar().await),
+        ["over", "under"],
+        "so B's own sidebar is still drawn at B's own switch",
+    );
+
+    a.switches_archives(false).await;
+
+    let hidden = a.sidebar_saying(|rows| rows.len() == 2).await;
+
+    assert_eq!(branches(&hidden), ["over", "under"]);
+    assert!(!store::showing_archived(&b.pool).await.unwrap());
+}
+
+/// Whether there is anything archived at all folds across the cluster: a device
+/// with nothing of its own draws the switch while a member has something behind
+/// it, and draws none when nothing anywhere does.
+#[tokio::test]
+async fn a_device_with_nothing_archived_draws_the_switch_for_a_member() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    a.starts(here, "the-archived-switch-governs").await;
+    let away = b.starts(there, "finished-with").await;
+
+    // Both devices' rows are on the list, and nothing anywhere has been put
+    // away: there is no switch worth drawing.
+    a.sidebar_saying(|rows| rows.len() == 2).await;
+
+    assert!(
+        !a.archives().await.any,
+        "nothing is archived on either device",
+    );
+
+    b.puts_away(away).await;
+
+    a.archives_saying(|archives| archives.any).await;
+
+    // A's own record still says nothing of A's is archived, which is the half
+    // the member's answer is folded into rather than replacing.
+    assert!(!store::any_archived(&a.pool).await.unwrap());
+
+    // And a member asking the same question over the link is answered A's own
+    // half alone: a member that folded its own members in would be folding the
+    // hub that asked, and the two would read each other round for ever.
+    let over_the_link: ShowingArchived =
+        reading(&b.workbench, &through(a.device.id(), ARCHIVES)).await;
+
+    assert!(
+        !over_the_link.any,
+        "over the link a device answers for itself",
+    );
+
+    // Taken back out on B, and the switch has nothing behind it again.
+    b.takes_back(away).await;
+
+    a.archives_saying(|archives| !archives.any).await;
+}
+
+/// And archiving a member's Conversation from the merged list takes its row off
+/// the list, while unarchiving it puts the row back.
+#[tokio::test]
+async fn archiving_a_members_conversation_takes_its_row_off_the_merged_list() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let there = b.holding_a_repo().await;
+    let away = b.starts(there, "finished-with").await;
+    b.starts(there, "still-going").await;
+
+    // Closed on B, that being what archiving is offered on.
+    store::close_conversation(&b.pool, away).await.unwrap();
+
+    a.sidebar_saying(|rows| rows.len() == 2).await;
+
+    // The press the card's menu makes on a member's row: through A, to the device
+    // that owns it.
+    let said = press(
+        &a.workbench,
+        &through(B, &format!("{SIDEBAR}/{away}/archive")),
+        None,
+    )
+    .await;
+
+    assert_eq!(said, "\"Archived\"", "the owning device did the archiving");
+
+    let left = a.sidebar_saying(|rows| rows.len() == 1).await;
+
+    assert_eq!(branches(&left), ["still-going"]);
+
+    let said = press(
+        &a.workbench,
+        &through(B, &format!("{SIDEBAR}/{away}/unarchive")),
+        None,
+    )
+    .await;
+
+    assert_eq!(said, "\"Unarchived\"");
+
+    let back = a.sidebar_saying(|rows| rows.len() == 2).await;
+
+    assert_eq!(branches(&back), ["still-going", "finished-with"]);
 }

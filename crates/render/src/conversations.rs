@@ -4812,6 +4812,10 @@ pub enum ConversationUnarchived {
 /// [`ShowArchived`] rather than this — a position, and nothing about what is
 /// behind it, that half being the server's own fact.
 ///
+/// **One switch for the whole merged list**, which is the device the browser
+/// opened's: every member of its cluster is asked for its rows at this position
+/// rather than filtering by its own (ADR-0020, *The opened device relays*).
+///
 /// Two answers in one payload because the page has one question. The sidebar's
 /// list is filtered by the switch in SQL, so an empty list says nothing about
 /// which of the two empties it is — nothing archived, or everything archived
@@ -4827,6 +4831,10 @@ pub struct ShowingArchived {
     /// And whether there is anything archived at all, whichever position the
     /// switch is in. False is a switch with nothing behind it, which is a
     /// switch not worth drawing.
+    ///
+    /// **Anything archived anywhere in the cluster**, this being the switch for
+    /// the merged list: a device with nothing of its own still draws it while a
+    /// member has something behind it.
     pub any: bool,
 }
 

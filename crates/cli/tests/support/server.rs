@@ -64,7 +64,7 @@ impl Server {
             // which — so a test standing in for a session has to be given the
             // same thing. Made only where there is none: this server is brought
             // up twice over one database, and the second time is a restart.
-            if store::conversations(&pool).await.unwrap().is_empty() {
+            if store::conversations(&pool, true).await.unwrap().is_empty() {
                 let repo =
                     store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
                         .await

@@ -152,7 +152,7 @@ async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered(
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -170,7 +170,7 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
         .unwrap()
         .unwrap();
 
-    let listed: Vec<(String, String)> = conversations(&pool)
+    let listed: Vec<(String, String)> = conversations(&pool, false)
         .await
         .unwrap()
         .into_iter()
@@ -383,14 +383,14 @@ async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     .await
     .unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     let row = rows.iter().find(|row| row.id == id).unwrap();
     assert!(row.naming);
     assert!(!row.branch_named);
 
     settle_naming(&pool, id).await.unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     assert!(!rows.iter().find(|row| row.id == id).unwrap().naming);
 }
 
@@ -666,7 +666,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 async fn nothing_started_means_nothing_listed() {
     let (_dir, pool) = fresh_pool().await;
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// Moving a draft onto another Repo, and the three things that follow from it:
@@ -1322,7 +1322,7 @@ async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::Archived
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// And the sidebar still draws it, carrying the word it could not read.
@@ -1341,7 +1341,7 @@ async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
         .unwrap();
     corrupt_the_state(&pool, broken).await;
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
 
     assert_eq!(
         rows.iter().map(|row| row.id).collect::<Vec<_>>(),
@@ -1371,7 +1371,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_list() {
         Archiving::Archived
     );
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.state, Lifecycle::Closed);
@@ -1398,7 +1398,7 @@ async fn what_was_archived_is_still_archived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert_eq!(
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::AlreadyArchived
@@ -1442,7 +1442,7 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
         Archiving::NotClosed
     );
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1471,7 +1471,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     assert!(!archived(&pool, id).await.unwrap());
 
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, false).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
 }
@@ -1495,7 +1495,7 @@ async fn what_was_unarchived_is_still_unarchived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
     assert_eq!(
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
@@ -1513,7 +1513,7 @@ async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
     );
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1526,8 +1526,8 @@ async fn unarchiving_a_conversation_that_is_not_there_says_so() {
     );
 }
 
-/// The human's standing choice to be shown what they have put away: with it
-/// on, an archived Conversation is on the list in its ordinary place.
+/// The human's standing choice to be shown what they have put away: asked for
+/// with it on, an archived Conversation is on the list in its ordinary place.
 #[tokio::test]
 async fn showing_the_archived_puts_them_back_in_the_list() {
     let (_dir, pool) = fresh_pool().await;
@@ -1535,21 +1535,41 @@ async fn showing_the_archived_puts_them_back_in_the_list() {
     close_conversation(&pool, id).await.unwrap();
     archive_conversation(&pool, id).await.unwrap();
 
-    assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
-    show_archived(&pool, true).await.unwrap();
-
-    assert!(showing_archived(&pool).await.unwrap());
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, true).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, id);
     assert!(archived(&pool, id).await.unwrap());
+}
 
+/// And the list is drawn at the position it is handed rather than at the one
+/// this machine's own switch is in.
+///
+/// Which is what makes one switch govern a merged list: the device the browser
+/// opened asks each of its members with its own position, and a member answers
+/// it without its own row being touched — see `crate::merging` and
+/// [`showing_archived`].
+#[tokio::test]
+async fn the_list_is_drawn_at_the_position_it_is_handed_rather_than_the_stored_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    // This machine's own switch is on, and a read that asked for it off is
+    // answered with the row left out all the same.
+    show_archived(&pool, true).await.unwrap();
+
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+
+    // And the other way round, the row being the one thing neither read moves.
     show_archived(&pool, false).await.unwrap();
 
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
 }
 
 /// And whether there is anything behind that switch at all, which is what the
@@ -1570,7 +1590,7 @@ async fn whether_anything_is_archived_is_read_apart_from_the_switch() {
     archive_conversation(&pool, id).await.unwrap();
 
     assert!(any_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     show_archived(&pool, true).await.unwrap();
     assert!(any_archived(&pool).await.unwrap());
@@ -1612,8 +1632,10 @@ async fn the_choice_to_show_them_survives_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(showing_archived(&pool).await.unwrap());
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    let showing = showing_archived(&pool).await.unwrap();
+
+    assert!(showing);
+    assert_eq!(conversations(&pool, showing).await.unwrap().len(), 1);
 }
 
 /// Where the worktree went outlives the process that made it — it is a directory
@@ -1699,7 +1721,7 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// The mark is a row like every other, so it is there after a restart — a page

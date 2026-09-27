@@ -76,7 +76,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 /// says — so a test posting one needs somewhere for it to land. What the
 /// Conversation is does not matter to anything here; that there is one does.
 async fn asking_from(pool: &SqlitePool) -> i64 {
-    if let Some(row) = store::conversations(pool).await.unwrap().first() {
+    if let Some(row) = store::conversations(pool, true).await.unwrap().first() {
         return row.id;
     }
 

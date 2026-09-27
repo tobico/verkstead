@@ -1976,23 +1976,35 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// above, because the two say different things and the row says which in words:
 /// *something wants you* against *there is news here*.
 ///
-/// What the human has archived is not here at all, unless they have asked to be
-/// shown it — see [`super::archive_conversation`] and
-/// [`super::showing_archived`]. Archiving is the one thing that takes a
+/// What the human has archived is not here at all, unless `showing_archived`
+/// says they have asked to be shown it — see [`super::archive_conversation`]
+/// and [`super::showing_archived`]. Archiving is the one thing that takes a
 /// Conversation off this list, and it takes it off nothing else: its Timeline,
 /// its branch and its own page are where they were.
 ///
-/// The toggle is read inside the query rather than handed in, because it is a
-/// fact about this list and this is the one thing that draws it: a caller given
-/// the choice would be a second place to get it wrong, and there is no other way
-/// the sidebar should ever be read.
+/// **The position is handed in rather than read inside the query**, because the
+/// list it draws is the cluster's rather than this machine's (ADR-0020, *The
+/// opened device relays*). The switch is the human's standing choice about a
+/// list, and the list they are looking at is the one the device they opened
+/// merged — so that device's position is what every member is asked with, and a
+/// member reading its own rows out for a hub answers to the hub's rather than to
+/// the one its own browser last stood at. Reading the row in here would be this
+/// query deciding that on the wrong machine.
+///
+/// So the endpoint that draws a sidebar says which position it is drawing at,
+/// and the sweeps that walk every Conversation — a restart's resume, the stall
+/// sweep — ask for the lot: an archived Conversation is a Closed one, and
+/// neither sweep has anything to say about one either way.
 ///
 /// A row whose state word this Verkstead does not know is still on the list,
 /// carrying the word — see [`RowState`]. Every other read of that column
 /// refuses one, and this one cannot afford to: the list is the only route to a
 /// Conversation's own page, so one bad row failing it would leave the human
 /// with nothing to press on any of them.
-pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
+pub async fn conversations(
+    pool: &SqlitePool,
+    showing_archived: bool,
+) -> Result<Vec<ConversationRow>> {
     /// The columns in the order the query below selects them.
     type Row = (
         i64,
@@ -2033,13 +2045,14 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 COALESCE(c.rank, '') AS rank
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
-         WHERE EXISTS (SELECT 1 FROM shown_archives)
+         WHERE ?
             OR NOT EXISTS (
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
          ORDER BY c.rank, c.id DESC",
         waiting = waits_on_the_human(),
     ))
+    .bind(showing_archived)
     .fetch_all(pool)
     .await
     .context("listing the Conversations")?;

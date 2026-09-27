@@ -354,7 +354,7 @@ async fn a_pending_steer_waits_on_the_human() {
         "the form is theirs to finish, so the page says so",
     );
     assert_eq!(
-        conversations(&pool)
+        conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()

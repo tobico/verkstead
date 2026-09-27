@@ -408,7 +408,7 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
     };
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "a Conversation being grilled is not waiting on anybody",
     );
 
@@ -417,14 +417,14 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
         .unwrap();
 
     assert!(
-        waiting(conversations(&pool).await.unwrap()),
+        waiting(conversations(&pool, false).await.unwrap()),
         "and one Verkstead pulled the brake on is",
     );
 
     clear_stop(&pool, id).await.unwrap();
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "and starting to drive again takes the dot with it, leaving the Notice \
          where it is",
     );
@@ -470,7 +470,7 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
 
         stop(&pool, id, kind, SAID, None).await.unwrap();
 
-        let waiting = conversations(&pool)
+        let waiting = conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -522,14 +522,14 @@ async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
     };
 
     assert!(
-        waiting(conversations(&pool).await.unwrap()),
+        waiting(conversations(&pool, false).await.unwrap()),
         "Verkstead pulled the brake, so until it is closed this is waiting on them",
     );
 
     close_conversation(&pool, id).await.unwrap();
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "and closing takes the dot away, whatever the stop was",
     );
     assert!(

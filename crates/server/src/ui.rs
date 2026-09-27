@@ -1121,11 +1121,34 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 /// this is, is [`OverTheLink`], the same extension the Nudge stream tells the
 /// two apart by and for the same kind of reason: a filter over what an answer
 /// holds rather than a second route to keep.
+///
+/// **And `?archived=` is what a hub asks a member's rows with.** *Show archived
+/// conversations* is one switch for the whole merged list and it is the opened
+/// device's — the human's standing choice about a list, and the list they are
+/// looking at is the cluster's — so a member is asked with that position rather
+/// than left to filter by its own. Read off this device's own switch where
+/// nothing says otherwise, which is every call a browser makes; read off the
+/// query where the call came over the link, which is the hub saying where its
+/// own switch stands. Nothing here writes the member's row — see
+/// [`store::showing_archived`], and [`crate::merging`] on the asking end.
 async fn conversations(
     State(state): State<AppState>,
     over_the_link: Option<Extension<OverTheLink>>,
+    Query(asked): Query<AskedArchived>,
 ) -> HttpResponse {
-    let conversations = match store::conversations(&state.pool).await {
+    let showing = match asked.archived.filter(|_| over_the_link.is_some()) {
+        Some(asked) => asked,
+
+        None => match store::showing_archived(&state.pool).await {
+            Ok(showing) => showing,
+            Err(error) => {
+                tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
+                return unavailable("the Conversations could not be read");
+            }
+        },
+    };
+
+    let conversations = match store::conversations(&state.pool, showing).await {
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "reading the Conversations failed");
@@ -1215,6 +1238,20 @@ async fn conversations(
     }
 
     Json(crate::merging::merged(&state, rows).await).into_response()
+}
+
+/// Where the caller's own **Show archived conversations** switch stands, where a
+/// caller said.
+///
+/// A hub reading a member's rows for the merged list is the one caller that
+/// says: the position is its own switch's, and what it is asking for is that
+/// member's list drawn at it. A browser says nothing and is answered at the
+/// switch of the device it opened, which is the same fact read off the store.
+#[derive(Debug, serde::Deserialize)]
+struct AskedArchived {
+    /// Absent on every call but a hub's read over the link — see
+    /// [`conversations`].
+    archived: Option<bool>,
 }
 
 /// `POST /api/ui/conversations` — start one against a registered Repo.
@@ -4548,10 +4585,30 @@ async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
 /// has been put away, and whether anything has been.
 ///
 /// Two facts about one switch, in one payload: the list above is filtered by
-/// the setting in SQL, so an empty list cannot say whether there is anything
-/// behind the switch — and that is what decides whether a page with no sidebar
-/// draws the switch at all. Read together so that the page reads once.
-async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
+/// the position it is drawn at, so an empty list cannot say whether there is
+/// anything behind the switch — and that is what decides whether a page with no
+/// sidebar draws the switch at all. Read together so that the page reads once.
+///
+/// **And whether there is anything archived folds across the cluster**, because
+/// the list this switch governs is the merged one: a device with nothing of its
+/// own still draws the switch while a member has something behind it, and a
+/// switch that hid a member's rows with no way of bringing them back would be
+/// the one press the merged list could not undo. Each member's answer is held
+/// beside the list held of it, so this costs no dial — see
+/// [`crate::merging::anything_archived`].
+///
+/// **The position itself is this device's own either way.** It is where the
+/// human put the switch on the device they opened, and a member is asked with it
+/// rather than told to move its own.
+///
+/// **Over the Peer Listener it is this device's own answer alone**, for the
+/// merged list's reason and one of its own: a member folding its own members in
+/// would be folding the hub that asked, and the two would read each other round
+/// for ever.
+async fn showing_archived(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+) -> HttpResponse {
     let showing = match store::showing_archived(&state.pool).await {
         Ok(showing) => showing,
         Err(error) => {
@@ -4560,13 +4617,20 @@ async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    match store::any_archived(&state.pool).await {
-        Ok(any) => Json(ShowingArchived { showing, any }).into_response(),
+    let own = match store::any_archived(&state.pool).await {
+        Ok(any) => any,
         Err(error) => {
             tracing::error!(error = ?error, "reading whether anything is archived failed");
-            unavailable("the setting could not be read")
+            return unavailable("the setting could not be read");
         }
-    }
+    };
+
+    let any = match over_the_link.is_some() {
+        true => own,
+        false => crate::merging::anything_archived(&state, own).await,
+    };
+
+    Json(ShowingArchived { showing, any }).into_response()
 }
 
 /// `POST /api/ui/conversations/archived` — and saying that it is, or is not.
@@ -4575,12 +4639,20 @@ async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
 /// pressing at once land on a state one of them asked for rather than on
 /// whichever order they arrived in. Refused for nothing, and there is nothing
 /// to answer with beyond that it was taken.
+///
+/// **And every member's held list is read again**, because each of them was
+/// asked with the position the switch was in before this press: the lists this
+/// device holds are what the merged list is drawn out of, and one fetched under
+/// the old position is a member's rows filtered by a choice the human has just
+/// changed. Nothing waits on that — the read is a dial per member, and the
+/// sidebar re-reads on the Nudge below whether it has landed or not.
 async fn show_archived(
     State(state): State<AppState>,
     Json(showing): Json<ShowArchived>,
 ) -> HttpResponse {
     match store::show_archived(&state.pool, showing.showing).await {
         Ok(()) => {
+            crate::merging::afresh(&state);
             state.nudges.announce(Nudge::Conversations);
             StatusCode::NO_CONTENT.into_response()
         }

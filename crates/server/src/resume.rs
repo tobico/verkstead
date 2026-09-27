@@ -674,7 +674,11 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
     let state = state.clone();
 
     tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
+        // Archived Conversations and all, whatever the switch stands at: what is
+        // being looked for is work with nothing driving it, and an archived
+        // Conversation is a Closed one — a state this sweep passes over below
+        // rather than one the list should be deciding for it.
+        let conversations = match store::conversations(&state.pool, true).await {
             Ok(conversations) => conversations,
             Err(error) => {
                 tracing::error!(error = ?error, "listing the Conversations a restart left failed");

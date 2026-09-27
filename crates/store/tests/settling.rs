@@ -62,7 +62,7 @@ async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreate
 
 /// The Conversation everything here is asked from, made on the first ask.
 async fn conversation(pool: &SqlitePool) -> anyhow::Result<i64> {
-    if let Some(row) = conversations(pool).await?.first() {
+    if let Some(row) = conversations(pool, false).await?.first() {
         return Ok(row.id);
     }
 

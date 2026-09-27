@@ -314,7 +314,7 @@ async fn a_stop_that_was_open_becomes_the_one_stop_it_now_is() {
     );
 
     assert!(
-        conversations(&pool)
+        conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -346,7 +346,7 @@ async fn a_stop_that_was_settled_stops_nothing() {
 
     assert!(stopped(&pool, id).await.unwrap().is_none());
     assert!(
-        !conversations(&pool)
+        !conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -429,7 +429,7 @@ async fn a_database_made_today_has_nothing_to_rewrite() {
         .await
         .unwrap();
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// A database whose stops were kept in tables beside the Conversations, as one
@@ -605,7 +605,7 @@ async fn an_open_pause_reads_back_as_a_stop_with_reset_words() {
     );
 
     assert!(
-        conversations(&pool)
+        conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
