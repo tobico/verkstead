@@ -117,6 +117,13 @@ let onscreen: BrowserWindow | undefined;
 /// already exited by then, so the asking is remembered here and answered by
 /// [`open`] instead: pressing the icon twice while Verkstead is coming up is a
 /// window that arrives, not a press that went nowhere.
+///
+/// **`second-instance`'s alone.** A Dock activation is the other thing that
+/// arrives before there is a window, and it is not an ask: Electron emits
+/// `activate` at a first launch as well as at a press, so a remembered one is a
+/// hidden login start showing its window anyway. That handler is registered once
+/// there is a window to bring forward, and never sets this — see the note beside
+/// it.
 let wanted = false;
 
 /// The sidecar, once there is one — for the ways out that are not a quit.
@@ -339,18 +346,6 @@ async function run(): Promise<void> {
   // quit, the window really was the last of the app. A Mac reaches it only on
   // its way out under Cmd+Q, its close always being a hide.
   app.on("window-all-closed", () => app.quit());
-
-  // And a Dock activation is the window coming back, which is the other half of
-  // what closing means on a Mac (ADR-0020): the app is a regular Dock app now,
-  // so pressing its icon there is the same act as Open on the tray. Registered
-  // everywhere, being a Mac's event to emit.
-  app.on("activate", () => {
-    if (onscreen === undefined) {
-      wanted = true;
-      return;
-    }
-    forward(onscreen);
-  });
 
   // `before-quit` rather than `will-quit`: this one comes before the windows
   // are closed, and what it is here for is the close that a quit is about to
@@ -641,6 +636,23 @@ async function run(): Promise<void> {
     by,
   });
   onscreen = window;
+
+  // **And a Dock activation is the window coming back**, which is the other half
+  // of what closing means on a Mac (ADR-0020): the app is a regular Dock app
+  // now, so pressing its icon there is the same act as **Open** on the tray.
+  // Registered everywhere, being a Mac's event to emit.
+  //
+  // **Registered here, after the window, rather than beside the handlers above
+  // — and that is the whole of what keeps a hidden login start hidden.**
+  // Electron emits `activate` when the application is activated, *including at
+  // a first launch*, so a handler registered before `whenReady` catches the
+  // launch's own activation and has nothing to bring forward yet. Remembered
+  // for later, that is a window shown over somebody's login by the one arm
+  // `hidden` below was written to prevent — the flag it would set is answered
+  // unconditionally, so it overrules `hidden` rather than asking it. Registered
+  // once there is a window, the launch's own activation is never seen and every
+  // activation that is seen is somebody pressing the tile.
+  app.on("activate", () => forward(window));
 
   // And then the icon, which is the other way to this window and the only one
   // while it is off the screen — which is why the close policy falls to Quit
