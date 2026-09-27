@@ -37,8 +37,12 @@ order.
   branch moves or a pull request below merges.
 - **Cut from the highest settled stage in the chain**, not from the highest of
   the stage's own dependencies: it builds on everything finished, and the
-  rebase at the finish is small. Off the default branch where nothing settled
-  is unmerged.
+  rebase at the finish is small. **The chain starts at the roadmap's own
+  branch** — the Conversation that wrote the roadmap, while its pull request is
+  unmerged — so stage 01 comes off there, exactly as it comes off its
+  predecessor today and for the same reason: the default branch does not hold
+  the roadmap the stage is started from. The default branch only where nothing
+  unmerged is left to stand on.
 - **A conflict at the join is the joining session's to resolve**: resolve it,
   run the checks again, ask the human only where it cannot tell which side is
   right.
@@ -68,7 +72,9 @@ order.
    request; one it cannot judge ends in a Question Set.
 5. **Cut from the highest settled stage** — the carry-on's choice of base.
    AC: in a roadmap run in order the base is the predecessor, as today; with a
-   settled sibling above the predecessor, the base is the sibling.
+   settled sibling above the predecessor, the base is the sibling; stage 01 of a
+   roadmap whose own pull request is unmerged comes off the roadmap's branch, as
+   it does today.
 6. **This repository's own block** — `docs/agents/git-workflow.md` says how a
    stage joins. AC: the block covers a branch that exists and is not at the
    top.
@@ -79,6 +85,10 @@ order.
 - `Stands` and `standing` in `continuing.rs` are still where a stage's base is
   chosen, and `stage_branches.stacks_on` is still where it is recorded. A
   stage's base and what it ends up stacked on stop being the same fact here.
+  `standing` is handed the **settling Conversation's** branch as the
+  predecessor, which is how stage 01 comes off the roadmap's own branch today
+  and how it has to keep coming off it — the chain's bottom is that branch, not
+  the default one.
 - `Step::Finish` and `to_a_pull_request` in `runner.rs` are still the finish,
   and the hold belongs in front of them.
 - `gh stack` keeps its registry per worktree, so a session re-adopts the chain

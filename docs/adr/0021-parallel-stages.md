@@ -55,9 +55,11 @@ starting nothing and saying why on the Timeline. Falling back to running in
 order was rejected, because it runs a roadmap in a way nobody wrote down.
 
 **Read afresh at every start**, off the top of the chain, so a hand edit to a
-running roadmap takes effect once it is committed there. Freezing the
-declarations when the roadmap first runs was rejected: the roadmaps already in
-flight are the ones most worth declaring by hand.
+running roadmap takes effect once it is committed there. The top of a chain no
+stage has joined yet is the roadmap's own branch — see *The chain* — so there is
+always a branch holding the roadmap to read them off. Freezing the declarations
+when the roadmap first runs was rejected: the roadmaps already in flight are the
+ones most worth declaring by hand.
 
 **A line may carry a platform**, `on windows`. It is read, recorded and shown
 and nothing acts on it yet: placing a stage on a device that matches is a
@@ -129,10 +131,15 @@ third opens a pull request carrying other stages' commits.
 
 **The roadmap is one chain, in the order its stages finish.**
 
+- **The chain starts at the roadmap's own branch.** The Conversation that wrote
+  the roadmap is the bottom of it while its pull request is unmerged, exactly as
+  it is the predecessor today: stage 01 is cut from there, because the default
+  branch does not hold the roadmap the stage is started from. Only when nothing
+  unmerged is left to stand on is the default branch the base.
 - **A new stage is cut from the highest settled stage in the chain**, so it
   builds on everything finished so far — its dependencies among it — and the
-  rebase at its finish is small. Off the default branch where nothing unmerged
-  is settled.
+  rebase at its finish is small. The roadmap's own branch where no stage has
+  settled yet, and the default branch where nothing unmerged is settled at all.
 - **A stage whose tasks are all done waits to join.** The server holds its
   finish step until every stage already in the chain has settled. Then the
   stage rebases onto the top, opens its pull request, and wraps up.
