@@ -9,7 +9,6 @@
     },
     "title": "MVP roadmap"
   },
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [],
   "base_commit": null,
@@ -20,13 +19,14 @@
   "compiles_uncached": false,
   "direction": null,
   "driven": false,
-  "grilling_pairing": "Nothing",
+  "grilling_pairing": null,
   "id": 1,
   "implementation_pairing": null,
   "naming": false,
   "parked": null,
   "pending_steer": null,
   "pinned": [],
+  "process": "Develop",
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": false,
@@ -43,6 +43,7 @@
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

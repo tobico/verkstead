@@ -171,18 +171,46 @@ async fn entries(profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
 /// refuse is never the one that runs anything.
 ///
 /// **A role picked away is settled**, and settles this: there is no session to
-/// fail to start, so a Conversation that will not be grilled, or will not be
-/// reviewed, is as ready as one that will. What it is not is an empty picker —
-/// see [`verkstead_render::PickedView`].
+/// fail to start, so a Conversation that will not be reviewed is as ready as one
+/// that will. What it is not is an empty picker — see
+/// [`verkstead_render::PickedView`]. Which leaves the review the one role read
+/// that way: the grilling picker's own such row retired with *No grilling*, so
+/// that role is answered with an account or not answered.
 pub(crate) fn ready_to_grill(
-    grilling: &PickedView,
+    grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
 ) -> bool {
-    runnable(implementation) && [grilling, review].into_iter().all(settled)
+    runnable(grilling) && ready_to_wrap(implementation, review)
 }
 
-/// Whether one role that can be picked away is settled: a Pairing something
+/// And the same with the grilling left out of it, which is what a Process that
+/// is never interviewed waits on: a **Tinker**, whose composer draws no Grilling
+/// picker at all.
+///
+/// The reading `unready_to_wrap` in [`crate::conversations`] takes for the
+/// press, said the way the pane wants it — one of them is what decides whether
+/// to offer the button and the other is what was wrong when it was pressed, and
+/// they have to be the one question.
+pub(crate) fn ready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) -> bool {
+    runnable(implementation) && settled(review)
+}
+
+/// And the same with the review left out of it as well, which is what a Process
+/// run under the Implementation role alone waits on: an **Investigate**, whose
+/// composer draws the one **Agent** dropdown and no other picker.
+///
+/// The one role every Process uses and no Process can pick away — there is no
+/// work without something doing it — so this is [`runnable`] under the name of
+/// the question it answers. Said here beside the other two rather than called
+/// directly, because what a press asks and what the pane asks have to be the one
+/// reading: `unready_to_investigate` in [`crate::conversations`] is the other
+/// half of it.
+pub(crate) fn ready_to_investigate(implementation: Option<&PairingView>) -> bool {
+    runnable(implementation)
+}
+
+/// Whether the one role that can be picked away is settled: a Pairing something
 /// could be launched under, or the row that launches nothing.
 fn settled(picked: &PickedView) -> bool {
     match picked {
@@ -388,21 +416,16 @@ fn directory(home: &Path) -> Result<PathBuf, ProfileSaved> {
     Ok(home)
 }
 
-/// Choose the Pairing a Conversation's grilling session will run under — or the
-/// row that says there is to be no grilling at all.
+/// Choose the Pairing a Conversation's grilling session will run under.
 ///
-/// One press either way, for the reason the review's is one: the picker offers
-/// them as one list, and nothing is judged about a role that runs nothing, there
-/// being no Profile to have gone and no model to have been retyped.
+/// An account and nothing else, the picker having no row that is not one: *No
+/// grilling* is retired, and a Brief that wants no interview is a **Tinker**
+/// Conversation.
 pub(crate) async fn choose_grilling(
     pool: &SqlitePool,
     id: i64,
-    choice: &RoleChoice,
+    choice: &ProfileChoice,
 ) -> Result<ProfileChosen> {
-    let Some(choice) = &choice.pairing else {
-        return Ok(chosen(store::skip_grilling(pool, id).await?));
-    };
-
     if let Some(refusal) = unlisted(pool, choice).await? {
         return Ok(refused(refusal));
     }

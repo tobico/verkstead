@@ -196,7 +196,7 @@ const GRILL_REFUSAL: Record<
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
   NoGrillingProfile:
-    "Pick a grilling profile and model — or No grilling — first, on the brief.",
+    "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile:

@@ -56,6 +56,21 @@
 //! sessions share the account's memory. Every Profile from before arrives on,
 //! because the shared store is what they have always been given.
 //!
+//! And one more column added holding nothing: a half-written steer keeps one slot
+//! per target's payload, and Investigating's arrives with the target. Nobody
+//! could have written into it, so it comes in empty — which is what an empty slot
+//! means on every other one of the form's fields too.
+//!
+//! And six more rebuilt, for one repository holding more than one pull request —
+//! a stack. The record of what was opened, the check rollup, the merge reading,
+//! the standing, what the wrap-up had settled and what its checks had been given
+//! each move off the repository and onto the pull request, so what was written
+//! down about the pull request a repository held stays about it and another number
+//! can stand beside it. The record gains the head branch with the rebuild, and it
+//! comes in empty: nothing wrote a head down, and nothing can recover one. The
+//! goes spent on a conflict stay keyed by the repository, that being per stack,
+//! and so are the one thing here that no rewrite touches.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -66,13 +81,15 @@ use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Pairing, ProfileFacts,
-    PullRequest, RanUnder, Saving, WaitingOn, asked_to_stop, clear_stop, commit_repo,
-    conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
-    open_database, profiles, pull_request, pull_request_repo, record_another_pull_request,
-    record_commit, record_fix_attempt, recorded_commits, register_repo, settle_wrap_up,
-    start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop, stopped,
-    timeline, update_profile, wrap_up_settled,
+    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Pairing, ProfileFacts,
+    PullRequest, RanUnder, Rollup, Saving, Standing, WaitingOn, asked_to_stop, check_rollup,
+    clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
+    fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
+    pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
+    record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
+    record_fix_attempt, recorded_commits, register_repo, save_pending_steer, settle_wrap_up, stack,
+    standing, start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop,
+    stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1104,6 +1121,11 @@ async fn every_pull_request_of_before_is_the_conversations_own_repositorys() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            // Nothing wrote the head down when this row was written, and nothing
+            // can recover it now — which for the Conversation's own repository is
+            // its own branch, and is the empty column the rebuild leaves.
+            head: None,
+            base: None,
             repo: None,
         }),
         "the wrap-up's watchers still find the pull request they always did",
@@ -1149,6 +1171,8 @@ async fn the_rebuilt_pull_requests_table_keeps_one_per_conversation_per_repo() {
         number: 7,
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/askance/pull/7".to_owned(),
+        head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     };
 
@@ -1180,6 +1204,304 @@ async fn the_rebuilt_pull_requests_table_keeps_one_per_conversation_per_repo() {
             .count(),
         2,
         "and a database opened twice is rewritten once",
+    );
+}
+
+/// A database whose pull requests are one per repository, which is what every one
+/// written before a repository could hold a stack is: the record keyed by the
+/// Conversation and the Repo and carrying no head branch, the merge and the
+/// standing keyed the same way, and the check rollup keyed by the Conversation
+/// alone.
+///
+/// Two pull requests in it, the Conversation's own and a read-write companion's,
+/// because the rollup's rewrite is only visible where there are two: one row
+/// between them is what the shape of before could hold, and what the row says is
+/// whichever watcher asked last.
+///
+/// The tables are written out as the Verkstead that made them declared them — the
+/// migration finds a database rather than a call — with the rows put in by hand
+/// underneath.
+async fn pull_request_readings_of_before(dir: &Path) -> (i64, i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    for table in [
+        "pull_requests",
+        "pull_request_checks",
+        "pull_request_merges",
+        "pull_request_standings",
+    ] {
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    sqlx::query(
+        "CREATE TABLE pull_requests (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             UNIQUE (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_request_checks (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             rollup          TEXT NOT NULL,
+             at              TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_request_merges (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             merging         TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_request_standings (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             standing        TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (in_repo, number, url) in [
+        (repo, 41, "https://github.com/tobico/verkstead/pull/41"),
+        (beside, 7, "https://github.com/tobico/askance/pull/7"),
+    ] {
+        let (event_id,): (i64,) = sqlx::query_as(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, '2026-08-01T09:14:22.000Z', 'pull-request', '')
+             RETURNING id",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO pull_requests (event_id, conversation_id, repo_id, number, title, url)
+             VALUES (?, ?, ?, ?, 'Rate limiting', ?)",
+        )
+        .bind(event_id)
+        .bind(id)
+        .bind(in_repo)
+        .bind(number)
+        .bind(url)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // The one rollup the shape of before could hold, which both watchers were
+    // writing into.
+    sqlx::query(
+        "INSERT INTO pull_request_checks (conversation_id, rollup, at)
+         VALUES (?, 'failed', '2026-08-01T09:14:22.000Z')",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // And the merge and the standing, which were already one per repository.
+    for (in_repo, merging, standing) in
+        [(repo, "conflicting", "open"), (beside, "cleanly", "merged")]
+    {
+        sqlx::query(
+            "INSERT INTO pull_request_merges (conversation_id, repo_id, merging, at)
+             VALUES (?, ?, ?, '2026-08-01T09:14:22.000Z')",
+        )
+        .bind(id)
+        .bind(in_repo)
+        .bind(merging)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO pull_request_standings (conversation_id, repo_id, standing, at)
+             VALUES (?, ?, ?, '2026-08-01T09:14:22.000Z')",
+        )
+        .bind(id)
+        .bind(in_repo)
+        .bind(standing)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+
+    (id, repo, beside)
+}
+
+/// Every reading written before this is the pull request it was about, and every
+/// row the database held is still there.
+///
+/// The merge and the standing were each already one per repository, so each keeps
+/// the pull request that repository holds. The rollup was the Conversation's
+/// alone, so it goes to the Conversation's own repository's pull request — the only
+/// one it was possible for it to have been about — and the companion's has none,
+/// which is *nobody has asked* rather than a word borrowed from the other.
+#[tokio::test]
+async fn every_reading_of_before_is_the_pull_request_it_was_about() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo, beside) = pull_request_readings_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        check_rollup(&pool, id, repo, 41).await.unwrap(),
+        Some(Rollup::Failed),
+        "the one rollup of before is the work's own pull request's",
+    );
+    assert_eq!(
+        check_rollup(&pool, id, beside, 7).await.unwrap(),
+        None,
+        "and the companion's suite is one nobody ever asked GitHub about",
+    );
+
+    assert_eq!(
+        merging(&pool, id, repo, 41).await.unwrap(),
+        Some(Merging::Conflicting),
+    );
+    assert_eq!(
+        merging(&pool, id, beside, 7).await.unwrap(),
+        Some(Merging::Cleanly),
+        "each merge reading keeps the pull request its repository holds",
+    );
+
+    assert_eq!(
+        standing(&pool, id, repo, 41).await.unwrap(),
+        Some(Standing::Open),
+    );
+    assert_eq!(
+        standing(&pool, id, beside, 7).await.unwrap(),
+        Some(Standing::Merged),
+        "and so does each standing",
+    );
+
+    assert_eq!(
+        pull_requests(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(in_repo, opened)| (in_repo.id, opened.number, opened.head))
+            .collect::<Vec<_>>(),
+        [(repo, 41, None), (beside, 7, None)],
+        "both pull requests read back as they always did, with the head column \
+         standing empty — nothing wrote it down, and nothing can recover it",
+    );
+}
+
+/// And the rule the rebuilt tables carry is the new one: a second pull request of
+/// the same repository stands beside the one that is there with readings of its
+/// own, and opening the database a second time rewrites nothing.
+#[tokio::test]
+async fn the_rebuilt_tables_hold_a_stack_and_are_rewritten_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo, _) = pull_request_readings_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        record_another_pull_request(
+            &pool,
+            id,
+            repo,
+            &PullRequest {
+                number: 42,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
+                head: Some("rate-limiting-2".to_owned()),
+                base: None,
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        "the old rule would have kept the row that repository already had",
+    );
+
+    record_check_rollup(&pool, id, repo, 42, Rollup::Passed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        check_rollup(&pool, id, repo, 42).await.unwrap(),
+        Some(Rollup::Passed),
+    );
+    assert_eq!(
+        check_rollup(&pool, id, repo, 41).await.unwrap(),
+        Some(Rollup::Failed),
+        "and the one below it in the stack keeps the suite it had",
+    );
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        check_rollup(&pool, id, repo, 41).await.unwrap(),
+        Some(Rollup::Failed),
+        "a database opened twice is rewritten once",
+    );
+    assert_eq!(
+        timeline(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| matches!(event.event, Event::PullRequest(_)))
+            .count(),
+        3,
+        "and every pull request it held is still on the Timeline",
     );
 }
 
@@ -1227,6 +1549,8 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -1379,7 +1703,7 @@ async fn every_fix_session_counted_before_this_was_the_conversations_own_reposit
         .unwrap();
 
     assert_eq!(
-        fix_attempts(&pool, id, repo, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(),
         1,
         "the go it has already had is still spent",
     );
@@ -1391,12 +1715,14 @@ async fn every_fix_session_counted_before_this_was_the_conversations_own_reposit
         .id;
 
     assert_eq!(
-        fix_attempts(&pool, id, beside, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, beside, 7, "Rust").await.unwrap(),
         0,
         "and the same check name on another pull request starts from its own two",
     );
     assert_eq!(
-        record_fix_attempt(&pool, id, beside, "Rust").await.unwrap(),
+        record_fix_attempt(&pool, id, beside, 7, "Rust")
+            .await
+            .unwrap(),
         1,
         "which the rebuilt key is what makes room for",
     );
@@ -1426,8 +1752,14 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     assert_eq!(
         settled,
         vec![
-            WaitingOn::Checks(repo),
-            WaitingOn::Comments(repo),
+            WaitingOn::Checks {
+                repo_id: repo,
+                number: 41
+            },
+            WaitingOn::Comments {
+                repo_id: repo,
+                number: 41
+            },
             WaitingOn::Review,
         ],
         "the suite that was green and the pull request that was quiet are the one \
@@ -1444,9 +1776,16 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
         Finished::StillWaiting,
     );
 
-    settle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Mergeable {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 
@@ -1459,11 +1798,342 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
         .unwrap();
 
     assert_eq!(
-        fix_attempts(&pool, id, repo, "Rust").await.unwrap(),
+        fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(),
         1,
         "what a check had been given is where the first run left it",
     );
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap().len(), 4);
+}
+
+/// A database whose wrap-up bookkeeping is one per repository, which is what
+/// every one written before a repository could hold a stack is: what the wrap-up
+/// had settled keyed by the Conversation and the Repo, and the goes a red check
+/// had spent keyed the same way.
+///
+/// Two pull requests in it, the Conversation's own and a read-write companion's,
+/// because one repository holding one of them is the whole of what the shape of
+/// before could say — and the rows are attributed to the pull request each
+/// repository held.
+///
+/// The goes spent on a conflict are written as they stand: that table is keyed by
+/// the Repo now as it was then, and deliberately, a repository's pull requests
+/// being a stack that one resolution session takes whole.
+///
+/// The two tables are written out as the Verkstead that made them declared them —
+/// the migration finds a database rather than a call — with the rows put in by
+/// hand underneath.
+async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/state/worktrees/rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    verkstead_store::pick_direction(&pool, id, verkstead_schema::Direction::Inline)
+        .await
+        .unwrap();
+
+    verkstead_store::record_pull_request(
+        &pool,
+        id,
+        repo,
+        &PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    record_another_pull_request(
+        &pool,
+        id,
+        beside,
+        &PullRequest {
+            number: 7,
+            title: "The other half".to_owned(),
+            url: "https://github.com/tobico/askance/pull/7".to_owned(),
+            head: Some("the-other-half".to_owned()),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // The goes spent on this repository's conflict, written through the call
+    // because that table is not what changes here — what it proves is that it did
+    // not change.
+    record_conflict_fix_attempt(&pool, id, repo).await.unwrap();
+
+    for table in ["wrap_up_settled", "check_fix_attempts"] {
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    sqlx::query(
+        "CREATE TABLE wrap_up_settled (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL,
+             waiting_on      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, waiting_on)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE check_fix_attempts (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             check_name      TEXT NOT NULL,
+             attempts        INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, check_name)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A wrap-up that had settled nearly everything: the review once, and the
+    // work's own pull request green, quiet and merging, with the companion's
+    // suite green and nothing else about it said.
+    for (in_repo, waiting_on) in [
+        (0, "review"),
+        (repo, "checks"),
+        (repo, "comments"),
+        (repo, "mergeable"),
+        (beside, "checks"),
+    ] {
+        sqlx::query(
+            "INSERT INTO wrap_up_settled (conversation_id, repo_id, waiting_on, at)
+             VALUES (?, ?, ?, '2026-08-01T09:14:22.000Z')",
+        )
+        .bind(id)
+        .bind(in_repo)
+        .bind(waiting_on)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // And one `Rust` red in each repository, each with goes of its own spent on
+    // it — which is what the shape of before could already tell apart, and what
+    // has to stay told apart.
+    for (in_repo, attempts) in [(repo, 1), (beside, 2)] {
+        sqlx::query(
+            "INSERT INTO check_fix_attempts (conversation_id, repo_id, check_name, attempts)
+             VALUES (?, ?, 'Rust', ?)",
+        )
+        .bind(id)
+        .bind(in_repo)
+        .bind(attempts)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+
+    (id, repo, beside)
+}
+
+/// Everything such a wrap-up had settled is still settled, about the pull request
+/// each repository held — and the goes its checks had spent are still spent.
+///
+/// Which is what keeps a wrap-up that was nearly over from starting again: a
+/// server that came back up to this database waits on what it was waiting on
+/// before, and dispatches no session for a check that has already had its goes.
+#[tokio::test]
+async fn a_wrap_up_of_before_is_still_waiting_on_what_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo, beside) = wrap_up_bookkeeping_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let mut settled = wrap_up_settled(&pool, id).await.unwrap();
+    settled.sort_by_key(|one| format!("{one:?}"));
+
+    assert_eq!(
+        settled,
+        vec![
+            WaitingOn::Checks {
+                repo_id: repo,
+                number: 41,
+            },
+            WaitingOn::Checks {
+                repo_id: beside,
+                number: 7,
+            },
+            WaitingOn::Comments {
+                repo_id: repo,
+                number: 41,
+            },
+            WaitingOn::Mergeable {
+                repo_id: repo,
+                number: 41,
+            },
+            WaitingOn::Review,
+        ],
+        "each settlement is the pull request its repository held, and the review \
+         is about none of them",
+    );
+
+    assert_eq!(
+        fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(),
+        1,
+        "the go this check has already had is still spent",
+    );
+    assert_eq!(
+        fix_attempts(&pool, id, beside, 7, "Rust").await.unwrap(),
+        2,
+        "and the same check name on the other pull request keeps its own count",
+    );
+
+    assert_eq!(
+        conflict_fix_attempts(&pool, id, repo).await.unwrap(),
+        1,
+        "and the goes spent on the conflict are where they were, counted per \
+         repository — which is per stack",
+    );
+
+    // Which leaves the wrap-up one thing short of over, exactly as it was: what
+    // was said on the companion's pull request, and whether GitHub can merge it.
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+    );
+
+    for waiting_on in [
+        WaitingOn::Comments {
+            repo_id: beside,
+            number: 7,
+        },
+        WaitingOn::Mergeable {
+            repo_id: beside,
+            number: 7,
+        },
+    ] {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+}
+
+/// And the rule the rebuilt tables carry is the new one: a second pull request of
+/// the same repository settles and counts on its own account, and opening the
+/// database a second time rewrites nothing.
+#[tokio::test]
+async fn the_rebuilt_wrap_up_tables_hold_a_stack_and_are_rewritten_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo, _) = wrap_up_bookkeeping_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    record_another_pull_request(
+        &pool,
+        id,
+        repo,
+        &PullRequest {
+            number: 42,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
+            head: Some("rate-limiting-2".to_owned()),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        record_fix_attempt(&pool, id, repo, 42, "Rust")
+            .await
+            .unwrap(),
+        1,
+        "the branch above in the stack counts `Rust` from its own two, which the \
+         old key had no room for",
+    );
+    assert_eq!(
+        fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(),
+        1,
+        "and what the one below it had spent is left where it was",
+    );
+
+    settle_wrap_up(
+        &pool,
+        id,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 42,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Checks {
+                repo_id: repo,
+                number: 41,
+            }),
+        "which is a settlement beside the one below it rather than over the top \
+         of it",
+    );
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(),
+        1,
+        "a database opened twice is rewritten once",
+    );
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap().len(),
+        6,
+        "and everything it had settled is still there",
+    );
 }
 
 /// A Conversation written before there was a Review role opens with the column
@@ -2223,5 +2893,243 @@ async fn the_sessions_of_before_keep_their_names_and_a_new_one_may_have_none() {
         "the session ran under a Profile with no name, so the record has none — \
          which reads as the harness and the model alone, exactly as a record \
          from before Verkstead wrote a name down does",
+    );
+}
+
+/// And a half-written steer from before Investigating was a target has no
+/// question written on it, which is what every slot of that form means empty.
+///
+/// The target arrives with the column, so there was never a form whose human
+/// could have picked it: the column's own emptiness is the whole of the rewrite,
+/// and the rest of what somebody had typed is exactly where they left it.
+#[tokio::test]
+async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    open_pending_steer(&pool, id).await.unwrap();
+
+    // An afternoon's typing on the targets that were there, which is what has to
+    // come back unchanged.
+    save_pending_steer(
+        &pool,
+        id,
+        &verkstead_store::PendingForm {
+            target: Some(Lifecycle::FollowUp),
+            follow_up: Some("Does it count the 429s it sends?".to_owned()),
+            ..verkstead_store::PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: there was no Investigating to steer into.
+    sqlx::query("ALTER TABLE pending_steers DROP COLUMN investigation")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let form = pending_steer(&pool, id).await.unwrap().expect(opening).form;
+
+        assert_eq!(
+            form.investigation, None,
+            "nobody could have asked for an investigation before there was one to ask for",
+        );
+        assert_eq!(
+            form.follow_up.as_deref(),
+            Some("Does it count the 429s it sends?"),
+            "and what they had written is where they left it",
+        );
+        assert_eq!(form.target, Some(Lifecycle::FollowUp));
+
+        pool.close().await;
+    }
+}
+
+/// A database whose pull requests carry a head branch and no base, which is what
+/// every one recorded before the chain was worth reading is.
+///
+/// The table is written out as the Verkstead that made it declared it — one row
+/// per Conversation, Repo and number, with the head written down and nothing
+/// saying what it merges into — and two pull requests of one repository put in
+/// it, which is the shape a stack leaves.
+async fn pull_requests_before_the_base_branch(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    sqlx::query("DROP TABLE pull_requests")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_requests (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             head_branch     TEXT,
+             UNIQUE (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (number, head) in [(41, "rate-limiting"), (42, "rate-limiting-2")] {
+        let (event_id,): (i64,) = sqlx::query_as(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, '2026-08-01T09:14:22.000Z', 'pull-request', '')
+             RETURNING id",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO pull_requests
+                 (event_id, conversation_id, repo_id, number, title, url, head_branch)
+             VALUES (?, ?, ?, ?, 'Rate limiting',
+                     'https://github.com/tobico/verkstead/pull/' || ?, ?)",
+        )
+        .bind(event_id)
+        .bind(id)
+        .bind(repo)
+        .bind(number)
+        .bind(number)
+        .bind(head)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+
+    (id, repo)
+}
+
+/// The column arrives empty and everything the table held is still there — and a
+/// repository whose rows say nothing about what sits on what reads in the order
+/// it was recorded in, which is the order it always read in.
+#[tokio::test]
+async fn pull_requests_recorded_before_the_base_branch_keep_what_they_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = pull_requests_before_the_base_branch(dir.path()).await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pull_requests(&pool, id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(_, opened)| (opened.number, opened.head, opened.base))
+                .collect::<Vec<_>>(),
+            [
+                (41, Some("rate-limiting".to_owned()), None),
+                (42, Some("rate-limiting-2".to_owned()), None),
+            ],
+            "{opening}, and both rows are where they were with the new column empty",
+        );
+
+        assert_eq!(
+            stack(&pool, id, repo)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|opened| opened.number)
+                .collect::<Vec<_>>(),
+            [41, 42],
+            "and rows that say nothing about the chain are read as they were recorded",
+        );
+
+        pool.close().await;
+    }
+}
+
+/// And a pull request recorded from here on writes its base down, beside the rows
+/// that never could.
+#[tokio::test]
+async fn a_pull_request_recorded_after_the_column_arrives_names_its_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = pull_requests_before_the_base_branch(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        record_another_pull_request(
+            &pool,
+            id,
+            repo,
+            &PullRequest {
+                number: 43,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/43".to_owned(),
+                head: Some("rate-limiting-3".to_owned()),
+                base: Some("rate-limiting-2".to_owned()),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+    );
+
+    assert_eq!(
+        pull_requests(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, opened)| (opened.number, opened.base))
+            .collect::<Vec<_>>(),
+        [
+            (41, None),
+            (42, None),
+            (43, Some("rate-limiting-2".to_owned())),
+        ],
     );
 }

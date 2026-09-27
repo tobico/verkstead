@@ -51,8 +51,9 @@ import type {
   FolderListing,
   GrillingStarted,
   OnboardingView,
-  OpenPullRequestRepo,
   PrefillView,
+  Process,
+  ProcessPicked,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -93,6 +94,7 @@ import type {
   Subscribed,
   Subscription,
   TakenUp,
+  TargetRecorded,
   TerminalClosed,
   TerminalOpened,
   TerminalsView,
@@ -277,22 +279,6 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
   return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
 }
 
-/// And the pull requests open in those Repos, each saying which Conversation
-/// already holds it.
-///
-/// One request for every registered Repo, because the server asks them in
-/// parallel and the browser waiting on six of them in turn would be six round
-/// trips to say what one can.
-///
-/// Slower than everything else this page reads — a `gh` per Repo, each of them
-/// a call to GitHub — so whatever draws it has something to show while it is on
-/// its way. A Repo that could not be asked is simply not in the answer: this
-/// never refuses, and an empty list means *nothing to wrap up here* rather than
-/// *something went wrong*.
-export function listOpenPullRequests(): Promise<OpenPullRequestRepo[]> {
-  return get<OpenPullRequestRepo[]>("/api/ui/open-pull-requests");
-}
-
 /// Start a Conversation to adopt one of those roadmaps with.
 ///
 /// What clicking a roadmap in the notice does. The stage is not sent: which one
@@ -309,36 +295,6 @@ export function startAdoption(
     // The branch the roadmap was found on, so the new Conversation starts
     // fixed to it. Empty is the default branch, which is what no base means.
     base: base || null,
-  });
-}
-
-/// And one to wrap one of those pull requests up with.
-///
-/// The whole row goes rather than its number, unlike the roadmap above: a
-/// roadmap is a document in the Conversation's own repository and is read back
-/// off it, where a pull request is GitHub's — and a server handed only a number
-/// would have to make a `gh` call of its own to name what the human is already
-/// looking at.
-///
-/// Nothing is checked out by this. It records and opens, and the take-up on the
-/// page it lands on is what touches git.
-export function startPullRequestAdoption(
-  repoId: number,
-  pull: {
-    number: number;
-    title: string;
-    url: string;
-    head: string;
-    base: string;
-  },
-): Promise<Started> {
-  return post<Started>("/api/ui/pull-request-adoptions", {
-    repo_id: repoId,
-    number: pull.number,
-    title: pull.title,
-    url: pull.url,
-    head: pull.head,
-    base: pull.base,
   });
 }
 
@@ -968,6 +924,22 @@ export function switchRepo(
     repo_id: repoId,
   });
 }
+
+/// Say what kind of work a drafting Conversation is for.
+///
+/// The Process and nothing else, the way the switch above it is a repo id and
+/// nothing else. Whether that Process can be started yet is the server's list to
+/// keep — a picker offering only the landed ones is a courtesy, and this route
+/// is reachable without one — so a refusal is another outcome to read here too.
+export function pickProcess(
+  id: number,
+  process: Process,
+): Promise<ProcessPicked> {
+  return post<ProcessPicked>(`/api/ui/conversations/${id}/process`, {
+    process,
+  });
+}
+
 /// Name the branch the work will be done on. Whether git would take the name is
 /// the server's to say, so this is another outcome to read rather than a status.
 export function renameBranch(
@@ -975,6 +947,22 @@ export function renameBranch(
   branch: string,
 ): Promise<BranchRenamed> {
   return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
+}
+
+/// Name what the work is pointed at — a pull request URL, a `#number` or a
+/// branch — or pass the empty string to take the name away.
+///
+/// A route of its own rather than the rename above it, and deliberately: that
+/// one asks git whether the string is a well-formed branch name, which a pull
+/// request URL is not. Which of the three this holds is decided at Start, so
+/// nothing here refuses it for its shape.
+export function nameTarget(
+  id: number,
+  target: string,
+): Promise<TargetRecorded> {
+  return post<TargetRecorded>(`/api/ui/conversations/${id}/target`, {
+    target,
+  });
 }
 
 /// Choose the branch the work comes off, or pass `null` to put the Conversation
@@ -1077,13 +1065,14 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
   return post<Adopted>(`/api/ui/conversations/${id}/adopt`, {});
 }
 
-/// And take up the pull request a conversation is holding: its head branch
-/// checked out, the pull request recorded, and the wrap-up running over it.
+/// And take up what a **Review** is pointed at, which is its Start: the Target
+/// field read, the branch checked out, the pull request recorded where there is
+/// one, and the wrap-up running over it.
 ///
 /// Nothing is sent here either, for the reason nothing is sent to adopt: which
-/// conversation is in the path, and what the branch is now is the repository's
-/// own answer — read when the button is pressed rather than taken from a page
-/// that read it a moment ago.
+/// conversation is in the path, and what the field names and what the branch is
+/// now are the record's and the repository's own answers — read when the button
+/// is pressed rather than taken from a page that read them a moment ago.
 export function takeUpPullRequest(id: number): Promise<TakenUp> {
   return post<TakenUp>(`/api/ui/conversations/${id}/take-up`, {});
 }
@@ -1291,16 +1280,15 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 
 /// Choose which account and model a conversation's grilling session runs under.
 ///
-/// `null` is the picker's own "No grilling" row, which is a choice like any
-/// other rather than the absence of one: the brief goes straight to an inline
-/// implementation.
+/// An account and nothing else: the picker has no row that is not one, *No
+/// grilling* having retired in favour of the Tinker process.
 export function chooseGrillingPairing(
   id: number,
-  choice: RoleChoice,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/grilling-pairing`,
-    choice,
+    pairing,
   );
 }
 

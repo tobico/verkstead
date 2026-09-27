@@ -61,6 +61,9 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
 /// too, being somewhere the human puts a Conversation whose work is already
 /// pushed — and it leads back into the wrap-up it came off.
+/// [`Lifecycle::Investigating`] is beside it the same way: a question about the
+/// code being answered rather than a rung the work climbs, and it leads back to
+/// wherever it was entered from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The Brief is being written, and with it everything else about the
@@ -86,6 +89,21 @@ pub enum Lifecycle {
     /// where it leads back to is Wrapping.
     FollowUp,
 
+    /// A question about the code is being answered: one session reading,
+    /// writing and running whatever it needs to find things out, in rounds of
+    /// Question Sets, and committing none of it.
+    ///
+    /// Off the ladder the way [`Self::FollowUp`] is, and for the same reason —
+    /// nothing is being built here, so there is no rung below it and none
+    /// above. Two ways in, a Start on an **Investigate** draft and a steer from
+    /// anywhere, and where it leads back to is where it came from: Done for an
+    /// Investigate Conversation of its own, and the state it was steered from
+    /// for one steered into it — Done again where that state is one nothing
+    /// returns to.
+    ///
+    /// See ADR-0020.
+    Investigating,
+
     /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
     /// opens a second round with a Brief of its own — see
     /// [`steer_conversation`].
@@ -106,6 +124,7 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::FollowUp => "follow-up",
+            Self::Investigating => "investigating",
             Self::Done => "done",
             Self::Closed => "closed",
         }
@@ -127,6 +146,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "follow-up" => Self::FollowUp,
+            "investigating" => Self::Investigating,
             "done" => Self::Done,
             "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
@@ -150,6 +170,78 @@ impl Lifecycle {
     /// guess — see [`load_conversation`], which still refuses.
     pub(crate) fn reads_as(word: &str, state: Self) -> bool {
         Self::read(word).is_ok_and(|read| read == state)
+    }
+}
+
+/// What kind of work a Conversation is for, and so which states it runs
+/// through.
+///
+/// [`Lifecycle`]'s pair rather than [`Direction`]'s: a fact of the
+/// Conversation's, picked before anything runs and frozen when the work starts,
+/// where a Direction rides a Question Set as a field of `Proposal` and so lives
+/// in the schema crate the agents write against. A Process is on no Set.
+///
+/// All five from the start, and all five can launch something now that Fix
+/// Merge Issues has landed: the record reads and writes every one of them, and
+/// what a stage adds is a start path and a row on the picker — never a variant.
+/// A store that held only what could be started would be one to migrate every
+/// time one more could.
+///
+/// See ADR-0020.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Process {
+    /// The ladder as it has always run, the interview included: Draft,
+    /// Grilling, Implementing, Wrapping, Done. Every new draft's default, and
+    /// the reading of every Conversation from before there were Processes.
+    Develop,
+
+    /// Questions about the code answered without changing it: Draft to
+    /// Investigating to Done, in a Worktree it is told to commit nothing from.
+    Investigate,
+
+    /// The wrap-up run over a pull request or a branch the Brief names: Draft
+    /// to Wrapping, reviewed. The Process a Conversation that adopted a pull
+    /// request already was, which is why that is how one reads.
+    Review,
+
+    /// Follow-up entered from a Draft: rounds on a fresh branch for as long as
+    /// the human wants, wrapping up where they left commits and finishing Done
+    /// where they left none.
+    Tinker,
+
+    /// A wrap-up narrowed to what GitHub refuses a merge for: Draft to
+    /// Wrapping with the review and the comments settled before it looks.
+    FixMergeIssues,
+}
+
+impl Process {
+    /// The word the column holds. Lowercase and spelled out, so the table reads
+    /// as something rather than as a number nobody can look up — exactly as
+    /// [`Lifecycle::stored`] is, and its own pair of functions rather than
+    /// serde for the same reason: what goes in a `TEXT` column is this module's
+    /// business.
+    pub(crate) fn stored(self) -> &'static str {
+        match self {
+            Self::Develop => "develop",
+            Self::Investigate => "investigate",
+            Self::Review => "review",
+            Self::Tinker => "tinker",
+            Self::FixMergeIssues => "fix-merge-issues",
+        }
+    }
+
+    /// The Process a stored word names. A word this does not know is a database
+    /// written by a Verkstead this one does not understand, which is worth
+    /// saying rather than guessing past — as an unknown state is.
+    pub(crate) fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "develop" => Self::Develop,
+            "investigate" => Self::Investigate,
+            "review" => Self::Review,
+            "tinker" => Self::Tinker,
+            "fix-merge-issues" => Self::FixMergeIssues,
+            other => bail!("a Conversation is running the unknown Process {other:?}"),
+        })
     }
 }
 
@@ -225,10 +317,11 @@ pub struct Conversation {
     /// The Profile and model the grilling session runs under, once they are
     /// chosen.
     ///
-    /// One of the two roles that can be picked away altogether — see
-    /// [`super::Picked`]. A Conversation whose human picked *no grilling* is
-    /// never grilled: its Brief goes straight to an inline implementation.
-    pub grilling_pairing: super::Picked,
+    /// A Pairing or nothing, there being no row to pick this role away with:
+    /// *No grilling* is retired, and a record written while it was there is read
+    /// as nothing chosen — exactly as a Repo's remembered skip is. Which is the
+    /// only way a skip can still be on one, nothing having written one since.
+    pub grilling_pairing: Option<super::Pairing>,
 
     /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
@@ -263,6 +356,16 @@ pub struct Conversation {
     /// proposal supersedes the one before it.
     pub direction: Option<Direction>,
 
+    /// And what kind of work it is for, which is the other half of that pair:
+    /// picked before anything runs, where a Direction is picked inside the
+    /// grilling — see [`Process`].
+    ///
+    /// Never optional. Every Conversation has a Process, including every one
+    /// started before there were any: where no row was written the reading
+    /// stands, which is Review for a Conversation holding a pull request and
+    /// Develop for every other — see [`process`].
+    pub process: Process,
+
     /// Which roadmap this Conversation is adopting, where it is adopting one.
     ///
     /// `None` is every Conversation started from the new-conversation box: they
@@ -271,14 +374,14 @@ pub struct Conversation {
     /// what is stored about the roadmap — see [`start_adoption`].
     pub adopting: Option<String>,
 
-    /// And which pull request it is holding, where it is holding one.
+    /// And what it is pointed at, where the human or the Brief has named
+    /// anything: a pull request URL, a `#number`, or a branch — see [`target`].
     ///
-    /// `None` for every Conversation but one started off the *Wrap up a pull
-    /// request* level, and never `Some` alongside [`Self::adopting`]: a
-    /// Conversation adopts one thing or none. What is inside is GitHub's own
-    /// reading of the pull request as it was listed — see
-    /// [`start_pull_request_adoption`].
-    pub adopting_pull_request: Option<AdoptedPullRequest>,
+    /// `None` is the field empty, which is every Conversation but a **Review**
+    /// somebody has named a target on. Which of the three it holds is decided
+    /// when it is read, at Start; nothing about the shape of it is settled
+    /// here.
+    pub target: Option<String>,
 
     /// The other registered Repos this Conversation works alongside, by the
     /// Repo's name — see [`super::companions`].
@@ -813,7 +916,13 @@ pub enum Chosen {
     NotDrafting,
 }
 
-/// What became of starting a Conversation grilling.
+/// What became of starting a Conversation's work — grilling it, or, on a
+/// **Tinker**, landing it in Follow-up, or, on an **Investigate**, landing it in
+/// Investigating.
+///
+/// One answer for all three landings, because they are the same record written
+/// with one word different: see [`start_grilling`], [`start_tinkering`] and
+/// [`start_investigating`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -865,6 +974,40 @@ pub enum Taking {
 
     /// It is past drafting, so something has taken it up already.
     NotDrafting,
+}
+
+/// Where a take-up leaves the Conversation it has just put on a branch.
+///
+/// The one thing the two kinds of target differ over down here, and they differ
+/// because of what follows the write. A pull request is *recorded* next, and that
+/// record is the move every wrapping Conversation comes through — see
+/// [`super::record_pull_request`] — so a take-up over one stops a step short and
+/// leaves the state alone. A bare branch has no pull request to record and
+/// nothing else would ever move it, so the move is made here, inside the same
+/// transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landing {
+    /// Drafting still, because recording the pull request is the move — which is
+    /// the very next thing the caller does.
+    Drafting,
+
+    /// Wrapping, with the move on the Timeline: there is no pull request to come
+    /// through the other door.
+    Wrapping,
+}
+
+/// How a take-up enters the wrap-up that follows it.
+///
+/// Two facts about the one moment, which is why they travel together: where the
+/// take-up leaves the Conversation, and what the wrap-up it is entering has
+/// already settled.
+pub struct Entering<'a> {
+    /// Which door this is — see [`Landing`].
+    pub landing: Landing,
+
+    /// And what that wrap-up has settled before it looks, which is empty for
+    /// every Process but one — see [`take_up`].
+    pub settled: &'a [super::WaitingOn],
 }
 
 /// What became of a direction picked on a wrap-up proposal.
@@ -929,7 +1072,13 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
-/// What became of landing a follow-up back in the wrap-up it was opened over.
+/// What became of landing a follow-up, which is one of two places.
+///
+/// Two of them because a follow-up is reached two ways. One steered into is
+/// something taken up about work that is already on a pull request, and it goes
+/// back to the wrap-up it was opened over; a **Tinker** starts straight into one
+/// on a branch nobody has opened anything on, and there what the branch holds is
+/// what decides. See [`follow_up_over`] and [`follow_up_done`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
     /// Landed: the Conversation is wrapping up again and the move is on its
@@ -937,10 +1086,39 @@ pub enum Ending {
     /// pushed anything.
     Wrapped,
 
+    /// Landed the other way: the Conversation is Done and the move is on its
+    /// Timeline, nothing having been built for a wrap-up to be about.
+    Finished,
+
     /// It is not following anything up, so there is no follow-up here to end —
     /// closed out from under the session, or steered somewhere else while this
     /// was deciding.
     NotFollowingUp,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of ending an investigation, which is one move to wherever the
+/// investigation came from.
+///
+/// One variant for the landing rather than one apiece, which is where this parts
+/// from [`Ending`] beside it: a follow-up is reached two ways and so lands in one
+/// of two places, and an investigation goes back to the state it was steered out
+/// of — any state there is, and Done for one that was steered out of nowhere. So
+/// the landing is the caller's word rather than something read back off the
+/// outcome. See [`investigation_over`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Investigated {
+    /// Landed: the Conversation is in the state it was sent to and the move is
+    /// on its Timeline, with its Worktree left exactly as the investigation
+    /// left it.
+    Landed,
+
+    /// It is not investigating anything, so there is no investigation here to
+    /// end — closed out from under the session, or steered somewhere else while
+    /// this was deciding.
+    NotInvestigating,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -1113,6 +1291,49 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the directions table")?;
+
+    // And what kind of work the Conversation is for: its Process, picked on the
+    // composer before anything runs. A table of its own for the reason the
+    // direction is one — there is no migration machinery here and
+    // `conversations` is STRICT and left alone — and it needs none besides: a
+    // database written before this arrives with the table empty, and a
+    // Conversation with no row of its own is read rather than backfilled. See
+    // [`process`], and ADR-0020 for why a Process is beside a Direction rather
+    // than folded into it.
+    //
+    // One Process per Conversation by the primary key, and a pick replaces
+    // whatever was there — the upsert the direction is written through.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS processes (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             process         TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the processes table")?;
+
+    // And what the work is pointed at, where the Process is one that takes a
+    // target: a pull request URL, a `#number` or a branch. A table of its own
+    // for the reason the Process beside it is one — there is no migration
+    // machinery here and `conversations` is STRICT and left alone — and a
+    // Conversation with nothing named has no row, which is the state every one
+    // of them starts in. See [`target`].
+    //
+    // Not the branch name re-used, though both are strings naming something in
+    // git. The branch field says what *this* Conversation's branch is called
+    // and is checked against `git check-ref-format`, which refuses a pull
+    // request URL over its colon; this says which work to take up and is read
+    // once, at Start. See ADR-0020.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS targets (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             target          TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the targets table")?;
 
     // What a roadmap stage's branch was put on top of, where it was put on top
     // of anything. A table of its own for the reason the direction is one, and
@@ -1389,43 +1610,14 @@ pub async fn start_adoption(
     .await
 }
 
-/// Start a Conversation holding `pull_request` against a registered Repo, on
-/// `branch`, with an empty Brief already in its Timeline.
+/// The pull request a Conversation is taking up, as `gh` answered about it.
 ///
-/// The roadmap start's sibling, and the same Conversation underneath: a Draft
-/// with one thing more written about it, which is what puts its page on the
-/// shape that names a pull request instead of asking for a branch. What is
-/// written down is what GitHub said when the row was listed — see
-/// [`AdoptedPullRequest`] — and it is written down rather than read again
-/// because reading it again is a `gh` per registered Repo.
-///
-/// Whether the branch is still there, whether it has moved and whether anything
-/// else is standing on it are questions about a repository *now*, and the
-/// take-up is where they are asked. Nothing here touches git at all.
-pub async fn start_pull_request_adoption(
-    pool: &SqlitePool,
-    repo_id: i64,
-    branch: &str,
-    pull_request: &AdoptedPullRequest,
-) -> Result<Option<i64>> {
-    started(
-        pool,
-        repo_id,
-        branch,
-        Named::Prefilled,
-        Adopts::PullRequest(pull_request),
-    )
-    .await
-}
-
-/// The pull request a drafting Conversation is holding, as it was listed.
-///
-/// GitHub's own five facts and nothing of Verkstead's: this is what a row off
-/// the *Wrap up a pull request* level said, carried through the create and kept
-/// until the take-up records the pull request properly — see
-/// [`super::take_up`], which reads the head branch out of git rather than out
-/// of here. What the take-up does take from this is the two facts git cannot
-/// answer: what the pull request is called and where it is.
+/// GitHub's own five facts and nothing of Verkstead's: what the press asked for
+/// and got back, written down by [`hold_pull_request`] and kept for the whole of
+/// the Conversation's life — it is what [`process`] reads a **Review** back off,
+/// and it is what a Draft from before there were Processes is still pointed at.
+/// What the take-up itself takes from it is the two facts git cannot answer:
+/// what the pull request is called and where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptedPullRequest {
     /// The number GitHub gave it, which is what everybody calls it by — in this
@@ -1450,9 +1642,9 @@ pub struct AdoptedPullRequest {
 /// What a Conversation is being started to adopt, where it is being started to
 /// adopt anything.
 ///
-/// Three cases rather than two `Option`s, because a Conversation adopts one
-/// thing or none: a pair of arguments would let a caller ask for both, and the
-/// row that came back would be a Draft drawn on two pages at once.
+/// Two cases rather than an `Option`, because what is being adopted decides what
+/// else the start writes: a named case is one more row in the same transaction,
+/// and a caller cannot ask for a roadmap and leave the name out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Adopts<'a> {
     /// The ordinary Conversation, which begins with a Brief and a grilling.
@@ -1460,9 +1652,6 @@ enum Adopts<'a> {
 
     /// A roadmap, by its directory name under `docs/roadmaps/`.
     Roadmap(&'a str),
-
-    /// Or a pull request that is already open, as GitHub listed it.
-    PullRequest(&'a AdoptedPullRequest),
 }
 
 /// Whose the branch name a Conversation is started on is.
@@ -1553,22 +1742,6 @@ async fn started(
                 .execute(&mut *tx)
                 .await
                 .with_context(|| format!("recording what Conversation {id} is adopting"))?;
-        }
-        Adopts::PullRequest(pull_request) => {
-            sqlx::query(
-                "INSERT INTO pull_request_adoptions
-                     (conversation_id, number, title, url, head, base)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-            )
-            .bind(id)
-            .bind(pull_request.number)
-            .bind(&pull_request.title)
-            .bind(&pull_request.url)
-            .bind(&pull_request.head)
-            .bind(&pull_request.base)
-            .execute(&mut *tx)
-            .await
-            .with_context(|| format!("recording the pull request Conversation {id} is holding"))?;
         }
     }
 
@@ -1930,14 +2103,15 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         base_ref: base_ref.filter(|named| !named.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
+        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
         review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
+        process: process(pool, id).await?,
         adopting: adopting(pool, id).await?,
-        adopting_pull_request: adopted_pull_request(pool, id).await?,
+        target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
     }))
 }
@@ -2231,6 +2405,186 @@ async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
     row.map(|(word,)| direction_read(&word)).transpose()
 }
 
+/// What kind of work a Conversation is for.
+///
+/// A Process rather than an optional one, because every Conversation has one:
+/// where no row was ever written the reading stands, and the reading is the
+/// whole of how Conversations from before there were Processes are covered.
+/// Nothing is backfilled — a row is written into none of them, and the same
+/// rule answers for whichever kind of row a Conversation happens to lack.
+///
+/// **Review where it is holding a pull-request adoption**, that being the
+/// Process its path already was: a Conversation started off *Wrap up a pull
+/// request* went Draft to Wrapping over somebody else's branch, which is what
+/// Review is. **Develop otherwise**, that being the one ladder there was.
+///
+/// The adoption row is the right thing to ask because it is never taken away:
+/// the take-up supersedes it by recording the pull request properly and leaves
+/// it where it is, so it goes on saying what the Conversation was started as
+/// for the whole of its life.
+pub async fn process(pool: &SqlitePool, id: i64) -> Result<Process> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT process FROM processes WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the Process of Conversation {id}"))?;
+
+    if let Some((word,)) = row {
+        return Process::read(&word);
+    }
+
+    Ok(match adopted_pull_request(pool, id).await? {
+        Some(_) => Process::Review,
+        None => Process::Develop,
+    })
+}
+
+/// Pick a drafting Conversation's Process.
+///
+/// Refused off the same two questions the branch name and the base commit are —
+/// where the Conversation has got to, and whether its branch has been made.
+/// Which is the whole of how a Process is frozen at Start: nothing is written
+/// when the work begins, and from the moment there is a worktree there is no
+/// way left to change it. A row means somebody picked; no row means the reading
+/// stands.
+///
+/// Which Processes can actually be *started* is not this function's question.
+/// The record reads and writes all five — see [`Process`] — and whether the one
+/// picked has a start path behind it yet is the server's list to keep.
+///
+/// The upsert [`pick_direction`] makes, for the same reason: one Process per
+/// Conversation by the primary key, and a second pick is the human changing
+/// their mind rather than a second Process.
+pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result<Edited> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
+    }
+
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET process = excluded.process",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .execute(pool)
+    .await
+    .with_context(|| format!("recording the Process picked on Conversation {id}"))?;
+
+    Ok(Edited::Saved)
+}
+
+/// What the work is pointed at, where anything has been named: the **Target**
+/// field, as it stands.
+///
+/// A string and nothing else. Which of the three things it holds — a pull
+/// request URL, a `#number`, a branch — is decided by whoever reads it, and the
+/// one reader that decides is the press: see the server's own `take_up`. The
+/// record keeps what was typed.
+///
+/// `None` is the field empty, which is no row: nothing is written until
+/// somebody types something or a Brief fills it, and clearing it takes the row
+/// away again.
+///
+/// **Except where a pull-request adoption is all there is**, which is a Draft
+/// from before there were Processes: it was started off the retired *Wrap up a
+/// pull request* level and pointed by the row that was pressed rather than by a
+/// field, and it reads as a [`Process::Review`] for that reason. So its target
+/// is that pull request's own URL — where nothing else names one, the field
+/// staying the human's the moment they type in it. One reading rather than a
+/// case in every reader: the page draws the field, Start resolves it and
+/// readiness counts it, all off this.
+pub async fn target(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT target FROM targets WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading what Conversation {id} is pointed at"))?;
+
+    if let Some((target,)) = row {
+        return Ok(Some(target));
+    }
+
+    Ok(adopted_pull_request(pool, id).await?.map(|held| held.url))
+}
+
+/// Name what a drafting Conversation is pointed at, or take the name away.
+///
+/// Refused off the two questions the branch name and the Process are — where
+/// the Conversation has got to, and whether its branch has been made — because
+/// it is the same kind of fact: a Draft's to change, and settled for good from
+/// the moment there is a worktree to read it in.
+///
+/// `None` is the field cleared rather than a target called nothing, and it
+/// drops the row: an empty string and no row are the same state, and keeping
+/// one would be two spellings of it.
+///
+/// Nothing here has an opinion on what the string *is*. A branch that is not on
+/// origin and a URL of another repository are both refused at the press, where
+/// there is a GitHub and a git to ask; this is a field being typed into.
+pub async fn set_target(pool: &SqlitePool, id: i64, target: Option<&str>) -> Result<Edited> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
+    }
+
+    match target {
+        Some(target) => {
+            sqlx::query(
+                "INSERT INTO targets (conversation_id, target) VALUES (?, ?)
+                 ON CONFLICT (conversation_id) DO UPDATE SET target = excluded.target",
+            )
+            .bind(id)
+            .bind(target)
+            .execute(pool)
+            .await
+            .with_context(|| format!("recording what Conversation {id} is pointed at"))?;
+        }
+        None => {
+            sqlx::query("DELETE FROM targets WHERE conversation_id = ?")
+                .bind(id)
+                .execute(pool)
+                .await
+                .with_context(|| format!("clearing what Conversation {id} is pointed at"))?;
+        }
+    }
+
+    Ok(Edited::Saved)
+}
+
+/// Fill an empty Target, and leave a filled one exactly as it is.
+///
+/// What a saved Brief does with the pull request its prose names. The human's
+/// own typing is never overwritten — a branch somebody named survives a URL
+/// arriving in the Brief afterwards — so this is the insert that does nothing
+/// where there is a row, rather than a read followed by a write that could race
+/// the keystroke between them.
+///
+/// Refused for nothing, and asked only where a Brief has just been saved: that
+/// save is refused past drafting, so a Conversation this is reached for is one
+/// whose Target is still its own to change.
+pub async fn fill_target(pool: &SqlitePool, id: i64, target: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO targets (conversation_id, target) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(target)
+    .execute(pool)
+    .await
+    .with_context(|| format!("filling the Target of Conversation {id} out of its Brief"))?;
+
+    Ok(())
+}
+
 /// Which roadmap a Conversation is adopting, where it is adopting one.
 ///
 /// A read of its own beside the row, as the worktree and the direction are:
@@ -2275,6 +2629,52 @@ pub async fn adopted_pull_request(
             base,
         }),
     )
+}
+
+/// Write down the pull request a Conversation is taking up.
+///
+/// The row the retired *Wrap up a pull request* level wrote when a pull request
+/// was loaded off a menu, written at the press instead: a **Review** names its
+/// target in its own field, and what GitHub answered about it is not known until
+/// the press asks. Which makes this row two things rather than bookkeeping — it is
+/// what
+/// lets a Draft through the one door into Wrapping (see
+/// [`super::record_pull_request`]), and it is what a Conversation's Process is
+/// read back as for the whole of its life (see [`process`]).
+///
+/// An upsert, for [`set_process`]'s reason: one pull request per Conversation
+/// by the primary key, and a press that ran again over a take-up that refused
+/// partway is the same Conversation taking up whatever it names now.
+///
+/// Nothing is refused for. What may be taken up is the caller's question and is
+/// settled long before this — a Conversation past drafting has a worktree, and
+/// the move this row is written for is what refuses a second one.
+pub async fn hold_pull_request(
+    pool: &SqlitePool,
+    id: i64,
+    pull_request: &AdoptedPullRequest,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO pull_request_adoptions (conversation_id, number, title, url, head, base)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET
+             number = excluded.number,
+             title  = excluded.title,
+             url    = excluded.url,
+             head   = excluded.head,
+             base   = excluded.base",
+    )
+    .bind(id)
+    .bind(pull_request.number)
+    .bind(&pull_request.title)
+    .bind(&pull_request.url)
+    .bind(&pull_request.head)
+    .bind(&pull_request.base)
+    .execute(pool)
+    .await
+    .with_context(|| format!("recording the pull request Conversation {id} is taking up"))?;
+
+    Ok(())
 }
 
 /// Which of the three roles a Pairing is being chosen for.
@@ -2353,16 +2753,6 @@ pub async fn set_review_pairing(
 /// will launch.
 pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
     skip(pool, id, Role::Review).await
-}
-
-/// And the row that says there is to be no grilling at all.
-///
-/// The same choice one role along, and it says more than the review one does:
-/// what a Conversation that picked it starts is an inline implementation on the
-/// Brief, so the press that would have begun an interview begins the work — see
-/// [`start_building`].
-pub async fn skip_grilling(pool: &SqlitePool, id: i64) -> Result<Chosen> {
-    skip(pool, id, Role::Grilling).await
 }
 
 /// Record that a role runs no session at all.
@@ -3342,11 +3732,6 @@ pub enum Switched {
     /// roadmap.
     Adopting,
 
-    /// It is holding a pull request, and a pull request is a branch in the
-    /// repository it was opened in: moving the work would leave it holding a
-    /// number that means something else over there, or nothing at all.
-    HoldingPullRequest,
-
     /// There is no Repo with that id on the registry.
     NoSuchRepo,
 }
@@ -3368,6 +3753,17 @@ pub enum Switched {
 /// adoption is in was settled by the row that started it rather than by the
 /// human, so it is not theirs to change afterwards; what is, is putting the
 /// roadmap down and composing work of their own.
+///
+/// **And off nothing about what it is pointed at**, unlike an adoption. A
+/// **Review**'s Target is a string the human owns, and what it means follows the
+/// Repo the way the field's own rule says it does: a bare `#41` is the number of
+/// whichever repository it is read in, and a URL naming a repository this Repo's
+/// origin is not is refused at Start by name — see the server's `resolve`. So a
+/// Draft from before there were Processes, which is pointed at a pull request by
+/// the row that made it rather than by a field, moves like any other and is told
+/// at the press if the move made its target somebody else's. Refusing here would
+/// be a control the panel cannot draw as refused: nothing on the wire tells that
+/// Draft apart from a Review somebody typed the same URL into.
 ///
 /// Three things follow from the move, and they are here rather than in the
 /// caller because a Conversation between them would be one nothing could read:
@@ -3394,15 +3790,6 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
 
     if adopting(pool, id).await?.is_some() {
         return Ok(Switched::Adopting);
-    }
-
-    // And the same fact about the other thing a Draft adopts. A pull request is
-    // a number in one repository — `#41` names something else in the next one
-    // along, or nothing — so which repository it is in was settled by the row
-    // that started the Conversation rather than by the human, exactly as a
-    // roadmap's was.
-    if adopted_pull_request(pool, id).await?.is_some() {
-        return Ok(Switched::HoldingPullRequest);
     }
 
     // On the registry rather than merely in the table, for the reason a
@@ -3543,31 +3930,13 @@ impl<'a> From<&'a String> for Base<'a> {
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
+///
+/// **Three landings, and which of them is the Conversation's Process's** — see
+/// [`start_tinkering`] and [`start_investigating`] below, which write this same
+/// transaction and leave the Conversation in Follow-up and in Investigating.
+/// Everything the server did against git before calling any of them is the same
+/// work, so the record of it is the same record.
 pub async fn start_grilling<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(pool, id, base.into(), worktree, companions, None).await
-}
-
-/// And the same start on a Conversation whose human picked *no grilling*: the
-/// branch, the worktree, the base commit and the memory exactly as above, and
-/// the Conversation lands Implementing rather than Grilling.
-///
-/// One press, two landings, and which of them is a fact about what was picked
-/// rather than a second kind of start — see [`skip_grilling`]. Everything the
-/// server did against git before calling either is the same work, so the record
-/// of it is the same record.
-///
-/// The direction goes down with the move, because there is no grilling left to
-/// propose one: what a Brief taken straight to the work is, is an inline
-/// implementation, and a Conversation implementing with no direction is a record
-/// nothing could resume — see [`pick_direction`], which is how the other way in
-/// writes the same row.
-pub async fn start_building<'a>(
     pool: &SqlitePool,
     id: i64,
     base: impl Into<Base<'a>>,
@@ -3577,34 +3946,82 @@ pub async fn start_building<'a>(
     start(
         pool,
         id,
+        Lifecycle::Grilling,
         base.into(),
         worktree,
         companions,
-        Some(Direction::Inline),
     )
     .await
 }
 
-/// What the two of them do, which is the same thing but for where it leaves the
-/// Conversation.
+/// And the same start on a **Tinker** Conversation, which lands in Follow-up.
 ///
-/// `building` is the direction a start that skips the grilling records, and its
-/// being there is also what says which state to land in: a start with a
-/// direction has nothing to grill and is already building.
+/// One press, two landings, and which of them is a fact about the Process
+/// rather than a second kind of start: the base commit, the worktree, the
+/// companions, the naming and the Repo's memory are written exactly as they are
+/// above. What differs is the state it comes out in — a Tinker is never
+/// interviewed, so there is no grilling for it to land in — and the session the
+/// server starts once this has been written.
+pub async fn start_tinkering<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::FollowUp,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// And the same start on an **Investigate** Conversation, which lands in
+/// Investigating.
+///
+/// The third landing of the one press, and written for [`start_tinkering`]'s
+/// reason: everything the server did against git before calling it is the same
+/// work, so the record of it is the same record. What differs is the state it
+/// comes out in — an investigation answers a question about the code rather
+/// than building anything, so there is neither a grilling nor a follow-up for it
+/// to land in — and the session the server starts once this has been written.
+pub async fn start_investigating<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        Lifecycle::Investigating,
+        base.into(),
+        worktree,
+        companions,
+    )
+    .await
+}
+
+/// What the three of them do, which is the same thing but for where it leaves
+/// the Conversation.
+///
+/// `landing` is the whole of what the Process decides here. Everything else is
+/// written the same way whichever press asked, because it is the same work being
+/// recorded.
 async fn start(
     pool: &SqlitePool,
     id: i64,
+    landing: Lifecycle,
     base: Base<'_>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
-    building: Option<Direction>,
 ) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
-
-    let landing = match building {
-        Some(_) => Lifecycle::Implementing,
-        None => Lifecycle::Grilling,
-    };
 
     let mut tx = super::writing(pool, "starting a Conversation's work").await?;
 
@@ -3638,19 +4055,7 @@ async fn start(
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("moving Conversation {id} to {landing:?}"))?;
-
-    if let Some(direction) = building {
-        sqlx::query(
-            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
-             ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
-        )
-        .bind(id)
-        .bind(direction_stored(direction))
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("recording how Conversation {id}'s work is being built"))?;
-    }
+    .with_context(|| format!("moving Conversation {id} to {}", landing.stored()))?;
 
     // Written over whatever is there rather than inserted: a record that somehow
     // holds a worktree already is corrected to the one just made, where an
@@ -3948,11 +4353,12 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// Land a follow-up back in the wrap-up it was opened over, because the human
 /// has said there is nothing else.
 ///
-/// The way out of Follow-up, and the only one there is short of a steer. A
-/// follow-up is something taken up about work that is already on a pull request,
-/// so where it ends is where it started: the wrap-up carries on over whatever
-/// the branch now holds, and *back to Done* is that wrap-up's own settling rule
-/// rather than anything decided here — see [`finish_wrap_up`].
+/// One of the two ways out of Follow-up short of a steer, and the one a
+/// follow-up steered into takes. It is something taken up about work that is
+/// already on a pull request, so where it ends is where it started: the wrap-up
+/// carries on over whatever the branch now holds, and *back to Done* is that
+/// wrap-up's own settling rule rather than anything decided here — see
+/// [`finish_wrap_up`]. The other way is [`follow_up_done`].
 ///
 /// Refused for anything but Follow-up, as every move here is refused outside the
 /// state it leaves: a Conversation closed or steered out from under the session
@@ -3977,6 +4383,42 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// One transaction, as every move is: a Conversation that says Wrapping always
 /// has the move on its Timeline to say when it got there.
 pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Wrapping, pushed).await
+}
+
+/// And land one in Done, because the branch it was following up on holds nothing.
+///
+/// The second way out of Follow-up, and a **Tinker**'s where its rounds built
+/// nothing at all: there is no pull request to carry the work to and no work to
+/// carry, so there is nothing for a wrap-up to be about. The Worktree stays as it
+/// is, as it does for any Done Conversation.
+///
+/// Which of the two a Tinker takes is read off its branch at the ending rather
+/// than off anything in the record — see `crate::runner`, which asks git once and
+/// calls the one that fits. Nothing here decides it, exactly as nothing here
+/// decides which state a start lands in.
+///
+/// No `pushed`, because there is nothing to have pushed to: a Conversation that
+/// gets here is on no pull request, so there are no checks to put back to
+/// waiting.
+///
+/// Refused for anything but Follow-up, and one transaction, for
+/// [`follow_up_over`]'s reasons.
+pub async fn follow_up_done(pool: &SqlitePool, id: i64) -> Result<Ending> {
+    out_of_follow_up(pool, id, Lifecycle::Done, false).await
+}
+
+/// What the two of them do, which is the same move to different states.
+///
+/// `landing` is the whole of what the caller decides here, as it is for a start
+/// — see [`start`]. `pushed` only ever means anything on the way to Wrapping,
+/// there being no settle to unsettle anywhere else.
+async fn out_of_follow_up(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+    pushed: bool,
+) -> Result<Ending> {
     let mut tx = super::writing(pool, "ending a follow-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -3995,34 +4437,103 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
 
     if pushed {
         // Every pull request the work ended up on, rather than the one. A
-        // Conversation ends on one per repository it was worked in and each has
-        // a suite of its own, so a follow-up that pushed is a wrap-up whose
-        // checks are all of them running again — and one left settled would be a
-        // wrap-up finishing on a green nobody re-earned.
-        let opened: Vec<(i64,)> =
-            sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+        // Conversation ends on one per repository it was worked in and as many in
+        // one repository as its stack is deep, each with a suite of its own, so a
+        // follow-up that pushed is a wrap-up whose checks are all of them running
+        // again — and one left settled would be a wrap-up finishing on a green
+        // nobody re-earned.
+        let opened: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT repo_id, number FROM pull_requests WHERE conversation_id = ?")
                 .bind(id)
                 .fetch_all(&mut *tx)
                 .await
                 .with_context(|| format!("reading which pull requests Conversation {id} is on"))?;
 
-        for (repo_id,) in opened {
-            super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks(repo_id)).await?;
+        for (repo_id, number) in opened {
+            super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks { repo_id, number })
+                .await?;
         }
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Wrapping.stored())
+        .bind(landing.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+        .with_context(|| format!("moving Conversation {id} out of following up"))?;
 
-    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    moved(&mut tx, id, landing).await?;
 
     tx.commit().await.context("ending a follow-up")?;
 
-    Ok(Ending::Wrapped)
+    Ok(match landing {
+        Lifecycle::Wrapping => Ending::Wrapped,
+        _ => Ending::Finished,
+    })
+}
+
+/// End an investigation, because the human has said there is nothing else they
+/// want found out.
+///
+/// The move and the line on the Timeline are the whole of it. An investigation
+/// answers a question about the code and writes nothing down on the branch, so
+/// there is no pull request to carry anything to and nothing for a wrap-up to be
+/// about — and its Worktree stays as it is, whatever scratch the session left in
+/// it being the scratch every Set's Diff has already shown.
+///
+/// **`landing` is the whole of what the caller decides here**, the way it is for
+/// a start and for the two ways out of a follow-up — see [`follow_up_over`] and
+/// [`follow_up_done`], which share one move with the state as the word that
+/// differs.
+/// Where an investigation goes is where it came from: the state the steer that
+/// opened it found the Conversation in, or Done for one that no steer opened.
+/// Nothing here works that out, and nothing here is in a position to: it is a
+/// fact recorded beside the Steer Event — see [`super::SteerRecord::source`].
+///
+/// Refused for anything but Investigating, as every move here is refused outside
+/// the state it leaves: a Conversation closed or steered out from under the
+/// session is not one to finish.
+///
+/// No `pushed`, and **no settles put back to waiting on the way to Wrapping**,
+/// which is where this parts from a follow-up landing in one: an investigation
+/// commits nothing and pushes nothing, so it has given GitHub no new run to make
+/// up its mind about and the settle standing over the checks is still earned.
+///
+/// One transaction, as every move is: a Conversation that says it has moved
+/// always has the move on its Timeline to say when it got there.
+pub async fn investigation_over(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Lifecycle,
+) -> Result<Investigated> {
+    let mut tx = super::writing(pool, "ending an investigation").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Investigated::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Investigating {
+        return Ok(Investigated::NotInvestigating);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(landing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} out of investigating"))?;
+
+    moved(&mut tx, id, landing).await?;
+
+    tx.commit().await.context("ending an investigation")?;
+
+    Ok(Investigated::Landed)
 }
 
 /// Send a Done Conversation back to wrapping up, because the human pressed
@@ -4100,8 +4611,9 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
         return Ok(Resolving::NothingConflicts);
     }
 
-    for repo_id in conflicted {
-        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable(repo_id)).await?;
+    for (repo_id, number) in conflicted {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable { repo_id, number })
+            .await?;
     }
 
     let pressed = Event::ResolveConflicts;
@@ -4164,6 +4676,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 /// the move on its Timeline to say when it got there, and one steered always has
 /// the human's own line above it.
 ///
+/// **And the state it was steered out of**, beside the Steer Event, in a table
+/// of its own: where the work went is the Event's, and where it came from would
+/// be nowhere the moment the state column is written over. Which is what an
+/// Investigating steered into reads at its ending to know where to go back to —
+/// see [`super::steers::came_from`], which is called before the move for that
+/// reason, and [`super::SteerRecord::source`], which is where it reads back.
+///
 /// **And the Pairing the human picked, where they picked one.** In the same
 /// transaction as the move, because it is the same act: steering re-settles what
 /// runs the work rather than picking for one session, and a Conversation that
@@ -4223,6 +4742,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         checkouts,
         said,
         recorded,
+        scratch,
     } = steer;
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
@@ -4257,6 +4777,14 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // just written it rather than looked up afterwards: two steers landing in
     // the same millisecond are told apart by their ids and by nothing else.
     let steered = landed.last_insert_rowid();
+
+    // And where the work came from, beside that Event. Before the move rather
+    // than after it, because what it writes down is the state column as the
+    // steer found it — see [`super::steers::came_from`], which selects it in the
+    // statement that records it. Where the work *went* is the Steer's own target;
+    // where it came from is nowhere else at all once the update below has run,
+    // and an Investigating steered into ends by going back to it.
+    super::steers::came_from(&mut tx, steered, id).await?;
 
     // And what came into the sandbox with it, directly under the human's own
     // line. The Steer says a person moved this; this says which repositories
@@ -4359,7 +4887,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // for the reason the Worktree above is — a Steer Event that said where the
     // work went without saying what was picked to run it would be half an
     // account of one press, and nothing could tell which half.
-    super::steers::record(&mut tx, steered, id, recorded, companions, opened).await?;
+    super::steers::record(&mut tx, steered, id, recorded, companions, opened, scratch).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -4566,6 +5094,16 @@ pub struct Steer<'a> {
     /// the same list — and a second copy on the submit would be two shapes to
     /// keep true about one press. See [`super::SteerRecord`].
     pub recorded: super::steers::Recorded<'a>,
+
+    /// And what each checkout already held uncommitted, read off the checkouts
+    /// as the submit lands rather than written by anybody.
+    ///
+    /// Empty on every steer but one into Investigating, which is the one target
+    /// whose ending has to put a Worktree back to what it found: an investigation
+    /// leaves its probes behind by instruction, and the only way to take those
+    /// away without taking away work that was already uncommitted is to have
+    /// written down which was which. See [`super::Scratch`].
+    pub scratch: &'a [super::Scratch<'a>],
 }
 
 /// A Pairing a steer settles: which of the roles, and both halves of the
@@ -4883,30 +5421,45 @@ pub async fn start_stage<'a>(
     Ok(Staged::Started)
 }
 
-/// Put a Draft holding a pull request on that pull request's branch: the branch
-/// it is on, the head it was taken up at, the branch GitHub says it goes into,
-/// and where the whole of it is checked out.
+/// Put a Draft on the branch it is taking up: the branch it is on, the head it
+/// was taken up at, the branch it goes into, and where the whole of it is
+/// checked out.
 ///
 /// [`start_stage`]'s sibling over the other kind of thing a Draft takes up, and
-/// it stops one step short of it: the state is left alone here, because
-/// recording the pull request is what moves this Conversation — see
+/// where it leaves the Conversation is `landing`'s to say — see [`Landing`],
+/// which is the whole of what a pull request and a bare branch differ over here.
+/// Over a pull request it stops one step short of a move, because recording that
+/// pull request is what moves this Conversation — see
 /// [`super::record_pull_request`], which is the very next thing the take-up
 /// does. A Conversation that arrived in Wrapping by its own finish step was
 /// moved by that same record, and a take-up is that ending reached by the other
-/// door rather than a second kind of move.
+/// door rather than a second kind of move. Over a branch there is no such record
+/// to come, so the move is made here.
 ///
-/// `base` is the pull request's head at take-up with GitHub's base branch beside
-/// it, which is deliberately not the pair every other start writes. The commit
-/// is the branch's own tip rather than what it came off, so that the sweep draws
-/// only what Verkstead adds from here — the pull request's own commits are the
-/// pull request's record. The name beside it is the branch the pull request
-/// merges into, which is what a conflict is measured against.
+/// `base` is the head at take-up with the branch it goes into beside it, which is
+/// deliberately not the pair every other start writes. The commit is the
+/// branch's own tip rather than what it came off, so that the sweep draws only
+/// what Verkstead adds from here — what is on the branch already is somebody
+/// else's record. The name beside it is GitHub's base branch where there is a
+/// pull request to give one, and the base the human picked where there is not,
+/// that being what its pull request will be opened against.
 ///
 /// No direction is written, unlike a stage's. There is no backlog and no inline
 /// run here: the work is built, and what follows this is a wrap-up.
 ///
 /// `companions` is where the companion repos the human configured while this
 /// drafted were checked out, in this transaction for [`start_stage`]'s reason.
+///
+/// `entering` is where this leaves the Conversation and what the wrap-up it is
+/// entering has settled before it looks — see [`Entering`]. What is settled is
+/// nothing at all for every Process but one: a **Fix Merge Issues** enters with
+/// the review and its pull request's comments settled, a wrap-up narrowed to what
+/// GitHub refuses a merge for, and they are written *here* rather than after the
+/// move, whichever door this is. Over a bare branch this transaction is the move,
+/// and over a pull request it is the transaction before the one that makes it, so
+/// a sweep or a restart never finds a wrapping Conversation that has not got them
+/// yet. The resolve press is the precedent, entering Wrapping with the review's
+/// settle standing and the merge put back to waiting — see [`resolve_conflicts`].
 pub async fn take_up<'a>(
     pool: &SqlitePool,
     id: i64,
@@ -4914,7 +5467,10 @@ pub async fn take_up<'a>(
     base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
+    entering: Entering<'_>,
 ) -> Result<Taking> {
+    let Entering { landing, settled } = entering;
+
     let base = base.into();
     let worktree = super::repos::text(worktree)?;
 
@@ -4936,9 +5492,9 @@ pub async fn take_up<'a>(
 
     // The branch is settled rather than invented, which is the one thing this
     // writes that a stage's start does not have to: a stage is worked on a name
-    // read out of a roadmap, and this one is worked on the branch the pull
-    // request is already on. So `naming` stays where it is — nobody is waiting
-    // for a better name for a branch that has a review on it.
+    // read out of a roadmap, and this one is worked on the branch the work is
+    // already on. So `naming` stays where it is — nobody is waiting for a better
+    // name for a branch that has work on it.
     sqlx::query(
         "UPDATE conversations SET named_branch = ?, base_commit = ?, base_ref = ? WHERE id = ?",
     )
@@ -4948,7 +5504,7 @@ pub async fn take_up<'a>(
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("putting Conversation {id} on the pull request's branch"))?;
+    .with_context(|| format!("putting Conversation {id} on the branch it is taking up"))?;
 
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
         .bind(id)
@@ -4959,7 +5515,28 @@ pub async fn take_up<'a>(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    tx.commit().await.context("taking up a pull request")?;
+    // And what the wrap-up has settled before it looks, which is how a narrowed
+    // one is entered. Inside this transaction with the move below it, so that a
+    // Conversation that says Wrapping is never one a watcher could read before
+    // they landed.
+    for one in settled {
+        super::wrap_up::settle(&mut tx, id, *one).await?;
+    }
+
+    // And the move, where there is no pull request coming to make it — see
+    // [`Landing`]. The state and the Timeline together, as every move is written.
+    if landing == Landing::Wrapping {
+        sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+            .bind(Lifecycle::Wrapping.stored())
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("moving Conversation {id} to wrapping a branch up"))?;
+
+        moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    }
+
+    tx.commit().await.context("taking a branch up")?;
 
     Ok(Taking::Recorded)
 }

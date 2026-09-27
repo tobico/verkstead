@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked,
+    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
     ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
     any_archived, archive_conversation, archived, close_conversation, conversation_branch,
-    conversations, create_profile, follow_branch, load_conversation, open_database, register_repo,
-    reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
-    settle_naming, show_archived, showing_archived, start_adoption, start_building,
-    start_conversation, start_grilling, start_pull_request_adoption, start_unnamed_conversation,
-    switch_repo, timeline, unarchive_conversation,
+    conversations, create_profile, follow_branch, hold_pull_request, load_conversation,
+    open_database, register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
+    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
+    start_adoption, start_conversation, start_grilling, start_tinkering,
+    start_unnamed_conversation, state, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -308,32 +308,6 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
             .naming,
         "a name the human typed has nothing to wait for",
     );
-}
-
-/// A start with no grilling in it leaves the same job to the session it starts,
-/// there being nothing different about it but which state it lands in.
-#[tokio::test]
-async fn a_start_with_no_grilling_leaves_the_branch_to_be_named_too() {
-    let (_dir, pool) = fresh_pool().await;
-    let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
-        .await
-        .unwrap()
-        .unwrap();
-
-    start_building(
-        &pool,
-        id,
-        "c0ffee",
-        Path::new("/data/worktrees/amber-kestrel"),
-        &[],
-    )
-    .await
-    .unwrap();
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Implementing);
-    assert!(conversation.naming);
 }
 
 /// The rename the instruction asked for is the end of the waiting, and so is a
@@ -748,7 +722,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     );
     assert_eq!(conversation.branch, "rate-limiting");
     assert!(conversation.branch_named);
-    assert!(matches!(conversation.grilling_pairing, Picked::Under(_)));
+    assert!(conversation.grilling_pairing.is_some());
 }
 
 /// The freeze: a checkout is of one repository, so from the moment there is one
@@ -816,77 +790,108 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     assert_eq!(adopting(&pool, id).await.unwrap().as_deref(), Some("mvp"));
 }
 
-/// And the same freeze over the other thing a Draft adopts. A pull request is a
-/// number in the repository it was opened in — `#41` names something else in
-/// the next one along, or nothing — so which repository the work is in was
-/// settled by the row that started the Conversation rather than by the human.
+/// And *not* the same freeze over a Draft from before there were Processes,
+/// unlike a roadmap: a Draft holding a pull-request adoption moves like any other.
+///
+/// What it is pointed at is the Target field, and a Target is a string whose
+/// meaning follows the Repo — a bare `#41` is the number of whichever repository
+/// it is read in, and a URL naming somewhere else is refused at Start by name.
+/// Which is what such a Draft's target is, its adoption row being read as that
+/// pull request's URL: moved onto another Repo it still names the repository it
+/// always did, and the press says so. Refusing here would be a refusal nothing
+/// could draw — nothing on the wire tells this Draft apart from a Review somebody
+/// typed the same URL into.
 #[tokio::test]
-async fn a_repo_switch_is_refused_while_a_pull_request_is_being_held() {
+async fn a_repo_switch_goes_through_over_a_held_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    let id = start_pull_request_adoption(&pool, verkstead, "amber-kestrel", &rate_limiting())
-        .await
-        .unwrap()
-        .unwrap();
+    let id = held_by(&pool, verkstead).await;
 
     assert_eq!(
         switch_repo(&pool, id, askance).await.unwrap(),
-        Switched::HoldingPullRequest
+        Switched::Switched
     );
 
-    // And nothing moved: the number still names the pull request it was listed
-    // as.
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.repo.name, "verkstead");
+    // Moved, and still pointed at the pull request it always was — which is a
+    // URL, so what the press will say about it is that it is another
+    // repository's.
     assert_eq!(
-        conversation
-            .adopting_pull_request
-            .as_ref()
-            .map(|held| held.number),
-        Some(41),
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .repo
+            .name,
+        "askance",
+    );
+    assert_eq!(
+        target(&pool, id).await.unwrap().as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
     );
 }
 
-/// Starting one to hold a pull request writes down what GitHub said and nothing
-/// else: a Draft like any other, with five facts beside it and no roadmap.
+/// A Conversation holding a pull-request adoption is pointed at it: its Target
+/// reads as that pull request's own URL, which is what makes a Draft from before
+/// there were Processes a **Review** that Start can take up.
+///
+/// The record is the weakest of the three ways a Target is named, so a field
+/// somebody has typed in wins over it — and clearing that field falls back to the
+/// adoption again, an emptied field keeping no row.
 #[tokio::test]
-async fn a_conversation_started_over_a_pull_request_carries_what_was_listed() {
+async fn a_held_pull_request_is_the_target_where_nothing_else_names_one() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
 
-    let id = start_pull_request_adoption(&pool, verkstead, "amber-kestrel", &rate_limiting())
+    let id = held_by(&pool, verkstead).await;
+
+    assert_eq!(
+        target(&pool, id).await.unwrap().as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
+    );
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .target
+            .as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
+        "which is what the page draws the field from",
+    );
+
+    assert_eq!(
+        set_target(&pool, id, Some("rate-limiting")).await.unwrap(),
+        Edited::Saved,
+    );
+    assert_eq!(
+        target(&pool, id).await.unwrap().as_deref(),
+        Some("rate-limiting"),
+        "the human's own typing names it instead",
+    );
+
+    assert_eq!(set_target(&pool, id, None).await.unwrap(), Edited::Saved);
+    assert_eq!(
+        target(&pool, id).await.unwrap().as_deref(),
+        Some("https://github.com/tobico/verkstead/pull/41"),
+    );
+}
+
+/// A Draft as the retired *Wrap up a pull request* level left one: started the
+/// ordinary way, with the pull request written beside it.
+///
+/// Which is the only way there is to one now — the start that made these is
+/// gone, and the row is written at the press. See [`hold_pull_request`].
+async fn held_by(pool: &sqlx::SqlitePool, repo_id: i64) -> i64 {
+    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel")
         .await
         .unwrap()
         .unwrap();
 
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Draft);
-    assert_eq!(
-        conversation.adopting, None,
-        "a Draft adopts one thing or none",
-    );
-    assert_eq!(
-        conversation.adopting_pull_request.as_ref(),
-        Some(&rate_limiting()),
-    );
+    hold_pull_request(pool, id, &rate_limiting()).await.unwrap();
 
-    // And read on its own, which is what the view is drawn off.
-    assert_eq!(
-        adopted_pull_request(&pool, id).await.unwrap().as_ref(),
-        Some(&rate_limiting()),
-    );
-
-    // The Brief is empty and the branch is Verkstead's own invention, exactly as
-    // an adoption's is: what the human writes arrives with the create's replay,
-    // and the branch is discarded at the take-up.
-    assert!(!conversation.branch_named);
-    assert_eq!(
-        timeline(&pool, id).await.unwrap().len(),
-        1,
-        "the empty Brief, and nothing else",
-    );
+    id
 }
 
 /// An ordinary Conversation, and one adopting a roadmap, are both holding no
@@ -910,8 +915,7 @@ async fn a_conversation_started_any_other_way_is_holding_no_pull_request() {
     }
 }
 
-/// The pull request the tests above are about, as the *Wrap up a pull request*
-/// level listed it.
+/// The pull request the tests above are about, as `gh` answered about it.
 fn rate_limiting() -> AdoptedPullRequest {
     AdoptedPullRequest {
         number: 41,
@@ -966,6 +970,74 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
     );
     assert_eq!(moves(&pool, id).await, [Lifecycle::Grilling]);
+}
+
+/// And the **Tinker** landing writes the same three things and leaves the
+/// Conversation in Follow-up, which is the whole of what separates the two.
+#[tokio::test]
+async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        start_tinkering(
+            &pool,
+            id,
+            "deadbeef",
+            Path::new("/state/worktrees/verkstead-rate-limiting"),
+            &[],
+        )
+        .await
+        .unwrap(),
+        Grilling::Started
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        conversation.state,
+        Lifecycle::FollowUp,
+        "a Tinker is never interviewed, so there is no grilling to land in",
+    );
+    assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
+    assert_eq!(
+        conversation.worktree.as_deref(),
+        Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
+    );
+    assert_eq!(moves(&pool, id).await, [Lifecycle::FollowUp]);
+
+    assert_eq!(
+        start_tinkering(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
+            .await
+            .unwrap(),
+        Grilling::NotDrafting,
+        "and it cannot be started twice, for the reason no start can",
+    );
+}
+
+/// Investigating is a state of its own, with a word of its own in the column.
+///
+/// Written here directly, because nothing in this task reaches it: what is
+/// being asked is that the column round-trips it, which is how a Conversation
+/// left in Investigating is read back after a restart.
+#[tokio::test]
+async fn a_conversation_set_investigating_reads_back_investigating() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    set_state(&pool, id, Lifecycle::Investigating)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Investigating,
+        "the word the column holds is one this Verkstead reads",
+    );
+    assert_eq!(
+        state(&pool, id).await.unwrap(),
+        Some(Lifecycle::Investigating),
+        "and the cheap reading of it says the same thing",
+    );
 }
 
 /// The rule that the base commit is the default branch's tip *at grill start*

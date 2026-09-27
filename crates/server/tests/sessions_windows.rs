@@ -859,10 +859,10 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) ->
             "model": format!("claude-{role}-5"),
         });
 
-        // Two of the pickers offer a row that is no account at all, so what they
-        // send is which of their rows was picked.
+        // The review picker offers a row that is no account at all, so what it
+        // sends is which of its rows was picked.
         let picked = match role {
-            "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+            "review" => serde_json::json!({ "pairing": pairing }),
             _ => pairing,
         };
 

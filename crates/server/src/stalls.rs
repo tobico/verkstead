@@ -216,6 +216,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Implementing => "implementing the work",
         Lifecycle::Wrapping => "wrapping the work up",
         Lifecycle::FollowUp => "following the work up",
+        Lifecycle::Investigating => "finding out what was asked",
         Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the Conversation",
     }
 }
@@ -262,6 +263,7 @@ mod tests {
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
             Lifecycle::FollowUp,
+            Lifecycle::Investigating,
         ]
         .into_iter()
         .map(driving)
@@ -274,6 +276,7 @@ mod tests {
                 "implementing the work",
                 "wrapping the work up",
                 "following the work up",
+                "finding out what was asked",
             ],
         );
     }

@@ -9,6 +9,14 @@
 //! And the few things it *writes*: a share's gist, a comment on a pull request,
 //! and the repository half of a create — see [`create_repository`].
 //!
+//! **One thing here is about a session's `gh` after all**, and it is the one
+//! question the host's cannot answer: whether a `gh` extension is installed.
+//! The program is the same file either way — both are resolved off the
+//! machine's own `PATH` — but an extension lives inside the home `gh` is run
+//! under, and a session's home is Verkstead's own. So that one is asked under
+//! the home a session gets rather than under this process's. See
+//! [`Gh::extension`].
+//!
 //! It authenticates as the configured token — the one in `secrets.yaml` that
 //! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
 //! environment of the call. The file is read at the moment of the call rather
@@ -32,6 +40,7 @@
 //! the real GitHub would be a test that needed a network, an account and a
 //! repository with a pull request on it.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -246,6 +255,79 @@ impl Gh {
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
+
+    /// Whether the `gh` extension `name` is there to be run, asked by running
+    /// it — `Ok(())` where it answered, and the reason where it did not.
+    ///
+    /// **The one thing here that is about a session's `gh` rather than the
+    /// server's.** The program is the same file either way, both being resolved
+    /// off the machine's own `PATH`; what differs is the home it is run under,
+    /// and an extension is a directory *inside* that home. So the host having
+    /// one says nothing whatever about what a session would find, and the only
+    /// honest way to ask is to ask under the home a session gets — which is
+    /// what `environment` carries, composed where a session's own is. See
+    /// [`crate::sessions::Sessions::session_environment`].
+    ///
+    /// The environment is therefore emptied first rather than added to: one
+    /// that inherited this process's would be answering for the server's home
+    /// and reporting it as a session's, which is the whole mistake this exists
+    /// to avoid. The same reading the same way round as the server makes of its
+    /// own image before it equips anybody with it — see
+    /// [`crate::sandbox::Executable::probed`].
+    ///
+    /// `--help` is the verb, because it is the one that reaches for nothing: an
+    /// extension prints its own usage without opening a socket or reading a
+    /// repository, so a non-zero exit says the extension is not there rather
+    /// than that something it wanted was not. Which is also the test
+    /// `docs/agents/git-workflow.md` tells a human to install by.
+    ///
+    /// Blocking, like everything else here that shells out.
+    pub(crate) fn extension(
+        &self,
+        name: &str,
+        environment: &[(String, OsString)],
+    ) -> Result<(), Trouble> {
+        let (program, before) = self
+            .program
+            .split_first()
+            .expect("a Gh is built with at least the program to run");
+
+        let mut command = Command::new(program);
+
+        command
+            .args(before)
+            .args([name, "--help"])
+            .env_clear()
+            .unseen()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+
+        // And the token, for the reason every other call here gets one: what a
+        // `gh` with nothing configured falls back on is the host's own login,
+        // and an extension asked as nobody is one that may refuse for a reason
+        // that has nothing to do with being installed.
+        if let Some(token) = self.token() {
+            command.env("GH_TOKEN", token);
+        }
+
+        let output = match command.output() {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Trouble::NoGh);
+            }
+            Err(error) => return Err(Trouble::Refused(error.to_string())),
+        };
+
+        match output.status.success() {
+            true => Ok(()),
+            false => Err(Trouble::read(&String::from_utf8_lossy(&output.stderr))),
+        }
+    }
 }
 
 /// Why `gh` could not answer.
@@ -266,7 +348,15 @@ pub(crate) enum Trouble {
     /// repository it is.
     NoRemote,
 
-    /// GitHub has no pull request for this branch.
+    /// GitHub has nothing under what it was asked about: no pull request on the
+    /// branch, or none under the number.
+    ///
+    /// Two sentences out of `gh` and one reason, because the selector is the
+    /// caller's and not GitHub's: asked with a branch it says there are no pull
+    /// requests found, and asked with a number it says it could not resolve one.
+    /// Every caller already knows which it asked with — see [`Self::why`], which
+    /// words it for the branch, and [`crate::conversations::resolve`], which
+    /// words it for the number.
     NoPullRequest,
 
     /// Something else, in `gh`'s own words.
@@ -283,7 +373,16 @@ impl Trouble {
     fn read(stderr: &str) -> Trouble {
         let said = stderr.to_lowercase();
 
-        if said.contains("no pull requests found") || said.contains("no open pull requests") {
+        // The first two are what a branch selector gets and the third is what a
+        // number gets — `gh pr view 4040` answers *GraphQL: Could not resolve to
+        // a PullRequest with the number of 4040* — and all three are GitHub
+        // having nothing under what it was asked about. Matched on the shape of
+        // the sentence rather than the whole of it, the number and the field
+        // GitHub blames being in the middle of it.
+        if said.contains("no pull requests found")
+            || said.contains("no open pull requests")
+            || said.contains("could not resolve to a pullrequest")
+        {
             return Trouble::NoPullRequest;
         }
 
@@ -666,26 +765,44 @@ pub(crate) fn comment(
 
 /// The pull request on `branch`, as the host's `gh` finds it.
 ///
-/// The three facts worth recording and no more — see
-/// [`store::PullRequest`]. Whether it is a draft, whether its checks are green
-/// and what is on it are all things that move while the PR is open, and this
-/// runs once.
+/// The five facts worth recording and no more — see [`store::PullRequest`].
+/// Whether it is a draft, whether its checks are green and what is on it are all
+/// things that move while the PR is open, and this runs once.
+///
+/// The head comes back from GitHub rather than off `branch`, though the two are
+/// the same branch: a selector is what was asked and `headRefName` is what GitHub
+/// answered about, and the answer is the one worth writing down. The base comes
+/// back beside it, which is what says where this pull request sits in a chain —
+/// see [`store::stack`].
 pub(crate) fn pull_request(
     gh: &Gh,
     repo: &Path,
     branch: &str,
 ) -> Result<store::PullRequest, Trouble> {
-    /// What `--json number,title,url` comes back as.
+    /// What `--json number,title,url,headRefName,baseRefName` comes back as.
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Opened {
         number: i64,
         title: String,
         url: String,
+        head_ref_name: String,
+        #[serde(default)]
+        base_ref_name: Option<String>,
     }
 
     // `--` is not gh's; the branch goes where gh takes a PR selector, which is a
     // number, a URL or a branch name.
-    let said = gh.ask(repo, &["pr", "view", branch, "--json", "number,title,url"])?;
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            branch,
+            "--json",
+            "number,title,url,headRefName,baseRefName",
+        ],
+    )?;
 
     let opened: Opened = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
@@ -694,6 +811,8 @@ pub(crate) fn pull_request(
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        head: Some(opened.head_ref_name),
+        base: opened.base_ref_name,
         // Unnamed: which repository this was asked in is what the caller already
         // knows, and the name on a recorded pull request is the label a reader
         // wants rather than anything written here. See [`store::PullRequest`].
@@ -701,84 +820,40 @@ pub(crate) fn pull_request(
     })
 }
 
-/// One open pull request in a repository, as `gh pr list` gives it.
+/// Every pull request the Repo has open, as the host's `gh` lists them.
 ///
-/// Everything a row of the *Wrap up a pull request* level draws, plus the one
-/// fact that decides whether there is a row at all: whether the head branch
-/// lives in a fork. See [`open_pull_requests`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Listed {
-    pub(crate) number: i64,
-    pub(crate) title: String,
-    pub(crate) url: String,
-
-    /// The branch the work is on, unqualified — `tobi/steer` rather than
-    /// `origin/tobi/steer`.
-    pub(crate) head: String,
-
-    /// And the branch it goes into.
-    pub(crate) base: String,
-
-    /// Whoever opened it, by their GitHub login. Empty where GitHub named
-    /// nobody, which is what a deleted account leaves behind.
-    pub(crate) author: String,
-
-    /// Its description as it was written, raw markdown. Empty where nobody
-    /// wrote one.
-    pub(crate) body: String,
-
-    /// Whether the head branch is in another repository — a fork. Such a pull
-    /// request cannot be pushed to over `origin`, so a wrap-up over it would
-    /// have nowhere to put a fix.
-    pub(crate) fork: bool,
-}
-
-/// Every open pull request in `repo`, as the host's `gh` lists them.
+/// What a **stack** is walked out of: the chain is open pull requests each based
+/// on the one below's head branch, and one list is the whole of what it takes to
+/// assemble — see [`crate::stacks`]. Asked once rather than followed link by
+/// link, a chain of four otherwise being four round trips to GitHub for what one
+/// answer holds.
 ///
-/// Any author and any age: what makes a pull request worth taking into the
-/// pipeline is that it is open, and whose it is says nothing about that. Forks
-/// come back marked rather than dropped here — what to do about one is the
-/// caller's, and a reader of this function should be able to see that GitHub was
-/// asked about all of them.
+/// [`Numbered`] apiece, which is the same shape a pull request asked for by
+/// number comes back in and for the same reasons: the head and the base are the
+/// links, the fork flag says whether a link is one this Conversation could ever
+/// push to, and the URL says which repository GitHub answered about.
 ///
-/// `--state open` and `--limit` said out loud rather than left to `gh`'s
-/// defaults, which are the same two values today and are `gh`'s to change.
+/// `--state open` because a chain runs through open pull requests: one that has
+/// been merged is a branch that is *in* the base rather than a link above it, and
+/// one that was closed is not a link at all.
 ///
-/// A repository with no GitHub remote answers [`Trouble::NoRemote`] here rather
-/// than being told apart beforehand: `gh` is what decides which repositories it
-/// can speak for — an SSH alias and a GitHub Enterprise host are both remotes a
-/// URL match would get wrong — and every caller of this already has to have an
-/// answer for a `gh` that will not answer.
-pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Trouble> {
-    /// What `--json number,title,body,url,headRefName,baseRefName,author,isCrossRepository`
-    /// comes back as, one per pull request.
+/// The limit is `gh`'s own page rather than every pull request a busy repository
+/// ever had. A stack is a handful deep and its links are the most recently opened
+/// pull requests of the repository; a repository with more than this many open at
+/// once has a chain somewhere in them, and a link that falls off the end reads
+/// as a chain that stops there.
+pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Numbered>, Trouble> {
+    /// What one entry of `gh pr list --json …` comes back as.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
-    struct Open {
+    struct Listed {
         number: i64,
         title: String,
         url: String,
         head_ref_name: String,
         base_ref_name: String,
         #[serde(default)]
-        author: Author,
-        #[serde(default)]
         is_cross_repository: bool,
-
-        /// The description, which is what a load prefills the box under the
-        /// title with. An `Option` rather than a defaulted `String`: a pull
-        /// request nobody described comes back as a null, and a default only
-        /// covers a field that is missing altogether.
-        #[serde(default)]
-        body: Option<String>,
-    }
-
-    /// Whoever opened it. An object rather than a name, and one that may be
-    /// missing its login: GitHub answers a deleted account with an empty one.
-    #[derive(Default, Deserialize)]
-    struct Author {
-        #[serde(default)]
-        login: String,
     }
 
     let said = gh.ask(
@@ -789,37 +864,127 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Tr
             "--state",
             "open",
             "--limit",
-            LISTED,
+            "100",
             "--json",
-            "number,title,body,url,headRefName,baseRefName,author,isCrossRepository",
+            "number,title,url,headRefName,baseRefName,isCrossRepository",
         ],
     )?;
 
-    let open: Vec<Open> = serde_json::from_str(&said)
+    let listed: Vec<Listed> = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
 
-    Ok(open
+    Ok(listed
         .into_iter()
-        .map(|one| Listed {
-            number: one.number,
-            title: one.title,
-            url: one.url,
-            head: one.head_ref_name,
-            base: one.base_ref_name,
-            author: one.author.login,
-            body: one.body.unwrap_or_default(),
-            fork: one.is_cross_repository,
+        .map(|listed| Numbered {
+            number: listed.number,
+            title: listed.title,
+            url: listed.url,
+            head: listed.head_ref_name,
+            base: listed.base_ref_name,
+            fork: listed.is_cross_repository,
+            // Everything `--state open` answered with is open, which is what
+            // was asked for.
+            open: true,
         })
         .collect())
 }
 
-/// How many open pull requests are asked for at once.
+/// One pull request of a repository, by its number, as the host's `gh` answers
+/// for that repository's origin.
 ///
-/// A ceiling rather than a page size — there is no second request, and a
-/// repository with more open pull requests than this has a list nobody was
-/// going to scroll to the end of anyway. `gh`'s own default is thirty, which is
-/// low enough that a busy repository would quietly hide work worth wrapping up.
-const LISTED: &str = "100";
+/// What a **Review** is started on: the Target names a number — see
+/// [`crate::targets`] — and this is the whole of what GitHub has to say about
+/// it before the take-up can run. Nothing about the pull request's own words is
+/// here: the Brief is the human's, and nothing of a pull request is ever read
+/// into it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Numbered {
+    pub(crate) number: i64,
+    pub(crate) title: String,
+
+    /// Where it is — and, with it, which repository `gh` answered about: a pull
+    /// request's URL carries its owner and its repository, which is what a URL
+    /// the human named is checked against. See [`crate::targets::repository_in`].
+    pub(crate) url: String,
+
+    /// The branch the work is on, unqualified — `tobi/steer` rather than
+    /// `origin/tobi/steer`.
+    pub(crate) head: String,
+
+    /// And the branch it goes into.
+    pub(crate) base: String,
+
+    /// Whether the head branch is in another repository — a fork. Such a pull
+    /// request cannot be pushed to over `origin`, so a wrap-up over it would
+    /// have nowhere to put a fix.
+    pub(crate) fork: bool,
+
+    /// Whether GitHub still has it open. A merged or closed pull request is
+    /// answered by number exactly as an open one is, and it is nothing to wrap
+    /// up: the caller refuses it by the same name a number nothing is open
+    /// under is refused by.
+    pub(crate) open: bool,
+}
+
+/// The pull request `number` names in `repo`, as the host's `gh` answers.
+///
+/// `gh pr view <n>` rather than a search: the number and the Repo's own origin
+/// are together the whole of what a pull request *is* to Verkstead, and `gh` is
+/// what decides which GitHub repository a directory speaks for, an SSH alias and
+/// a GitHub Enterprise host being remotes a URL match would get wrong.
+///
+/// A number GitHub has nothing under at all comes back as
+/// [`Trouble::NoPullRequest`], that being what `gh` says about one — *could not
+/// resolve to a PullRequest with the number of …*; a number it has something
+/// closed or merged under comes back with [`Numbered::open`] false. The two are
+/// one refusal to the human and are told apart here because only one of them is
+/// an error.
+pub(crate) fn pull_request_numbered(
+    gh: &Gh,
+    repo: &Path,
+    number: i64,
+) -> Result<Numbered, Trouble> {
+    /// What `--json number,title,url,headRefName,baseRefName,isCrossRepository,state`
+    /// comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Viewed {
+        number: i64,
+        title: String,
+        url: String,
+        head_ref_name: String,
+        base_ref_name: String,
+        #[serde(default)]
+        is_cross_repository: bool,
+
+        /// `OPEN`, `CLOSED` or `MERGED`, in GitHub's own spelling.
+        state: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "number,title,url,headRefName,baseRefName,isCrossRepository,state",
+        ],
+    )?;
+
+    let viewed: Viewed = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(Numbered {
+        number: viewed.number,
+        title: viewed.title,
+        url: viewed.url,
+        head: viewed.head_ref_name,
+        base: viewed.base_ref_name,
+        fork: viewed.is_cross_repository,
+        open: viewed.state.eq_ignore_ascii_case("open"),
+    })
+}
 
 /// One check GitHub is running against a pull request's head commit.
 ///
@@ -1592,9 +1757,9 @@ mod tests {
 
     /// The ordinary answer: a branch with a PR on it.
     #[test]
-    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_and_url() {
+    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_url_and_branches() {
         let (dir, gh) = stub(
-            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}"#,
+            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main"}"#,
             "",
         );
 
@@ -1604,11 +1769,53 @@ mod tests {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                // GitHub's own answer rather than the selector it was asked with,
+                // which is what a green suite is afterwards held against.
+                head: Some("rate-limiting".to_owned()),
+                // And what it goes into, which is what says where in a chain it
+                // sits.
+                base: Some("main".to_owned()),
                 // Which repository is the caller's to know: what `gh` was asked
                 // in is not something it reads back.
                 repo: None,
             },
         );
+    }
+
+    /// Every open pull request of the repository, which is what a stack is
+    /// walked out of: the head and the base apiece are the links, and a fork is
+    /// said so that the walk can stop at one.
+    #[test]
+    fn the_repositorys_open_pull_requests_read_back_with_their_heads_and_bases() {
+        let (dir, gh) = stub(
+            r#"[{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false},
+                {"number":41,"title":"Stage 02","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"stage-02","baseRefName":"stage-01","isCrossRepository":true}]"#,
+            "",
+        );
+
+        let listed = open_pull_requests(&gh, dir.path()).unwrap();
+
+        assert_eq!(
+            listed.iter().map(|one| one.number).collect::<Vec<_>>(),
+            [40, 41],
+        );
+        assert_eq!(listed[0].head, "stage-01");
+        assert_eq!(listed[0].base, "main");
+        assert!(!listed[0].fork);
+        assert!(listed[1].fork, "and a head in a fork is said to be one");
+        assert!(
+            listed.iter().all(|one| one.open),
+            "everything `--state open` answered with is open",
+        );
+    }
+
+    /// And a repository with nothing open is an empty list rather than a
+    /// failure, which is what `gh pr list` says about one.
+    #[test]
+    fn a_repository_with_nothing_open_lists_nothing() {
+        let (dir, gh) = stub("[]", "");
+
+        assert_eq!(open_pull_requests(&gh, dir.path()), Ok(Vec::new()));
     }
 
     /// The one every finish step can reasonably run into: the branch is pushed
@@ -1622,6 +1829,28 @@ mod tests {
 
         assert_eq!(
             pull_request(&gh, dir.path(), "rate-limiting"),
+            Err(Trouble::NoPullRequest),
+        );
+    }
+
+    /// And the same answer asked the other way: a *number* GitHub has nothing
+    /// under, which it says in a different sentence entirely.
+    ///
+    /// The reason is the same and the words are not, so both have to be read:
+    /// what a Review does about *GitHub has nothing under that* is name the
+    /// number back to the human, and anything else is read as GitHub having been
+    /// unreachable — which sends them to look at their machine over a number they
+    /// typed wrong.
+    #[test]
+    fn a_number_with_no_pull_request_is_that_same_answer() {
+        let (dir, gh) = stub(
+            "",
+            "GraphQL: Could not resolve to a PullRequest with the number of 4040. \
+             (repository.pullRequest)",
+        );
+
+        assert_eq!(
+            pull_request_numbered(&gh, dir.path(), 4040),
             Err(Trouble::NoPullRequest),
         );
     }
@@ -2128,8 +2357,8 @@ mod tests {
                 r#"token="${GH_TOKEN-unset}"
                    if [ "$1" = api ]; then printf '[]'; exit 0; fi
                    case "$5" in
-                     number,title,url)
-                       printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
+                     number,title,url,headRefName,baseRefName)
+                       printf '{"number":41,"title":"%s","url":"u","headRefName":"b","baseRefName":"main"}' "$token" ;;
                      statusCheckRollup,headRefOid,mergeable)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)

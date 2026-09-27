@@ -303,6 +303,8 @@ async fn everything(pool: &SqlitePool) -> i64 {
             number: 56,
             title: "Conversation sharing".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/56".to_owned(),
+            head: Some("conversation-sharing".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -341,6 +343,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             checkouts: &[],
             said: None,
             recorded: verkstead_store::Recorded::default(),
+            scratch: &[],
         },
     )
     .await
@@ -630,10 +633,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     assert_eq!(companions[0].repo.path, "");
 
     // And which account wrote it.
-    assert_eq!(
-        conversation.grilling_pairing,
-        verkstead_render::PickedView::Nothing,
-    );
+    assert_eq!(conversation.grilling_pairing, None);
     assert!(conversation.implementation_pairing.is_none());
     assert_eq!(
         conversation.review_pairing,
@@ -1694,6 +1694,7 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
                     model: "claude-opus-5",
                 }),
             },
+            scratch: &[],
         },
     )
     .await

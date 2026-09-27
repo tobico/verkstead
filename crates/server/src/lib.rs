@@ -80,6 +80,7 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+mod investigations;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
 /// read, and the gate that answers 401 to everything which has not shown it.
 ///
@@ -134,9 +135,6 @@ mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
-/// The open pull requests Verkstead did not open, which is the door work
-/// already somewhere else comes into the pipeline through.
-mod pull_requests;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
@@ -188,6 +186,9 @@ mod sharing;
 /// runs on rather than an implementation detail of an endpoint, and standing a
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
+/// The chain of pull requests a Fix Merge Issues was pointed into the middle
+/// of: walked on GitHub at Start, recorded, and said on the Timeline.
+mod stacks;
 mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
@@ -202,6 +203,10 @@ mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.
 mod stops;
+/// What a **Review** Conversation is to take up: the **Target** field read at the
+/// press, and the Brief read for the pull request URL or bare `#number` that
+/// fills that field while it is empty.
+mod targets;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one
 /// `script` made inside the sandbox.

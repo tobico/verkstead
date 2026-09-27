@@ -21,23 +21,26 @@ import type {
   Adopted,
   Created,
   DirectoryListing,
-  OpenPullRequestRepo,
+  Process,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
   RepoView,
   SettingsView,
   TakenUp,
+  TargetRecorded,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
-import takeUp from "../src/workbench/TakeUp.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
-import { BRANCH_REFUSAL } from "../src/workbench/Setup";
+import { BRANCH_REFUSAL, TARGET, TARGET_REFUSAL } from "../src/workbench/Setup";
+// The Processes the picker offers and the words they are said in, read rather
+// than spelled out again: what the row offers is that list and nothing else.
+import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -58,14 +61,23 @@ import {
   REPOS,
   drawn,
   mount,
+  openAgent,
   theWorkbench,
 } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
 import { browse, held, listingAt } from "./fields";
-import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
+import {
+  actionRows,
+  offered,
+  opened,
+  pick,
+  picker,
+  press,
+  rows,
+  showing,
+} from "./pickers";
 import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
-import pulls from "./fixtures/open-pull-requests.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -73,12 +85,6 @@ import told from "./fixtures/settings.json" with { type: "json" };
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
 const ABANDONED = abandoned as AbandonedRepo[];
-
-/// And the pull requests open across them, as the server answers for them: two
-/// repositories, one of the four listed already taken up by a Conversation, and
-/// the fork among them already left out — see
-/// `crates/server/tests/pull_requests.rs`, which writes this.
-const OPEN_PULLS = pulls as OpenPullRequestRepo[];
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -145,7 +151,7 @@ const remembering = (
   implementation: ProfileEntry,
   review: ProfileEntry,
 ): RepoPairingsView => ({
-  grilling: { Under: { profile: grilling, model: grilling.models[0]! } },
+  grilling: { profile: grilling, model: grilling.models[0]! },
   implementation: {
     profile: implementation,
     model: implementation.models[0]!,
@@ -195,17 +201,35 @@ async function composing(container: ParentNode): Promise<HTMLTextAreaElement> {
   return drawn<HTMLTextAreaElement>(container, `.${composer.box} textarea`);
 }
 
-/// Wait until all three role pickers are standing on something, which is what
-/// *Start work* waits on as well.
+/// What the Agent trigger is reading while it is shut: the words of its own
+/// value line, and the ` +N` after them.
+function agentReads(): string {
+  return (
+    document.querySelector(
+      `.${setup.agentOption} > button .${setup.optionValue}`,
+    )?.textContent ?? ""
+  );
+}
+
+/// Wait until every role the Process uses is standing on something, which is
+/// what *Start work* waits on as well.
 ///
-/// The press carries a grilling with it, so it draws inert until every role is
-/// answered — and the answer they arrive with is the repo's own memory, which is
-/// a read of its own. A test pressing before it lands would be pressing a button
-/// that has nothing to do but say what is missing.
+/// The press carries a grilling with it, so it draws inert until every one of
+/// them is answered — and the answer they arrive with is the repo's own memory,
+/// which is a read of its own. A test pressing before it lands would be pressing
+/// a button that has nothing to do but say what is missing.
+///
+/// Read off the trigger rather than off the pickers, which is exactly what the
+/// trigger is for: it says *Not chosen* while any role the Process uses is
+/// empty, so the panel does not have to be opened to find out.
 async function rolesAnswered(): Promise<void> {
-  for (const role of ["Grilling", "Implementation", "Review"]) {
-    await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
-  }
+  await waitFor(() => {
+    expect(
+      document.querySelector(`.${setup.agentOption}`),
+      "the Agent option has not been drawn yet",
+    ).toBeTruthy();
+    expect(agentReads()).not.toBe("Not chosen");
+  });
 }
 
 /// Open the Repo panel, which is where the repo is picked and everything under
@@ -634,6 +658,7 @@ describe("the compose page", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
 
     // Nothing to prefill from until a repo is picked: the memory is the repo's.
     await waitFor(() => expect(showing("Grilling")).toBe("Not chosen"));
@@ -663,6 +688,7 @@ describe("the compose page", () => {
 
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
+    await openAgent(container);
 
     await waitFor(() =>
       expect(showing("Grilling")).toBe("Fable 5 — fable"),
@@ -670,8 +696,8 @@ describe("the compose page", () => {
 
     // One of the three made the human's own, which is what the switch must not
     // touch.
-    pick("Grilling", "No grilling");
-    expect(showing("Grilling")).toBe("No grilling");
+    pick("Grilling", "Claude Code Sonnet 5 — sonnet");
+    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
 
     await pickRepo(container, REPOS[0]!.id);
 
@@ -681,7 +707,7 @@ describe("the compose page", () => {
       expect(showing("Review")).toBe("Fable 5 — fable"),
     );
     expect(showing("Implementation")).toBe("Sonnet 5 — sonnet");
-    expect(showing("Grilling")).toBe("No grilling");
+    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
   });
 
   it("sends nothing for a role left showing the prefill", async () => {
@@ -712,6 +738,7 @@ describe("the compose page", () => {
       target: { value: "Make the widget" },
     });
     await pickRepo(container, REPOS[1]!.id);
+    await openAgent(container);
 
     await waitFor(() =>
       expect(showing("Grilling")).toBe("Fable 5 — fable"),
@@ -744,13 +771,976 @@ describe("the compose page", () => {
     const { container } = mount("/compose");
 
     await composing(container);
+    await openAgent(container);
 
-    // Waited for: the list of profiles is a read of its own, and the row is
+    // Waited for: the list of profiles is a read of its own, and the panel is
     // drawn once it has arrived.
     await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(PROFILES.length).toBeGreaterThan(0);
+  });
+});
+
+/// What kind of work the page is composing, which is the one control in the row
+/// that is *not* remembered per repo.
+///
+/// What the control looks like and what it offers are the composer's own and are
+/// asked about in `workbench.test.tsx`. What is asked here is the half a compose
+/// page owns: where it stands before anybody touches it, that a pick lands on
+/// the device, and what the create does — or does not do — with what is held.
+describe("the process a compose page is composing under", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// Where the row reads it, which is the order the row is read in: the
+  /// repository, what kind of work it is, and then who runs it.
+  it("stands between the repo and the agent, on Develop", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const row = await drawn(container, `.${setup.options}`);
+    // Waited for: the profiles are a read of their own, and the Agent option at
+    // the far end of the row is drawn once they have landed.
+    await waitFor(() =>
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
+    );
+
+    const at = (selector: string) =>
+      [...row.children].findIndex((option) => option.matches(selector));
+
+    expect(at(`.${setup.repoSelect}`)).toBe(0);
+    expect(at(`.${setup.processChoice}`)).toBe(1);
+    expect(at(`.${setup.agentOption}`)).toBe(2);
+    expect(row.children).toHaveLength(3);
+
+    // Develop for every repo, remembered nowhere: it is the one thing about a
+    // conversation likeliest to differ from the last.
+    expect(showing("Process")).toBe("Develop");
+    await pickRepo(container, REPOS[1]!.id);
+    expect(showing("Process")).toBe("Develop");
+  });
+
+  /// All five now, Fix Merge Issues having landed last. A Process is offered
+  /// only once its stage has landed, as an agent type is offered only once it
+  /// can launch the real thing.
+  it("offers the processes that have landed and no others", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
+
+    expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
+    expect(OFFERED).toEqual([
+      "Develop",
+      "Tinker",
+      "Investigate",
+      "Review",
+      "FixMergeIssues",
+    ]);
+  });
+
+  /// The server applies its own reading to the Conversation it creates — no row
+  /// at all is Develop — so a picker nobody touched has nothing to say. Sending
+  /// it back would be this page claiming somebody chose it.
+  it("sends nothing for a process left on Develop", async () => {
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    await waitFor(() => expect(showing("Process")).toBe("Develop"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(0);
+  });
+
+  /// And exactly one where it was touched, even where what was picked is what
+  /// the control was already showing: what the human touched is the page's to
+  /// say, and the record is what says it afterwards.
+  it("sends one request for a process the human picked", async () => {
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+
+    await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
+    pick("Process", PROCESS.Develop);
+
+    // Held on the device the moment it is picked, so a reload loses nothing.
+    expect(stored().process).toBe("Develop");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
+      ).toEqual({ process: "Develop" }),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(1);
+  });
+});
+
+/// The Target field on this page: the same field the composer draws, held on
+/// the device like everything else in the panel and replayed onto the draft a
+/// press makes.
+describe("the target a compose page is pointed at", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// A page on Review, against the repo it would be composed against, which is
+  /// where a reload leaves one.
+  function composedAsReview(over: Partial<Composed> = {}): void {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "Review" satisfies Process,
+        ...over,
+      }),
+    );
+  }
+
+  it("is drawn under Review and under no other process", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await openRepo(container);
+
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
+    expect(screen.queryByLabelText("Target")).toBeNull();
+
+    pick("Process", PROCESS.Review);
+
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+  });
+
+  /// And under a **Fix Merge Issues**, which is the other Process pointed at
+  /// work already somewhere else: the field follows the pick on this page as it
+  /// does on a draft's own composer, off the same list.
+  it("follows a pick onto Fix merge issues and off it again", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await openRepo(container);
+
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
+
+    pick("Process", PROCESS.FixMergeIssues);
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+
+    pick("Process", PROCESS.Develop);
+    await waitFor(() => expect(screen.queryByLabelText("Target")).toBeNull());
+  });
+
+  /// Filled from the box while it is empty, by the reading the server does
+  /// when a Brief is saved — so a URL written into the brief shows up in the
+  /// field rather than the field standing empty over what a press would find.
+  it("fills itself from the brief while it is empty", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    fireEvent.input(box, {
+      target: {
+        value: "Wrap up https://github.com/tobico/verkstead/pull/41 today.\n",
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Target") as HTMLInputElement).value,
+      ).toBe("https://github.com/tobico/verkstead/pull/41"),
+    );
+    expect(stored().target).toBe(
+      "https://github.com/tobico/verkstead/pull/41",
+    );
+  });
+
+  /// And it keeps up with a name being typed out, which is the only way a name
+  /// ever reaches this box: `#4` is a whole name on the way to `#412`, so a fill
+  /// that stopped at the first one would leave the field naming a pull request
+  /// nobody meant.
+  it("follows a name being typed a character at a time", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    const typed = "Wrap up #412 today.";
+    for (let upto = 1; upto <= typed.length; upto += 1) {
+      fireEvent.input(box, { target: { value: typed.slice(0, upto) } });
+    }
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Target") as HTMLInputElement).value).toBe(
+        "#412",
+      ),
+    );
+    expect(stored().target).toBe("#412");
+  });
+
+  /// The same for a URL, which is longer and goes the same way.
+  it("follows a url being typed a character at a time", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    const typed = "See https://github.com/tobico/verkstead/pull/412 please.";
+    for (let upto = 1; upto <= typed.length; upto += 1) {
+      fireEvent.input(box, { target: { value: typed.slice(0, upto) } });
+    }
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Target") as HTMLInputElement).value).toBe(
+        "https://github.com/tobico/verkstead/pull/412",
+      ),
+    );
+  });
+
+  /// And it lets go the moment the human types in the field, whatever the box
+  /// says afterwards: correcting its own fill is not the same as overwriting
+  /// theirs.
+  it("stops following once the field has been typed in", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+
+    fireEvent.input(box, { target: { value: "Wrap up #41" } });
+    await waitFor(() => expect(field.value).toBe("#41"));
+
+    fireEvent.input(field, { target: { value: "rate-limiting" } });
+    await waitFor(() => expect(stored().target).toBe("rate-limiting"));
+
+    fireEvent.input(box, { target: { value: "Wrap up #412 today." } });
+    await waitFor(() => expect(stored().brief).toContain("today"));
+    expect(field.value).toBe("rate-limiting");
+  });
+
+  /// And never over what was typed into it: a branch somebody named survives a
+  /// URL arriving in the box afterwards.
+  it("leaves a target somebody typed exactly as it was", async () => {
+    composedAsReview({ target: "rate-limiting" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    fireEvent.input(box, {
+      target: { value: "Like https://github.com/tobico/verkstead/pull/41.\n" },
+    });
+
+    await waitFor(() => expect(stored().brief).toContain("Like"));
+    expect(
+      (screen.getByLabelText("Target") as HTMLInputElement).value,
+    ).toBe("rate-limiting");
+  });
+
+  /// The base picker follows what the field holds, exactly as it does on a
+  /// draft's own composer.
+  it("takes the base picker away where the target is a pull request", async () => {
+    composedAsReview({ target: "https://github.com/tobico/verkstead/pull/41" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  it("keeps it where the target is a branch", async () => {
+    composedAsReview({ target: "rate-limiting" });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openRepo(container);
+
+    await waitFor(() => screen.getByLabelText("Target"));
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+
+  /// And the press waits on it: a Review with a brief and both roles and
+  /// nothing named is inert, and says what it is waiting on.
+  it("holds the press inert while nothing is named", async () => {
+    composedAsReview({ brief: "Wrap the limiter up." });
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("true"),
+    );
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, a target, and both roles picked and working.",
+    );
+  });
+
+  /// And the draft a press makes is holding what the page held, replayed
+  /// through the endpoint the composer's own field uses.
+  it("puts the target on the draft it creates", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toEqual(
+        { target: "#41" },
+      ),
+    );
+
+    // And the kickoff is the take-up, the Review's press being the wrap-up
+    // over what the target names.
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toBe(1),
+    );
+  });
+
+  /// And a target the server would not take is carried to that draft's own
+  /// composer, the way every other refused field is.
+  it("says on the draft it made what the server would not take", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("NotDrafting" satisfies TargetRecorded),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `The target could not be named: ${TARGET_REFUSAL.NotDrafting}`,
+        ),
+      ).toBeTruthy(),
+    );
+
+    // And the kickoff is what the refusal stops, exactly as a refused branch
+    // name stops it.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
+  });
+
+  /// And a **Fix Merge Issues** page is the same press over the same field: it
+  /// waits on a brief, a target and the one role its table names, and the
+  /// kickoff behind it is the take-up rather than a grill start.
+  it("takes up what a fix merge issues page is pointed at", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "FixMergeIssues" satisfies Process,
+        target: "#41",
+      }),
+    );
+
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+
+    // Nothing written yet, so the press is inert and says the three things it
+    // is waiting on — one role, this Process using one.
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("true"),
+    );
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, a target, and one role picked and working.",
+    );
+
+    fireEvent.input(box, { target: { value: "The limiter will not merge." } });
+    await waitFor(() => expect(showing("Agent")).toBeTruthy());
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("false"),
+    );
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toEqual(
+        { process: "FixMergeIssues" satisfies Process },
+      ),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toEqual(
+        { target: "#41" },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+});
+
+/// Which of the role pickers stand in the row, and what the press waits on:
+/// the Process's to say, and `processes.ts`'s table to answer.
+///
+/// The one-role shape is exercised over an Investigate, which the picker offers
+/// and this page can be moved to like any other landed Process.
+describe("the pickers a compose page's process draws", () => {
+  beforeEach(() => localStorage.clear());
+
+  /// A page holding a Process and the repo it would be composed against, which
+  /// is where a reload would leave one.
+  function composedAs(process: Process): void {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), repo: REPOS[1]!.id, process }),
+    );
+  }
+
+  it("draws all three under Develop", async () => {
+    composedAs("Develop");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openAgent(container);
+    await waitFor(() => expect(screen.getByLabelText("Grilling")).toBeTruthy());
+    expect(screen.getByLabelText("Implementation")).toBeTruthy();
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+  });
+
+  /// And two under a Tinker, which is the other Process this page can be moved
+  /// to: no Grilling picker, it being a Process that is never interviewed.
+  it("draws two and no grilling picker under Tinker", async () => {
+    composedAs("Tinker");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await openAgent(container);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Implementation")).toBeTruthy(),
+    );
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    expect(ROLES.Tinker.uses).toEqual(["implementation", "review"]);
+    expect(OFFERED).toContain("Tinker");
+  });
+
+  /// And one picker is no panel at all: the control is the picker, which is
+  /// what the describe below is about.
+  it("draws one picker under a process that uses one role", async () => {
+    composedAs("Investigate");
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(screen.getByLabelText("Agent")).toBeTruthy());
+
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
+    expect(OFFERED).toContain("Investigate");
+  });
+
+  /// And the press waits on exactly those roles. Asked over a repo remembering
+  /// an implementation pairing and nothing else: under Develop that is a start
+  /// still waiting on two roles, and under a Process that uses one it is a
+  /// start with everything it needs.
+  it("waits on the roles the process uses and no others", async () => {
+    const memory: RepoPairingsView = {
+      grilling: null,
+      implementation: {
+        profile: PROFILES[1]!,
+        model: PROFILES[1]!.models[0]!,
+      },
+      review: "Nothing",
+    };
+
+    composedAs("Investigate");
+    theWorkbench(
+      whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "What does the cache do?" } });
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    // The one role, on the control the table gave it: a dropdown rather than a
+    // trigger, so there is nothing to open to read it.
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+
+    // The one role it uses is answered, so there is nothing left to wait on —
+    // and the two it does not use are not drawn to be waited on.
+    await waitFor(() => expect(start.getAttribute("aria-disabled")).toBe("false"));
+    expect(start.getAttribute("title")).toBeNull();
+  });
+
+  /// The same page under Develop, which waits on the two that memory left
+  /// empty — and says so in the words the table counts.
+  it("says what it is waiting on in the roles the process has", async () => {
+    const memory: RepoPairingsView = {
+      grilling: null,
+      implementation: {
+        profile: PROFILES[1]!,
+        model: PROFILES[1]!.models[0]!,
+      },
+      review: "Nothing",
+    };
+
+    composedAs("Develop");
+    theWorkbench(
+      whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "Make the widget" } });
+    await openAgent(container);
+
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(showing("Implementation")).toBe("Opus 5 — opus"),
+    );
+
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, and every role picked and working.",
+    );
+  });
+
+  /// And a Process with one role says one role, which is the whole of what the
+  /// table changes about these words.
+  it("says one role where the process has one", async () => {
+    composedAs("Investigate");
+    theWorkbench(json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(screen.getByLabelText("Agent")).toBeTruthy());
+
+    expect(
+      screen.getByRole("button", { name: "Start work" }).getAttribute("title"),
+    ).toBe("Starting needs a brief, and one role picked and working.");
+  });
+});
+
+/// The one **Agent** control, which is the row's last option: a trigger reading
+/// who the work would run under, and behind it the role pickers stacked under
+/// their own names.
+///
+/// What the control *is* is the composer's own and is asked about in
+/// `workbench.test.tsx` — both pages draw the one piece, which is the whole
+/// point of it. What is asked here is the half a compose page owns: that the row
+/// holds it at all, and that its reading is composed off what the pickers are
+/// showing rather than off anything this device has stored.
+describe("the agent control on a compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The row reads Repo, Process, Agent, and the pickers are what the last of
+  /// them drops — one flat card hung off its trigger rather than a dialog over
+  /// the page, exactly as the Repo option beside it is.
+  it("holds the role pickers behind one Agent trigger", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() =>
+      expect(row.querySelector(`.${setup.agentOption}`)).toBeTruthy(),
+    );
+
+    // Three labels along the row, and nothing of the pickers until the last of
+    // them is pressed.
+    expect(
+      [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Repo", "Process", "Agent"]);
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(container.querySelector("dialog")).toBeNull();
+
+    const panel = await openAgent(container);
+    await waitFor(() => expect(picker("Grilling")).toBeTruthy());
+
+    // Stacked under their role names, in the order the table says the Process
+    // uses them.
+    expect(
+      [...panel.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Grilling", "Implementation", "Review"]);
+    expect(panel.getAttribute("role")).toBe("group");
+  });
+
+  /// The repo in the bench remembers three genuinely different accounts, which
+  /// is the case the counting is for: the Implementation Pairing is read out and
+  /// the other two are counted, the way the Repo trigger counts the repos the
+  /// work runs alongside.
+  it("reads the implementation pairing and counts the roles beside it", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+  });
+
+  /// And says it once where there is nothing else to say: a role on the same
+  /// Pairing adds nothing, and neither does a role picked away — *No review* is
+  /// an answer rather than another account.
+  it("reads the pairing once where the other roles match or are skipped", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json({
+          ...remembering(PROFILES[1]!, PROFILES[1]!, PROFILES[1]!),
+          review: "Skipped",
+        } satisfies RepoPairingsView),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+  });
+
+  /// One for the one role that is somewhere else — and off what the pickers are
+  /// showing, so a pick inside the panel is read on the trigger the moment it is
+  /// made.
+  it("counts one for a review picked onto a different pairing", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json(remembering(PROFILES[1]!, PROFILES[1]!, PROFILES[1]!)),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+
+    await openAgent(container);
+    // The row reads out in full where the list does; the trigger drops the
+    // backend's name, its mark having said it already.
+    pick("Review", "Claude Code Fable 5 — fable");
+
+    expect(agentReads()).toBe("Opus 5 — opus +1");
+  });
+
+  /// And *Not chosen* while a role the Process uses is empty, which is what the
+  /// start press will refuse on. Nothing is stored for a picker nobody has
+  /// touched, so the trigger stands on the repo's own memory the same way the
+  /// pickers do — and says nothing at all until it lands.
+  it("reads not chosen until the repo's memory has landed", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    // No repo, so no memory to read: there is nothing to prefill a role from.
+    await waitFor(() => expect(agentReads()).toBe("Not chosen"));
+    expect(stored().implementation).toBeNull();
+
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+  });
+
+  /// A role the Process does not use is not one of them, and the table is what
+  /// says which: a Review uses Implementation and Review, so a repo remembering
+  /// nothing for the grilling is nothing the trigger is waiting on.
+  it("says nothing about a role the process does not use", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "Review" satisfies Process,
+      }),
+    );
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json({
+          grilling: null,
+          implementation: {
+            profile: PROFILES[1]!,
+            model: PROFILES[1]!.models[0]!,
+          },
+          review: { Under: { profile: PROFILES[1]!, model: PROFILES[1]!.models[0]! } },
+        } satisfies RepoPairingsView),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
+  });
+});
+
+/// The other shape of the same control, on this page: where the table says the
+/// Process is run under one role, the **Agent** is the flat Pairing dropdown
+/// itself, standing in the row with no trigger over it and no panel behind it.
+///
+/// What the shape *is* is the composer's own and is asked about in
+/// `workbench.test.tsx`. What is asked here is the half a compose page owns: that
+/// the one picker stands on the repo's memory the way the pickers in the panel
+/// do, and that a pick through it is replayed onto the Implementation role of
+/// the Conversation a press creates.
+///
+/// Asked over an Investigate, which is the one landed Process run under a single
+/// role: the device is holding one, the picker draws a chosen
+/// Process it cannot offer, and the shape is read off the table rather than off
+/// what has landed.
+describe("the agent dropdown on a compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// A page holding a one-role Process and the repo it would be composed
+  /// against, which is where a reload would leave one.
+  function investigating(): void {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "Investigate" satisfies Process,
+      }),
+    );
+  }
+
+  it("stands in the row as the picker itself, with no panel anywhere", async () => {
+    investigating();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    // The row still reads Repo, Process, Agent — the last of the three drawn as
+    // a listbox rather than as a panel's trigger.
+    expect(
+      [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["Repo", "Process", "Agent"]);
+    expect(container.querySelector(`.${setup.agentOption}`)).toBeNull();
+    expect(row.children).toHaveLength(3);
+
+    expect(ROLES.Investigate.control).toBe("dropdown");
+  });
+
+  /// The Implementation role, whichever shape asks for it: the same picker on
+  /// the same prefill, which is the repo's own memory until somebody touches
+  /// it. The id says so as plainly as anything can — it is the implementation
+  /// picker with the row's own label over it.
+  it("stands on the repo's memory, as the picker in the panel does", async () => {
+    investigating();
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(picker("Agent")).toBeTruthy());
+
+    expect(picker("Agent").id).toBe("implementation-pairing");
+    // The implementation memory and not another role's, which is what the two
+    // other accounts the repo remembers are there to tell it from.
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+    expect(stored().implementation, "nobody touched it").toBeNull();
+  });
+
+  /// And a pick through it is the Implementation role's, replayed onto the
+  /// Conversation the press creates and onto no other role.
+  it("replays a pick onto the implementation role alone", async () => {
+    investigating();
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grilling-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "What does the cache do?" },
+    });
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+
+    // The row reads out in full where the list does; the closed control drops
+    // the backend's name, its mark having said it already.
+    pick("Agent", "Claude Code Sonnet 5 — sonnet");
+    expect(showing("Agent")).toBe("Sonnet 5 — sonnet");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+      ).toEqual({
+        profile_id: PROFILES[2]!.id,
+        model: PROFILES[2]!.models[0]!,
+      }),
+    );
+
+    // The two roles the Process does not use were never drawn, so there was
+    // nothing to touch and nothing to replay.
+    for (const role of ["grilling", "review"]) {
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/${role}-pairing`),
+      ).toBe(0);
+    }
   });
 });
 
@@ -1235,9 +2225,10 @@ describe("making a repo from the Repo dropdown", () => {
 /// the composer and started from it.
 ///
 /// This is where the sidebar's New-conversation menu ended up. What was a group
-/// of rows under the repos is a level of the *Other actions* menu under the box,
-/// and what a press does is the difference worth asking about: the menu created
-/// a conversation on the spot, and this creates nothing until one of the two
+/// of rows under the repos is *the* level of the *Other actions* menu under the
+/// box — the only one, since a Review takes a pull request up now — and what a
+/// press does is the difference worth asking about: the menu created a
+/// conversation on the spot, and this creates nothing until one of the two
 /// presses under the box.
 describe("continuing a roadmap from the compose page", () => {
   beforeEach(() => {
@@ -1421,8 +2412,10 @@ describe("continuing a roadmap from the compose page", () => {
     expect(container.querySelector("#branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
 
-    // The two that are still the human's to settle.
+    // The two that are still the human's to settle — the roles behind the
+    // Agent trigger, which is where every one of them stands.
     expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    await openAgent(container);
     expect(screen.getByLabelText("Grilling")).toBeTruthy();
   });
 
@@ -1574,6 +2567,7 @@ describe("continuing a roadmap from the compose page", () => {
     await loadRoadmap(container, 2);
     await rolesAnswered();
 
+    await openAgent(container);
     pick("Review", "No review");
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
@@ -1662,465 +2656,37 @@ describe("continuing a roadmap from the compose page", () => {
       ).toBeTruthy(),
     );
   });
-});
 
-/// The other level of that menu: the pull requests open across the registered
-/// Repos, which is work already somewhere else waiting to be wrapped up.
-///
-/// What is asked here is the level rather than the reading — which pull requests
-/// GitHub is asked about, which of them come back and which are left out is the
-/// server's, and `crates/server/tests/pull_requests.rs` is where that is pinned.
-/// This is fed the payload that suite writes.
-describe("wrapping up a pull request from the compose page", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    leaveRefusals(0, []);
-  });
-
-  /// The workbench with pull requests open in it, `answered` being what
-  /// `/api/ui/open-pull-requests` says.
-  function withOpen(
-    answered = json(OPEN_PULLS),
-    ...answers: Parameters<typeof serving>
-  ) {
-    return theWorkbench(
-      whenever("/api/ui/open-pull-requests", answered),
-      ...answers,
-    );
-  }
-
-  /// What the level reads as, and what the way back out of it says.
-  const WRAP = "Wrap up a pull request";
-
-  /// The menu under the box, dropped — and the level that lists the pull
-  /// requests, which is the second of the two rows in it.
-  async function wrapLevel(container: ParentNode): Promise<HTMLButtonElement> {
-    fireEvent.click(
-      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
-    );
-    return screen.getByRole("menuitem", { name: WRAP }) as HTMLButtonElement;
-  }
-
-  /// And that level opened, and the rows it holds.
-  async function pullRows(container: ParentNode): Promise<HTMLButtonElement[]> {
-    fireEvent.click(await wrapLevel(container));
-    await drawn(container, `.${composer.pullRow}`);
-    return [
-      ...container.querySelectorAll<HTMLButtonElement>(`.${composer.pullRow}`),
-    ];
-  }
-
-  /// Every open pull request there is, flat, in the order the rows come down.
-  const flat = OPEN_PULLS.flatMap((held) =>
-    held.pull_requests.map((pull) => ({ repo: held.repo, pull })),
-  );
-
-  it("names each pull request, its repo and number, its branches and its author", async () => {
-    withOpen();
+  /// And it is the only level. *Wrap up a pull request* stood beside it until
+  /// the Review Process took that path over, and the menu is still a menu: one
+  /// level, greyed rather than gone while there is nothing to continue, because
+  /// what it replaced was a dropdown that came and went with a list.
+  it("offers continuing a roadmap and nothing else", async () => {
+    adopting();
     const { container } = mount("/compose");
 
     await composing(container);
-    const rows = await pullRows(container);
-    expect(rows.length).toBe(flat.length);
+    await otherActions(container);
 
-    for (const [n, { repo, pull }] of flat.entries()) {
-      const said = rows[n]!.textContent!;
-      expect(said).toContain(repo);
-      expect(said).toContain(`#${pull.number}`);
-      expect(said).toContain(pull.title);
-      expect(said).toContain(pull.head);
-      expect(said).toContain(pull.base);
-      expect(said).toContain(pull.author);
-    }
+    expect(screen.getAllByRole("menuitem").length).toBe(1);
+    expect(screen.getByRole("menuitem", { name: CONTINUE })).toBeTruthy();
   });
 
-  /// One a Conversation already holds is listed all the same, says so, and goes
-  /// there: there is one Conversation per piece of work, and a second one over
-  /// the same branch would be two wrap-ups pushing to it.
-  it("says which pull requests are taken, and leads to the conversation holding one", async () => {
-    withOpen();
-    const { container, history } = mount("/compose");
-
-    await composing(container);
-    const rows = await pullRows(container);
-
-    const taken = flat.findIndex(({ pull }) => pull.conversation_id !== null);
-    expect(taken, "the fixture holds one that is taken").toBeGreaterThan(-1);
-
-    expect(rows[taken]!.textContent).toContain("already in a conversation");
-
-    fireEvent.click(rows[taken]!);
-
-    const held = flat[taken]!.pull.conversation_id!;
-    await waitFor(() =>
-      expect(history.get().startsWith(`/conversations/${held}`)).toBe(true),
-    );
-  });
-
-  /// The level is a `gh` per registered Repo, each a call out to GitHub, so it
-  /// is often still going when the menu is opened. Greying it then would be
-  /// saying *nothing to wrap up* about a list nobody has read yet.
-  it("opens to a line saying it is reading, rather than greying", async () => {
-    withOpen(hangs());
+  /// And nothing asks GitHub what is open. The level that did is gone, and with
+  /// it the one reading on this page that waited on somebody else's server: the
+  /// page opens on what Verkstead itself knows.
+  it("asks for no open pull requests when the page opens", async () => {
+    const fetching = adopting();
     const { container } = mount("/compose");
 
     await composing(container);
-    const level = await wrapLevel(container);
-    expect(level.disabled).toBe(false);
+    await otherActions(container);
 
-    fireEvent.click(level);
-    await drawn(container, `.${composer.reading}`);
-    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
-  });
-
-  /// And once the reading is back with nothing in it, the level greys — which
-  /// is what the roadmap level beside it does with nothing to continue.
-  it("greys the level once the reading is back empty", async () => {
-    withOpen(json([]));
-    const { container } = mount("/compose");
-
-    await composing(container);
-
-    const level = await waitFor(async () => {
-      const row = await wrapLevel(container);
-      if (!row.disabled) throw new Error(`${WRAP} is not greyed yet`);
-      return row;
-    });
-
-    // And it opens nothing: the card is still on its first level.
-    fireEvent.click(level);
-    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
-    expect(container.querySelector(`.${composer.reading}`)).toBeNull();
-  });
-
-  /// A free row loads it into the box — which is where this parts company with
-  /// a roadmap row. A roadmap locks a card over the box; a pull request brings
-  /// words of its own, so the box stays a box and is prefilled with them.
-  it("prefills the box with the title and the description", async () => {
-    withOpen();
-    const { container } = mount("/compose");
-
-    await composing(container);
-    const free = await freeRow(container);
-    fireEvent.click(free.row);
-
-    const band = await drawn(container, `.${takeUp.held}`);
-    expect(band.textContent).toContain(free.repo);
-    expect(band.textContent).toContain(`#${free.pull.number}`);
-    expect(band.textContent).toContain(free.pull.head);
-    expect(band.textContent).toContain(free.pull.base);
-
-    // The box is still a box, and what is in it is the pull request's own words.
-    const filled = await composing(container);
-    await waitFor(() =>
-      expect(filled.value).toBe(
-        `# ${free.pull.title}\n\n${free.pull.body.trim()}\n`,
+    expect(
+      fetching.mock.calls.filter(([asked]) =>
+        String(asked).includes("pull-request"),
       ),
-    );
-
-    // And the menu is gone with the load: there is one thing in the box at a
-    // time, and the way to another is to clear the one that is in it.
-    expect(container.querySelector(`.${composer.actions}`)).toBeNull();
-  });
-
-  /// Held on the device like everything else on this page: a reload lands on the
-  /// pull request that was loaded, with the box as it was left.
-  it("keeps the loaded pull request on this device", async () => {
-    withOpen();
-    const first = mount("/compose");
-
-    await composing(first.container);
-    const free = await freeRow(first.container);
-    fireEvent.click(free.row);
-    await drawn(first.container, `.${takeUp.held}`);
-    first.unmount();
-
-    withOpen();
-    const again = mount("/compose");
-    const band = await drawn(again.container, `.${takeUp.held}`);
-    expect(band.textContent).toContain(`#${free.pull.number}`);
-
-    const box = await composing(again.container);
-    expect(box.value).toContain(free.pull.title);
-  });
-
-  /// And put down again, which gives the box back the text the pull request was
-  /// loaded over: a pull request fills the box rather than locking a card over
-  /// it, so what was being written is stowed with it and comes back when it
-  /// goes.
-  ///
-  /// Seeded on the device rather than typed, exactly as the roadmap's own clear
-  /// is: the state a clear restores is a page holding both at once, and it is a
-  /// state this file can write down.
-  it("puts the text it was loaded over away, and gives it back on clear", async () => {
-    const one = OPEN_PULLS[0]!;
-    const free = one.pull_requests[0]!;
-
-    keep({
-      ...blank(),
-      brief: `# ${free.title}\n\n${free.body}\n`,
-      pull: {
-        repo_id: one.repo_id,
-        repo: one.repo,
-        number: free.number,
-        title: free.title,
-        url: free.url,
-        head: free.head,
-        base: free.base,
-        stowed: "Make the widget",
-      },
-    });
-    withOpen();
-    const { container } = mount("/compose");
-
-    // The pull request is over the box, and the box is holding its words rather
-    // than what was being written.
-    const box = await composing(container);
-    await drawn(container, `.${takeUp.held}`);
-    expect(box.value).toContain(free.title);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: `Clear #${free.number}` }),
-    );
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${takeUp.held}`)).toBeNull(),
-    );
-    await waitFor(() =>
-      expect(
-        (
-          container.querySelector(
-            `.${composer.box} textarea`,
-          ) as HTMLTextAreaElement
-        ).value,
-      ).toBe("Make the widget"),
-    );
-  });
-
-  /// The repo is the pull request's and settled, its branch is the head branch
-  /// and its base is that branch's own head at take-up — so neither field is
-  /// drawn. Nor is the grilling picker: the work is built, and the take-up moves
-  /// it straight into the wrap-up.
-  it("fixes the repo and draws no branch, base or grilling picker", async () => {
-    withOpen();
-    const { container } = mount("/compose");
-
-    await composing(container);
-    const free = await freeRow(container);
-    fireEvent.click(free.row);
-    await drawn(container, `.${takeUp.held}`);
-
-    await waitFor(() =>
-      expect(
-        container.querySelector(`.${setup.repoOption} .${setup.optionValue}`)
-          ?.textContent,
-      ).toBe(free.repo),
-    );
-
-    await openRepo(container);
-    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
-      true,
-    );
-    expect(container.querySelector("#branch")).toBeNull();
-    expect(screen.queryByLabelText("Base branch")).toBeNull();
-    expect(screen.queryByLabelText("Grilling")).toBeNull();
-
-    // The three that are still the human's to settle.
-    expect(screen.getByLabelText("Works alongside")).toBeTruthy();
-    expect(screen.getByLabelText("Implementation")).toBeTruthy();
-    expect(screen.getByLabelText("Review")).toBeTruthy();
-  });
-
-  /// The press: the Conversation started against the repo and the pull request,
-  /// the edited Brief saved on it, and the touched pickers replayed. Neither the
-  /// branch nor the base is sent — the pull request answers both.
-  it("creates a draft holding it, with the edited brief on it", async () => {
-    const fetching = withOpen(
-      json(OPEN_PULLS),
-      ...REMEMBERED,
-      whenever(
-        "/api/ui/pull-request-adoptions",
-        json({ Started: { id: OPEN.id } }),
-        "POST",
-      ),
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/review-pairing`,
-        json("Chosen"),
-        "POST",
-      ),
-      json(null),
-    );
-    const { container, history } = mount("/compose");
-
-    await composing(container);
-    const free = await freeRow(container);
-    fireEvent.click(free.row);
-    await drawn(container, `.${takeUp.held}`);
-
-    const box = await composing(container);
-    fireEvent.input(box, { target: { value: "# Rate limiting\n\nAnd my own note.\n" } });
-
-    pick("Review", "No review");
-
-    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
-
-    await waitFor(() =>
-      expect(sent(fetching, "/api/ui/pull-request-adoptions")).toEqual({
-        repo_id: free.repo_id,
-        number: free.pull.number,
-        title: free.pull.title,
-        url: free.pull.url,
-        head: free.pull.head,
-        base: free.pull.base,
-      }),
-    );
-    await waitFor(() =>
-      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toEqual({
-        markdown: "# Rate limiting\n\nAnd my own note.\n",
-      }),
-    );
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
-      ).toEqual({ pairing: null }),
-    );
-
-    // The two the pull request answers for itself, and the grilling it never
-    // has.
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toBe(0);
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
-
-    await waitFor(() =>
-      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
-    );
-    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
-  });
-
-  /// *Start work* creates the same Conversation and takes the pull request up,
-  /// which is the kickoff under the third of its three names: a roadmap is
-  /// adopted, work of the human's own is grilled, and a pull request is taken
-  /// up — the work on it being built already.
-  it("takes the pull request up once the draft is made", async () => {
-    const fetching = withOpen(
-      json(OPEN_PULLS),
-      ...REMEMBERED,
-      whenever(
-        "/api/ui/pull-request-adoptions",
-        json({ Started: { id: OPEN.id } }),
-        "POST",
-      ),
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/brief`,
-        json("Saved"),
-        "POST",
-      ),
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/take-up`,
-        json("TakenUp" satisfies TakenUp),
-        "POST",
-      ),
-    );
-    const { container } = mount("/compose");
-
-    await composing(container);
-    const free = await freeRow(container);
-    fireEvent.click(free.row);
-    await drawn(container, `.${takeUp.held}`);
-
-    // Both roles the wrap-up runs under, which is the whole of what the press
-    // waits on: a pull request has no grilling to answer for.
-    for (const role of ["Implementation", "Review"]) {
-      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
-    }
-
-    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
-
-    await waitFor(() =>
-      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
-    );
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({}),
-    );
-
-    // And neither of the other two kickoffs, each of which is for a different
-    // kind of draft.
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(0);
-  });
-
-  /// And the quieter press still stops at the draft: *Save as draft* creates the
-  /// Conversation holding the pull request and leaves the take-up on its own
-  /// page.
-  it("leaves the take-up alone when it is only saved as a draft", async () => {
-    const fetching = withOpen(
-      json(OPEN_PULLS),
-      ...REMEMBERED,
-      whenever(
-        "/api/ui/pull-request-adoptions",
-        json({ Started: { id: OPEN.id } }),
-        "POST",
-      ),
-    );
-    const { container } = mount("/compose");
-
-    await composing(container);
-    const free = await freeRow(container);
-    fireEvent.click(free.row);
-    await drawn(container, `.${takeUp.held}`);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
-
-    await waitFor(() =>
-      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
-    );
-    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
-  });
-
-  /// The first free row of the fixture, with everything a test needs to say
-  /// which one it pressed.
-  async function freeRow(container: ParentNode): Promise<{
-    row: HTMLButtonElement;
-    repo_id: number;
-    repo: string;
-    pull: OpenPullRequestRepo["pull_requests"][number];
-  }> {
-    const rows = await pullRows(container);
-    const at = flat.findIndex(({ pull }) => pull.conversation_id === null);
-    expect(at, "the fixture holds one nothing has taken up").toBeGreaterThan(-1);
-
-    const held = OPEN_PULLS.find((group) =>
-      group.pull_requests.includes(flat[at]!.pull),
-    )!;
-
-    return {
-      row: rows[at]!,
-      repo_id: held.repo_id,
-      repo: flat[at]!.repo,
-      pull: flat[at]!.pull,
-    };
-  }
-
-  /// Read when the page opens and again on each reopen, and held nowhere:
-  /// GitHub owns this list, and a copy in the browser would be one this page had
-  /// to work out when to stop believing.
-  it("reads the list again every time the page is opened", async () => {
-    const fetching = withOpen();
-
-    const first = mount("/compose");
-    await composing(first.container);
-    await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(1),
-    );
-    first.unmount();
-
-    const again = mount("/compose");
-    await composing(again.container);
-    await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(2),
-    );
+    ).toEqual([]);
   });
 });
 
@@ -2377,20 +2943,52 @@ describe("what a device holds between visits", () => {
       repo: 2,
       brief: "Make the widget",
       branch: "widget-work",
+      target: "#41",
+      filled: "#41",
       base: "release-1.4",
       companions: [
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },
       ],
+      process: "Develop",
       grilling: "1:opus",
       implementation: "2:fable",
       review: null,
       adopting: null,
-      pull: null,
     };
 
     keep(held);
 
     expect(stored()).toEqual(held);
+  });
+
+  /// A body from a build before the Process was asked for has no `process` at
+  /// all, which is a picker nobody touched rather than a fault — the one
+  /// absence a field-by-field check has to read rather than discard.
+  it("reads a body from before the process as one nobody picked", () => {
+    const { process: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// And a word this build has never heard of is discarded with the rest of the
+  /// draft, because it would go straight back out on the wire.
+  it("discards a draft holding a process the wire does not know", () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), repo: 2, process: "Ponder" }),
+    );
+
+    expect(stored()).toEqual(blank());
+  });
+
+  /// An untouched Process is no more worth coming back to than an untouched
+  /// anything else: a page holding one and nothing else is a page worth
+  /// nothing, and a page holding a picked one is worth keeping.
+  it("keeps a draft whose only touched field is the process", () => {
+    keep({ ...blank(), process: "Develop" });
+
+    expect(stored()).toEqual({ ...blank(), process: "Develop" });
   });
 
   it("holds nothing at all for a page nobody has touched", () => {

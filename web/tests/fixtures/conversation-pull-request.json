@@ -1,12 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": {
-    "base": "main",
-    "head": "rate-limiting",
-    "number": 41,
-    "title": "Rate limiting for the public API",
-    "url": "https://github.com/tobico/verkstead/pull/41"
-  },
   "archived": false,
   "attachments": [],
   "base_commit": null,
@@ -17,13 +10,14 @@
   "compiles_uncached": false,
   "direction": null,
   "driven": false,
-  "grilling_pairing": "Nothing",
+  "grilling_pairing": null,
   "id": 2,
   "implementation_pairing": null,
   "naming": false,
   "parked": null,
   "pending_steer": null,
   "pinned": [],
+  "process": "Review",
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": false,
@@ -40,6 +34,7 @@
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": "https://github.com/tobico/verkstead/pull/41",
   "timeline": [
     {
       "Brief": {

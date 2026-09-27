@@ -53,6 +53,7 @@ import { Empty } from "../notices";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
+import { PROCESS, ROLE, uses } from "./processes";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -156,6 +157,13 @@ function Configuration(props: {
 
       <dl class={styles.facts}>
         <Fact term="Repo">{props.conversation.repo.name}</Fact>
+        {/* And what kind of work it is, where the composer asked for it: the
+            picker sits between the Repo and the Pairings, and this is the same
+            two facts in the same order. In this half rather than the one below
+            because a Process is a fact about the work rather than about the
+            machine it was worked on — so a share says it, as it says the three
+            around it. */}
+        <Fact term="Process">{PROCESS[props.conversation.process]}</Fact>
         {/* The name where there is one, and the rule that will pick one where
             there is not — which is what a Conversation adopting a roadmap
             reads, its Brief being frozen from the start and its branch being
@@ -193,7 +201,7 @@ function Configuration(props: {
             is about the machine rather than about the work, so the half a share
             does not draw. The record it would be drawn from is empty there
             anyway; this is what keeps the pane from reporting that emptiness as
-            *not checked out* and *no grilling*, which would be a share telling
+            *not checked out* and *nobody grilling*, which would be a share telling
             the reader something untrue instead of nothing at all. */}
         <Show when={!props.readOnly}>
           <Machine conversation={props.conversation} />
@@ -248,6 +256,13 @@ function Configuration(props: {
 /// The same query the pickers make, so the cache is what a second caller pays —
 /// and the reading says the Profile's name while it is still in flight, saying
 /// it being the answer that can never misattribute a run.
+///
+/// **A fact per role the Process uses**, off the same table the composer draws
+/// its pickers from — see [`uses`](./processes.ts). A role the Process has no
+/// session for has no account to report: a Conversation holding a pull request
+/// reads as a Review, which never grills, so a *Grilling* row here would be the
+/// pane naming who runs a session that will not exist, beside a composer that
+/// has stopped asking.
 function Machine(props: { conversation: ConversationView }): JSX.Element {
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
@@ -260,26 +275,35 @@ function Machine(props: { conversation: ConversationView }): JSX.Element {
       <Fact term="Worktree">
         <Where worktree={props.conversation.worktree} />
       </Fact>
-      <Fact term="Grilling">
-        <Picked
-          picked={props.conversation.grilling_pairing}
-          saved={profiles.data}
-          away="No grilling."
-        />
-      </Fact>
-      <Fact term="Implementation">
-        <Paired
-          pairing={props.conversation.implementation_pairing}
-          saved={profiles.data}
-        />
-      </Fact>
-      <Fact term="Review">
-        <Picked
-          picked={props.conversation.review_pairing}
-          saved={profiles.data}
-          away="No review."
-        />
-      </Fact>
+      {/* An account or nothing, this role having had no row that runs no
+          session since *No grilling* retired. */}
+      <Show when={uses(props.conversation.process, "grilling")}>
+        <Fact term={ROLE.grilling}>
+          <Paired
+            pairing={props.conversation.grilling_pairing}
+            saved={profiles.data}
+          />
+        </Fact>
+      </Show>
+      {/* Drawn whatever the Process is: every one of them uses this role, there
+          being no work without something building it. */}
+      <Show when={uses(props.conversation.process, "implementation")}>
+        <Fact term={ROLE.implementation}>
+          <Paired
+            pairing={props.conversation.implementation_pairing}
+            saved={profiles.data}
+          />
+        </Fact>
+      </Show>
+      <Show when={uses(props.conversation.process, "review")}>
+        <Fact term={ROLE.review}>
+          <Picked
+            picked={props.conversation.review_pairing}
+            saved={profiles.data}
+            away="No review."
+          />
+        </Fact>
+      </Show>
     </>
   );
 }
@@ -409,12 +433,12 @@ function Paired(props: {
   );
 }
 
-/// And a role that could be picked away as well as paired, which is the grilling
-/// and the review.
+/// And the role that could be picked away as well as paired, which is the
+/// review.
 ///
-/// Said as the choice it was rather than as an absence: *no grilling* and *no
-/// review* are what the human picked, and a pane that read either as "not
-/// chosen" would show a settled conversation as an unsettled one.
+/// Said as the choice it was rather than as an absence: *no review* is what the
+/// human picked, and a pane that read it as "not chosen" would show a settled
+/// conversation as an unsettled one.
 function Picked(props: {
   picked: PickedView;
   saved: ProfileEntry[] | undefined;

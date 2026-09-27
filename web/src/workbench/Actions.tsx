@@ -249,6 +249,8 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "The account this conversation builds under is gone. Steer it into Implementing and pick another.",
   NoFollowUpBrief:
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
+  NoInvestigation:
+    "Nothing on the record says what this investigation was opened about. Steer it into Investigating again with a fresh brief.",
 };
 
 /// What the Resume row says under its name: what the press does, and — on the

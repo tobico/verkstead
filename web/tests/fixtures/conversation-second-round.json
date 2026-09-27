@@ -1,6 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [],
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
@@ -12,22 +11,20 @@
   "direction": "task-list",
   "driven": false,
   "grilling_pairing": {
-    "Under": {
-      "model": "claude-fable-5",
-      "profile": {
-        "account": {
-          "agent_type": "Claude",
-          "claude_dir": "/srv/accounts/fable/.claude",
-          "config_file": "/srv/accounts/fable/.claude.json"
-        },
-        "broken": null,
-        "id": 1,
-        "memory": true,
-        "models": [
-          "claude-fable-5"
-        ],
-        "name": "fable"
-      }
+    "model": "claude-fable-5",
+    "profile": {
+      "account": {
+        "agent_type": "Claude",
+        "claude_dir": "/srv/accounts/fable/.claude",
+        "config_file": "/srv/accounts/fable/.claude.json"
+      },
+      "broken": null,
+      "id": 1,
+      "memory": true,
+      "models": [
+        "claude-fable-5"
+      ],
+      "name": "fable"
     }
   },
   "id": 7,
@@ -66,6 +63,7 @@
       }
     }
   ],
+  "process": "Develop",
   "ready_to_continue": true,
   "ready_to_grill": false,
   "ready_to_resume": true,
@@ -100,6 +98,7 @@
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

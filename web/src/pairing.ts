@@ -117,7 +117,7 @@ export function choice(picked: string): ProfileChoice {
 }
 
 /// The row that says a role runs no session at all, as it travels inside a
-/// `<select>` — "No grilling" on one picker and "No review" on the other.
+/// `<select>` — "No review", on the one picker that offers one.
 ///
 /// Not the empty string, which is the picker's own placeholder: nothing chosen
 /// and *chosen to run nothing* are different states, and one of them lets the

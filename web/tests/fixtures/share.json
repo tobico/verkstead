@@ -39,7 +39,6 @@
   ],
   "conversation": {
     "adopting": null,
-    "adopting_pull_request": null,
     "archived": false,
     "attachments": [
       {
@@ -79,13 +78,14 @@
     "compiles_uncached": false,
     "direction": "inline",
     "driven": false,
-    "grilling_pairing": "Nothing",
+    "grilling_pairing": null,
     "id": 4,
     "implementation_pairing": null,
     "naming": false,
     "parked": null,
     "pending_steer": null,
     "pinned": [],
+    "process": "Develop",
     "ready_to_continue": false,
     "ready_to_grill": false,
     "ready_to_resume": false,
@@ -102,6 +102,7 @@
     "state": "Implementing",
     "stop_asked": false,
     "stopped_by_hand": false,
+    "target": null,
     "timeline": [
       {
         "Brief": {
@@ -231,7 +232,7 @@
       "conversation": 4,
       "diagrams": false,
       "diff": [],
-      "follow_up": false,
+      "ending": null,
       "id": 5,
       "postscript_html": null,
       "preface_html": "<p>We settled all four questions. Here is what I think we build.</p>\n",

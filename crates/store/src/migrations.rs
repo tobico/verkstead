@@ -12,19 +12,28 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
+//! And six are about one repository holding more than one — a **stack**, whose
+//! pull requests are a chain of branches each based on the one below. What was
+//! keyed by the repository is keyed by the pull request: the record of what was
+//! opened, how its checks are getting on, whether GitHub can merge it, where it
+//! has got to, what a wrap-up has settled about it, and what its checks have been
+//! given. The first of the six brings the head branch with it, a fact GitHub told
+//! Verkstead that nothing used to write down.
+//!
 //! Two of them are a `NOT NULL` going away, which SQLite cannot do in place at
 //! all: an Agent Profile may go unnamed now, and so may the record of what a
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Eight of them are a column arriving rather than rows moving between tables —
+//! Ten of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
-//! is a merge, which Answer an attached file was put on, and whether a Profile
-//! shares its account's memory — which is the same kind of one-time rewrite:
-//! the rows already there are given the value that says what was true of them
-//! before the column existed.
+//! is a merge, which Answer an attached file was put on, whether a Profile
+//! shares its account's memory, the question a half-written steer would open
+//! an investigation on, and the branch a recorded pull request merges into —
+//! which is the same kind of one-time rewrite: the rows already there are given
+//! the value that says what was true of them before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -55,7 +64,88 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     attached_files_that_named_no_answer(pool).await?;
     profiles_that_had_to_be_named(pool).await?;
     sessions_that_had_to_name_a_profile(pool).await?;
-    profiles_that_had_no_memory_switch(pool).await
+    profiles_that_had_no_memory_switch(pool).await?;
+    pending_steers_that_had_no_investigation(pool).await?;
+    pull_requests_that_were_one_per_repository(pool).await?;
+    check_rollups_that_named_no_pull_request(pool).await?;
+    merges_that_named_no_pull_request(pool).await?;
+    standings_that_named_no_pull_request(pool).await?;
+    settlements_that_were_one_per_repository(pool).await?;
+    fix_attempts_that_were_one_per_repository(pool).await?;
+    pull_requests_that_named_no_base_branch(pool).await
+}
+
+/// Give every pull request recorded before the chain was worth reading the
+/// column that holds the branch it merges into.
+///
+/// Nobody has one: the base arrives with the column, and every row this reaches
+/// was recorded when a repository held one pull request and there was nothing
+/// above or below it to sit on. So the column's own default is the whole of the
+/// rewrite and there is no `UPDATE` under it — which is the record saying what
+/// is true. A wrap-up whose rows do not say what sits on what is read in the
+/// order they were recorded in, which is the order everything had before there
+/// were stacks; see [`super::stack`].
+///
+/// A column arriving rather than a rebuild, unlike the six above it: nothing
+/// about the table's own rule changes, and `ALTER TABLE ... ADD COLUMN` is
+/// something SQLite will do in place.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn pull_requests_that_named_no_base_branch(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_requests') WHERE name = ?")
+            .bind("base_branch")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the branch a recorded pull request merges into")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE pull_requests ADD COLUMN base_branch TEXT")
+        .execute(pool)
+        .await
+        .context("giving the pull requests recorded before this a base branch to have named")?;
+
+    Ok(())
+}
+
+/// Give every half-written steer from before Investigating was a target the
+/// column that holds the question one would be opened on.
+///
+/// Nobody wrote one: the target arrives with the column, so every row this
+/// reaches is a form whose human could not have picked Investigating. So the
+/// column stands empty and there is no `UPDATE` under it — which is what the
+/// empty slot means anyway, on this column as on every other one of the form's:
+/// nothing written. See [`super::pending_steers`].
+///
+/// A column rather than the follow-up's own read twice, because the form holds
+/// one slot per target's payload: a human who wrote a follow-up's brief, moved
+/// the picker to Investigating and moved it back would otherwise find their own
+/// sentence read back as a question they never asked.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn pending_steers_that_had_no_investigation(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pending_steers') WHERE name = ?")
+            .bind("investigation")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the question a half-written steer would investigate")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE pending_steers ADD COLUMN investigation TEXT")
+        .execute(pool)
+        .await
+        .context("settling the half-written steers from before Investigating was a target")?;
+
+    Ok(())
 }
 
 /// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put
@@ -980,6 +1070,505 @@ async fn addressed_comments_that_named_no_pull_request(pool: &SqlitePool) -> Res
     tx.commit()
         .await
         .context("attributing the comments dispatched for before this to a pull request")
+}
+
+/// Rebuild `pull_requests` around the pull request rather than the repository,
+/// and give every row the head branch column.
+///
+/// A repository used to hold one of a Conversation's pull requests — one branch
+/// per repository and one pull request per branch, so the number was a fact on
+/// the row rather than part of its identity. A Conversation wrapping up a
+/// **stack** holds several in the one repository, the chain's bases being each
+/// other's heads, so what a row is *about* is the Conversation, the Repo and the
+/// number together.
+///
+/// And the head branch arrives with the rebuild, because it is wanted for the
+/// same reason: holding a green suite against what origin is holding is a
+/// question about one pull request's branch, and several in one Worktree make the
+/// checkout the wrong place to ask. Nothing knows the head of a pull request
+/// recorded before this without asking GitHub about every one of them, so the
+/// column arrives empty — which for the Conversation's own repository is its own
+/// branch, the one thing it was possible for it to be, and for a companion's is
+/// nothing anybody can recover. See [`super::pull_requests::PullRequest::head`].
+///
+/// The table is rebuilt rather than altered for the reason every rebuild above it
+/// is: `UNIQUE (conversation_id, repo_id)` is declared inline, SQLite gives it its
+/// own index that no `DROP INDEX` reaches, and a `CREATE TABLE IF NOT EXISTS`
+/// does nothing at all to a table that is already there. The column could have
+/// been added in place; the rule could not, so the two go together.
+///
+/// It runs after [`pull_requests_that_named_no_repo`], whose shape predates the
+/// Repo entirely — a database old enough to need both gets both in that order.
+///
+/// Safe to run twice: what says whether there is anything to do is the head
+/// column being absent, and after the first run it is there.
+async fn pull_requests_that_were_one_per_repository(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_requests') WHERE name = ?")
+            .bind("head_branch")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the head branch of a recorded pull request")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "making the pull requests recorded before this one per pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE pull_requests_by_number (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             head_branch     TEXT,
+             UNIQUE (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the pull requests table over with the number in its rule")?;
+
+    // Every row as it stands, with nothing in the new column: the rows are what
+    // they always were, and what changes is what a row is allowed to stand beside
+    // from now on.
+    sqlx::query(
+        "INSERT INTO pull_requests_by_number
+             (event_id, conversation_id, repo_id, number, title, url)
+         SELECT event_id, conversation_id, repo_id, number, title, url
+         FROM pull_requests",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("copying the pull requests recorded before this across")?;
+
+    sqlx::query("DROP TABLE pull_requests")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the pull requests table as it was")?;
+
+    // Which takes the old unique index with it, that being the table's own: the
+    // rule the rebuilt table carries is the Conversation, the Repo and the number.
+    sqlx::query("ALTER TABLE pull_requests_by_number RENAME TO pull_requests")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt pull requests table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("making the pull requests recorded before this one per pull request")
+}
+
+/// Attribute every check rollup written before a repository could hold more than
+/// one pull request to the pull request it was about.
+///
+/// The one reading of GitHub that never caught up: how a pull request's checks are
+/// was keyed by the Conversation alone, from when a Conversation had one pull
+/// request to have a suite. It has been wrong since a Conversation could end on a
+/// read-write companion's as well — two watchers writing one row, each reading the
+/// other's suite, and the card drawing whichever wrote last — and a stack in one
+/// repository makes it wrong three ways over. So a row is the Conversation's, the
+/// Repo's and the number's, which is what a suite is about.
+///
+/// Every row already there is the Conversation's own repository's pull request,
+/// which is the only one it was possible for it to have been about: what a
+/// companion's watcher wrote is indistinguishable from what the work's own wrote,
+/// and the reading the record kept is whichever asked last. Taking the work's own
+/// is the honest half of a fact that was never two.
+///
+/// It gains the Repo and the number together, so it is joined twice: to the
+/// Conversations for the repository, and to the pull requests for the number that
+/// repository holds. Which is also what leaves behind a rollup whose Conversation
+/// has gone, and one written against a repository whose pull request has — there
+/// is no pull request such a row could be attributed to, and no card left to draw
+/// it.
+///
+/// The table is rebuilt for the reason the ones above it are: the rule is declared
+/// inline as the primary key, so it is the table itself that has to be written out
+/// again.
+///
+/// Safe to run twice: what says whether there is anything to do is the Repo column
+/// being absent, and after the first run it is there.
+async fn check_rollups_that_named_no_pull_request(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_request_checks') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the pull request a check rollup is about")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "attributing the check rollups of before to a pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE pull_request_checks_by_number (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             rollup          TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the check rollups table over with a pull request on it")?;
+
+    sqlx::query(
+        "INSERT INTO pull_request_checks_by_number
+             (conversation_id, repo_id, number, rollup, at)
+         SELECT c.conversation_id, v.repo_id, p.number, c.rollup, c.at
+         FROM pull_request_checks c
+         JOIN conversations v ON v.id = c.conversation_id
+         JOIN pull_requests p
+           ON p.conversation_id = c.conversation_id AND p.repo_id = v.repo_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the check rollups of before to a pull request")?;
+
+    sqlx::query("DROP TABLE pull_request_checks")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the check rollups table as it was")?;
+
+    sqlx::query("ALTER TABLE pull_request_checks_by_number RENAME TO pull_request_checks")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt check rollups table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the check rollups of before to a pull request")
+}
+
+/// Attribute every merge reading written before a repository could hold more than
+/// one pull request to the pull request it was about.
+///
+/// Whether a branch merges was already a fact about one pull request rather than
+/// about the Conversation — that is what made it a table of its own — but it was
+/// keyed by the repository, there being one of them in a repository to be about.
+/// A stack is several, so a row is the Conversation's, the Repo's and the
+/// number's.
+///
+/// Every row already there is that repository's one pull request, which is the
+/// only one it was possible for it to be about, so the number comes off the pull
+/// requests table. Joined rather than sub-selected, which is also what leaves
+/// behind a reading whose pull request has gone off the record: there is nothing
+/// left for it to be about.
+///
+/// The table is rebuilt for the reason the ones above it are: the rule is declared
+/// inline as the primary key, so it is the table itself that has to be written out
+/// again.
+///
+/// Safe to run twice: what says whether there is anything to do is the number
+/// column being absent, and after the first run it is there.
+async fn merges_that_named_no_pull_request(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_request_merges') WHERE name = ?")
+            .bind("number")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the pull request a merge reading is about")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "attributing the merge readings of before to a pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE pull_request_merges_by_number (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             merging         TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the merge readings table over with a pull request on it")?;
+
+    sqlx::query(
+        "INSERT INTO pull_request_merges_by_number
+             (conversation_id, repo_id, number, merging, at)
+         SELECT m.conversation_id, m.repo_id, p.number, m.merging, m.at
+         FROM pull_request_merges m
+         JOIN pull_requests p
+           ON p.conversation_id = m.conversation_id AND p.repo_id = m.repo_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the merge readings of before to a pull request")?;
+
+    sqlx::query("DROP TABLE pull_request_merges")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the merge readings table as it was")?;
+
+    sqlx::query("ALTER TABLE pull_request_merges_by_number RENAME TO pull_request_merges")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt merge readings table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the merge readings of before to a pull request")
+}
+
+/// And every standing the same way, which is the reading that ends the asking.
+///
+/// The merge's rewrite exactly, one fact along and for one word's sake: a pull
+/// request recorded merged or closed is one the sweep after Done never asks about
+/// again, and a standing keyed by the repository would take the pull requests
+/// beside it in a stack off that sweep with it.
+///
+/// Safe to run twice: what says whether there is anything to do is the number
+/// column being absent, and after the first run it is there.
+async fn standings_that_named_no_pull_request(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM pragma_table_info('pull_request_standings') WHERE name = ?",
+    )
+    .bind("number")
+    .fetch_optional(pool)
+    .await
+    .context("looking for the pull request a standing is about")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "attributing the standings of before to a pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE pull_request_standings_by_number (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             standing        TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the standings table over with a pull request on it")?;
+
+    sqlx::query(
+        "INSERT INTO pull_request_standings_by_number
+             (conversation_id, repo_id, number, standing, at)
+         SELECT s.conversation_id, s.repo_id, p.number, s.standing, s.at
+         FROM pull_request_standings s
+         JOIN pull_requests p
+           ON p.conversation_id = s.conversation_id AND p.repo_id = s.repo_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the standings of before to a pull request")?;
+
+    sqlx::query("DROP TABLE pull_request_standings")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the standings table as it was")?;
+
+    sqlx::query("ALTER TABLE pull_request_standings_by_number RENAME TO pull_request_standings")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt standings table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the standings of before to a pull request")
+}
+
+/// Attribute every settlement written before a repository could hold more than
+/// one pull request to the pull request it was about, and rebuild the key around
+/// it.
+///
+/// What a wrap-up waits on is one settlement per pull request for the checks, what
+/// has been said and whether the branch merges — and it was keyed by the Repo
+/// each was opened in, there being one of them in a repository to be about. A
+/// stack is several, each with a suite of its own and a base of its own, so a
+/// settlement is the Conversation's, the Repo's, the number's and the thing's.
+///
+/// Every row already there is that repository's one pull request, which is the
+/// only one it was possible for it to be about, so the number comes off the pull
+/// requests table. The review is the exception it has always been: one review
+/// across the whole of the work, written against no pull request, so it keeps the
+/// zero in the Repo column and takes one in the number beside it — see
+/// [`super::wrap_up`], where that zero is argued.
+///
+/// Left-joined rather than inner-joined so the review comes through, and the
+/// settlements about a pull request that is not on the record are the ones left
+/// behind: there is nothing left for such a row to be about, and no watcher to
+/// read it.
+///
+/// It runs after [`settlements_that_named_no_pull_request`], whose shape predates
+/// the Repo entirely — a database old enough to need both gets both in that order.
+///
+/// Safe to run twice: what says whether there is anything to do is the number
+/// column being absent, and after the first run it is there.
+async fn settlements_that_were_one_per_repository(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('wrap_up_settled') WHERE name = ?")
+            .bind("number")
+            .fetch_optional(pool)
+            .await
+            .context("looking for which pull request a wrap-up's settlement is about")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "attributing the settlements of before to a pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE wrap_up_settled_by_number (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL,
+             number          INTEGER NOT NULL,
+             waiting_on      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number, waiting_on)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the wrap-up settlements table over with a number on it")?;
+
+    sqlx::query(
+        "INSERT INTO wrap_up_settled_by_number
+             (conversation_id, repo_id, number, waiting_on, at)
+         SELECT s.conversation_id, s.repo_id,
+                CASE s.waiting_on WHEN 'review' THEN 0 ELSE p.number END,
+                s.waiting_on, s.at
+         FROM wrap_up_settled s
+         LEFT JOIN pull_requests p
+           ON p.conversation_id = s.conversation_id AND p.repo_id = s.repo_id
+         WHERE s.waiting_on = 'review' OR p.number IS NOT NULL",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the settlements of before to a pull request")?;
+
+    sqlx::query("DROP TABLE wrap_up_settled")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the wrap-up settlements table as it was")?;
+
+    sqlx::query("ALTER TABLE wrap_up_settled_by_number RENAME TO wrap_up_settled")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt wrap-up settlements table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the settlements of before to a pull request")
+}
+
+/// And every fix session counted before then the same way, which is the other
+/// half of a wrap-up's own bookkeeping.
+///
+/// The settlements' rewrite exactly, one fact along: a check red on two of a
+/// repository's pull requests is two different failures, and a count keyed by the
+/// repository would have the bottom of a stack spending the goes of everything
+/// above it.
+///
+/// Inner-joined, there being no row here that is about the wrap-up as a whole: a
+/// count is always about one pull request's suite. Which is also what leaves
+/// behind a count whose pull request has gone off the record — there is nothing
+/// left for it to be a go at.
+///
+/// It runs after [`fix_attempts_that_named_no_repo`], whose shape predates the
+/// Repo entirely.
+///
+/// Safe to run twice: what says whether there is anything to do is the number
+/// column being absent, and after the first run it is there.
+async fn fix_attempts_that_were_one_per_repository(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('check_fix_attempts') WHERE name = ?")
+            .bind("number")
+            .fetch_optional(pool)
+            .await
+            .context("looking for which pull request a counted fix session was a go at")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(
+        pool,
+        "attributing the fix sessions counted before this to a pull request",
+    )
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE check_fix_attempts_by_number (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             check_name      TEXT NOT NULL,
+             attempts        INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, number, check_name)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the check fix attempts table over with a number on it")?;
+
+    sqlx::query(
+        "INSERT INTO check_fix_attempts_by_number
+             (conversation_id, repo_id, number, check_name, attempts)
+         SELECT a.conversation_id, a.repo_id, p.number, a.check_name, a.attempts
+         FROM check_fix_attempts a
+         JOIN pull_requests p
+           ON p.conversation_id = a.conversation_id AND p.repo_id = a.repo_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the fix sessions counted before this to a pull request")?;
+
+    sqlx::query("DROP TABLE check_fix_attempts")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the check fix attempts table as it was")?;
+
+    sqlx::query("ALTER TABLE check_fix_attempts_by_number RENAME TO check_fix_attempts")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt check fix attempts table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the fix sessions counted before this to a pull request")
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end

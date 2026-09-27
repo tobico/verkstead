@@ -50,23 +50,44 @@
 //! on each in turn — see [`at_startup`]. What it leaves alone is a stop somebody
 //! decided on, that being the one kind waiting for a press rather than for a
 //! server.
+//!
+//! **And so does an ending that puts a Conversation back somewhere.** An
+//! investigation goes back to the state it was steered out of, which may be a
+//! wrap-up or a run — and what a Conversation in one of those needs is the same
+//! whoever put it there, so the ending asks for the recompute rather than working
+//! out a second answer of its own. See [`landed`], which is the recompute over a
+//! registration handed in rather than taken, and nothing about the press itself.
+
+use std::future::Future;
+use std::pin::Pin;
 
 use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::drivers::Driving;
 use crate::github;
 use crate::store::{self, Lifecycle};
 
 /// Who asked for the run to start again.
 ///
-/// One thing turns on it, and only one: the fix attempts a wrapping
-/// Conversation's checks have already spent. A human who has read what stopped
-/// and pressed Resume is asking for another go, so the counters are forgotten;
-/// a server coming back up has read nothing and asked for nothing, and an
-/// attempt spent before the restart is one it must not spend again — see
-/// [`crate::checks`]. Everything else about the recompute is the same either
-/// way, which is the whole point of there being one.
+/// Two things turn on it and nothing else does, the recompute itself being the
+/// same for all three — which is the whole point of there being one.
+///
+/// **The fix attempts a wrapping Conversation's checks have already spent.** A
+/// human who has read what stopped and pressed Resume is asking for another go,
+/// so the counters are forgotten; a server coming back up has read nothing and
+/// asked for nothing, and an attempt spent before the restart is one it must not
+/// spend again — see [`crate::checks`]. An ending that landed the Conversation
+/// here is the press's case rather than the restart's: what arrives is a wrap-up
+/// that has been away and come back, exactly as a follow-up's ending brings one
+/// back, and a count left standing would be a watcher that stopped again on its
+/// first poll without dispatching anything.
+///
+/// **And what the press decides about the press**: the stop it clears and the
+/// half-written steer it abandons — see [`starting`]. A restart clears the stop
+/// and leaves the steer where it stands; an ending touches neither, nobody having
+/// pressed anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Resuming {
     /// The human pressed the button.
@@ -74,6 +95,17 @@ pub(crate) enum Resuming {
 
     /// A server came up over a Conversation the last one was driving.
     Restarted,
+
+    /// Or nobody asked at all: an ending landed the Conversation in a state
+    /// something has to be driving, and this is that something being started.
+    ///
+    /// Which is an investigation going back where it came from — see
+    /// [`landed`]. The recompute is the press's, because what a Conversation in
+    /// Wrapping or Implementing needs is the same whoever put it there; what is
+    /// not the press's is everything the press decides *about the press* — the
+    /// stop it clears and the half-written steer it abandons. Nothing was
+    /// pressed here, so neither is touched.
+    Landed,
 }
 
 /// Press Resume: recompute what should be driving this Conversation, clear the
@@ -161,6 +193,83 @@ pub(crate) async fn resume(
     // leaving it to the `?` and the early returns does.
     let driving = state.drivers.driving(conversation_id);
 
+    recompute(state, &conversation, driving, resuming).await
+}
+
+/// Start driving a Conversation that has landed in a state something has to be
+/// driving, because an ending put it there.
+///
+/// **The press's recompute over an ending's landing.** What a Conversation in
+/// Wrapping or Implementing needs is the same whoever put it there — which is
+/// already written and already exhaustive over the states — so this is
+/// [`resume`]'s own reading rather than a second one beside it, and the one
+/// difference is [`Resuming::Landed`]. An investigation going back where it came
+/// from is the only caller: see [`crate::runner`], where the landing is decided
+/// and the state Done is the one that wants none of this.
+///
+/// **The registration is handed in rather than taken here**, which is what parts
+/// this from the press: the ending holds one from before the move was written and
+/// hands it on whole, so there is no moment where the Conversation reads as
+/// undriven — and asking [`crate::drivers::Drivers::driven`] over the top of it
+/// would read the ending's own registration and answer that something was driving
+/// it already.
+///
+/// Which is why nothing here is about a stop either. The press is offered on a
+/// Conversation that has stopped and clears what it finds; a Conversation whose
+/// investigating session has just ended on the human's own mark has stopped over
+/// nothing, and a landing that cleared a stop somebody decided on would be an
+/// ending overruling them.
+///
+/// A refusal is handed back rather than written down. There is nobody in front of
+/// this to answer, and the Conversation it leaves is one in a driven state with
+/// nothing driving it — which is exactly what the stall sweep says out loud a
+/// minute later, in words that name the state. See [`crate::stalls::sweeping`].
+///
+/// **Boxed, which is a fact about the compiler rather than about the work.** The
+/// recompute spawns the drivers, and one of them is the very investigating session
+/// this is reached from — so `recompute` → `investigating` → `found_out` →
+/// `landed` → `recompute` is a cycle of `async fn`s. Whether a future is `Send` is
+/// worked out from what it awaits, and a cycle of anonymous types gives that no
+/// place to start, so one edge of it is given a name instead: `dyn Future + Send`
+/// is the name and the box is what it takes to hold one.
+pub(crate) fn landed(
+    state: &AppState,
+    conversation_id: i64,
+    driving: Driving,
+) -> Pin<Box<dyn Future<Output = anyhow::Result<Resumed>> + Send + '_>> {
+    Box::pin(async move {
+        let Some(conversation) = store::load_conversation(&state.pool, conversation_id).await?
+        else {
+            return Ok(Resumed::NoSuchConversation);
+        };
+
+        // Nothing drives a Conversation that is drafting, done or closed, so
+        // there is nothing for a landing in one to start. Answered here as well
+        // as by the caller, which does not dispatch for a landing in Done at all:
+        // this is the rule said where it is asked, exactly as the press says it
+        // twice.
+        if !driven(conversation.state) {
+            return Ok(Resumed::NotDriven);
+        }
+
+        recompute(state, &conversation, driving, Resuming::Landed).await
+    })
+}
+
+/// What the two of them do, which is the same recompute from the same reading.
+///
+/// Everything past the questions [`resume`] asks about the press itself: the
+/// Worktree the work needs, the branch it may have been renamed to, and the
+/// state's own answer to what ought to be running. `driving` is the registration
+/// it is handed, held across the launch and passed on to whatever it starts.
+async fn recompute(
+    state: &AppState,
+    conversation: &store::Conversation,
+    driving: Driving,
+    resuming: Resuming,
+) -> anyhow::Result<Resumed> {
+    let conversation_id = conversation.id;
+
     // Every state past drafting has a Worktree, so one missing from the record
     // is a record that cannot be true. There is nowhere for a session to run and
     // nothing to make a worktree from either — the path is Verkstead's own to
@@ -218,7 +327,7 @@ pub(crate) async fn resume(
         // asked and answered — the interview itself went with the process it ran
         // in. See [`crate::grillings::again`].
         Lifecycle::Grilling => {
-            if conversation.grilling_pairing.pairing().is_none() {
+            if conversation.grilling_pairing.is_none() {
                 return Ok(Resumed::NoGrillingPairing);
             }
 
@@ -333,6 +442,47 @@ pub(crate) async fn resume(
             ));
         }
 
+        // **A wrap-up still owed its own pull request**, which is a **Review**
+        // taken up over a bare branch whose `submitting` session left none — see
+        // [`crate::conversations::take_up`]. That one is moved into Wrapping by
+        // the take-up rather than by a pull request being recorded, so it is the
+        // one wrap-up that can stand here with nothing of its own on the record,
+        // and the watchers below over the top of it would read the branch, watch
+        // no checks and never open the one thing missing. So the press asks for
+        // that instead, which is the promise the run makes about a finish that
+        // stopped short of its push, kept for the other ending that sends for one
+        // — see [`crate::runner::owed_for_a_branch`].
+        //
+        // Asked of the record and nothing else: every other way into Wrapping
+        // comes through the pull request being recorded, so a Conversation's own
+        // Repo having no row is the whole of the reading.
+        Lifecycle::Wrapping
+            if store::pull_request(&state.pool, conversation_id, conversation.repo.id)
+                .await?
+                .is_none() =>
+        {
+            starting(state, conversation_id, resuming).await?;
+
+            // The base the take-up recorded, which is the branch the picker held
+            // and what the pull request is to be opened against. Where the record
+            // has none — a Conversation from before the name was kept — the
+            // repository's own rule stands, as it does everywhere else that reads
+            // this column.
+            let against = conversation
+                .base_ref
+                .clone()
+                .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+            let state = state.clone();
+
+            tokio::spawn(crate::runner::owed_for_a_branch(
+                state,
+                conversation_id,
+                against,
+                driving,
+            ));
+        }
+
         // The wrap-up's watchers over the top of nothing, which is what a
         // restarting server does with a Conversation it left wrapping up. Each
         // of the five decides for itself whether there is anything left to do,
@@ -346,7 +496,11 @@ pub(crate) async fn resume(
             starting(state, conversation_id, resuming).await?;
 
             match resuming {
-                Resuming::Pressed => {
+                // And an ending's landing with it, for the reason a press
+                // forgets them: what arrives is a wrap-up that has been away and
+                // come back, so a count spent before it went would be a watcher
+                // that stopped again on its first poll. See [`Resuming`].
+                Resuming::Pressed | Resuming::Landed => {
                     let state = state.clone();
 
                     tokio::spawn(async move {
@@ -383,9 +537,17 @@ pub(crate) async fn resume(
         // outlives the session having it is the Timeline. See
         // [`crate::follow_ups`].
         //
-        // No pull request is read for here. The steer that opened this refused
-        // without one, and a follow-up is about the branch rather than about the
-        // record of it: what the session is sent to do is the brief.
+        // **Unless the follow-up is over and its pull request is what is
+        // missing**, which is a Tinker whose ending sent for one and got nowhere
+        // — the state stays Follow-up until that pull request is recorded, so a
+        // press or a restart landing in that window has an ending to finish
+        // rather than a round to start. Asked there rather than here, because it
+        // is the runner's own reading and the two must agree: see
+        // [`crate::runner::follow_up_again`].
+        //
+        // The brief is read for either way. It costs one read of the Timeline,
+        // and a Conversation in this state with nothing to pick up is one the
+        // press should say so about by name rather than one it acts on halfway.
         Lifecycle::FollowUp => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -397,10 +559,39 @@ pub(crate) async fn resume(
 
             starting(state, conversation_id, resuming).await?;
 
-            tokio::spawn(crate::runner::following_up(
+            tokio::spawn(crate::runner::follow_up_again(
                 state.clone(),
                 conversation_id,
                 follow_up,
+                driving,
+            ));
+        }
+
+        // And a fresh session on the investigating skill, on the question this
+        // Investigating was opened with and the rounds it has already been
+        // through — the follow-up's shape, and for the follow-up's reason: an
+        // investigation is a conversation, so nothing of it is written on the
+        // branch and what outlives the session having it is the Timeline. See
+        // [`crate::investigations`].
+        //
+        // There is no ending left half-made to look for here, the way a
+        // follow-up's owed pull request is: an investigation never ends on one.
+        Lifecycle::Investigating => {
+            if conversation.implementation_pairing.is_none() {
+                return Ok(Resumed::NoImplementationPairing);
+            }
+
+            let Some(investigation) = crate::investigations::opened(state, conversation_id).await?
+            else {
+                return Ok(Resumed::NoInvestigation);
+            };
+
+            starting(state, conversation_id, resuming).await?;
+
+            tokio::spawn(crate::runner::investigating(
+                state.clone(),
+                conversation_id,
+                investigation,
                 driving,
             ));
         }
@@ -629,6 +820,9 @@ fn why(refusal: Resumed) -> Option<&'static str> {
         Resumed::NoFollowUpBrief => {
             "nothing on the record says what the follow-up was opened about"
         }
+        Resumed::NoInvestigation => {
+            "nothing on the record says what the investigation was opened about"
+        }
     })
 }
 
@@ -684,16 +878,27 @@ async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
 ///
 /// Before [`clear`] rather than after it, so that the one Nudge it announces
 /// carries both: the badge going and the item going are one change to the page.
+///
+/// **An ending's landing does neither**, which is the whole of what
+/// [`Resuming::Landed`] means here. Nobody pressed anything: the human ticked
+/// **Nothing else** on a round and the investigation went back where it came
+/// from, so a stop standing over the Conversation is one somebody decided on and
+/// a steer half-written against it is still theirs to submit. What the landing
+/// starts is a driver, and a driver is all it starts.
 async fn starting(
     state: &AppState,
     conversation_id: i64,
     resuming: Resuming,
 ) -> anyhow::Result<()> {
-    if resuming == Resuming::Pressed {
-        store::discard_pending_steer(&state.pool, conversation_id).await?;
-    }
+    match resuming {
+        Resuming::Landed => Ok(()),
+        Resuming::Restarted => clear(state, conversation_id).await,
+        Resuming::Pressed => {
+            store::discard_pending_steer(&state.pool, conversation_id).await?;
 
-    clear(state, conversation_id).await
+            clear(state, conversation_id).await
+        }
+    }
 }
 
 /// Whether Resume is worth offering: the Conversation is in a state something
@@ -720,10 +925,11 @@ pub(crate) fn ready(
 /// Whether this is a state something ought to be driving, which is the whole of
 /// what Resume is offered on.
 ///
-/// The four: a grilling has its session, an implementation its run, a wrap-up
-/// its watchers, and a follow-up the session the human is talking to. The three
-/// that are left — drafting, done and closed — were never being driven by
-/// anything, so a press on one is not a Conversation that stood still.
+/// The five: a grilling has its session, an implementation its run, a wrap-up
+/// its watchers, and a follow-up and an investigation the session the human is
+/// talking to. The three that are left — drafting, done and closed — were never
+/// being driven by anything, so a press on one is not a Conversation that stood
+/// still.
 ///
 /// Said once here because three places ask it and none of them may answer it
 /// differently: the button the page draws, the press that arrives, and the
@@ -731,7 +937,11 @@ pub(crate) fn ready(
 fn driven(lifecycle: Lifecycle) -> bool {
     matches!(
         lifecycle,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp
+        Lifecycle::Grilling
+            | Lifecycle::Implementing
+            | Lifecycle::Wrapping
+            | Lifecycle::FollowUp
+            | Lifecycle::Investigating
     )
 }
 

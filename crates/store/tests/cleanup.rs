@@ -25,19 +25,20 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Adding, Ask, Commit, CompanionMode, CompanionWorktree, Decision, Deletion, Lifecycle,
-    Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade, ProfileFacts,
-    PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn, add_companion,
-    append_capture, append_transcript, archive_conversation, ask, attach, capture,
+    Account, Adding, Ask, Commit, CompanionMode, CompanionWorktree, Decision, Deletion, Edited,
+    Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade, Process,
+    ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
+    add_companion, append_capture, append_transcript, archive_conversation, ask, attach, capture,
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
     end_session, load_conversation, load_response, lock_set, nothing_else, open_database,
     open_pending_steer, pick_direction, place_conversations, reclaim, record_addressed_comments,
     record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
     record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
     record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
-    session_id, set_grilling_pairing, settle_wrap_up, skip_review, stamp_unseen, start_capture,
-    start_conversation, start_grilling, start_implementing, stop, submit_response, timeline,
-    transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
+    session_id, set_grilling_pairing, set_process, set_target, settle_wrap_up, skip_review,
+    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
+    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -140,6 +141,8 @@ async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -523,11 +526,21 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
 
     // While it is still a draft, which is the only time these are settled: the
-    // other repository it is worked in, the model one role runs on, and the role
-    // that runs no session at all.
+    // other repository it is worked in, the Process it runs, what it is pointed
+    // at, the model one role runs on, and the role that runs no session at all.
     assert_eq!(
         add_companion(pool, id, companion).await.unwrap(),
         Adding::Added
+    );
+
+    assert_eq!(
+        set_process(pool, id, Process::Develop).await.unwrap(),
+        Edited::Saved,
+    );
+
+    assert_eq!(
+        set_target(pool, id, Some("#41")).await.unwrap(),
+        Edited::Saved,
     );
 
     let profile = create_profile(
@@ -575,7 +588,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap();
 
     assert!(
-        nothing_else(pool, id).await.unwrap(),
+        nothing_else(pool, id, Lifecycle::FollowUp).await.unwrap(),
         "the round is marked as over",
     );
 
@@ -641,6 +654,8 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -648,15 +663,19 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap();
 
     // What GitHub last said about it, and how far the wrap-up got.
-    record_check_rollup(pool, id, Rollup::Passed).await.unwrap();
-    record_merging(pool, id, repo, Merging::Cleanly)
+    record_check_rollup(pool, id, repo, 41, Rollup::Passed)
         .await
         .unwrap();
-    record_standing(pool, id, repo, Standing::Open)
+    record_merging(pool, id, repo, 41, Merging::Cleanly)
+        .await
+        .unwrap();
+    record_standing(pool, id, repo, 41, Standing::Open)
         .await
         .unwrap();
     settle_wrap_up(pool, id, WaitingOn::Review).await.unwrap();
-    record_fix_attempt(pool, id, repo, "build").await.unwrap();
+    record_fix_attempt(pool, id, repo, 41, "build")
+        .await
+        .unwrap();
     record_conflict_fix_attempt(pool, id, repo).await.unwrap();
     record_addressed_comments(pool, id, repo, &["IC_kwDO".to_owned()])
         .await
@@ -804,6 +823,24 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .unwrap();
 
     sqlx::query("INSERT INTO steer_upgrades (event_id, repo_id, branch) VALUES (?, ?, '')")
+        .bind(event)
+        .bind(companion)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And where that steer came from, which is another row hung off the same
+    // Event.
+    sqlx::query("INSERT INTO steer_sources (event_id, state) VALUES (?, 'grilling')")
+        .bind(event)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And what its checkout was already holding uncommitted, which is the last
+    // of them: one row per path, and the NULL row a checkout that held nothing
+    // is recorded as.
+    sqlx::query("INSERT INTO steer_scratch (event_id, repo_id, path) VALUES (?, ?, 'README.md')")
         .bind(event)
         .bind(companion)
         .execute(pool)

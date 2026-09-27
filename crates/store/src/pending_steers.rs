@@ -25,11 +25,21 @@
 //! throwing that away for somebody who pressed twice.
 //!
 //! **A slot for every field the form has** — where it is going, the brief, the
-//! digest tick, the instruction, the follow-up brief, the Pairing, the
-//! interrupt tick, and the companion rows the steer would add and open up. All
-//! of them empty when the row is written: what fills them is the form saving
-//! itself as it is typed. Empty is what the form opens on, and it is what every
-//! one of them means — no target picked yet, nothing written, nothing ticked.
+//! digest tick, the instruction, the follow-up brief, the question an
+//! investigation is opened on, the Pairing, the interrupt tick, and the
+//! companion rows the steer would add and open up. All of them empty when the
+//! row is written: what fills them is the form saving itself as it is typed.
+//! Empty is what the form opens on, and it is what every one of them means — no
+//! target picked yet, nothing written, nothing ticked.
+//!
+//! **One slot per target's payload rather than one shared between them**, which
+//! is what makes a change of mind about where the work goes cost nothing. The
+//! brief a follow-up is opened on and the question an investigation is opened on
+//! are two things to write, so they are two columns: a human who wrote one,
+//! moved the picker across and moved it back would otherwise read their own
+//! sentence back as something they never said. See [`super::migrations`], which
+//! is what gives the rows written before the second of them the value that says
+//! what was true of them before the column existed.
 
 use super::{CompanionMode, Lifecycle};
 use anyhow::{Context, Result};
@@ -81,6 +91,13 @@ pub struct PendingForm {
 
     /// And the brief, for a steer into Follow-up.
     pub follow_up: Option<String>,
+
+    /// And the question, for a steer into Investigating.
+    ///
+    /// Its own slot rather than the follow-up's read twice: the two are
+    /// different things to write, and the form holds both so that moving the
+    /// picker between them loses neither.
+    pub investigation: Option<String>,
 
     /// What the work would run under from here, where the human has picked
     /// something.
@@ -169,6 +186,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              digest          INTEGER NOT NULL DEFAULT 0,
              instruction     TEXT,
              follow_up       TEXT,
+             investigation   TEXT,
              profile_id      INTEGER REFERENCES profiles(id),
              model           TEXT,
              interrupt       INTEGER NOT NULL DEFAULT 0
@@ -266,14 +284,15 @@ pub async fn pending_steer(
         i64,
         Option<String>,
         Option<String>,
+        Option<String>,
         Option<i64>,
         Option<String>,
         i64,
     );
 
     let Some(row): Option<Row> = sqlx::query_as(
-        "SELECT opened_at, target, brief, digest, instruction, follow_up, profile_id, model,
-                interrupt
+        "SELECT opened_at, target, brief, digest, instruction, follow_up, investigation,
+                profile_id, model, interrupt
          FROM pending_steers WHERE conversation_id = ?",
     )
     .bind(conversation_id)
@@ -284,7 +303,18 @@ pub async fn pending_steer(
         return Ok(None);
     };
 
-    let (at, target, brief, digest, instruction, follow_up, profile_id, model, interrupt) = row;
+    let (
+        at,
+        target,
+        brief,
+        digest,
+        instruction,
+        follow_up,
+        investigation,
+        profile_id,
+        model,
+        interrupt,
+    ) = row;
 
     // Read rather than guessed past, as every other stored state word is: a
     // target this build does not understand is a database written by a
@@ -321,6 +351,7 @@ pub async fn pending_steer(
             digest: digest != 0,
             instruction,
             follow_up,
+            investigation,
             // Both halves or neither: a Pairing is picked whole, so a row
             // holding one of them is a row nothing picked.
             pairing: profile_id
@@ -371,7 +402,7 @@ pub async fn save_pending_steer(
     let written = sqlx::query(
         "UPDATE pending_steers
          SET target = ?, brief = ?, digest = ?, instruction = ?, follow_up = ?,
-             profile_id = ?, model = ?, interrupt = ?
+             investigation = ?, profile_id = ?, model = ?, interrupt = ?
          WHERE conversation_id = ?",
     )
     .bind(form.target.map(Lifecycle::stored))
@@ -379,6 +410,7 @@ pub async fn save_pending_steer(
     .bind(i64::from(form.digest))
     .bind(form.instruction.as_deref())
     .bind(form.follow_up.as_deref())
+    .bind(form.investigation.as_deref())
     .bind(form.pairing.as_ref().map(|pairing| pairing.profile_id))
     .bind(form.pairing.as_ref().map(|pairing| pairing.model.as_str()))
     .bind(i64::from(form.interrupt))

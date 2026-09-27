@@ -40,11 +40,56 @@ pub enum Lifecycle {
     /// wrap-up.
     FollowUp,
 
+    /// Beside the ladder rather than on it, the way Follow-up is: a question
+    /// about the code being answered in rounds, with nothing built and nothing
+    /// committed. Reachable from a Start on an **Investigate** draft and from a
+    /// steer out of anywhere, and leading back to wherever it was entered from.
+    Investigating,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
     /// to. Reachable from every other state, and leading nowhere.
     Closed,
+}
+
+/// What kind of work a Conversation is for, and so which states it runs
+/// through.
+///
+/// [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
+/// Set, so it is the viewer's half of a fact of the record's — the store's own
+/// enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
+/// held to each other in one function on the server.
+///
+/// All five, and all five can start something now that Fix Merge Issues has
+/// landed: which of them the picker offers is a list of its own all the same,
+/// and what a stage adds is a row on that list and a start path behind it —
+/// never a variant. A wire that carried only what could be started would be one
+/// to widen every time one more could.
+///
+/// See ADR-0020.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Process {
+    /// The ladder as it has always run, the interview included. Every new
+    /// draft's default, and how every Conversation from before there were
+    /// Processes reads.
+    Develop,
+
+    /// Questions about the code answered without changing it.
+    Investigate,
+
+    /// The wrap-up run over a pull request or a branch the Brief names — and
+    /// how a Conversation that adopted a pull request reads, that being the
+    /// Process its path already was.
+    Review,
+
+    /// Follow-up entered from a Draft: rounds on a fresh branch, primed with
+    /// the Brief.
+    Tinker,
+
+    /// A wrap-up narrowed to what GitHub refuses a merge for.
+    FixMergeIssues,
 }
 
 /// One row of the conversations sidebar.
@@ -262,92 +307,6 @@ pub struct AbandonedRoadmap {
     pub base: String,
 }
 
-/// One Repo's open pull requests, as the *Wrap up a pull request* level lists
-/// them.
-///
-/// Grouped by Repo for the reason the abandoned roadmaps are — a number is a
-/// fact about a repository, and `#41` says something different in each of them,
-/// so a flat list would be one whose rows could not be told apart without
-/// carrying the repository anyway.
-///
-/// Nothing here is stored. Every field is read off GitHub through the host's
-/// `gh` at the moment the level is drawn, which is why a pull request somebody
-/// has since merged simply stops appearing rather than having to be taken off
-/// anything.
-///
-/// A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
-/// logged in, a GitHub that would not answer — contributes no group at all
-/// rather than an empty one or a failure: what Verkstead does not know is not
-/// an empty list, but it is not a broken page either.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct OpenPullRequestRepo {
-    /// Which Repo, by the id a Conversation is started against.
-    pub repo_id: i64,
-
-    /// And what it is called, which is what each row says it is in.
-    pub repo: String,
-
-    /// The open pull requests in it, in the order GitHub listed them. Never
-    /// empty: a Repo with nothing open contributes no group at all.
-    pub pull_requests: Vec<OpenPullRequest>,
-}
-
-/// One open pull request, as a row of that level draws it.
-///
-/// Any author, because whose pull request it is says nothing about whether it is
-/// worth wrapping up — what the pipeline takes up is the branch rather than the
-/// person. Forks are the one exclusion, and they are excluded for what taking
-/// one up would have to do rather than out of taste: a head branch in another
-/// repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
-/// check would have nowhere to put the fix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct OpenPullRequest {
-    /// The number GitHub gave it, which is what everybody calls it by — in
-    /// this repository and nowhere else.
-    pub number: i64,
-
-    /// Its title, which is the line a row leads with.
-    pub title: String,
-
-    /// The whole URL, so a row can lead out to GitHub without a repository
-    /// name being guessed at.
-    pub url: String,
-
-    /// The branch the work is on, which is the branch taking it up checks out.
-    pub head: String,
-
-    /// And the branch it goes into, which is what the wrap-up watches for
-    /// conflicts against.
-    pub base: String,
-
-    /// Who opened it, by their GitHub login. Empty where GitHub named nobody,
-    /// which is what a deleted account leaves behind.
-    pub author: String,
-
-    /// What it says about itself: the description as it was written, raw
-    /// markdown. Empty where nobody wrote one.
-    ///
-    /// Never drawn on the row — a row is a line, and this is a document — but
-    /// carried on it all the same, because loading a pull request prefills the
-    /// box with the title as a heading and this under it. Raw rather than
-    /// rendered, unlike every other piece of markdown crossing this wire: what
-    /// it becomes is a Brief the human edits, and a field cannot be filled from
-    /// HTML.
-    pub body: String,
-
-    /// The Conversation already holding this pull request, where one does —
-    /// any state, Done and Closed included, because a pull request stays on a
-    /// Conversation's record once it is recorded there.
-    ///
-    /// `null` is a pull request nothing has taken up. What a held row does
-    /// instead of loading is lead to the Conversation holding it: there is one
-    /// Conversation per piece of work, and a second one over the same branch
-    /// would be two wrap-ups pushing to it.
-    pub conversation_id: Option<i64>,
-}
-
 /// What a Conversation is adopting, as its own page draws it: the roadmap it
 /// was started for, and the stage adopting would start.
 ///
@@ -375,36 +334,6 @@ pub struct AdoptionView {
     /// gone, or its next stage is somebody else's already. The press says which
     /// of those it is; this is only what the page can name.
     pub stage: Option<AdoptedStage>,
-}
-
-/// The pull request a drafting Conversation is holding, as its own page names
-/// it: which one, what it is called, and the two branches it sits between.
-///
-/// Kept rather than read off GitHub every time the page is drawn, which is where
-/// this parts company with [`AdoptionView`] beside it. A roadmap is a document
-/// in the Conversation's own repository and costs a file read; a pull request is
-/// a call out to GitHub, and a page that made one every time it was opened would
-/// be a page waiting on somebody else's server to say what it is about. What is
-/// authoritative is asked again at the take-up, which is the one moment it
-/// matters.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct AdoptedPullRequestView {
-    /// The number GitHub gave it, which is what everybody calls it by — in the
-    /// Conversation's own Repo and nowhere else.
-    pub number: i64,
-
-    /// Its title, as it read when the row was listed.
-    pub title: String,
-
-    /// The whole URL, so the card can lead out to GitHub.
-    pub url: String,
-
-    /// The branch the work is on, which is the branch the take-up checks out.
-    pub head: String,
-
-    /// And the branch it goes into.
-    pub base: String,
 }
 
 /// The stage an adoption would start, named.
@@ -438,6 +367,19 @@ pub struct ConversationView {
     /// shows the same three facts about it, and a second shape for the same
     /// thing would be a second opinion about what a Repo is.
     pub repo: RepoEntry,
+
+    /// What kind of work it is: the Process, picked on the composer between the
+    /// Repo and the Pairings and frozen when the work starts — see [`Process`].
+    ///
+    /// Never `null`. Every Conversation has one, including every one started
+    /// before there were any: where the record holds no pick the reading stands,
+    /// and the reading is the store's.
+    ///
+    /// Beside the Repo rather than beside the Pairings, which is where the pane
+    /// draws it: the Pairings are in the half of the Configuration that is about
+    /// the machine the work was done on, and a Process is a fact about the work.
+    /// So it is one of the facts a published share says.
+    pub process: Process,
 
     pub branch: String,
 
@@ -479,11 +421,11 @@ pub struct ConversationView {
     /// than by id: the pane says what they are, and whether the Profile is
     /// still runnable.
     ///
-    /// One of the two roles the picker offers a row that runs no session for,
-    /// so this says which of three the human picked rather than whether they
-    /// picked at all. A Conversation that picked *no grilling* is not grilled:
-    /// its Brief goes straight to an inline implementation.
-    pub grilling_pairing: PickedView,
+    /// A Pairing or nothing, the picker having no row that runs no session:
+    /// *No grilling* is retired, and a record written while it was there reads
+    /// as nothing picked — see [`crate::PickedView`], which the two roles that
+    /// do have one still use.
+    pub grilling_pairing: Option<PairingView>,
 
     /// And the ones the implementation will run under. Chosen separately
     /// because it is genuinely a separate account and model.
@@ -612,15 +554,19 @@ pub struct ConversationView {
     /// Adopt press — no Brief to write and no grilling to start.
     pub adopting: Option<AdoptionView>,
 
-    /// And the pull request it is holding, where it is holding one.
+    /// And what the work is pointed at, where the human or the Brief has named
+    /// anything: the **Target** field, as it stands.
     ///
-    /// `null` alongside [`Self::adopting`] on every ordinary Conversation, and
-    /// never both at once: a Draft adopts one thing or none. `Some` is one
-    /// started off the *Wrap up a pull request* level, and it is what puts the
-    /// page on that shape — the pull request named over a Brief the human still
-    /// writes, the two Pairings that will run the wrap-up, and no branch, base
-    /// or grilling to settle.
-    pub adopting_pull_request: Option<AdoptedPullRequestView>,
+    /// `null` is the field empty, which is every Conversation but a **Review**
+    /// somebody has named a target on. What is in it is a pull request URL, a
+    /// `#number` or a branch, kept as it was typed — which of the three it is
+    /// is decided at Start and not before, so there is nothing here saying
+    /// which the page is looking at.
+    ///
+    /// Drawn in the Repo panel under the Branch field, for the Processes that
+    /// take a target and no others — see `processes.ts`, where that list is
+    /// kept beside the role table.
+    pub target: Option<String>,
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
@@ -913,6 +859,15 @@ pub struct SteerForm {
     /// And the brief, for a steer into Follow-up.
     #[serde(default)]
     pub follow_up: Option<String>,
+
+    /// And the question, for a steer into Investigating.
+    ///
+    /// A slot of its own rather than the follow-up's read twice, which is the
+    /// rule every payload here is kept under: the form holds what was written
+    /// under each target, so a human who moves the picker across and back reads
+    /// their own sentence back where they wrote it.
+    #[serde(default)]
+    pub investigation: Option<String>,
 
     /// What the work would run under from here, which is what the submit would
     /// send — the Conversation's own prefill included, rather than only a pick
@@ -3101,30 +3056,6 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
-/// And starting one to wrap a pull request up with: which Repo, and the row off
-/// the *Wrap up a pull request* level that was pressed.
-///
-/// The whole row rather than a number, unlike [`NewAdoption`] beside it. A
-/// roadmap is a document in the Conversation's own repository and is read back
-/// off it wherever it is wanted; a pull request is somebody else's server, and
-/// a server that had only the number would have to make a `gh` call of its own
-/// to draw the card the human has already been looking at. So the five facts
-/// travel, and the take-up is where GitHub is asked again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewPullRequestAdoption {
-    pub repo_id: i64,
-    pub number: i64,
-    pub title: String,
-    pub url: String,
-
-    /// The branch the work is on, which is the branch the take-up checks out.
-    pub head: String,
-
-    /// And the branch it goes into.
-    pub base: String,
-}
-
 /// The order the human has just dragged the sidebar into: every Conversation
 /// they can see, by id, top first.
 ///
@@ -3169,11 +3100,68 @@ pub struct RepoChoice {
     pub repo_id: i64,
 }
 
+/// What kind of work a drafting Conversation is for.
+///
+/// The Process and nothing else, the way [`RepoChoice`] is an id and nothing
+/// else: which one it is is the whole of what the picker says.
+///
+/// Any of the five may be asked for — the wire carries all of them, and whether
+/// the one asked for can be started yet is the server's list to keep rather than
+/// something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProcessChoice {
+    pub process: Process,
+}
+
+/// What became of picking one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ProcessPicked {
+    Picked,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, or its branch has been cut. The same
+    /// refusal the Repo switch gives and under the same one word, for the same
+    /// reason: a Conversation with a worktree is not one a dropdown rewrites,
+    /// and which of the two it is makes no difference to what the human can do
+    /// about it.
+    ///
+    /// Which is the whole of how a Process is frozen at Start. Nothing is
+    /// written when the work begins; from the moment there is a worktree there
+    /// is no way left to change it.
+    NotDrafting,
+
+    /// That Process has no stage behind it yet: the record reads and writes all
+    /// five, and only the ones whose stage has landed can be picked on.
+    ///
+    /// A refusal of its own rather than one of the above, because it is
+    /// something different about the world — nothing the human does to this
+    /// Conversation makes it pickable, and what they are waiting on is
+    /// Verkstead rather than themselves. Which Processes have landed is the
+    /// server's list; the rows the picker draws are the viewer's, and a stage
+    /// that adds one adds the other.
+    NotLanded,
+}
+
 /// What the branch is to be called.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct BranchRename {
     pub branch: String,
+}
+
+/// And what the work is pointed at: a pull request URL, a `#number` or a
+/// branch, as it was typed.
+///
+/// One string whichever of the three it is, because which it is, is not a
+/// question the field asks — it is decided when the Target is read, at Start.
+/// Blank is the field cleared, which is the target taken away rather than one
+/// called nothing, exactly as a blank [`BranchRename`] is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TargetNamed {
+    pub target: String,
 }
 
 /// The branch to come off, or `null` to go back to the default-branch rule.
@@ -3455,13 +3443,6 @@ pub enum RepoSwitched {
     /// the roadmap down, not carrying it across.
     Adopting,
 
-    /// The Conversation is holding a pull request, which is a branch and a
-    /// number in the Repo it was opened in: `#41` names something else in the
-    /// next repository along, or nothing at all. Which repository it is in was
-    /// settled by the row that started the Conversation, exactly as an
-    /// adoption's was.
-    HoldingPullRequest,
-
     /// There is no registered Repo with that id — taken off the registry between
     /// the panel listing it and the press that picked it.
     NoSuchRepo,
@@ -3481,6 +3462,26 @@ pub enum BranchRenamed {
     /// Not a name git would take for a branch. Asked of git itself rather than
     /// guessed at from a list of forbidden characters.
     NotABranchName,
+}
+
+/// What became of naming what the work is pointed at.
+///
+/// Two refusals rather than the branch field's three, and the missing one is
+/// the point: nothing here asks git whether the string is a well-formed branch
+/// name, because a pull request URL is not one and is the commonest thing to
+/// type in. What the string names is decided at Start, where there is a GitHub
+/// and a git to ask — a branch origin has never heard of and a URL of another
+/// repository are refused there, by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TargetRecorded {
+    Recorded,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, so what it was pointed at was read
+    /// when the work started and is not a text field any more. The Branch
+    /// field's own rule, and for its reason.
+    NotDrafting,
 }
 
 /// What became of choosing the branch the work comes off.
@@ -3682,6 +3683,12 @@ pub enum Resumed {
     /// about: another record that cannot be true, a steer being the only way
     /// into Follow-up and one without a brief being refused.
     NoFollowUpBrief,
+
+    /// And it says it is investigating and nothing on its Timeline says what
+    /// about: the same record that cannot be true, read for the state beside
+    /// it. Both ways into Investigating carry the question in, and neither is
+    /// allowed in without one.
+    NoInvestigation,
 }
 
 /// What became of pressing **Resolve conflicts** on a finished Conversation's
@@ -3795,11 +3802,12 @@ pub enum SteerCancelled {
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
 /// its own, and a steer is for the states the work is *done in* — the four rungs
-/// of the ladder, and Follow-up beside them, which has no other way in at all. A
-/// target the form offers is a target something can be set going in, which is
-/// why the two that turn on a pull request are drawn out where there is none: an
-/// instruction is writable anywhere and Done needs nothing, but there is no
-/// wrapping up and no following up of work nobody can see.
+/// of the ladder, and Follow-up and Investigating beside them. A target the form
+/// offers is a target something can be set going in, which is why the two that
+/// turn on a pull request are drawn out where there is none: an instruction is
+/// writable anywhere, Done needs nothing and a question can be asked about work
+/// at any stage, but there is no wrapping up and no following up of work nobody
+/// can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -3861,6 +3869,23 @@ pub enum SteerTarget {
     /// next.
     FollowUp,
 
+    /// A question about this work answered without changing it: a session
+    /// started on the brief the human wrote, which finds out what they asked
+    /// and goes on asking until they are finished, committing nothing.
+    ///
+    /// **The brief is required**, as a follow-up's is and for the same reason:
+    /// there is nothing on the branch that could stand for the question. It
+    /// carries it in a field of its own, as every payload here does, and a
+    /// submit without one is refused under its own name — see
+    /// [`ConversationSteered::NoInvestigationBrief`].
+    ///
+    /// Reachable from every state, unlike either of the other two that run: an
+    /// investigation is a question about the work rather than a step of it, so
+    /// there is nowhere the work can have got to that makes asking one wrong.
+    /// Where it leads back to is the state it was steered from — or Done, for the
+    /// states nothing returns to.
+    Investigating,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
@@ -3876,7 +3901,11 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Implementing | Self::Wrapping | Self::FollowUp => true,
+            Self::Grilling
+            | Self::Implementing
+            | Self::Wrapping
+            | Self::FollowUp
+            | Self::Investigating => true,
             Self::Done => false,
         }
     }
@@ -3963,6 +3992,21 @@ pub struct SteerSubmission {
     /// Whitespace alone is nothing written, as everywhere else here.
     #[serde(default)]
     pub follow_up: Option<String>,
+
+    /// And the question, for a steer into Investigating.
+    ///
+    /// The follow-up's rule word for word: it lands as the Steer Event's own
+    /// body, the session started on it is primed with it as its Brief, it is
+    /// **required** because nothing on the branch could stand for a question
+    /// somebody wanted asked, and whitespace alone is nothing written. A submit
+    /// that names Investigating without one is refused by name — see
+    /// [`ConversationSteered::NoInvestigationBrief`].
+    ///
+    /// Its own field rather than [`Self::follow_up`] sent under another name,
+    /// because the form keeps the two apart: what a submit carries is what the
+    /// human wrote under the target they picked.
+    #[serde(default)]
+    pub investigation: Option<String>,
 
     /// Whether the session is primed with everything the human has already
     /// answered.
@@ -4100,12 +4144,20 @@ pub enum ConversationSteered {
 
     /// Follow-up was named with no brief written.
     ///
-    /// The one written payload that is always required. A steer into
+    /// One of the two written payloads that are always required. A steer into
     /// Implementing with nothing written carries on what the branch holds and a
     /// steer into Grilling with nothing written grills the Brief that is there;
     /// a follow-up is neither the run's next step nor a round of it, so an empty
     /// one is a session with nothing to follow up.
     NoFollowUpBrief,
+
+    /// And Investigating was named with no question written.
+    ///
+    /// The same rule on the other required payload, refused under its own name
+    /// because what the human is owed is a sentence about what they were doing:
+    /// an investigation is a question about the work, and the follow-up's words
+    /// name a pull request that a steer into Investigating need not have.
+    NoInvestigationBrief,
 
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.
@@ -4350,7 +4402,7 @@ pub enum Adopted {
     },
 }
 
-/// What became of pressing the take-up on a Draft holding a pull request.
+/// What became of pressing Start on a **Review** Draft.
 ///
 /// [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
 /// named the same way for the same reason: a human is at the workbench pressing
@@ -4361,6 +4413,12 @@ pub enum Adopted {
 /// refuses an adoption is a name being *taken*; a pull request's head branch is
 /// the whole point, so what refuses a take-up is that branch holding something
 /// origin does not, or somebody else standing on it.
+///
+/// And the ones in front of all of those, which an adoption has no equivalent
+/// of: a stage is named by the row that was pressed, where a Review is pointed at
+/// its work in the **Target** field — typed in, or filled out of a Brief that
+/// named a pull request — and what that field holds is read at the press. So this
+/// list begins with what the field said and what GitHub made of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum TakenUp {
@@ -4373,9 +4431,55 @@ pub enum TakenUp {
     /// It is past drafting, so it has been taken up once already — or closed.
     NotDrafting,
 
-    /// It is holding no pull request, which is every Conversation that began
-    /// with a Brief and a grilling. There is nothing here to wrap up.
+    /// It is neither a Review nor one of the Drafts that were started holding a
+    /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
+
+    /// The **Target** field is empty, so there is nothing for this Review to take
+    /// up. Anything in it at all is a pull request or a branch — see
+    /// [`Self::NoHeadBranch`], which is what a name origin has nothing under
+    /// comes back as.
+    ///
+    /// The press is inert on the page while the field is empty, so this is
+    /// what a page whose copy of the world has gone stale gets back.
+    NoTarget,
+
+    /// The Target's URL names a pull request of another repository, and `gh`
+    /// answers for this Repo's origin. Which repository it named is the whole
+    /// of what the human needs: either the URL is the wrong one, or this
+    /// Conversation is on the wrong Repo.
+    AnotherRepository {
+        /// The `owner/repo` the URL said, as it was written.
+        named: String,
+    },
+
+    /// GitHub has nothing open under that number in this Repo — never opened,
+    /// or merged or closed since the Brief was written.
+    NoSuchPullRequest {
+        /// The number that was asked about.
+        number: i64,
+    },
+
+    /// GitHub could not be asked at all: no `gh` on the PATH, nobody logged in,
+    /// no GitHub remote, a GitHub that would not answer. In `gh`'s own words,
+    /// because which of those it is, is the whole of what to go and fix.
+    GitHubRefused {
+        /// Why, in the sentence the server put it in.
+        why: String,
+    },
+
+    /// The pull request's head branch is in a fork, so nothing a wrap-up did
+    /// could be pushed to it — the fixes would have nowhere to go.
+    Fork,
+
+    /// Another Conversation is already on that pull request, and there is one
+    /// Conversation per piece of work. Which one is the whole of what the
+    /// human needs: the way on is that Conversation rather than a second one
+    /// over the same branch.
+    AlreadyHeld {
+        /// The Conversation that has it, for the way there.
+        conversation: i64,
+    },
 
     /// No Agent Profile is chosen for the implementation, which is what a red
     /// check and a conflict are fixed under.
@@ -4398,8 +4502,10 @@ pub enum TakenUp {
     /// that may be a week old.
     FetchFailed,
 
-    /// Origin has no branch by the name GitHub gave as the pull request's head
-    /// — deleted since it was listed, or never pushed to this remote.
+    /// Origin has no branch by the name being taken up — the head GitHub gave for
+    /// a pull request, deleted since or never pushed to this remote, or a
+    /// **Target** naming a branch that is not on origin at all. Which is nothing
+    /// to wrap up either way: there is nowhere for a review to happen.
     NoHeadBranch,
 
     /// There is a local branch by that name, and it holds commits origin does

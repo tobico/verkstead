@@ -31,24 +31,24 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
-    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
-    CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileListsView, FileMade,
-    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite,
-    FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
+    Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved, Author,
+    BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView,
+    CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
+    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
+    Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
+    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
+    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView,
+    Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
     ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
     RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
     SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
     SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
     SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -135,24 +135,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // rather than under a Repo, because that is where it is read: what it
         // offers is another way to start work.
         .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
-        // And the pull requests open in them, which is the other thing offered
-        // under that box: work that is already somewhere else, waiting to be
-        // wrapped up. Read off GitHub rather than out of the store, so it sits
-        // beside the roadmaps rather than under a Repo for the same reason.
-        .route("/api/ui/open-pull-requests", get(open_pull_requests))
         // And starting one to adopt a roadmap with, which is what clicking a
         // roadmap in that notice does. Its own endpoint rather than a field on
         // the one above: adopting is the other way into the pipeline, and what
         // it starts is a Conversation with no Brief to write.
         .route("/api/ui/adoptions", post(start_adoption))
-        // And starting one to wrap a pull request up with, which is what
-        // pressing a free row of that level does. Its own endpoint beside the
-        // one above for the same reason, over the other kind of thing there is
-        // to take up.
-        .route(
-            "/api/ui/pull-request-adoptions",
-            post(start_pull_request_adoption),
-        )
         .route("/api/ui/conversations/{id}", get(conversation))
         // And the same Conversation as one file to send somebody: the share
         // build of the viewer with this record inside it, answered as a
@@ -374,7 +361,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // facts about. Refused from the moment there is a checkout, like both
         // of them.
         .route("/api/ui/conversations/{id}/repo", post(switch_repo))
+        // And what kind of work it is, which the picker beside that panel asks
+        // and which is refused off the same two questions: a Process is the
+        // Draft's to change and nobody else's.
+        .route("/api/ui/conversations/{id}/process", post(pick_process))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
+        // And what the work is pointed at, for the Processes that are pointed
+        // at work already somewhere else. A route of its own rather than the
+        // branch rename re-used: that one asks `git check-ref-format`, which
+        // refuses a pull request URL over its colon — see ADR-0020.
+        .route("/api/ui/conversations/{id}/target", post(name_target))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // And the other registered Repos the work runs alongside, added and
         // taken away on the same card and for as long as the same card is
@@ -681,20 +677,25 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         OffsetDateTime::now_utc(),
     );
 
-    // Whether the closing section carries the Nothing-else option, which is a
-    // fact about the Conversation rather than about the Set: a follow-up's
-    // rounds are ordinary Sets, and what makes one a follow-up's is where the
-    // work stands while it is being answered. A Conversation that cannot be read
-    // draws no option, which is what every state but Follow-up gets anyway.
-    let follow_up = match store::state(&state.pool, conversation).await {
-        Ok(state) => state == Some(store::Lifecycle::FollowUp),
+    // Whether the closing section carries the Nothing-else option, and which
+    // ending it would bring about — a fact about the Conversation rather than
+    // about the Set: a follow-up's rounds and an investigation's are both
+    // ordinary Sets, and what makes one either is where the work stands while it
+    // is being answered. A Conversation that cannot be read draws no option,
+    // which is what every state but those two gets anyway.
+    let ending = match store::state(&state.pool, conversation).await {
+        Ok(state) => match state {
+            Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
+            Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
+            _ => None,
+        },
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation,
                 "reading where a Set's Conversation stands failed"
             );
-            false
+            None
         }
     };
 
@@ -719,7 +720,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, follow_up, attachments)
+        verkstead_render::set_view(set_id, conversation, set, standing, ending, attachments)
     })
     .await;
 
@@ -1011,45 +1012,6 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
     Json(crate::stages::abandoned(repos).await).into_response()
 }
 
-/// `GET /api/ui/open-pull-requests` — every open pull request in the registered
-/// Repos, grouped by Repo, each saying which Conversation already holds it.
-///
-/// The other way work gets into the pipeline: a pull request Verkstead did not
-/// open is a branch with a review on it and nothing driving the wrap-up, and
-/// this is what the *Wrap up a pull request* level under the compose box lists.
-///
-/// Read off GitHub through the host's `gh` every time it is asked for, like the
-/// roadmaps above and for a stronger version of their reason: GitHub owns this
-/// list, and a copy Verkstead kept would be wrong the moment somebody pressed
-/// *Merge*.
-///
-/// **Nothing here is an error.** A Repo with no GitHub remote, a machine with no
-/// `gh`, a login that has expired and a GitHub that timed out are all
-/// repositories this list has no news about — see [`crate::pull_requests::open`],
-/// where each of them contributes no rows and no failure. The one thing that can
-/// go wrong is the registry itself, which is Verkstead's own database.
-async fn open_pull_requests(State(state): State<AppState>) -> HttpResponse {
-    let repos = match store::registered_repos(&state.pool).await {
-        Ok(repos) => repos,
-        Err(error) => {
-            tracing::error!(error = ?error, "reading the registered Repos failed");
-            return unavailable("the registered Repos could not be read");
-        }
-    };
-
-    // Which pull requests are already in the pipeline, read once for the whole
-    // list — see [`store::held_pull_requests`].
-    let held = match store::held_pull_requests(&state.pool).await {
-        Ok(held) => held,
-        Err(error) => {
-            tracing::error!(error = ?error, "reading which pull requests are already held failed");
-            return unavailable("the open pull requests could not be read");
-        }
-    };
-
-    Json(crate::pull_requests::open(&state.github, repos, &held).await).into_response()
-}
-
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 ///
 /// Three facts ride out on every row beyond what the store holds: whether a
@@ -1204,34 +1166,6 @@ async fn start_adoption(
     }
 }
 
-/// `POST /api/ui/pull-request-adoptions` — start a Conversation to wrap a pull
-/// request up with.
-///
-/// What pressing a free row of the *Wrap up a pull request* level does. It
-/// records and opens: nothing about the repository is touched and nothing is
-/// checked out until the human presses the take-up on the page this puts them
-/// on.
-async fn start_pull_request_adoption(
-    State(state): State<AppState>,
-    Json(new): Json<NewPullRequestAdoption>,
-) -> HttpResponse {
-    let pull_request = store::AdoptedPullRequest {
-        number: new.number,
-        title: new.title,
-        url: new.url,
-        head: new.head,
-        base: new.base,
-    };
-
-    match crate::conversations::start_wrapping_up(&state, new.repo_id, &pull_request).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, "starting a Conversation to wrap a pull request up failed");
-            unavailable("the Conversation could not be started")
-        }
-    }
-}
-
 /// `GET /api/ui/conversations/{id}` — one Conversation with its Timeline.
 ///
 /// The Timeline travels with it rather than being fetched beside it: it is what
@@ -1345,7 +1279,7 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::picked(conversation.grilling_pairing).await {
+    let grilling_pairing = match crate::profiles::pairing(conversation.grilling_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1389,25 +1323,25 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // And how the pull request's checks were the last time anything asked, which
+    // And how each pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
-    // once for the two cards drawn from it below, both being the one card in the
-    // two places a pull request is drawn.
+    // once for the two cards drawn from each of them below, both being the one
+    // card in the two places a pull request is drawn.
     //
-    // The Conversation's own repository's pull request only. How the checks are
-    // is written down per Conversation rather than per pull request, so it is the
-    // one that moved this Conversation into Wrapping that it belongs to — see
-    // [`own_checks`]. A companion's card draws no icon rather than this one's.
+    // Every pull request rather than the Conversation's own: a suite is a fact
+    // about one branch, so a companion's card and each branch of a stack draw
+    // their own icon. Which is why it is read as a map by the Event each pull
+    // request is — that is what both copies of a card have to hand.
     //
     // Stale on a Conversation nothing is watching any more, the watcher stopping
     // when the wrap-up is over — which is a card an hour behind rather than a
     // card that is wrong: the last thing anybody asked GitHub is the honest
     // thing to draw.
-    let checks = match store::check_rollup(&state.pool, id).await {
-        Ok(checks) => checks.map(rollup),
+    let checks = match store::rollups(&state.pool, id).await {
+        Ok(checks) => checks,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading how a pull request's checks are failed");
-            None
+            tracing::error!(error = ?error, conversation_id = id, "reading how a Conversation's pull requests' checks are failed");
+            std::collections::HashMap::new()
         }
     };
 
@@ -1415,10 +1349,7 @@ pub(crate) async fn conversation_view(
     // moves — the checks watcher writes it every poll of a wrap-up, and the sweep
     // after Done goes on writing it until the pull request is merged or closed.
     //
-    // Every pull request rather than the Conversation's own, unlike the rollup
-    // above: this is written down per pull request, so a companion's card draws
-    // its own reading. Which is why it is read as a map by the Event each pull
-    // request is — that is what both copies of a card have to hand.
+    // Read the same way and keyed the same way, for the same reason.
     //
     // A pull request nothing has asked GitHub about is absent, and so is one
     // GitHub has not worked the answer out for. Both are a card with no mark,
@@ -1491,7 +1422,7 @@ pub(crate) async fn conversation_view(
                 title: opened.title.clone(),
                 url: opened.url.clone(),
                 repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
+                checks: checks.get(&event.id).copied().map(rollup),
                 merging: merges.get(&event.id).copied().map(merging),
             },
         )),
@@ -1552,10 +1483,12 @@ pub(crate) async fn conversation_view(
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        &grilling_pairing,
+        conversation.process,
+        grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
         &review_pairing,
         brief,
+        conversation.target.as_deref(),
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
@@ -1613,28 +1546,6 @@ pub(crate) async fn conversation_view(
         ),
         _ => None,
     };
-
-    // And the pull request it is holding, where it is holding one and has not
-    // taken it up yet. Read straight off the record rather than off GitHub: the
-    // roadmap above is a document in this Repo and costs a file read, where this
-    // would be a call out to somebody else's server every time the page was
-    // opened. What GitHub says *now* is what the take-up asks for, which is the
-    // one moment it decides anything.
-    //
-    // A worktree says the take-up has happened, exactly as it says an adoption
-    // has: what follows it is a wrap-up, and the pull request is on the record
-    // properly by then.
-    let adopting_pull_request = conversation
-        .adopting_pull_request
-        .clone()
-        .filter(|_| worktree.is_none())
-        .map(|held| AdoptedPullRequestView {
-            number: held.number,
-            title: held.title,
-            url: held.url,
-            head: held.head,
-            base: held.base,
-        });
 
     // Whether driving has stopped, however it stopped: the stop says the
     // Conversation is stopped now, and the Notice it points at says what stopped
@@ -1897,6 +1808,7 @@ pub(crate) async fn conversation_view(
             path: conversation.repo.path.to_string_lossy().into_owned(),
             default_branch: conversation.repo.default_branch,
         },
+        process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
         naming: conversation.naming,
@@ -1910,7 +1822,7 @@ pub(crate) async fn conversation_view(
         stop_asked,
         ready_to_continue,
         adopting,
-        adopting_pull_request,
+        target: conversation.target,
         grilling_pairing,
         implementation_pairing,
         review_pairing,
@@ -2124,7 +2036,7 @@ pub(crate) async fn conversation_view(
                             title: opened.title,
                             url: opened.url,
                             repo: opened.repo.clone(),
-                            checks: own_checks(&opened.repo, checks),
+                            checks: checks.get(&event.id).copied().map(rollup),
                             merging: merges.get(&event.id).copied().map(merging),
                         },
                     ),
@@ -3659,25 +3571,28 @@ async fn pull_request(
     };
 
     let gh = state.github.clone();
+    let number = opened.number;
 
     let asked = {
         let path = repo.path.clone();
 
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, opened.number)).await
+        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, number)).await
     };
 
     match asked {
         Ok(Ok(read)) => {
             // Written down before the answer goes out, so a page that redraws
             // the card on the Nudge this sends draws what the pane is about to
-            // show it.
-            crate::checks::remember(&state, id, &read.checks).await;
+            // show it. Against this pull request rather than the Conversation:
+            // one repository holds as many as a stack is deep, and each has a
+            // suite of its own.
+            crate::checks::remember(&state, id, repo.id, number, &read.checks).await;
 
             // And the two facts about the pull request itself that came back on
             // the same question: whether it merges, and where it has got to. The
             // pane is what freshens both on a Conversation nothing is watching
             // and nothing is sweeping — see [`crate::merges::remember`].
-            crate::merges::remember(&state, id, &repo, read.landing).await;
+            crate::merges::remember(&state, id, &repo, number, read.landing).await;
 
             Json(read.pane).into_response()
         }
@@ -3843,6 +3758,30 @@ async fn switch_repo(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/process` — say what kind of work a drafting
+/// Conversation is for.
+///
+/// Every refusal is the server's, as the Repo switch's are: a picker that offers
+/// only the Processes whose stage has landed is a courtesy, and this endpoint is
+/// reachable without one.
+async fn pick_process(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<ProcessChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ProcessPicked::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::pick_process(&state.pool, id, choice.process).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "picking a conversation's Process failed");
+            unavailable("the process could not be picked")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/branch` — name the branch the work will be
 /// done on.
 async fn rename_branch(
@@ -3859,6 +3798,26 @@ async fn rename_branch(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "renaming a branch failed");
             unavailable("the branch could not be named")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/target` — name the pull request or branch
+/// the work is pointed at, or take the name away.
+async fn name_target(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(named): Json<TargetNamed>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TargetRecorded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_target(&state.pool, id, &named.target).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "naming a conversation's target failed");
+            unavailable("the target could not be named")
         }
     }
 }
@@ -4439,12 +4398,11 @@ async fn show_archived(
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
-/// the grilling session runs under, or the row that says there is to be no
-/// grilling at all.
+/// the grilling session runs under.
 async fn choose_grilling_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(choice): Json<RoleChoice>,
+    Json(choice): Json<ProfileChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
@@ -4615,24 +4573,6 @@ fn merging(merges: store::Merging) -> Merging {
     }
 }
 
-/// How the checks are, but only on the pull request they were written down
-/// about.
-///
-/// A rollup is recorded per Conversation, and a Conversation now ends on one
-/// pull request per repository it was worked in — so the word belongs to the one
-/// that moved it into Wrapping, which is the Conversation's own repository's.
-/// That is the pull request whose `repo` reads back unlabeled: a companion's
-/// carries the name of the repository it was opened in.
-///
-/// A companion's card draws no icon rather than this one's. Drawing it there
-/// would be saying something about a suite nobody asked GitHub about.
-fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<CheckRollup> {
-    match repo {
-        None => checks,
-        Some(_) => None,
-    }
-}
-
 /// Which Profile each steer on a Timeline picked, by the Event it was recorded
 /// on.
 ///
@@ -4797,8 +4737,33 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::FollowUp => Lifecycle::FollowUp,
+        store::Lifecycle::Investigating => Lifecycle::Investigating,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
+    }
+}
+
+/// And the store's Process as the viewer receives it. One word either side, and
+/// this is where those two vocabularies are held to each other — the pair
+/// [`lifecycle`] above is, for the fact beside it.
+pub(crate) fn process(process: store::Process) -> Process {
+    match process {
+        store::Process::Develop => Process::Develop,
+        store::Process::Investigate => Process::Investigate,
+        store::Process::Review => Process::Review,
+        store::Process::Tinker => Process::Tinker,
+        store::Process::FixMergeIssues => Process::FixMergeIssues,
+    }
+}
+
+/// And back the other way, for the one press that writes one.
+pub(crate) fn picked_process(process: Process) -> store::Process {
+    match process {
+        Process::Develop => store::Process::Develop,
+        Process::Investigate => store::Process::Investigate,
+        Process::Review => store::Process::Review,
+        Process::Tinker => store::Process::Tinker,
+        Process::FixMergeIssues => store::Process::FixMergeIssues,
     }
 }
 

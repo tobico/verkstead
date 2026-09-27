@@ -1,5 +1,9 @@
-//! The Nothing-else mark: the human saying, on a follow-up's Set, that there is
-//! nothing else to follow up.
+//! The Nothing-else mark: the human saying, on a Set of a Conversation having
+//! rounds, that there is nothing else they want out of them.
+//!
+//! Two states are had in rounds and both end on this mark — Follow-up and
+//! Investigating — so the per-Conversation reading is told which of them it is
+//! reading inside. See [`nothing_else`].
 //!
 //! A table of its own, for the reason a lock and a deferral each have one:
 //! `responses` is STRICT, there is no migration machinery here, and a fact about
@@ -68,8 +72,8 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
     Ok(found.is_some())
 }
 
-/// Whether the follow-up on this Conversation has been marked as over: its
-/// latest answered Set carries the mark.
+/// Whether the rounds this Conversation is having in `within` have been marked
+/// as over: its latest answered Set carries the mark.
 ///
 /// **The latest one decides, and the mark is never sticky.** A Set asked after
 /// an end-marked Response is the follow-up going round again — the human may
@@ -77,12 +81,19 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
 /// what this reads is the newest Response of the round and never the newest mark.
 /// An answer without one puts the follow-up back to running.
 ///
-/// **This follow-up's own**, which is what the window is for. A Conversation can
-/// be steered into Follow-up more than once, and a mark left by the round before
-/// it would end the next one before it had asked anything. So the window opens
-/// at the newest move into Follow-up, exactly as a wrap-up's proposals are
-/// counted from the newest move into Wrapping — see
+/// **This round's own, in the state the caller names**, which is what the window
+/// is for. A Conversation can be steered into Follow-up more than once, and a
+/// mark left by the round before it would end the next one before it had asked
+/// anything. So the window opens at the newest move into `within`, exactly as a
+/// wrap-up's proposals are counted from the newest move into Wrapping — see
 /// [`super::conversations::last_batch_proposal`].
+///
+/// Which state that is, is the caller's, because two of them end on this mark
+/// and each has a window of its own: [`Lifecycle::FollowUp`] for a follow-up,
+/// and [`Lifecycle::Investigating`] for an investigation, which is had in rounds
+/// the same way and ended the same way. A Conversation investigated and then
+/// followed up would read the investigation's mark as the follow-up's if the
+/// state were assumed here, and end a follow-up that had asked nothing.
 ///
 /// **Answered rather than settled**, which is the one place the two part
 /// company: a Set locked unanswered carries no Response and so carries no mark,
@@ -95,7 +106,11 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
 /// not the round's own last word. A store-and-nudge round is the round's own
 /// last word all the same — the session that asked it is idling on the Answer
 /// with its turn ended, which is exactly the session this mark ends.
-pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+pub async fn nothing_else(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    within: Lifecycle,
+) -> Result<bool> {
     let found: Option<(i64,)> = sqlx::query_as(
         "SELECT q.id
          FROM question_sets q
@@ -114,12 +129,15 @@ pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64) -> Result<boo
     )
     .bind(conversation_id)
     .bind(conversation_id)
-    .bind(Event::Moved(Lifecycle::FollowUp).kind())
-    .bind(Lifecycle::FollowUp.stored())
+    .bind(Event::Moved(within).kind())
+    .bind(within.stored())
     .fetch_optional(pool)
     .await
     .with_context(|| {
-        format!("looking for the last round Conversation {conversation_id} answered")
+        format!(
+            "looking for the last round Conversation {conversation_id} answered while {}",
+            within.stored()
+        )
     })?;
 
     let Some((set_id,)) = found else {

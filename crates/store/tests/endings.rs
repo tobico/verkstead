@@ -14,19 +14,21 @@
 //! round asked after a marked one puts the follow-up back to running, and a mark
 //! left by the follow-up before this one ends nothing.
 //!
-//! And the landing that reading ends in: back to Wrapping over the pull request
-//! the follow-up was opened about, with the checks put back to waiting where it
-//! pushed.
+//! And the two landings that reading ends in: back to Wrapping over the pull
+//! request the follow-up was opened about, with the checks put back to waiting
+//! where it pushed — and Done, for a follow-up on a branch nothing built anything
+//! on and no pull request is waiting for.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Ending, Lifecycle, PullRequest, Recorded, Settlements, Steer, Steering, Submission,
-    WAITED_ON, WaitingOn, ask, ended_on, follow_up_over, load_conversation, load_response,
-    lock_set, nothing_else, open_database, record_another_pull_request, register_repo,
-    settle_wrap_up, start_conversation, steer_conversation, submit_response, wrap_up_settled,
+    Ask, Ending, Event, Investigated, Lifecycle, PullRequest, Recorded, Settlements, Steer,
+    Steering, Submission, WAITED_ON, WaitingOn, ask, ended_on, follow_up_done, follow_up_over,
+    investigation_over, load_conversation, load_response, lock_set, nothing_else, open_database,
+    record_another_pull_request, register_repo, settle_wrap_up, start_conversation,
+    steer_conversation, submit_response, timeline, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -260,6 +262,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
                 checkouts: &[],
                 said: None,
                 recorded: Recorded::default(),
+                scratch: &[],
             },
         )
         .await
@@ -276,7 +279,9 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
     following_up(&pool, conversation).await;
 
     assert!(
-        !nothing_else(&pool, conversation).await.unwrap(),
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "a follow-up that has asked nothing is one nobody has ended"
     );
 
@@ -286,7 +291,9 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation).await.unwrap(),
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "and an answer without the option ticked is the human saying there is more"
     );
 
@@ -296,7 +303,9 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation).await.unwrap(),
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "the newest round they answered carries the mark, so the follow-up is over"
     );
 }
@@ -316,7 +325,9 @@ async fn a_round_asked_after_the_mark_puts_the_follow_up_back_to_running() {
     let again = asked(&pool, conversation, "one more thing then").await;
 
     assert!(
-        nothing_else(&pool, conversation).await.unwrap(),
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "a round nobody has answered says nothing, so the marked one is still \
          the latest word"
     );
@@ -326,7 +337,9 @@ async fn a_round_asked_after_the_mark_puts_the_follow_up_back_to_running() {
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation).await.unwrap(),
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "and its own Response decides: the mark is never sticky"
     );
 }
@@ -343,7 +356,11 @@ async fn a_mark_left_by_the_follow_up_before_this_one_ends_nothing() {
         .await
         .unwrap();
 
-    assert!(nothing_else(&pool, conversation).await.unwrap());
+    assert!(
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap()
+    );
 
     // Back to the wrap-up, and steered into Follow-up a second time — which is a
     // follow-up that has asked nothing yet.
@@ -355,7 +372,9 @@ async fn a_mark_left_by_the_follow_up_before_this_one_ends_nothing() {
     following_up(&pool, conversation).await;
 
     assert!(
-        !nothing_else(&pool, conversation).await.unwrap(),
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "the window opens at the newest move into Follow-up, so last time's mark \
          is not this follow-up's word"
     );
@@ -377,7 +396,9 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
     lock_set(&pool, &settlements(), locked).await.unwrap();
 
     assert!(
-        nothing_else(&pool, conversation).await.unwrap(),
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "a Set nobody answered carries no Response and so no word either way"
     );
 
@@ -397,12 +418,16 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation).await.unwrap(),
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "and a Deferred Ask is nobody's round: its Answers are for a later \
          session by design"
     );
     assert!(
-        nothing_else(&pool, conversation).await.unwrap(),
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "and a Deferred Ask is nobody's round: its Answers are for a later \
          session by design"
     );
@@ -427,7 +452,9 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation).await.unwrap(),
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
         "an answer without the mark on a store-and-nudge round puts the \
          follow-up back to running"
     );
@@ -452,9 +479,16 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
             .unwrap();
     }
 
-    settle_wrap_up(&pool, conversation, WaitingOn::Checks(repo))
-        .await
-        .unwrap();
+    settle_wrap_up(
+        &pool,
+        conversation,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
 
     following_up(&pool, conversation).await;
 
@@ -477,7 +511,10 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
     let settled = wrap_up_settled(&pool, conversation).await.unwrap();
 
     assert!(
-        !settled.contains(&WaitingOn::Checks(repo)),
+        !settled.contains(&WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }),
         "the follow-up pushed, so the green standing over the checks was the run \
          before it: {settled:?}",
     );
@@ -506,6 +543,8 @@ fn opened() -> PullRequest {
         number: 41,
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     }
 }
@@ -537,6 +576,66 @@ async fn a_follow_up_that_pushed_nothing_lands_with_every_settle_standing() {
     );
 }
 
+/// And the other landing: Done, for a follow-up on a branch nothing was built on
+/// and no pull request is waiting for.
+///
+/// A **Tinker** whose rounds were questions and answers alone. There is nothing
+/// to open a pull request over and nothing for a wrap-up to be about, so the move
+/// is the whole of it — and it is a move like every other, which means a line on
+/// the Timeline saying when the Conversation got there. Which of the two landings
+/// a follow-up takes is read off its branch by the caller; the store writes the
+/// one it is asked for.
+#[tokio::test]
+async fn a_follow_up_that_built_nothing_lands_in_done_with_the_move_on_its_timeline() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    following_up(&pool, conversation).await;
+
+    assert_eq!(
+        follow_up_done(&pool, conversation).await.unwrap(),
+        Ending::Finished,
+    );
+
+    let conversation_row = load_conversation(&pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(
+        conversation_row.state,
+        Lifecycle::Done,
+        "there is nothing on the branch to wrap up, so the work is finished",
+    );
+
+    let moved = moves(&pool, conversation).await;
+
+    assert_eq!(
+        moved.last(),
+        Some(&Lifecycle::Done),
+        "and the Timeline says when it got there, as it does for every move: \
+         {moved:?}",
+    );
+    assert!(
+        !moved.contains(&Lifecycle::Wrapping),
+        "without passing through a wrap-up on the way: there was never a pull \
+         request for one to be about: {moved:?}",
+    );
+}
+
+/// The states a Conversation's Timeline says it has moved through, in order.
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event.event {
+            Event::Moved(state) => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     let (_dir, pool) = fresh_pool().await;
@@ -550,5 +649,288 @@ async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     assert_eq!(
         follow_up_over(&pool, 404, false).await.unwrap(),
         Ending::NoSuchConversation,
+    );
+
+    // And the landing beside it is refused by the same two names: both are the
+    // one move out of Follow-up, so neither is a way into Done or Wrapping from
+    // anywhere else.
+    assert_eq!(
+        follow_up_done(&pool, conversation).await.unwrap(),
+        Ending::NotFollowingUp,
+    );
+    assert_eq!(
+        follow_up_done(&pool, 404).await.unwrap(),
+        Ending::NoSuchConversation,
+    );
+}
+
+/// And the same move into Investigating, which is the other window the
+/// whole-Conversation read is taken inside.
+async fn investigating(pool: &SqlitePool, conversation: i64) {
+    assert_eq!(
+        steer_conversation(
+            pool,
+            conversation,
+            Steer {
+                target: Lifecycle::Investigating,
+                pairings: &[],
+                brief: None,
+                instruction: Some("Where does it get the window from?\n"),
+                direction: None,
+                worktree: None,
+                base: None,
+                companions: &[],
+                opened: &[],
+                checkouts: &[],
+                said: None,
+                recorded: Recorded::default(),
+                scratch: &[],
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+}
+
+/// The mark is read inside the window of the state the caller names, and a mark
+/// left in another one is not this round's word.
+///
+/// Two states are had in rounds and both end on this mark, so the reading has to
+/// be told which of them it is inside. A Conversation followed up and marked and
+/// then steered into Investigating is an investigation that has asked nothing:
+/// reading the follow-up's mark as its own would end it before its first round.
+#[tokio::test]
+async fn a_mark_left_in_another_state_is_not_this_ones_word() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    following_up(&pool, conversation).await;
+
+    let ended = asked(&pool, conversation, "the round that ended the follow-up").await;
+    submit_response(&pool, &settlements(), ended, &ending())
+        .await
+        .unwrap();
+
+    assert!(
+        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
+    );
+
+    investigating(&pool, conversation).await;
+
+    assert!(
+        !nothing_else(&pool, conversation, Lifecycle::Investigating)
+            .await
+            .unwrap(),
+        "the investigation's window opens at the move into Investigating, so the \
+         follow-up's mark is not its word"
+    );
+
+    let round = asked(&pool, conversation, "the round they answered").await;
+    submit_response(&pool, &settlements(), round, &answering())
+        .await
+        .unwrap();
+
+    assert!(
+        !nothing_else(&pool, conversation, Lifecycle::Investigating)
+            .await
+            .unwrap(),
+        "and an answer without the option ticked is the human saying there is \
+         more they want found out"
+    );
+    assert!(
+        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+            .await
+            .unwrap(),
+        "which is the newest round read the other way round as well: the window \
+         says where to start, and the newest Response inside it decides"
+    );
+
+    let last = asked(&pool, conversation, "the round that ended it").await;
+    submit_response(&pool, &settlements(), last, &ending())
+        .await
+        .unwrap();
+
+    assert!(
+        nothing_else(&pool, conversation, Lifecycle::Investigating)
+            .await
+            .unwrap(),
+        "and the mark on the newest round they answered is what ends the \
+         investigation"
+    );
+}
+
+/// An investigation ends in Done, with the move on the Timeline and nothing else
+/// written.
+///
+/// Done being what a caller with nowhere to send it back to asks for: an
+/// investigation writes nothing down on the branch, so there is no pull request to
+/// carry anything to and nothing for a wrap-up to be about.
+#[tokio::test]
+async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    investigating(&pool, conversation).await;
+
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::Landed,
+    );
+
+    let conversation_row = load_conversation(&pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(conversation_row.state, Lifecycle::Done);
+
+    let moved = moves(&pool, conversation).await;
+
+    assert_eq!(
+        moved.last(),
+        Some(&Lifecycle::Done),
+        "and the Timeline says when it got there, as it does for every move: \
+         {moved:?}",
+    );
+    assert!(
+        !moved.contains(&Lifecycle::Wrapping),
+        "without passing through a wrap-up on the way: an investigation builds \
+         nothing for one to be about: {moved:?}",
+    );
+}
+
+/// And it lands wherever the caller says, which is what an investigation steered
+/// into being goes back to.
+///
+/// The landing is the caller's whole say here, the way it is for the two ways out
+/// of a follow-up: where an investigation came from is a fact recorded beside the
+/// Steer Event that opened it, and nothing in this move is in a position to read
+/// one. What the move owes either way is the state and the line on the Timeline.
+///
+/// **And nothing else**, which is the other half: the wrap-up this one goes back
+/// to has its settles exactly as the investigation found them. An investigation
+/// commits nothing and pushes nothing, so GitHub has no new run to make up its
+/// mind about and the green standing over the checks is still earned — which is
+/// where this parts from a follow-up that pushed.
+#[tokio::test]
+async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    // The wrap-up it will come back to, and the pull request whose suite is what a
+    // follow-up landing here would have put back to waiting.
+    let repo = own_repo(&pool, conversation).await;
+    record_another_pull_request(&pool, conversation, repo, &opened())
+        .await
+        .unwrap();
+
+    for waiting_on in WAITED_ON {
+        settle_wrap_up(&pool, conversation, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    settle_wrap_up(
+        &pool,
+        conversation,
+        WaitingOn::Checks {
+            repo_id: repo,
+            number: 41,
+        },
+    )
+    .await
+    .unwrap();
+
+    investigating(&pool, conversation).await;
+
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Wrapping)
+            .await
+            .unwrap(),
+        Investigated::Landed,
+    );
+
+    let conversation_row = load_conversation(&pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(
+        conversation_row.state,
+        Lifecycle::Wrapping,
+        "the investigation went back where it came from",
+    );
+
+    let moved = moves(&pool, conversation).await;
+
+    assert_eq!(
+        moved.last(),
+        Some(&Lifecycle::Wrapping),
+        "with the move on its Timeline, as every move has: {moved:?}",
+    );
+    assert!(
+        !moved.contains(&Lifecycle::Done),
+        "and nothing passed through Done on the way: {moved:?}",
+    );
+
+    let settled = wrap_up_settled(&pool, conversation).await.unwrap();
+
+    assert!(
+        settled.contains(&WaitingOn::Checks {
+            repo_id: repo,
+            number: 41
+        }),
+        "and the green standing over the checks is still earned: an investigation \
+         commits nothing and pushes nothing, so GitHub has no new run to make up \
+         its mind about — which is where this parts from a follow-up that pushed: \
+         {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Review),
+        "with the review settled as the investigation found it: {settled:?}",
+    );
+}
+
+#[tokio::test]
+async fn nothing_but_an_investigation_can_be_ended_as_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::NotInvestigating,
+        "a Conversation that is not investigating anything has no investigation \
+         to end",
+    );
+    assert_eq!(
+        investigation_over(&pool, 404, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::NoSuchConversation,
+    );
+
+    // And the same once it has been ended: the move out of Investigating is not a
+    // second way into anywhere from anywhere else, whichever landing it is asked
+    // for.
+    investigating(&pool, conversation).await;
+
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Done)
+            .await
+            .unwrap(),
+        Investigated::Landed,
+    );
+    assert_eq!(
+        investigation_over(&pool, conversation, Lifecycle::Wrapping)
+            .await
+            .unwrap(),
+        Investigated::NotInvestigating,
     );
 }

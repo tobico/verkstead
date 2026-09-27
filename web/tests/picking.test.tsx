@@ -48,9 +48,9 @@ const SOURCES = import.meta.glob("../src/**/*.tsx", {
 }) as Record<string, string>;
 
 /// Three rows: two accounts with marks of their own, and one row that is no
-/// account at all — which is the shape the grilling and review pickers have.
+/// account at all — which is the shape the review picker has.
 const ROWS: { value: string; label: string; mark: AgentType | null }[] = [
-  { value: ":", label: "No grilling", mark: null },
+  { value: ":", label: "No review", mark: null },
   { value: "1:claude-fable-5", label: "Claude Code Fable 5", mark: "Claude" },
   { value: "2:grok-4.6", label: "Grok 4.6", mark: "Grok" },
 ];
@@ -335,7 +335,7 @@ describe("what a row of the listbox draws", () => {
       art(grokMarkFile),
     ]);
     expect(rows(UNDER)).toEqual([
-      "No grilling",
+      "No review",
       "Claude Code Fable 5",
       "Grok 4.6",
     ]);
@@ -412,8 +412,8 @@ describe("the listbox with its label in the handle", () => {
   it("is named by the label it draws inside itself", () => {
     render(() => (
       <Listbox
-        id="grilling-pairing"
-        heading={{ words: "Grilling" }}
+        id="review-pairing"
+        heading={{ words: "Review" }}
         options={ROWS}
         value={(row) => row.value}
         label={(row) => row.label}
@@ -423,25 +423,25 @@ describe("the listbox with its label in the handle", () => {
       />
     ));
 
-    const control = picker("Grilling");
+    const control = picker("Review");
 
-    expect(control.id).toBe("grilling-pairing");
+    expect(control.id).toBe("review-pairing");
     expect(control.getAttribute("aria-labelledby")).toBe(
-      "grilling-pairing-label",
+      "review-pairing-label",
     );
-    expect(document.getElementById("grilling-pairing-label")!.textContent).toBe(
-      "Grilling",
+    expect(document.getElementById("review-pairing-label")!.textContent).toBe(
+      "Review",
     );
     // The value is still the value, said where every other control says it.
-    expect(showing("Grilling")).toBe("Grok 4.6");
+    expect(showing("Review")).toBe("Grok 4.6");
 
     // And out of the contents the value is read from, so that the name is not
     // read into it as well: a node named directly by `aria-labelledby` is
     // still read for the name however it is hidden, which is what leaves this
-    // control called "Grilling" and showing "Grok 4.6" rather than called
-    // "Grilling" and showing "Grilling Grok 4.6".
+    // control called "Review" and showing "Grok 4.6" rather than called
+    // "Review" and showing "Review Grok 4.6".
     expect(
-      document.getElementById("grilling-pairing-label")!.getAttribute("aria-hidden"),
+      document.getElementById("review-pairing-label")!.getAttribute("aria-hidden"),
     ).toBe("true");
   });
 
@@ -450,8 +450,8 @@ describe("the listbox with its label in the handle", () => {
   it("drops the rows on a press on the label", () => {
     render(() => (
       <Listbox
-        id="grilling-pairing"
-        heading={{ words: "Grilling" }}
+        id="review-pairing"
+        heading={{ words: "Review" }}
         options={ROWS}
         value={(row) => row.value}
         label={(row) => row.label}
@@ -460,9 +460,9 @@ describe("the listbox with its label in the handle", () => {
       />
     ));
 
-    fireEvent.click(document.getElementById("grilling-pairing-label")!);
+    fireEvent.click(document.getElementById("review-pairing-label")!);
 
-    expect(expanded("Grilling")).toBe(true);
+    expect(expanded("Review")).toBe(true);
   });
 
   /// Two readings of one choice: the rows say the whole of it, and the trigger
@@ -470,8 +470,8 @@ describe("the listbox with its label in the handle", () => {
   it("reads the closed control shorter than the row it came off", () => {
     render(() => (
       <Listbox
-        id="grilling-pairing"
-        heading={{ words: "Grilling" }}
+        id="review-pairing"
+        heading={{ words: "Review" }}
         options={ROWS}
         value={(row) => row.value}
         label={(row) => row.label}
@@ -481,9 +481,9 @@ describe("the listbox with its label in the handle", () => {
       />
     ));
 
-    expect(showing("Grilling")).toBe("Fable 5");
-    expect(rows("Grilling")).toEqual([
-      "No grilling",
+    expect(showing("Review")).toBe("Fable 5");
+    expect(rows("Review")).toEqual([
+      "No review",
       "Claude Code Fable 5",
       "Grok 4.6",
     ]);

@@ -235,7 +235,6 @@ pub fn shared(
             // a control on the record: an adopting Conversation draws the Adopt
             // press and the setup card under its Brief.
             adopting: None,
-            adopting_pull_request: None,
 
             // What is happening right now, which is nothing here: a share is a
             // file, and no session is running in it. Both of these are read as
@@ -288,7 +287,7 @@ pub fn shared(
             repo,
             companions,
             worktree: None,
-            grilling_pairing: PickedView::Nothing,
+            grilling_pairing: None,
             implementation_pairing: None,
             review_pairing: PickedView::Nothing,
 

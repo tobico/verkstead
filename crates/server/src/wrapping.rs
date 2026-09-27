@@ -94,7 +94,64 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
         return;
     };
 
-    record(state, conversation_id, repo_id, &branch, found, writing).await
+    record(
+        state,
+        conversation_id,
+        repo_id,
+        &branch,
+        found,
+        writing,
+        Door::TheMove,
+    )
+    .await
+}
+
+/// The same for a Conversation that is wrapping up already: the pull request is
+/// written beside the wrap-up rather than being what starts one.
+///
+/// **A Review taken up over a bare branch**, and nothing else. That one is moved
+/// into Wrapping by the take-up itself, there being no pull request to move it —
+/// see [`crate::conversations::take_up`] — and the session sent for one runs from
+/// inside the wrap-up it is already in. So the record is the row without the move
+/// over the top of it, exactly as a companion's pull request is recorded, and the
+/// watchers start on what was opened.
+///
+/// Which is why it is a door rather than a second reading of the state: a
+/// Conversation that is Wrapping has nothing left to wrap, so the move would be
+/// refused as a second attempt at an ending and the pull request would go
+/// unrecorded — and what the human would be looking at is a wrap-up watching
+/// nothing.
+pub(crate) async fn opened_beside(state: &AppState, conversation_id: i64, writing: Option<i64>) {
+    let Some((repo_id, branch, found)) = asked(state, conversation_id).await else {
+        return;
+    };
+
+    record(
+        state,
+        conversation_id,
+        repo_id,
+        &branch,
+        found,
+        writing,
+        Door::Beside,
+    )
+    .await
+}
+
+/// Which door a pull request a session has just opened comes through.
+///
+/// One thing to record and two ways in, and what tells them apart is where the
+/// Conversation already stands rather than anything about the pull request. See
+/// [`opened`] and [`opened_beside`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Door {
+    /// The move: the Conversation is not wrapping yet, and recording this is what
+    /// carries it there — the ending every run comes through.
+    TheMove,
+
+    /// Beside a wrap-up that is under way already, which is a take-up over a bare
+    /// branch: the row and the Event, and no move.
+    Beside,
 }
 
 /// Make of an answer `gh` has already given what [`opened`] makes of its own.
@@ -108,7 +165,8 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 ///
 /// `repo_id` is the registered Repo it was opened in, which is which of a
 /// Conversation's pull requests this one is, and `branch` is the branch that was
-/// asked about, which is what the stop is logged against.
+/// asked about, which is what the stop is logged against. `door` is whether
+/// recording this is the move — see [`Door`].
 pub(crate) async fn record(
     state: &AppState,
     conversation_id: i64,
@@ -116,6 +174,7 @@ pub(crate) async fn record(
     branch: &str,
     found: Result<store::PullRequest, github::Trouble>,
     writing: Option<i64>,
+    door: Door,
 ) {
     let opened = match found {
         Ok(opened) => opened,
@@ -132,7 +191,24 @@ pub(crate) async fn record(
         }
     };
 
-    match store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await {
+    // The row either way, and the move only through the door that is one — a
+    // Conversation that is Wrapping already has nothing left to wrap, so asking
+    // for the move there would record nothing at all.
+    let recorded = match door {
+        Door::TheMove => {
+            store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await
+        }
+        Door::Beside => {
+            store::record_another_pull_request(&state.pool, conversation_id, repo_id, &opened)
+                .await
+                .map(|there| match there {
+                    true => store::Wrapping::Started,
+                    false => store::Wrapping::NoSuchConversation,
+                })
+        }
+    };
+
+    match recorded {
         Ok(store::Wrapping::Started) => {
             tracing::info!(
                 conversation_id,
@@ -160,6 +236,23 @@ pub(crate) async fn record(
                     number: opened.number,
                 },
             );
+
+            // And the rest of the stack, where this Conversation's Process is one
+            // that walks a chain: the same walk a take-up runs at the press, from
+            // the other door. What gets here is a **Fix Merge Issues** taken up
+            // over a bare branch — there was nothing to walk from at the press,
+            // and the `submitting` session it sent has just opened the pull
+            // request there is one from now.
+            //
+            // A Notice of its own rather than a sentence on the take-up's, that
+            // one having been written before there was anything to say; and
+            // before the watchers, which is what watches what it recorded. See
+            // [`crate::stacks`].
+            if let Some(said) = crate::stacks::walked(state, conversation_id).await
+                && let Err(error) = store::note(&state.pool, conversation_id, &said).await
+            {
+                tracing::error!(error = ?error, conversation_id, "recording what the stack is failed");
+            }
 
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is
@@ -204,10 +297,11 @@ pub(crate) async fn record(
 ///
 /// What both of a wrap-up's per-pull-request watchers need before they can go to
 /// the network, and one thing rather than two because it is one question: a
-/// Conversation ends on a pull request per repository it was worked in, and
-/// asking GitHub about one — its checks or what has been said on it — means
-/// running `gh` in that repository and sending whoever answers to that
-/// repository's checkout. See [`crate::checks`] and [`crate::comments`].
+/// Conversation ends on a pull request per repository it was worked in and as
+/// many in one repository as its stack is deep, and asking GitHub about one — its
+/// checks or what has been said on it — means running `gh` in that repository and
+/// sending whoever answers to that repository's checkout. See [`crate::checks`]
+/// and [`crate::comments`].
 pub(crate) struct Watched {
     /// The registered Repo it was opened in, which is where `gh` is run and what
     /// the feedback and the Notice name it by.
@@ -217,21 +311,42 @@ pub(crate) struct Watched {
     /// repository and nowhere else.
     pub(crate) number: i64,
 
+    /// The branch its work is on, as the record holds it — see
+    /// [`store::PullRequest::head`].
+    ///
+    /// What a green suite is held against: the rollup GitHub reports is a fact
+    /// about one commit, and which commit that has to *be* is whatever origin
+    /// holds on this pull request's own branch. Read off the row rather than off
+    /// the checkout, because a repository wrapping up a stack has several
+    /// branches through the one Worktree and the checkout answers for at most
+    /// one of them.
+    ///
+    /// `None` on a row written before Verkstead wrote the head down, which is
+    /// the one case the checkout still has to stand in for — see
+    /// [`crate::checks`].
+    pub(crate) head: Option<String>,
+
     /// The checkout its branch is on: the Conversation's own worktree, or the
     /// companion's beside it. Where a session sent at it is sent to work.
     pub(crate) worktree: PathBuf,
 }
 
-/// Where the pull request opened in `repo_id` is, and where its work is done.
+/// Where `opened`, the pull request recorded in `repo_id`, is — and where its
+/// work is done.
 ///
 /// The Conversation's own repository and Worktree, or the companion's beside it.
 /// `None` where the Conversation has neither — a companion taken off it, or a
 /// checkout that is gone — which is a pull request nothing can do anything
 /// about.
+///
+/// The whole recorded pull request rather than its number, because the branch
+/// comes with it: which branch this one's work is on is as much a fact off the
+/// row as the number is, and neither can be read off a Worktree that a stack
+/// shares.
 pub(crate) fn watched(
     conversation: &store::Conversation,
     repo_id: i64,
-    number: i64,
+    opened: &store::PullRequest,
 ) -> Option<Watched> {
     let (repo, worktree) = match conversation.repo.id == repo_id {
         true => (&conversation.repo, conversation.worktree.as_ref()?),
@@ -247,7 +362,8 @@ pub(crate) fn watched(
 
     Some(Watched {
         repo: repo.clone(),
-        number,
+        number: opened.number,
+        head: opened.head.clone(),
         worktree: worktree.clone(),
     })
 }
@@ -470,13 +586,14 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                 // past above — so a server coming back up over one gets its
                 // watchers from [`watching`] rather than from here.
                 let repo_id = companion.repo_id;
+                let number = opened.number;
 
                 driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::checks::watch(state, conversation_id, repo_id)
+                    crate::checks::watch(state, conversation_id, repo_id, number)
                 });
 
                 driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::comments::watch(state, conversation_id, repo_id)
+                    crate::comments::watch(state, conversation_id, repo_id, number)
                 });
 
                 // The Timeline has something new pinned on it, and an open page

@@ -43,7 +43,8 @@ use verkstead_render::{
     Adopted, Attached, AttachmentRemoved, AttachmentView, BaseRecorded, BranchRenamed, BriefSaved,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
-    PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, TakenUp, Worktree,
+    PairingView, PickedView, Process, ProcessPicked, RepoPairingsView, RepoSwitched, Started,
+    TakenUp, TargetRecorded, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -127,42 +128,6 @@ pub(crate) async fn start_adopting(
     )
 }
 
-/// Start a Conversation to wrap `pull_request` up in a registered Repo with.
-///
-/// [`start_adopting`]'s sibling over the other kind of thing that can be taken
-/// up, and the same start underneath: a Draft with the pull request written
-/// beside it, which is what draws the page that names one. The branch name is
-/// the server's here too and is discarded at the take-up — the Conversation's
-/// name is the pull request's own head branch — so what it does until then is
-/// stand in the record for a branch nobody has named.
-///
-/// Nothing about the pull request is checked here, and nothing about the
-/// repository is touched. Whether the head branch is still where GitHub said it
-/// was, and whether anything is standing on it, are questions about a repository
-/// *now*: they are the take-up's, and asking them at the moment a row was
-/// pressed would answer them a page too early.
-///
-/// No base is fixed either, unlike an adoption's. The base commit a taken-up
-/// Conversation gets is the pull request's head at take-up, so there is nothing
-/// to record until then.
-pub(crate) async fn start_wrapping_up(
-    state: &AppState,
-    repo_id: i64,
-    pull_request: &store::AdoptedPullRequest,
-) -> Result<Started> {
-    Ok(
-        match store::start_pull_request_adoption(&state.pool, repo_id, &branch_name(), pull_request)
-            .await?
-        {
-            Some(id) => {
-                prefill(state, id, repo_id).await;
-                Started::Started { id }
-            }
-            None => Started::NoSuchRepo,
-        },
-    )
-}
-
 /// Fix a new adopting Conversation's base to the branch its roadmap was found
 /// on.
 ///
@@ -215,14 +180,7 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
     let prefill = pairing_prefill(state, repo_id).await?;
 
-    // A Repo last started with no grilling is prefilled with no grilling, which
-    // is the memory doing exactly what it does for a Pairing: what the human
-    // last picked, ready to be changed. Nothing is judged about the row that
-    // runs nothing — there is no Profile to have gone — so it is applied
-    // wherever it was remembered.
-    if prefill.grilling.skipped() {
-        store::skip_grilling(&state.pool, id).await?;
-    } else if let Some(pairing) = prefill.grilling.pairing() {
+    if let Some(pairing) = &prefill.grilling {
         store::set_grilling_pairing(
             &state.pool,
             id,
@@ -285,7 +243,11 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
     }
 
     Ok(RepoPairingsView {
-        grilling: prefilled(remembered.grilling).await?,
+        // A skip is read and not applied, which is [`usable`]'s answer to one:
+        // the grilling picker has no row to prefill onto since *No grilling*
+        // retired, so a Repo remembering one arrives exactly as a Repo with
+        // nothing remembered for the role does.
+        grilling: usable(remembered.grilling).await?,
         implementation: usable(remembered.implementation).await?,
         review: prefilled(remembered.review).await?,
     })
@@ -303,10 +265,10 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 /// **Composed role by role.** Each of the three takes the last start's Pairing
 /// where it is still usable, and the platform default where it is not — and
 /// where there was no last start at all, or it left that role empty. A role it
-/// picked away is one of those: *No grilling* is a pick about that piece of
-/// work, and a brand-new Repo silently skipping its interview on the strength of
+/// picked away is one of those: *No review* is a pick about that piece of work,
+/// and a brand-new Repo silently wrapping up unreviewed on the strength of
 /// another Repo's would be a surprise, so the skip is not carried across. The
-/// Repo's own memory carries skips as it always has; only this copy drops them.
+/// Repo's own memory carries it as it always has; only this copy drops it.
 ///
 /// Both candidates go through [`usable`], so neither is trusted any further than
 /// a remembered Pairing is. One candidate a source: a last start that does not
@@ -322,7 +284,7 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: under(filled(last.grilling, &profiles, store::Role::Grilling).await?),
+        grilling: filled(last.grilling, &profiles, store::Role::Grilling).await?,
         implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
         review: under(filled(last.review, &profiles, store::Role::Review).await?),
     })
@@ -342,7 +304,7 @@ async fn filled(
     usable(crate::pairing_defaults::platform_default(profiles, role)).await
 }
 
-/// One role's memory as a picker would show it, for the two roles that can
+/// One role's memory as a picker would show it, for the one role that can
 /// remember the row that runs no session.
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
@@ -368,7 +330,9 @@ async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
 /// Profile's own list.
 ///
 /// A remembered role that was picked away is `None` here too — it is nothing to
-/// prefill a *Pairing* with, and its caller applies it on its own account.
+/// prefill a *Pairing* with. The review's caller applies that on its own
+/// account, and the grilling's does not: the row it would have prefilled onto
+/// retired with *No grilling*, so this is the whole of that role's reading.
 ///
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
@@ -729,11 +693,67 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 }
 
 /// Save what the human has written into the Brief.
+///
+/// **And fill an empty Target out of it.** A pull request URL or a `#number` is
+/// unambiguous anywhere in prose, so a Brief that names one names the work this
+/// Conversation is about — and the field is where Start looks, so a page
+/// showing it empty over a name the press would have found would be the field
+/// lying about what is going to happen.
+///
+/// Never over what is already there. The human's own typing wins: a branch
+/// somebody named survives a URL arriving in the Brief afterwards, which is
+/// [`store::fill_target`]'s whole job. And only where the save landed — a Brief
+/// refused for being frozen is one whose Target froze with it.
 pub(crate) async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<BriefSaved> {
-    Ok(match store::save_brief(pool, id, markdown).await? {
+    let saved = match store::save_brief(pool, id, markdown).await? {
         store::Edited::Saved => BriefSaved::Saved,
         store::Edited::NoSuchConversation => BriefSaved::NoSuchConversation,
         store::Edited::NotDrafting => BriefSaved::NotDrafting,
+    };
+
+    if saved == BriefSaved::Saved
+        && let Some(named) = crate::targets::pull_request_in(markdown)
+    {
+        store::fill_target(pool, id, &written(&named)).await?;
+    }
+
+    Ok(saved)
+}
+
+/// A pull request the Brief named, written back into the Target field the way
+/// somebody typing it there would have written it.
+///
+/// The URL where the Brief carried one and `#<n>` where it carried a bare
+/// number, which is what the human wrote either way — the field is theirs to
+/// read and to correct, so what stands in it is their own name for the thing
+/// rather than a rendering of what was parsed out of it.
+fn written(named: &crate::targets::NamedPullRequest) -> String {
+    match &named.repository {
+        Some(repository) => format!("https://github.com/{repository}/pull/{}", named.number),
+        None => format!("#{}", named.number),
+    }
+}
+
+/// Name what a drafting Conversation is pointed at, or take the name away.
+///
+/// The **Target**: a pull request URL, a `#number` or a branch, in one field
+/// because which of the three it is, is decided at Start and not while it is
+/// being typed. Blank is the field cleared — what the human means by emptying
+/// it is *nothing yet*, and there is no target called nothing.
+///
+/// **Nothing is asked of git or of GitHub here.** The Branch field beside it
+/// runs `git check-ref-format`, which is exactly why this is not that field: a
+/// pull request URL is not a well-formed ref and is the commonest thing to put
+/// here. What the string names is settled at the press, where there is a GitHub
+/// to ask about a number and an origin to ask about a branch.
+pub(crate) async fn set_target(pool: &SqlitePool, id: i64, target: &str) -> Result<TargetRecorded> {
+    let target = target.trim();
+    let named = (!target.is_empty()).then_some(target);
+
+    Ok(match store::set_target(pool, id, named).await? {
+        store::Edited::Saved => TargetRecorded::Recorded,
+        store::Edited::NoSuchConversation => TargetRecorded::NoSuchConversation,
+        store::Edited::NotDrafting => TargetRecorded::NotDrafting,
     })
 }
 
@@ -971,9 +991,60 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
         store::Switched::NotDrafting => RepoSwitched::NotDrafting,
         store::Switched::Adopting => RepoSwitched::Adopting,
-        store::Switched::HoldingPullRequest => RepoSwitched::HoldingPullRequest,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
+}
+
+/// The Processes a Conversation can actually be started on: the ones whose
+/// stage has landed.
+///
+/// **The server's list, and the viewer keeps the other** — the rows the picker
+/// draws, in `web/src/workbench/processes.ts`. Two places rather than one
+/// because they are two different statements: this is what the record will
+/// accept, and that is what the human is offered. A stage that brings a Process
+/// to life adds to both, and each of them is written knowing the other is there.
+///
+/// All five, the last of them landing with Fix Merge Issues: the record reads
+/// and writes exactly this set — see [`store::Process`] — so nothing is held
+/// back here today. The list stays all the same, because it is the mechanism
+/// rather than the tally: a Process is spelled in [`store::Process`] before
+/// there is a stage that can run it, and this is where it waits.
+const LANDED: &[Process] = &[
+    Process::Develop,
+    Process::Tinker,
+    Process::Investigate,
+    Process::Review,
+    Process::FixMergeIssues,
+];
+
+/// Say what kind of work a drafting Conversation is for.
+///
+/// Thin over the store with one question of its own in front of it, which is
+/// the one the store deliberately does not ask: whether that Process has a stage
+/// behind it yet. The record holds all five and only the landed ones can be
+/// picked on, so the rest are refused here by a name that says why —
+/// rather than under [`ProcessPicked::NotDrafting`], which is about this
+/// Conversation and is something the human could have done differently.
+///
+/// Asked first, and before the Conversation is so much as looked up: a Process
+/// with no stage behind it is refused for a Conversation that does not exist as
+/// readily as for one that does, because what is wrong with the ask is the ask.
+pub(crate) async fn pick_process(
+    pool: &SqlitePool,
+    id: i64,
+    process: Process,
+) -> Result<ProcessPicked> {
+    if !LANDED.contains(&process) {
+        return Ok(ProcessPicked::NotLanded);
+    }
+
+    Ok(
+        match store::set_process(pool, id, crate::ui::picked_process(process)).await? {
+            store::Edited::Saved => ProcessPicked::Picked,
+            store::Edited::NoSuchConversation => ProcessPicked::NoSuchConversation,
+            store::Edited::NotDrafting => ProcessPicked::NotDrafting,
+        },
+    )
 }
 
 /// Add a registered Repo for the work to run alongside.
@@ -1131,14 +1202,21 @@ pub(crate) async fn rename_companion_branch(
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
-/// **Two landings, and which of them is what the human picked.** A Conversation
-/// with a grilling Pairing is grilled: the session that starts is the interview,
-/// and what the work becomes is settled through it. One whose human picked *no
-/// grilling* has settled it already — the Brief is the whole plan — so the same
-/// branch, the same worktree, the same frozen Brief and the same fixed Pairings
-/// leave the Conversation Implementing, with an inline session building from the
-/// Brief alone. Everything above this line is the same work either way, which is
-/// why it is one press and one function rather than two.
+/// **Three landings, and the Conversation's Process is what says which.** A
+/// **Develop** one is grilled, and the session that starts is the interview
+/// through which what the work becomes is settled. A **Tinker** lands in
+/// Follow-up instead, and the session that starts is the follow-up's own, primed
+/// with the Brief as the thing to follow up on. An **Investigate** lands in
+/// Investigating, and the session that starts is the investigating one, primed
+/// with the Brief as the question to find out about. Everything between the press
+/// and those three lines is the same work — the fetch, the base, the branch, the
+/// checkouts, the freeze and the memory — which is why it is one function rather
+/// than three beside each other.
+///
+/// Which roles it waits on is the Process's too: Develop wants all three; a
+/// Tinker is never interviewed, so it wants the two a wrap-up wants and the
+/// Grilling picker is drawn for it nowhere; and an Investigate builds nothing to
+/// review, so it wants the Implementation role alone.
 ///
 /// Everything that has to be true is checked here, each refused by its own name,
 /// because each is something different for the human to go and do. They are
@@ -1223,19 +1301,30 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
+    // What kind of work this is, which decides three things below: which roles
+    // the press waits on, where it lands the Conversation, and which session it
+    // starts in the Worktree.
+    let process = conversation.process;
+
+    // A Tinker asks exactly what a take-up asks — the Profile the work runs
+    // under and the Profile the review reads under — because it is never
+    // interviewed and no Grilling picker is drawn for one to have been chosen
+    // on. Reused rather than written again beside it: it is the same question,
+    // so it is the same answer.
+    let unready = match process {
+        store::Process::Tinker => unready_to_wrap(implementation.as_ref(), &review),
+        store::Process::Investigate => unready_to_investigate(implementation.as_ref()),
+        _ => unready(grilling.as_ref(), implementation.as_ref(), &review),
+    };
+
+    if let Some(refusal) = unready {
         return Ok(refusal.grilling());
     }
-
-    // Which of the two this press is, decided once and before anything is made:
-    // what it changes is where the Conversation lands and what is launched into
-    // the worktree, and neither of those is a question git has to be asked.
-    let grilled = !grilling.skipped();
 
     // Kept rather than only judged: it is what the session about to start is
     // primed with, and it is frozen from the moment the Conversation moves.
@@ -1460,9 +1549,15 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         named: Some(&named),
     };
 
-    let moved = match grilled {
-        true => store::start_grilling(pool, id, base, &path, &checkouts).await?,
-        false => store::start_building(pool, id, base, &path, &checkouts).await?,
+    // And where the press lands it, which is the one thing about the record
+    // that the Process decides: the same transaction either way, with the state
+    // it comes out in as the word that differs.
+    let moved = match process {
+        store::Process::Tinker => store::start_tinkering(pool, id, base, &path, &checkouts).await?,
+        store::Process::Investigate => {
+            store::start_investigating(pool, id, base, &path, &checkouts).await?
+        }
+        _ => store::start_grilling(pool, id, base, &path, &checkouts).await?,
     };
 
     match moved {
@@ -1502,19 +1597,48 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // end of this rather than handed on — what drives a grilling from there is
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
-    let _driving = state.drivers.driving(id);
+    //
+    // A Tinker and an Investigate hand it on instead, to the run that is about
+    // to drive their rounds: each of those is a loop rather than a launch, and
+    // it holds the registration for as long as it is driving.
+    let driving = state.drivers.driving(id);
 
-    // A start with no grilling in it is a run rather than an interview, so what
-    // follows is the runner's: a session on the implementation skill, watched out
-    // to the pull request and the wrap-up exactly as an inline implementation
-    // picked at the end of a grilling is. It takes a registration of its own —
-    // see [`crate::runner::build_the_ungrilled`] — so the one above can go when
-    // this press does.
-    if !grilled {
-        crate::runner::build_the_ungrilled(state, id);
+    // A Tinker's own session, which is the follow-up's: the same skill, the same
+    // rounds and the same ending, opened on the Brief as the thing to follow up
+    // on. Spawned rather than awaited, exactly as a steer into Follow-up spawns
+    // it — what drives the Conversation from here is that run, and the human is
+    // standing at the button this is answering. See
+    // [`crate::runner::following_up`].
+    if process == store::Process::Tinker {
+        tokio::spawn(crate::runner::following_up(
+            state.clone(),
+            id,
+            crate::follow_ups::FollowUp::priming(brief),
+            driving,
+        ));
 
         return Ok(GrillingStarted::Started);
     }
+
+    // And an Investigate's own session, which is the one session an
+    // investigation has: the investigating skill, opened on the Brief as the
+    // question to find out about, in rounds of Question Sets that commit
+    // nothing. Spawned rather than awaited for the Tinker's reason, and handed
+    // the registration for the same one — see [`crate::runner::investigating`].
+    if process == store::Process::Investigate {
+        tokio::spawn(crate::runner::investigating(
+            state.clone(),
+            id,
+            crate::investigations::Investigation::opening(brief),
+            driving,
+        ));
+
+        return Ok(GrillingStarted::Started);
+    }
+
+    // And a grilling keeps it here, for the paragraph above's reason: what
+    // drives one from here is the session this is about to launch.
+    let _driving = driving;
 
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
@@ -1524,7 +1648,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NoSuchConversation);
     };
 
-    // Only the grilling Profile. The implementation one is fixed before starting
+    // The grilling Profile is what this session runs under. The implementation
+    // one is fixed before starting
     // because the grilling ends by handing over to it — that hand-over is a
     // later stage's, and this session is not run under it.
     //
@@ -1536,7 +1661,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: nothing in a sandbox says what a session is for —
     // a global instructions file there holds the human's own text and never
     // Verkstead's — so the prompt is where it is said — see [`crate::skills`].
-    if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
+    if let Some(pairing) = conversation.grilling_pairing.clone()
         && let Some(prompt) = state
             .sessions
             .skills()
@@ -1993,12 +2118,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
     }
 
@@ -2327,9 +2452,36 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
     crate::stages::stacks_at(repo, commit).then(|| named.to_owned())
 }
 
-/// Take up a pull request Verkstead did not open: one press, and a drafting
-/// Conversation becomes that pull request's, on its head branch, with the
-/// ordinary wrap-up running over it.
+/// Take up work Verkstead did not open: one press, and a drafting Conversation
+/// becomes the pull request's or the branch's, on that branch, with the ordinary
+/// wrap-up running over it.
+///
+/// **Which is what Start does on a Review and on a Fix Merge Issues**, there
+/// being one press on a composer. The button reads *Start work* like every other
+/// Process's, and what it reaches is this — so every refusal below keeps the
+/// name and the sentence it already had, whichever of the two pressed it. What
+/// decides that it is this press rather than a grill start is
+/// [`takes_a_target`]: whether the Process is pointed at work that is already
+/// somewhere else, rather than whether it is a Review.
+///
+/// **And the target is the Target field's.** A Review is pointed at its work
+/// there — typed in, or filled out of the Brief when it was saved — and the
+/// press reads that field and decides which of the two it is; see [`resolve`],
+/// which is that whole half. One place to look, so the field the human is
+/// reading and the name the press acts on cannot come apart — including for a
+/// Draft from before there were Processes, which was started holding a pull
+/// request off the retired *Wrap up a pull request* level: that one's field reads
+/// as the URL of what it was made for, so it comes down this road like every
+/// other Review. See [`store::target`].
+///
+/// **A branch is the same take-up with nothing at the end of it.** The work is
+/// built and pushed and nobody opened a pull request, so the fetch, the
+/// settling, the companions and the checkout are all as they are over a pull
+/// request, and what differs is what is *recorded*: no pull request, the base
+/// picker's branch as the name beside the base commit, and the move into
+/// Wrapping made by the take-up itself rather than by a record arriving. Then one
+/// `submitting` session is sent for the pull request the work is owed — see
+/// [`crate::runner::owed_for_a_branch`].
 ///
 /// [`adopt`]'s sibling over the other kind of thing a Draft holds, and the same
 /// shape underneath — the roles checked, origin fetched, git asked everything
@@ -2343,14 +2495,23 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// **Every refusal is named, and they are checked cheap-first**, which is
 /// [`adopt`]'s order and for its reason: each of them is something different for
 /// the human to go and do, and the record's own state and its Profiles are
-/// answered before anything that costs a git call.
+/// answered before anything that costs a call to GitHub or to git. Then GitHub,
+/// which answers what the Target names — a number's pull request, or whichever
+/// one is open on a branch — and with that in hand the record says whether
+/// somebody is already on it: one Conversation per piece of work, so a pull
+/// request another Conversation is on is refused naming it and the refusal leads
+/// there, however the Target named it. Then git.
 ///
-/// **Two roles rather than three.** The work on a pull request is built, so
-/// there is no round for a grilling to open and no grilling picker on the page
-/// — see [`unready_to_wrap`].
+/// **Two roles rather than three, and one where the Process never reviews.** The
+/// work on a pull request is built, so there is no round for a grilling to open
+/// and no grilling picker on the page — see [`unready_to_wrap`]. A **Fix Merge
+/// Issues** takes the review out as well, nothing about it reading the branch,
+/// and waits on the Implementation Pairing alone — see
+/// [`unready_to_investigate`].
 ///
-/// **The head branch is settled against origin, and origin is fetched first.**
-/// A pull request lives on the remote, so what the branch *is* is what origin
+/// **The branch is settled against origin, and origin is fetched first.**
+/// The work lives on the remote — that is what makes it something to wrap up —
+/// so what the branch *is* is what origin
 /// holds: with no local branch one is cut off origin's, tracking it; with a
 /// local one standing behind origin's, that branch is fast-forwarded on to it;
 /// and one that is ahead, or that has gone its own way, is refused rather than
@@ -2358,12 +2519,14 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// decide what becomes of them. A branch already checked out somewhere is
 /// refused naming the place, git holding one checkout per branch.
 ///
-/// **The base recorded is the head at take-up, with GitHub's base branch beside
-/// it.** Which is not the pair any other start writes, and deliberately: what a
-/// base is *for* here is drawing the line between what was already on the pull
-/// request and what Verkstead adds, so the commit is the branch's own tip and
+/// **The base recorded is the head at take-up, with the branch it goes into
+/// beside it.** Which is not the pair any other start writes, and deliberately:
+/// what a base is *for* here is drawing the line between what was already on the
+/// branch and what Verkstead adds, so the commit is the branch's own tip and
 /// the Timeline starts empty. The name beside it is the branch the pull request
-/// merges into, which is what a conflict is measured against.
+/// merges into, which is what a conflict is measured against — GitHub's answer
+/// where there is a pull request to answer, and the base the picker holds where
+/// there is not, that being the branch the pull request will be opened against.
 ///
 /// **Then git, and then the store**, which is [`adopt`]'s order for [`adopt`]'s
 /// reason. Nothing made before a refusal outlives it — a worktree made is
@@ -2374,7 +2537,8 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// **And the pull request is recorded last, because recording it is the move.**
 /// [`store::record_pull_request`] writes the row, the Event and the state in one
 /// transaction, which is how every wrapping Conversation gets there; a take-up
-/// is that ending reached by the other door.
+/// is that ending reached by the other door. A branch has no such record to make,
+/// so [`store::take_up`] makes the move itself — see [`store::Landing`].
 pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     let pool = &state.pool;
 
@@ -2393,14 +2557,17 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         return Ok(TakenUp::NotDrafting);
     }
 
-    // What GitHub said when the row was pressed, and the whole of what makes
-    // this Conversation a take-up. The branch is read out of the repository
-    // below; what is taken from here is the two facts git cannot answer — what
-    // the pull request is called and where it is — and the branch it merges
-    // into, which is GitHub's own.
-    let Some(held) = conversation.adopting_pull_request.clone() else {
+    // Whether this press is a take-up at all, which is the Process and nothing
+    // else — and the question is whether it is pointed at work that is already
+    // somewhere else rather than whether it is a Review, there being two of
+    // those now. A Draft from before there were Processes that was started
+    // holding a pull request reads as a **Review** for that very reason — see
+    // [`store::process`] — so it reaches this by the one road every other
+    // targeted Process does, and anything pointed at nothing has nothing to
+    // wrap up.
+    if !takes_a_target(conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
-    };
+    }
 
     // Read as rows rather than judged off the ids, exactly as a grill start
     // reads them: a Profile whose pair has gone is not one to run a session
@@ -2409,18 +2576,81 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready_to_wrap(implementation.as_ref(), &review) {
+    // And how many of them this Process waits on, which is the one thing about
+    // the press its own row decides: a **Review** reads the branch under the
+    // Review Pairing and waits on it, and a **Fix Merge Issues** never reviews
+    // anything, so it waits on the Implementation Pairing alone — exactly as an
+    // Investigate does, and reusing that reading rather than writing it out
+    // again beside this one.
+    let unready = match conversation.process {
+        store::Process::FixMergeIssues => unready_to_investigate(implementation.as_ref()),
+        _ => unready_to_wrap(implementation.as_ref(), &review),
+    };
+
+    if let Some(refusal) = unready {
         return Ok(refusal.taking_up());
     }
 
-    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &held.head);
+    // And what is being taken up: the Target field read, and GitHub asked about
+    // it where it names a pull request. Everything above this line costs
+    // nothing, which is why it is above it — the record's own state and the pair
+    // of accounts it would run under are answered before a call goes out to
+    // GitHub.
+    let taking = match resolve(state, &conversation).await? {
+        Ok(resolved) => resolved,
+        Err(refusal) => return Ok(refusal),
+    };
+
+    // And which pull request this is, whichever way it was named. A pull request
+    // named outright is its own number; a branch's is whatever GitHub has open on
+    // it, which is a question a branch has to be asked as squarely as a number
+    // does — see [`opened_on`]. Neither is a number this Conversation may take up
+    // until the record has been asked about it.
+    let number = match &taking {
+        Target::PullRequest(held) => Some(held.number),
+        Target::Branch(branch) => match opened_on(state, &conversation, branch).await? {
+            Ok(number) => number,
+            Err(refusal) => return Ok(refusal),
+        },
+    };
+
+    // And whether somebody is already on it. There is one Conversation per piece
+    // of work, so a pull request another Conversation has on its record is a
+    // refusal that leads there rather than a second wrap-up over the same
+    // branch. Asked of the record rather than of git, and asked before the fetch:
+    // it is a row, and it is the last thing that costs nothing.
+    //
+    // **Asked of a branch too, and that is the whole of why the question above it
+    // is asked.** A branch is the other name for the same piece of work — the
+    // `submitting` session a branch take-up sends is told by its own skill that a
+    // pull request already on the branch *is the job done* — so a branch would
+    // otherwise be the way round this refusal rather than a case it does not
+    // cover. A Conversation that has finished with a pull request and been Closed
+    // has let go of its worktree and kept its branch, so [`settled`] has nothing
+    // to say about the one case that matters most.
+    if let Some(number) = number
+        && let Some(other) =
+            store::conversation_on_pull_request(pool, conversation.repo.id, number).await?
+        && other != id
+    {
+        return Ok(TakenUp::AlreadyHeld {
+            conversation: other,
+        });
+    }
+
+    // The branch the work is on: a pull request's head, or the name the field
+    // held. Which is what everything below this turns on — the checkout, the
+    // record and the branch the Conversation is named for.
+    let head = taking.head().to_owned();
+
+    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &head);
 
     // Everything git has to be asked, off the runtime's threads: fetching,
     // resolving, moving a ref and making a worktree all block.
     let made = tokio::task::spawn_blocking({
         let repo = conversation.repo.path.clone();
         let path = path.clone();
-        let head = held.head.clone();
+        let head = head.clone();
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
         let checkouts = state.checkouts.clone();
@@ -2428,13 +2658,13 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         move || {
             // Before anything resolves, for the reason a grill start fetches
             // first: a remote-tracking ref is only as fresh as the last fetch,
-            // and the whole of what a pull request is lives on the remote. The
+            // and the whole of what is being taken up lives on the remote. The
             // human is at this button, so being offline is theirs to go and fix.
             if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
-                    "fetching a Repo's remotes failed, so its pull request is not being taken up",
+                    "fetching a Repo's remotes failed, so nothing of it is being taken up",
                 );
 
                 return Err(TakenUp::FetchFailed);
@@ -2451,7 +2681,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
             }];
 
             // And the companions beside it, by the same [`plan`] both other
-            // presses use: a Conversation holding a pull request drafts like any
+            // presses use: a Conversation taking something up drafts like any
             // other, so its setup card put those rows there like any other's.
             for companion in companions {
                 let beside =
@@ -2479,62 +2709,165 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
     // And now the store, in the order the record is read in: the branch it is
     // on, where its work is, and what it came off — and then the move.
-    let base = store::Base {
-        commit: &commit,
-        named: Some(&held.base),
+    //
+    // The name beside the base commit is the branch this goes into. GitHub says
+    // it where there is a pull request to ask about; where there is not, it is
+    // the base the picker holds, or the default branch that picker's first entry
+    // stands for — which is the branch the `submitting` session below opens the
+    // pull request against.
+    let named = match &taking {
+        Target::PullRequest(held) => held.base.clone(),
+        Target::Branch(_) => conversation
+            .base_commit
+            .clone()
+            .unwrap_or_else(|| conversation.repo.default_branch.clone()),
     };
 
-    match store::take_up(pool, id, &held.head, base, &path, &checkouts).await? {
+    let base = store::Base {
+        commit: &commit,
+        named: Some(&named),
+    };
+
+    // And where it lands, which is the one thing about the record a branch
+    // changes: a pull request is recorded a moment from now and that record is
+    // the move, and a branch has no such record coming — see [`store::Landing`].
+    let landing = match &taking {
+        Target::PullRequest(_) => store::Landing::Drafting,
+        Target::Branch(_) => store::Landing::Wrapping,
+    };
+
+    // And what the wrap-up it is entering has settled before it looks, which is
+    // nothing at all for a **Review** and the review and the comments for a **Fix
+    // Merge Issues**: that one is narrowed to what GitHub refuses a merge for, so
+    // the comments watcher has nothing to dispatch and the review watcher nothing
+    // to start, and the rule that ends the whole thing is left waiting on
+    // Mergeable and the checks. Written in the transaction below rather than after
+    // it, for the reason [`store::take_up`] gives.
+    //
+    // The comments are settled against the pull request the take-up holds — the
+    // Conversation's own Repo and the number GitHub gave it there, that being what
+    // a settlement names now that a repository can hold a whole stack of them.
+    //
+    // Which is why a bare branch settles only the review here: there is no pull
+    // request yet to name, `submitting` opening one into the same repository a
+    // moment from now, and a number invented for it would be a settlement about
+    // nothing. The comments watcher writes its own the moment there is one to
+    // watch.
+    //
+    // This door's own writing of them, and neither watcher's licence to skip its
+    // own: each of them reads the Process a moment from now and writes its settle
+    // back whatever it finds — see [`narrows_the_wrap_up`]. What writing them here
+    // buys is that there is no instant in which a wrapping Conversation on a pull
+    // request is not narrowed, which is what a sweep or a restart between the move
+    // and the first poll would otherwise find.
+    let narrowed = narrows_the_wrap_up(conversation.process);
+
+    let mut settled = Vec::new();
+
+    if narrowed {
+        settled.push(store::WaitingOn::Review);
+
+        if let Target::PullRequest(held) = &taking {
+            settled.push(store::WaitingOn::Comments {
+                repo_id: conversation.repo.id,
+                number: held.number,
+            });
+        }
+    }
+
+    let entering = store::Entering {
+        landing,
+        settled: &settled,
+    };
+
+    match store::take_up(pool, id, &head, base, &path, &checkouts, entering).await? {
         store::Taking::Recorded => {}
         store::Taking::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
         store::Taking::NotDrafting => return Ok(TakenUp::NotDrafting),
     }
 
-    // Which is what moves it: the row, the Event and the state in one
-    // transaction, the same one a finish step's pull request comes through.
-    let pull_request = store::PullRequest {
-        number: held.number,
-        title: held.title.clone(),
-        url: held.url.clone(),
-        repo: None,
-    };
+    if let Target::PullRequest(held) = &taking {
+        // What was taken up, written down where the retired menu used to write
+        // it: out of what `gh` answered rather than out of a row that was
+        // pressed. It is not only the record of what this Conversation was
+        // started as — see [`store::process`], which reads it back for the whole
+        // of its life — it is the one thing that lets a Draft through the door
+        // below.
+        store::hold_pull_request(pool, id, held).await?;
 
-    match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
-        store::Wrapping::Started => {}
-        store::Wrapping::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
-        store::Wrapping::NothingToWrap => return Ok(TakenUp::NotDrafting),
+        // Which is what moves it: the row, the Event and the state in one
+        // transaction, the same one a finish step's pull request comes through.
+        let pull_request = store::PullRequest {
+            number: held.number,
+            title: held.title.clone(),
+            url: held.url.clone(),
+            // The branch the take-up has just put the Worktree on, which GitHub
+            // named when the Target was resolved — see [`store::PullRequest::head`]
+            // for what is afterwards held against it.
+            head: Some(held.head.clone()),
+            // And the branch it goes into, which GitHub named beside it: what
+            // says where this pull request sits in a chain, and so which of a
+            // stack is under which — see [`store::stack`].
+            base: Some(held.base.clone()),
+            repo: None,
+        };
+
+        match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
+            store::Wrapping::Started => {}
+            store::Wrapping::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
+            store::Wrapping::NothingToWrap => return Ok(TakenUp::NotDrafting),
+        }
     }
 
     // Recorded, so the sweep would keep them. What follows is a Timeline and
     // some watchers, and none of them makes a directory.
     drop(making);
 
-    if let Err(error) = store::note(pool, id, &taken(&held)).await {
+    // And the rest of the stack, where this Process is one that walks: GitHub's
+    // chain both ways from the pull request just recorded, every link of it
+    // recorded beside it — see [`crate::stacks`]. Here rather than after the
+    // note, because what it found is part of what the note says; and after the
+    // checkouts are let go, because it goes to the network and makes no
+    // directory.
+    let stack = crate::stacks::walked(state, id).await;
+
+    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed, stack)).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
     }
 
     tracing::info!(
         conversation_id = id,
-        number = held.number,
-        branch = held.head,
-        "a pull request was taken up, so the Conversation is wrapping it up",
+        branch = head,
+        "work was taken up, so the Conversation is wrapping it up",
     );
 
     // A Conversation moved, so every page drawing it says so without being
-    // reloaded: its own, and the row it has in the sidebar.
-    //
-    // **Not the level under the compose box**, which has one row fewer free in
-    // it and goes on saying otherwise until it is opened again. That is the
-    // viewer's own decision and a deliberate one — the level is a `gh` per
-    // registered Repo, so a Nudge that re-read it would be a call out to GitHub
-    // every time anything anywhere moved, and it is read on open and reopen
-    // instead. See `Compose.tsx`, where it is taken. What a stale row leads to
-    // is a take-up refused by name rather than a second wrap-up over the same
-    // branch: the head branch is checked out by then, and git holds one
-    // checkout per branch.
+    // reloaded: its own, and the row it has in the sidebar. Nothing else draws
+    // what was taken up — there is no list of open pull requests any more, and a
+    // compose page holds a Target somebody typed rather than a row off one.
     state
         .nudges
         .announce(Nudge::Conversation { conversation: id });
+
+    // A branch has no pull request for the wrap-up to watch, so the one thing
+    // owed is asked for first and the wrap-up starts over what is opened — the
+    // run a finish step that stopped short of its push is sent through, with the
+    // base the picker holds carried into it. Spawned rather than awaited, and
+    // registered as driving before it is: the human is standing at the button
+    // this is answering, and what drives the Conversation from here is that run.
+    // See [`crate::runner::owed_for_a_branch`].
+    if let Target::Branch(_) = &taking {
+        let driving = state.drivers.driving(id);
+
+        tokio::spawn(crate::runner::owed_for_a_branch(
+            state.clone(),
+            id,
+            named,
+            driving,
+        ));
+
+        return Ok(TakenUp::TakenUp);
+    }
 
     // And the wrap-up itself, exactly as the finish step starts it: nobody has
     // read this branch, whatever has been said on the pull request is waiting to
@@ -2544,12 +2877,225 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     Ok(TakenUp::TakenUp)
 }
 
-/// What the pull request's head branch is here, and what its tip comes to.
+/// What a **Review**'s Target turned out to name.
+///
+/// Decided at the press and nowhere earlier — see [`resolve`]. Which of the two
+/// it is decides three things and nothing else: whether GitHub is asked anything,
+/// what name goes beside the base commit, and whether the take-up moves the
+/// Conversation itself or leaves that to a pull request being recorded.
+enum Target {
+    /// A pull request, as `gh` answered about it: its number, its title, where it
+    /// is, the branch the work is on and the branch it merges into.
+    PullRequest(store::AdoptedPullRequest),
+
+    /// A branch, which is whatever the field holds that is not a pull request.
+    /// Whether origin has anything under the name is [`settled`]'s to say.
+    Branch(String),
+}
+
+impl Target {
+    /// The branch the work is on, which is the whole of what the checkout and the
+    /// record turn on: a pull request's head, or the name itself.
+    fn head(&self) -> &str {
+        match self {
+            Target::PullRequest(held) => &held.head,
+            Target::Branch(branch) => branch,
+        }
+    }
+}
+
+/// What a **Review** is to take up, resolved at the press: the **Target** field
+/// read, and GitHub asked about it where it names a pull request.
+///
+/// **Server-side, and not a session.** The refusals below and the ones after
+/// them are careful and already written, and a session doing the resolving
+/// would move them into a prompt.
+///
+/// **Which of the two it is, is decided here and only here.** A
+/// `github.com/<owner>/<repo>/pull/<n>` URL or a bare `#<n>` is a pull request,
+/// and *anything else in the field is a branch* — see
+/// [`crate::targets::pull_request_named`], which asks what the whole of the field
+/// is rather than scanning it for a number. So prose somebody left in there is a
+/// branch nobody has, which [`settled`] refuses by name; nothing is guessed at
+/// here and nothing is asked of GitHub about it.
+///
+/// **An empty field is the one refusal this makes of its own.** Start is inert on
+/// the page while the field is empty, so [`TakenUp::NoTarget`] is what a page
+/// whose copy of the world went stale gets back.
+///
+/// **A pull request's own name is a number, and `gh` answers for it.** One place
+/// to look: the Brief fills that field while it is empty — see [`save_brief`] —
+/// so by the time the press happens what the human is looking at is what is read.
+/// What is in the field is a number, with a repository beside it where the name
+/// came as a URL. What comes back from `gh` is
+/// everything git cannot say: what the pull request is called, where it is, the
+/// branch the work is on, the branch it merges into, and whether its head is in
+/// a fork.
+///
+/// **A URL naming another repository is refused by name.** `gh` answers for the
+/// Conversation's Repo and its origin, so a URL whose owner and repository are
+/// not the ones it answered about is a pull request this Conversation cannot
+/// take up — the number would be asked of the wrong GitHub, and the branch would
+/// be somebody else's. Checked against the URL `gh` handed back rather than
+/// against anything configured: that URL is GitHub's own statement of which
+/// repository it answered about.
+///
+/// **And a fork is refused here**, where the rest of the branch refusals are
+/// [`settled`]'s: a fork's head branch is in another repository, so nothing a
+/// wrap-up did could be pushed to it and a fix would have nowhere to go.
+///
+/// The outer `Result` is the machinery failing; the inner one is the human
+/// having something to go and do about it, which is every value this hands back
+/// either way.
+async fn resolve(
+    state: &AppState,
+    conversation: &store::Conversation,
+) -> Result<std::result::Result<Target, TakenUp>> {
+    // The field, whatever put it there, and read once. Empty is nothing to take
+    // up at all, and the store keeps no row for an emptied field — see
+    // [`store::set_target`].
+    let Some(target) = conversation.target.as_deref().map(str::trim) else {
+        return Ok(Err(TakenUp::NoTarget));
+    };
+
+    if target.is_empty() {
+        return Ok(Err(TakenUp::NoTarget));
+    }
+
+    // And a target that is not a pull request is a branch, which is the whole of
+    // the reading: origin is what says whether there is anything under the name,
+    // and that is asked with the rest of git below.
+    let Some(named) = crate::targets::pull_request_named(target) else {
+        return Ok(Ok(Target::Branch(target.to_owned())));
+    };
+
+    // Off the runtime's threads: `gh` is a process, and running one blocks.
+    let asked = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let repo = conversation.repo.path.clone();
+
+        move || crate::github::pull_request_numbered(&gh, &repo, named.number)
+    })
+    .await?;
+
+    let found = match asked {
+        Ok(found) => found,
+
+        // `gh`'s own way of saying there is nothing under that number, and its
+        // own way of saying it could not be asked at all. The first is the
+        // human's number to correct and the second is their machine's to fix,
+        // which is why they are told apart rather than both read as *no such
+        // pull request*.
+        Err(crate::github::Trouble::NoPullRequest) => {
+            return Ok(Err(TakenUp::NoSuchPullRequest {
+                number: named.number,
+            }));
+        }
+        Err(trouble) => {
+            tracing::debug!(
+                conversation_id = conversation.id,
+                number = named.number,
+                why = trouble.why(),
+                "a Review's pull request could not be read through the host gh",
+            );
+
+            return Ok(Err(TakenUp::GitHubRefused { why: trouble.why() }));
+        }
+    };
+
+    // Which repository `gh` answered about, as its own answer says. Compared
+    // case-insensitively, GitHub's owners and repositories being spelled
+    // whichever way whoever typed the URL spelled them.
+    if let Some(wanted) = named.repository
+        && !crate::targets::repository_in(&found.url)
+            .is_some_and(|answered| answered.eq_ignore_ascii_case(&wanted))
+    {
+        return Ok(Err(TakenUp::AnotherRepository { named: wanted }));
+    }
+
+    if !found.open {
+        return Ok(Err(TakenUp::NoSuchPullRequest {
+            number: found.number,
+        }));
+    }
+
+    if found.fork {
+        return Ok(Err(TakenUp::Fork));
+    }
+
+    Ok(Ok(Target::PullRequest(store::AdoptedPullRequest {
+        number: found.number,
+        title: found.title,
+        url: found.url,
+        head: found.head,
+        base: found.base,
+    })))
+}
+
+/// And which pull request GitHub has open on `branch`, where it has one.
+///
+/// [`resolve`]'s other half, over the other way a Review names its work. A
+/// number names a pull request and this asks what a *branch* names — because to
+/// the one-Conversation-per-piece-of-work rule they are the same question, and a
+/// branch that went unasked would be the way round a refusal rather than a case
+/// it did not cover: the `submitting` session a branch take-up sends is told by
+/// its own skill that a pull request already on the branch is the job done, so it
+/// would quietly make this Conversation the second wrap-up on somebody else's.
+///
+/// **`None` is a branch with nothing open on it**, which is the ordinary case and
+/// the one the whole bare-branch ending is for: there is nothing to check against
+/// the record, and nothing is owed but the pull request the take-up sends for.
+/// One that is closed or merged reads the same way, and rightly — what a branch
+/// like that is owed is a pull request of its own, which is what will be opened.
+///
+/// **A GitHub that cannot be asked refuses**, as it does over a number: it is not
+/// GitHub saying the branch is free, and this Conversation is being set going
+/// towards a `gh pr create` it would walk into the same wall with. The same
+/// reading [`settled`] takes of a git that will not answer, one door along.
+async fn opened_on(
+    state: &AppState,
+    conversation: &store::Conversation,
+    branch: &str,
+) -> Result<std::result::Result<Option<i64>, TakenUp>> {
+    // Off the runtime's threads, as [`resolve`]'s own call is: `gh` is a process.
+    let asked = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let repo = conversation.repo.path.clone();
+        let branch = branch.to_owned();
+
+        move || crate::github::pull_request(&gh, &repo, &branch)
+    })
+    .await?;
+
+    Ok(match asked {
+        Ok(opened) => Ok(Some(opened.number)),
+        Err(crate::github::Trouble::NoPullRequest) => Ok(None),
+        Err(trouble) => {
+            tracing::debug!(
+                conversation_id = conversation.id,
+                branch,
+                why = trouble.why(),
+                "a Review's branch could not be asked about through the host gh",
+            );
+
+            Err(TakenUp::GitHubRefused { why: trouble.why() })
+        }
+    })
+}
+
+/// What the branch being taken up is here, and what its tip comes to.
 ///
 /// The rules the grilling settled, in one place because they are one question:
 /// *what does this checkout hold, and what does it hold now*. Origin is the
-/// authority throughout — a pull request is a branch on the remote, and this
-/// repository's copy of it is a copy.
+/// authority throughout — what is being taken up lives on the remote, whether it
+/// is a pull request's head or a branch somebody pushed and opened nothing on,
+/// and this repository's copy of it is a copy.
+///
+/// **Which is what refuses a Target naming no branch**: a name origin has nothing
+/// under is [`TakenUp::NoHeadBranch`], and that covers prose left in the field as
+/// squarely as it covers a head branch deleted since the pull request was opened.
+/// There is nowhere for a review to happen on a branch that is not on origin, so
+/// there is nothing there to wrap up.
 ///
 /// - **No local branch**: one is cut off origin's, by name rather than by
 ///   commit, so that git sets its upstream — see [`worktrees::add`].
@@ -2645,20 +3191,69 @@ fn standing(head: &str, upstream: String) -> Holds {
     }
 }
 
-/// What a taken-up Conversation's Timeline is told: which pull request was taken
-/// up, and what the wrap-up is reading it against.
+/// What a taken-up Conversation's Timeline is told: what was taken up, and what
+/// the wrap-up is reading it against.
 ///
 /// [`adopted`]'s job at the other door, and shorter for the reason the page is:
 /// a pull request is pinned on this Timeline already, as its own card with its
 /// number and its title on it, so what is worth saying here is the thing the
-/// card cannot — that everything on the branch already is the pull request's own
-/// and the record starts from here.
-fn taken(held: &store::AdoptedPullRequest) -> String {
+/// card cannot — that everything on the branch already is the work's own and the
+/// record starts from here.
+///
+/// **A branch has no card**, so this is the whole of what the Timeline says about
+/// it: the name, where the record starts, and that a pull request is being opened
+/// against `named`. Which is the one thing about a branch that is not obvious from
+/// the panel — the base picker's choice becomes the pull request's base at this
+/// moment and never again.
+///
+/// **And the wrap-up that is about to run, where it is a narrowed one.** `narrowed`
+/// is [`narrows_the_wrap_up`]'s answer about the Process, and a **Fix Merge
+/// Issues** is the one it is true of: the review and the comments are settled as
+/// this lands, so nothing will read the branch and nothing said on the pull
+/// request will be answered. Which is worth a sentence precisely because it is an
+/// absence — a wrap-up nothing reviews looks from the Timeline like one whose
+/// review has not started yet, and the human picked the Process minutes ago.
+/// Nothing is said for any other Process, there being nothing to say: the
+/// ordinary wrap-up is what a taken-up Conversation has always run.
+///
+/// **And the stack, where the take-up walked one.** `stack` is
+/// [`crate::stacks::walked`]'s own account of the chain — what it is, from the
+/// bottom, and which of it belongs to another Conversation — and it goes in
+/// ahead of the narrowing for the reason it is said at all: the pull requests
+/// above and below arrived on this record without anybody pressing anything, and
+/// a wrap-up that quietly waits on two more than the human named is a wrap-up
+/// they cannot read. Or its account of a chain it could not read, which is said
+/// for the same reason turned around — a wrap-up over one pull request of a
+/// stack nobody knows the size of is as unreadable as the other way. `None` is a
+/// lone pull request, which is every take-up there was before there were stacks.
+fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) -> String {
+    let taken = match taking {
+        Target::PullRequest(held) => format!(
+            "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
+             what this Timeline records starts at that branch's head: the commits already on the \
+             pull request are its own, and `{named}` is what it merges into.",
+            held.number, held.title, held.head,
+        ),
+        Target::Branch(branch) => format!(
+            "The branch `{branch}` was taken up for wrapping, and it is on no pull request: one is \
+             being opened against `{named}` before the wrap-up reads it. What this Timeline records \
+             starts at that branch's head — the commits already on it are the work's own.",
+        ),
+    };
+
+    let taken = match stack {
+        Some(stack) => format!("{taken} {stack}"),
+        None => taken,
+    };
+
+    if !narrowed {
+        return taken;
+    }
+
     format!(
-        "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and what \
-         this Timeline records starts at that branch's head: the commits already on the pull \
-         request are its own, and `{}` is what it merges into.",
-        held.number, held.title, held.head, held.base,
+        "{taken} The wrap-up is narrowed to what GitHub refuses a merge for: no review will be \
+         read, and nothing said on the pull request will be answered — what it waits on is the \
+         checks and whether the pull request merges."
     )
 }
 
@@ -2945,16 +3540,14 @@ async fn read(state: &AppState, id: i64) {
 /// they will do anything, and each says so in its own words — see
 /// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
-    grilling: &PickedView,
+    grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
 ) -> Option<Unready> {
-    // The row that runs no session is a choice made, so it passes here as a
-    // Pairing does — and leaves nothing to be broken, there being no Profile.
-    let grilling = match grilling {
-        PickedView::Skipped => None,
-        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
-        _ => return Some(Unready::NoGrillingProfile),
+    // An account or nothing, this role having no row to be picked away with:
+    // a Pairing is what answers it, and anything else is a picker to go back to.
+    let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoGrillingProfile);
     };
 
     let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
@@ -2967,7 +3560,7 @@ fn unready(
         _ => return Some(Unready::NoReviewProfile),
     };
 
-    [grilling, Some(implementation), review]
+    [Some(grilling), Some(implementation), review]
         .into_iter()
         .flatten()
         .any(|pairing| pairing.profile.broken.is_some())
@@ -3006,8 +3599,9 @@ impl Unready {
     }
 
     /// And to the press that takes a pull request up, which has no word for a
-    /// grilling because it never asks about one — see [`unready_to_wrap`], the
-    /// only thing that makes one of these for it.
+    /// grilling because it never asks about one — see [`unready_to_wrap`] and
+    /// [`unready_to_investigate`], the two readings that make one of these for
+    /// it, neither of which looks at a grilling.
     fn taking_up(self) -> TakenUp {
         match self {
             Unready::NoImplementationProfile | Unready::NoGrillingProfile => {
@@ -3042,6 +3636,31 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
         .into_iter()
         .flatten()
         .any(|pairing| pairing.profile.broken.is_some())
+        .then_some(Unready::ProfileBroken)
+}
+
+/// And what is wrong with the one Profile an investigation runs under, or
+/// nothing at all.
+///
+/// [`unready_to_wrap`]'s reading with the review taken out of it as well, which
+/// is the whole of an **Investigate**: nothing is built, so there is nothing to
+/// review, and the composer draws the one **Agent** dropdown over the
+/// Implementation picker and nothing else. What is left is the Profile the
+/// session runs under, judged exactly as it is beside a grilling.
+///
+/// **And the whole of a Fix Merge Issues too**, which is why a take-up asks it —
+/// see [`take_up`]. That Process is a wrap-up whose review is settled before it
+/// looks, so no session ever reads the branch under a Review Pairing and there
+/// is no picker drawn for one: the same one role, judged the same way.
+fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unready> {
+    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoImplementationProfile);
+    };
+
+    implementation
+        .profile
+        .broken
+        .is_some()
         .then_some(Unready::ProfileBroken)
 }
 
@@ -3125,21 +3744,118 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 }
 
 /// Whether everything needed before the work starts is settled, as the pane
-/// reads it: the three roles, and a Brief with something in it.
+/// reads it: the roles the Process uses, a Brief with something in it, and a
+/// target where the Process takes one.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
 /// the base commit, which are decided against git when the button is pressed.
+///
+/// **The same reading the press takes**, one Process at a time: a **Tinker** is
+/// never interviewed, so the Grilling picker is drawn for it nowhere and the
+/// button waits on the two roles a wrap-up waits on; a **Review** is the wrap-up
+/// itself and waits on exactly those two, and on something in the Target field
+/// besides; an **Investigate** is run under the Implementation role alone, so it
+/// waits on that one; and a **Fix Merge Issues** waits on that one role and on
+/// the Target field, being a wrap-up nothing reviews. The press asks exactly this
+/// again when it is pressed — see [`start_grilling`] and [`take_up`], where the
+/// readings stand beside their refusals.
+///
+/// **A target and not a *good* target.** Whether what is in the field is a pull
+/// request GitHub has, or a branch origin has, is decided at the press, where
+/// there is somewhere to ask; an empty field is the one thing a page can see for
+/// itself, and it is the one thing this waits on.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    grilling: &PickedView,
+    process: store::Process,
+    grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
     brief: &str,
+    target: Option<&str>,
 ) -> bool {
-    state == store::Lifecycle::Draft
-        && !brief.trim().is_empty()
-        && crate::profiles::ready_to_grill(grilling, implementation, review)
+    let roles = match process {
+        store::Process::Review | store::Process::Tinker => {
+            crate::profiles::ready_to_wrap(implementation, review)
+        }
+        store::Process::Investigate | store::Process::FixMergeIssues => {
+            crate::profiles::ready_to_investigate(implementation)
+        }
+        _ => crate::profiles::ready_to_grill(grilling, implementation, review),
+    };
+
+    let pointed =
+        !takes_a_target(process) || target.is_some_and(|target| !target.trim().is_empty());
+
+    state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles && pointed
+}
+
+/// Which Processes are pointed at work that is already somewhere else, and so
+/// take a **Target**.
+///
+/// The server's half of a fact the viewer keeps too — `TARGETED` in
+/// `processes.ts`, beside the role table — for the reason the landed list is
+/// kept in both: one says what the record waits on, the other says what the
+/// panel draws, and a stage that gives a Process a target adds to both.
+///
+/// **Review and Fix Merge Issues**, the two Processes pointed at work that is
+/// already somewhere else: each is a wrap-up over a pull request or a branch
+/// somebody built without Verkstead, and the field is where it is named.
+///
+/// Which is the question the take-up asks of a press as well — see [`take_up`],
+/// whose door this is: *is this Process pointed at work that is already
+/// somewhere else* rather than *is this a Review*.
+pub(crate) fn takes_a_target(process: store::Process) -> bool {
+    matches!(
+        process,
+        store::Process::Review | store::Process::FixMergeIssues
+    )
+}
+
+/// And which of them wrap up narrowed to what GitHub refuses a merge for: the
+/// review and the comments settled as the Conversation lands, so the wrap-up
+/// waits on **Mergeable** and the checks alone.
+///
+/// **Fix Merge Issues**, and nothing else. Every other Process reads the branch
+/// and answers what is said on the pull request; this one is pointed at a pull
+/// request that has been reviewed and talked about already, and what is left of
+/// wrapping it up is the two things GitHub itself refuses a merge for.
+///
+/// Asked in three places and by each of them for itself, which is the pattern the
+/// rest of the wrap-up follows: the take-up writes both settles as it enters — see
+/// [`take_up`] — and the review watcher and the comments watcher each read this a
+/// moment later and write their own back, see [`crate::review`] and
+/// [`crate::comments`].
+///
+/// Settling at the door alone would not hold, because a door is not the only way
+/// a settle goes: a steer into Wrapping takes the review's with it, a steer into
+/// Grilling forgets every settle the round made, a comment landing unsettles the
+/// comments, and a companion's pull request recorded mid-wrap-up is a repository
+/// the door had nothing to say about. Read this way every door into Wrapping
+/// behaves alike, with no bookkeeping per door — and a wrap-up that lost a settle
+/// by some road nobody thought of gets it back on the next poll rather than
+/// waiting for ever on it.
+pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
+    matches!(process, store::Process::FixMergeIssues)
+}
+
+/// And which of them are pointed at a link of a chain rather than at one pull
+/// request: the **stack** walked on GitHub where the pull request is recorded,
+/// and every one of it recorded beside it.
+///
+/// **Fix Merge Issues**, and nothing else — the same one Process, asked as its
+/// own question because it is its own fact. What this one is about is what the
+/// wrap-up is *over*: a conflict low in a stack moves every branch above it, so
+/// a Conversation pointed at any link of one is a Conversation over all of them.
+/// Every other Process is pointed at work Verkstead built, on the one branch it
+/// cut, and there is no chain around it to find.
+///
+/// Asked at both doors a pull request is recorded through, for the reason the
+/// narrowing is asked at each of its own: a take-up over a pull request walks at
+/// the press, and a take-up over a bare branch has nothing to walk from until
+/// its `submitting` session has opened one — see [`crate::stacks`].
+pub(crate) fn walks_the_stack(process: store::Process) -> bool {
+    matches!(process, store::Process::FixMergeIssues)
 }
 
 /// Whether git would take this as a branch name.

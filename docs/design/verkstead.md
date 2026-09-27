@@ -228,7 +228,16 @@ flowchart LR
   the work begins rather than swapped underneath it. Each repo remembers the
   set it was last started with, so the next conversation on it arrives with
   every picker filled — a prefill the human may change, kept server-side so a
-  phone and a desk share it.
+  phone and a desk share it. *Revised 2026-09-25, grilling
+  conversation-processes*: which roles a conversation fixes is its
+  **Process**'s — all three for Develop, implementation and review for Review
+  and Tinker, implementation alone for Investigate and Fix Merge Issues — and
+  **No grilling** is retired, a brief that wants no interview being the Tinker
+  Process rather than a hole in Develop; *No review* stays, on Develop and
+  Tinker. The three pickers become one **Agent** control whose shape is the
+  Process's: the flat dropdown where one role is used, a panel like the Repo's
+  holding the role pickers where several are. See
+  [ADR-0020](../adr/0020-a-conversation-has-a-process.md).
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) is one set every sandbox gets. It is configured in two places
   — `--sandbox-bind DIR`, and the same grammar in the workbench settings
@@ -319,7 +328,11 @@ flowchart LR
   2026-08-29, building optional-steps-and-auto-branch*: the button reads
   "Start work", one press covering both ways a conversation starts, and on
   **No grilling** the same press lands it Implementing with an inline session
-  on the brief alone. Question sets
+  on the brief alone. *Revised 2026-09-25, grilling conversation-processes*: the
+  one press starts whichever the conversation's **Process** is, and grilling is
+  Develop's — **No grilling** is retired, the brief that wants no interview
+  being a **Tinker** conversation, which the same press lands in Follow-up. See
+  [ADR-0020](../adr/0020-a-conversation-has-a-process.md). Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
@@ -727,13 +740,16 @@ again. A cold load of a details pane never begins it: a kept link is a request
 to be shown that one thing.
 
 What a Conversation needs settling before it runs — repo, branch, base commit,
-both Pairings, the readiness verdict — stands on the **composer**, which is the
+the Process, its Pairings, the readiness verdict — stands on the **composer**, which is the
 details pane a drafting Brief opens, drawn as the composer of a chat app: one
 box at the app's measure holding the document as the field it is written in,
 the setup as a row of borderless label-over-value dropdowns along the inside of
 its bottom edge — Repo first, whose one flat panel holds which repo the work is
 in, the branch, the base and the companions, then the three role Pairings — and
-the press that starts the work under the box, against its right edge. Switching
+the press that starts the work under the box, against its right edge. *Revised
+2026-09-25, grilling conversation-processes*: the row reads **Repo**,
+**Process**, **Agent**, the Process picked between the two and the three role
+pickers folded into the one Agent control, as ADR-0020 sets out. Switching
 a draft's repo resets its base to the new repo's default and drops a companion
 that has become its own repo, leaving the branch name and the Pairings alone;
 it is refused, and the picker reads disabled, from the moment a worktree exists —
@@ -760,16 +776,19 @@ or a closed tab loses nothing, and nothing reaches the server until a press.
 per-field setup endpoints and kicks the work off; **Save as draft**, quieter and
 beside it, stops after the fields. Creating needs a repo and nothing else, so the
 quieter press waits on that alone; the other carries a grilling start and waits
-on what one has always waited on — a brief and the three roles — drawing inert
-short of that and saying what is missing when it is pressed, exactly as the
-composer's own start does. Both land in the Conversation they made, and a
+on what one has always waited on — a brief, and every role the Process uses
+answered — drawing inert short of that and saying what is missing when it is
+pressed, exactly as the composer's own start does, and naming the roles as
+that Process has them. Both land in the Conversation they made, and a
 successful create clears what the device was holding. There is no batched create and no second set of validation rules: a
 field the server refuses leaves the rest of the work on a part-set draft, and the
 refusal is carried to that draft's own composer to be read where the field is.
-Its three role pickers stand on what the picked repo was last grilled with, read
-off the repo and re-read whenever it is switched, so the page shows what a draft
-created there would have arrived showing — shown and not held, so a picker left
-on it sends nothing at create and the server's own prefill answers for it.
+Its role pickers are the one **Agent** control the composer's are, in whichever
+shape the Process asks for, and each of them stands on what the picked repo was
+last grilled with, read off the repo and re-read whenever it is switched, so the
+page shows what a draft created there would have arrived showing — shown and not
+held, so a picker left on it sends nothing at create and the server's own
+prefill answers for it.
 
 **Other actions is one menu with a level per action** (*settled 2026-09-08,
 building improve-pr*). The compose page's *Adopt a roadmap* dropdown was drawn
@@ -803,6 +822,33 @@ press: a review answered into splitting work out has made the work a backlog,
 so the move back down the ladder records **task list** where the record has
 none. Without it the Conversation would be building with nothing saying how,
 which is the record a pressed Resume refuses on by name.
+
+*Revised 2026-09-25, grilling conversation-processes*: the review-only mode
+judged not worth a state above is worth a **Process** — two of them. **Wrap up
+a pull request** and the list of open pull requests behind it go; a pull
+request or a branch is named in the brief of a **Review** or **Fix Merge
+Issues** conversation instead, the first a wrap-up with its review and the
+second one narrowed to what GitHub refuses a merge for, stacks included.
+*Continue a roadmap* stays the one level of Other actions, a roadmap being the
+one thing adopted that brings a brief of its own. The take-up rules above —
+the head at take-up as the base commit, GitHub's base beside it, a head that is
+ahead or diverged refused by name — stand, run at Start rather than from a
+press of their own. See
+[ADR-0020](../adr/0020-a-conversation-has-a-process.md).
+
+*Revised 2026-09-27, roadmap stage processes/05*: that went in, and the level,
+the list, the `gh` read behind it, the start that loaded a pull request and the
+*Wrap up* press on the draft's pane are all gone. So **Other actions** holds one
+level and is drawn as the menu it always was — greyed while there is nothing to
+continue rather than hidden, because what the paragraph above settled is that a
+control saying what it offers beats a dropdown that comes and goes with a list,
+and one level left is no reason to go back to the dropdown. Nothing about the
+pull request is touched either: the Brief is the human's, and loading one no
+longer prefills anything, so opening the compose page asks GitHub nothing at all.
+The record of what was taken up stays and is written by the Review's own Start,
+which is what a Conversation's Process is read back off — so a **Draft** from
+before the Process, started off the retired level, reads as a Review with that
+pull request's URL in its Target field and starts through the new path.
 
 **And with nothing to list, that page is the whole of the app** (*settled
 2026-09-08, onboarding stage 04*). The **zero state** is a fact about the

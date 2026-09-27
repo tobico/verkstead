@@ -821,28 +821,43 @@ through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do
 is register the Repos you work in — that stays yours, on the settings page.
 
-A Conversation fixes a **Grilling Pairing**, an **Implementation Pairing** and a
-**Review Pairing** before it starts — a Profile and one of its models, picked
-together as one row. The same Profile may fill all three, and separate ones are
-how the parts bill to separate accounts. The review one runs the wrap-up's
+A Conversation has a **Process**, which is what kind of work it is: the one
+picked decides the shape of the run below and which roles the Conversation is
+run under. **Develop** is the full one — the grilling, the Direction and the
+pipeline, and the walkthrough below is its. **Tinker** is a Brief that wants no
+interview: the press takes it straight into a conversation with one session
+about the work itself, and where that conversation built something it ends on a
+pull request and the same wrap-up. Both are on the composer's picker; the rest
+arrive a Process at a time, and one is offered only once it can run.
+
+A Conversation fixes the **Pairings** the roles it uses need before it starts —
+a Profile and one of its models, picked together as one row, on the one
+**Agent** control. Develop uses three: a **Grilling Pairing**, an
+**Implementation Pairing** and a **Review Pairing**. A Tinker is never
+interviewed, so it uses the two a wrap-up needs. The same Profile may fill them
+all, and separate ones are how the parts bill to separate accounts. The review one runs the wrap-up's
 review and nothing else, reviewing being a fresh set of eyes on what was built —
 and its picker offers **No review** beside the accounts, for work you would
-rather have wrapped up without one. The grilling picker offers **No grilling**
-the same way, for work whose Brief is already the whole plan. All of them are
-settled while the Conversation is drafting, and the work starting is what fixes
-them.
+rather have wrapped up without one — the one row on any of the pickers that is
+not an account. All of them are settled while the Conversation is drafting, and
+the work starting is what fixes them.
 
 **Then, per piece of work:**
 
-1. **New conversation**, against a Repo. Write the **Brief** — the markdown
-   document the work starts from, and its first Event. The base commit defaults
-   to the default branch's tip and is yours to override.
+1. **New conversation**, against a Repo. Pick the **Process** and write the
+   **Brief** — the markdown document the work starts from, and its first Event.
+   The base commit defaults to the default branch's tip and is yours to
+   override.
 2. **Start work.** The branch and the **Worktree** are made here, and a
    grilling session opens in the Sandbox. What it wants to know arrives as
    Question Sets on the Timeline and, if you have subscribed, on your phone.
-   Answer from wherever you are; the session waits. On **No grilling** the same
-   press skips to step 5 instead: one session builds from the Brief alone, and
-   what the Brief leaves genuinely open comes back to you as a Question Set.
+   Answer from wherever you are; the session waits. On a **Tinker** the same
+   press skips steps 3 to 5: one session opens on the Brief as the thing to
+   follow up on, and the two of you go round in Sets — it does what you asked,
+   commits it, and puts the next round to you — for as long as you want, until
+   you tick **Nothing else** on one. Then a Conversation that committed
+   something carries on into step 6's pull request and the wrap-up under it, and
+   one that committed nothing is **Done**.
 3. **The Proposal.** The grilling ends by proposing a **Direction** — inline,
    task list or roadmap — on a Set carrying the chooser. Picking one accepts
    the Proposal, and the pick is delivered back to the grilling session rather

@@ -118,6 +118,7 @@ import type {
   ConversationView,
   Lifecycle,
   PairingView,
+  Process,
   RepoEntry,
   SteerCompanionRefusal,
   SteerEvent,
@@ -136,6 +137,7 @@ import { Listbox } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
+import { narrowed } from "./processes";
 import { keeping, type Keeping } from "./settling";
 import { STATE } from "./states";
 import { BasePicker, RULE } from "./Setup";
@@ -158,6 +160,8 @@ export const STEER_REFUSAL: Record<
     "There is nothing on this branch to carry on — no backlog with work left in it, and no roadmap it has written — so write what to do.",
   NoFollowUpBrief:
     "A follow-up is whatever you want taken up about this pull request, so write what that is.",
+  NoInvestigationBrief:
+    "An investigation is whatever you want found out about this work, so write what that is.",
   EmptyBrief:
     "There is no brief to grill: this conversation has none written yet, so write the one this round is about.",
   NoPairing: "Pick the account and model the work runs under from here.",
@@ -217,6 +221,25 @@ const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
 /// to go and look at is one of several repos rather than the obvious one. The
 /// grill start's own refusals are drawn the same way — see `grillRefusal` in
 /// [`Timeline`](./Timeline.tsx).
+/// Which of a target's notes this conversation reads, there being one target that
+/// means two different things.
+///
+/// **Wrapping up**, where the Process's wrap-up is narrowed to what GitHub refuses
+/// a merge for: no session reads the branch, nothing said on the pull request is
+/// answered, and the one pick settles the Implementation Pairing alone — so the
+/// note promising a review and its comments would promise an hour of work that
+/// never happens. Which is the argument the take-up's own Timeline note already
+/// makes about the same absence: a wrap-up nothing reviews looks from the outside
+/// like one whose review has not started yet, so it is worth a sentence.
+///
+/// Asked of [`narrowed`](./processes.ts) rather than of the Process by name, that
+/// being where a fact about a Process is kept.
+function note(offered: (typeof TARGETS)[number], process: Process): string {
+  return offered.narrowedNote !== undefined && narrowed(process)
+    ? offered.narrowedNote
+    : offered.note;
+}
+
 export function steerRefusal(outcome: ConversationSteered): string {
   if (typeof outcome === "object") {
     return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[outcome.Companion.why]}`;
@@ -228,19 +251,27 @@ export function steerRefusal(outcome: ConversationSteered): string {
 /// Where a steer can send a conversation, and what each target means.
 ///
 /// Draft and Closed are not here and never will be: each has a way in of its
-/// own; follow-up is here because a steer is the only way into it at all.
-/// Wrapping up and follow-up are the two that are not always offered, which is
-/// what `offered` below draws them out by: a conversation whose work is on no
-/// pull request has no wrap-up to be steered into and nothing to follow up, and
-/// following up is for work the pipeline has seen through rather than work still
-/// being built.
+/// own; follow-up and investigating are here because a steer is the only way
+/// into either at all. Wrapping up and follow-up are the two that are not always
+/// offered, which is what `offered` below draws them out by: a conversation whose
+/// work is on no pull request has no wrap-up to be steered into and nothing to
+/// follow up, and following up is for work the pipeline has seen through rather
+/// than work still being built.
+///
+/// Investigating is offered from everywhere, unlike either of those: a question
+/// about the work is not a step of it, so there is nowhere the work can have got
+/// to that makes asking one wrong — including work on no pull request at all.
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
 /// settled, and one nothing runs in needs none. `role` is which pairing that
 /// is, there being one for the interviewing, one for everything that builds and
 /// one for the review — and wrapping up settles the review one alongside the
-/// building one from the same pick, a wrap-up doing both.
+/// building one from the same pick, a wrap-up doing both, unless the Process's
+/// wrap-up is a narrowed one and there is no review for it to do.
+///
+/// `narrowedNote` is what that one target says instead where the wrap-up it sends
+/// the work to is narrowed — see [`note`], which is the whole of why it is here.
 ///
 /// In the order the work goes through them, because that is the order the human
 /// reads the pipeline in everywhere else.
@@ -248,6 +279,7 @@ const TARGETS: {
   target: SteerTarget;
   label: string;
   note: string;
+  narrowedNote?: string;
   runs: boolean;
   role?: "grilling" | "implementation";
 }[] = [
@@ -269,6 +301,8 @@ const TARGETS: {
     target: "Wrapping",
     label: "Wrapping up",
     note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs the fixes, and the review too where nothing was picked for it. The fix attempts start over.",
+    narrowedNote:
+      "The pull request looked at again: the checks watched, and whether it merges. This process wraps up narrowed to what GitHub refuses a merge for, so nothing reads the branch and nothing said on the pull request is answered. What you pick runs the fixes. The fix attempts start over.",
     runs: true,
     role: "implementation",
   },
@@ -276,6 +310,13 @@ const TARGETS: {
     target: "FollowUp",
     label: "Follow-up",
     note: "The pull request followed up on: a session that answers what you ask, does what you want done about it, and keeps asking what else there is until you are finished.",
+    runs: true,
+    role: "implementation",
+  },
+  {
+    target: "Investigating",
+    label: "Investigating",
+    note: "A question about this work answered without changing it: a session that reads, writes and runs whatever it needs to find out, commits none of it, and keeps asking what else there is until you are finished. It then goes back to the state you steered it from, or to Done where there is nowhere to go back to.",
     runs: true,
     role: "implementation",
   },
@@ -370,6 +411,7 @@ const UNANSWERED: SteerForm = {
   digest: false,
   instruction: null,
   follow_up: null,
+  investigation: null,
   pairing: null,
   interrupt: false,
   added: [],
@@ -417,6 +459,7 @@ function reading(form: SteerForm): string {
     form.digest,
     form.instruction ?? "",
     form.follow_up ?? "",
+    form.investigation ?? "",
     form.pairing && pairing.spelled(form.pairing),
     form.interrupt,
     form.added.map((row) => [row.repo_id, row.mode, row.base_ref, row.branch]),
@@ -867,11 +910,9 @@ export function Steer(props: {
   // to wrapping up would be the form answering a question they had not been
   // asked.
   //
-  // The Pairing behind the grilling pick rather than the pick itself: a
-  // conversation whose human chose "No grilling" has no account to prefill this
-  // with, and steering into a grilling is asking for an interview — so that row
-  // is not one this picker offers, and the field opens empty for them to pick
-  // who runs it.
+  // Neither picker offers a row that is not an account, steering into a state
+  // being asking for the session that state runs — so a conversation with no
+  // Pairing on the role opens the field empty for them to pick who runs it.
   const [grilling, setGrilling] = createSignal<string | null>(null);
   const [implementation, setImplementation] = createSignal<string | null>(null);
 
@@ -908,7 +949,7 @@ export function Steer(props: {
     }
 
     return settling === "grilling"
-      ? pairing.chosen(pairing.under(props.conversation.grilling_pairing))
+      ? pairing.chosen(props.conversation.grilling_pairing)
       : pairing.chosen(props.conversation.implementation_pairing);
   });
 
@@ -965,6 +1006,14 @@ export function Steer(props: {
   /// rather than a step of the run.
   const [followUp, setFollowUp] = createSignal<string | null>(null);
   const following = () => followUp() ?? held().follow_up ?? "";
+
+  /// And the question, for a steer into investigating.
+  ///
+  /// Required for the follow-up's reason and kept in a slot of its own for the
+  /// reason every payload here is: what is written under one target stays
+  /// written when the picker moves off it, so a change of mind costs nothing.
+  const [investigation, setInvestigation] = createSignal<string | null>(null);
+  const finding = () => investigation() ?? held().investigation ?? "";
 
   /// Whether the submit would be refused for want of one, which is what holds
   /// the button shut rather than a message after the press.
@@ -1051,6 +1100,12 @@ export function Steer(props: {
     () => going() === "FollowUp" && !following().trim(),
   );
 
+  /// And on the other: an investigation is a question somebody wanted asked, so
+  /// there is nothing an empty one could mean either.
+  const needsInvestigation = createMemo(
+    () => going() === "Investigating" && !finding().trim(),
+  );
+
   const [interrupt, setInterrupt] = createSignal<boolean | null>(null);
   const ending = () => interrupt() ?? held().interrupt;
 
@@ -1075,6 +1130,7 @@ export function Steer(props: {
     digest: priming(),
     instruction: doing() || null,
     follow_up: following() || null,
+    investigation: finding() || null,
     pairing: picked() ? pairing.choice(picked()) : null,
     interrupt: ending(),
     added: additions(),
@@ -1153,6 +1209,8 @@ export function Steer(props: {
           going() === "Implementing" && doing().trim() ? doing() : null,
         follow_up:
           going() === "FollowUp" && following().trim() ? following() : null,
+        investigation:
+          going() === "Investigating" && finding().trim() ? finding() : null,
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
@@ -1238,7 +1296,9 @@ export function Steer(props: {
                   />
                   {offered.label}
                 </label>
-                <Note class={styles.optionNote}>{offered.note}</Note>
+                <Note class={styles.optionNote}>
+                  {note(offered, props.conversation.process)}
+                </Note>
               </div>
             )}
           </For>
@@ -1348,6 +1408,34 @@ export function Steer(props: {
           </div>
         </Show>
 
+        {/* And under investigating, the other payload with nothing it could mean
+            empty: there is no question to answer without one, so the field is
+            the target and the submit is held shut until it says something. */}
+        <Show when={going() === "Investigating"}>
+          <div>
+            <label for="steer-investigation">What to find out</label>
+            <textarea
+              id="steer-investigation"
+              rows="6"
+              value={finding()}
+              onInput={(event) => {
+                setInvestigation(event.currentTarget.value);
+                keeper.settle();
+              }}
+              onBlur={() => keeper.keep()}
+              disabled={submit.isPending}
+              placeholder="Ask about this work: what it does, why it does it, or whether something holds."
+            />
+            <Note>
+              A session reads, writes and runs whatever it needs to answer you,
+              and commits none of it. It goes on asking what else there is until
+              you are finished, and then the conversation goes back to the state
+              you steered it from — or to Done, where there is nowhere to go back
+              to.
+            </Note>
+          </div>
+        </Show>
+
         {/* Only where something runs in the state picked. What is settled here
             is the conversation's own pairing rather than one session's, which is
             what the line under it says: steering re-settles what runs the work.
@@ -1449,7 +1537,8 @@ export function Steer(props: {
               (runs() && !picked()) ||
               needsInstruction() ||
               needsBrief() ||
-              needsFollowUp()
+              needsFollowUp() ||
+              needsInvestigation()
             }
           >
             {submit.isPending ? "Steering…" : "Steer"}
@@ -1512,11 +1601,12 @@ export function Steer(props: {
 /// The form's own labels rather than a heading invented here, because that is
 /// what the record is being drawn as: the human filled in a field called *What
 /// to do first*, and reading it back under any other name would be the record
-/// answering a question they were never asked. Only the two targets that carry
-/// a body are here — the rest say nothing but the state.
+/// answering a question they were never asked. Only the targets that carry a
+/// body are here — the rest say nothing but the state.
 const WROTE: Partial<Record<Lifecycle, string>> = {
   Implementing: "What to do first",
   FollowUp: "What to follow up on",
+  Investigating: "What to find out",
 };
 
 /// Whether the steer at `at` on this record wrote the brief its round opened

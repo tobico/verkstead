@@ -1,6 +1,5 @@
 {
   "adopting": null,
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [
     {
@@ -41,22 +40,20 @@
   "direction": null,
   "driven": false,
   "grilling_pairing": {
-    "Under": {
-      "model": "claude-fable-5",
-      "profile": {
-        "account": {
-          "agent_type": "Claude",
-          "claude_dir": "/srv/accounts/fable/.claude",
-          "config_file": "/srv/accounts/fable/.claude.json"
-        },
-        "broken": null,
-        "id": 1,
-        "memory": true,
-        "models": [
-          "claude-fable-5"
-        ],
-        "name": "fable"
-      }
+    "model": "claude-fable-5",
+    "profile": {
+      "account": {
+        "agent_type": "Claude",
+        "claude_dir": "/srv/accounts/fable/.claude",
+        "config_file": "/srv/accounts/fable/.claude.json"
+      },
+      "broken": null,
+      "id": 1,
+      "memory": true,
+      "models": [
+        "claude-fable-5"
+      ],
+      "name": "fable"
     }
   },
   "id": 1,
@@ -82,6 +79,7 @@
   "parked": null,
   "pending_steer": null,
   "pinned": [],
+  "process": "Develop",
   "ready_to_continue": false,
   "ready_to_grill": true,
   "ready_to_resume": false,
@@ -116,6 +114,7 @@
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,
+  "target": null,
   "timeline": [
     {
       "Brief": {

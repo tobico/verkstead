@@ -83,19 +83,20 @@ pub use companions::{
 };
 pub use conversations::{
     AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,
-    ConversationRow, Directing, Edited, Ending, Event, Grilling, Implementing, Landed, Lifecycle,
-    Rebuilding, Resolving, Role, RowState, SetOnTimeline, Settling, Staged, Steer, Steering,
-    Switched, Taking, TimelineEvent, Work, adopted_pull_request, adopting, ask, asked_from,
-    closable, close_conversation, conversation_branch, conversations, follow_branch,
-    follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
-    open_set, opened_at, pick_direction, picked_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
-    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
-    skip_review, stacks_on, stage_roadmap, start_adoption, start_building, start_conversation,
-    start_grilling, start_implementing, start_pull_request_adoption, start_stage,
-    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, timeline,
-    unfinished_conversations, waiting, work_on_repo,
+    ConversationRow, Directing, Edited, Ending, Entering, Event, Grilling, Implementing,
+    Investigated, Landed, Landing, Lifecycle, Process, Rebuilding, Resolving, Role, RowState,
+    SetOnTimeline, Settling, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
+    adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
+    conversation_branch, conversations, fill_target, follow_branch, follow_up_done, follow_up_over,
+    hold_pull_request, implement_again, investigation_over, last_batch_proposal, last_proposal,
+    load_conversation, note, open_set, opened_at, pick_direction, picked_direction, process,
+    record_backlog, record_handoff, record_roadmap, recorded_conversations, recorded_worktrees,
+    reinvent_branch, rename_branch, resolve_conflicts, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_process, set_review_pairing, set_state,
+    set_target, settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_investigating, start_stage,
+    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
+    target, timeline, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
@@ -113,9 +114,10 @@ pub use profiles::{
     create_profile, delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, held_pull_requests,
-    merges, merging, pull_request, pull_request_repo, pull_requests, record_another_pull_request,
-    record_check_rollup, record_merging, record_pull_request, record_standing, standing,
+    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,
+    conversation_on_pull_request, merges, merging, pull_request, pull_request_numbered,
+    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
+    record_merging, record_pull_request, record_standing, rollups, stack, standing,
     unfinished_pull_requests,
 };
 pub use push::{
@@ -131,7 +133,8 @@ pub use session_names::session_id;
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use steers::{
-    PickedPairing, Recorded, RecordedPairing, SteerAddition, SteerRecord, SteerUpgrade,
+    PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
+    scratch,
 };
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,

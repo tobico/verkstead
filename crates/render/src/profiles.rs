@@ -265,10 +265,10 @@ pub struct PairingView {
 /// it: the Pairing its sessions run under, that the role runs none, or nothing
 /// picked yet.
 ///
-/// Three rather than a nullable Pairing, because a picker offers *no grilling*
-/// or *no review* as a row of its own: a Conversation that picked one is as
-/// ready to start as one that picked a Pairing, and a page that could not tell
-/// it from an empty picker would draw the placeholder over a settled choice.
+/// Three rather than a nullable Pairing, because the review picker offers *no
+/// review* as a row of its own: a Conversation that picked it is as ready to
+/// start as one that picked a Pairing, and a page that could not tell it from an
+/// empty picker would draw the placeholder over a settled choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PickedView {
@@ -321,14 +321,16 @@ impl PickedView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RepoPairingsView {
-    /// One of the two roles whose memory can hold the row that runs no session,
-    /// so this says which of three rather than whether anything is remembered.
-    pub grilling: PickedView,
+    /// A Pairing, or nothing: the grilling role has no row that runs no session,
+    /// so a skip some Repo remembers from before *No grilling* retired is read
+    /// as nothing remembered and never handed over as a choice.
+    pub grilling: Option<PairingView>,
 
-    /// The one role that has no such row: a Pairing, or nothing.
+    /// And the other role with no such row.
     pub implementation: Option<PairingView>,
 
-    /// And the other role that has one.
+    /// The one whose memory can hold it, so this says which of three rather than
+    /// whether anything is remembered.
     pub review: PickedView,
 }
 

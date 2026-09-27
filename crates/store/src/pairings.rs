@@ -238,11 +238,11 @@ async fn remembered(pool: &SqlitePool, repo_id: i64, role: Role) -> Result<Picke
 /// to Closed is a draft closed without ever starting, which is no pairing
 /// anybody ran and is passed over.
 ///
-/// Handed back as the store holds it, skips included, for the reason
+/// Handed back as the store holds it, the review's skip included, for the reason
 /// [`remembered_pairings`] hands back what was written: what a fresh Repo does
 /// with a role this Conversation picked away is decided above the store, beside
-/// the rest of the prefill's judging. The Implementation role has no row that
-/// runs nothing, so it is only ever a Pairing or [`Picked::Nothing`].
+/// the rest of the prefill's judging. The other two roles have no row that runs
+/// nothing, so each is only ever a Pairing or [`Picked::Nothing`].
 ///
 /// Everything [`Picked::Nothing`] where no Conversation has started at all,
 /// which is a workbench on its first day.
@@ -276,7 +276,9 @@ pub async fn last_started_pairings(pool: &SqlitePool) -> Result<RepoPairings> {
     };
 
     Ok(RepoPairings {
-        grilling: conversation.grilling_pairing,
+        grilling: conversation
+            .grilling_pairing
+            .map_or(Picked::Nothing, Picked::Under),
         implementation: conversation
             .implementation_pairing
             .map_or(Picked::Nothing, Picked::Under),

@@ -1,12 +1,12 @@
-//! The Nothing-else option on a follow-up's Sets: the control the closing
-//! section carries when, and only when, the Set was asked while its
-//! Conversation is in Follow-up.
+//! The Nothing-else option: the control the closing section carries when, and
+//! only when, the Set was asked while its Conversation is somewhere with an
+//! ending to mark — Follow-up, or Investigating.
 //!
-//! Both Sets come out of `tests/fixtures/set-following-up.json` and
-//! `set-answering.json`, which `cargo test` writes from the real
-//! `/api/ui/sets/{id}` — so what decides whether the option is drawn is the
-//! payload the server really sends, and the mark this page puts on the wire is
-//! checked against the Response the schema really describes.
+//! The Sets come out of `tests/fixtures/set-following-up.json`,
+//! `set-investigating.json` and `set-answering.json`, which `cargo test` writes
+//! from the real `/api/ui/sets/{id}` — so what decides whether the option is
+//! drawn is the payload the server really sends, and the mark this page puts on
+//! the wire is checked against the Response the schema really describes.
 //!
 //! The other half of the arrangement is not on this side of the wire at all:
 //! the mark comes off the Response in the store, so the agent is handed the
@@ -24,14 +24,22 @@ import { draftKey } from "../src/set/filling";
 import { answering, sent } from "./reading";
 import { json, readable } from "./serving";
 import following from "./fixtures/set-following-up.json" with { type: "json" };
+import investigating from "./fixtures/set-investigating.json" with {
+  type: "json",
+};
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
-/// The renderer is a page's own doing and neither fixture has a Diagram; mocked
-/// so nothing here loads megabytes of mermaid.
+/// The renderer is a page's own doing and none of these fixtures has a Diagram;
+/// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-/// A round of a follow-up, which is the one kind of Set the option is drawn on.
+/// A round of a follow-up, which is one of the two kinds of Set the option is
+/// drawn on.
 const FOLLOWING_UP = readable(following);
+
+/// And a round of an investigation, which is the other: the same box over the
+/// other ending.
+const INVESTIGATING = readable(investigating);
 
 /// An ordinary Set, asked from a Conversation that is building rather than
 /// following up.
@@ -105,12 +113,54 @@ describe("the option on a follow-up's Set", () => {
 
     expect(
       page.querySelector(`.${sheet.ending}`),
-      "every state but Follow-up draws the closing section without it",
+      "a state with no ending to mark draws the closing section without it",
     ).toBeNull();
     expect(
       page.querySelector(`#postscript`),
       "which is the same closing section, minus the option",
     ).toBeTruthy();
+  });
+});
+
+describe("the option on an investigation's Set", () => {
+  it("is the same box, in the same place", async () => {
+    const { page } = await answering(INVESTIGATING);
+
+    expect(
+      page.querySelector(`.${sheet.ending} .${sheet.endingName}`)!.textContent,
+    ).toBe("Nothing else");
+    expect(option(page).checked).toBe(false);
+  });
+
+  /// And the one thing that differs: an investigation ends rather than wrapping
+  /// up, and nothing it wrote is committed — so a line promising a wrap-up here
+  /// would be offering a review of work nobody did.
+  it("says what ticking it does in the investigation's own words", async () => {
+    const { page } = await answering(INVESTIGATING);
+
+    const said = page.querySelector(`.${sheet.ending} .${sheet.semantics}`)!
+      .textContent!;
+    expect(said).toContain("nothing more you want found out");
+    expect(said).toContain("still goes back");
+    expect(said).toContain("nothing it wrote is committed");
+    expect(
+      said,
+      "and nothing about a wrap-up, which is not where this one goes",
+    ).not.toContain("wraps up");
+  });
+
+  it("sends the same mark as a follow-up's round does", async () => {
+    const { page, fetching } = await answering(
+      INVESTIGATING,
+      submitted("Accepted"),
+    );
+
+    answer(page);
+    fireEvent.click(option(page));
+    submit(page);
+
+    await waitFor(() => expect(sent(fetching)).toBeTruthy());
+    expect((sent(fetching) as Decided).nothing_else).toBe(true);
   });
 });
 

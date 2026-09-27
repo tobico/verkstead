@@ -1,20 +1,22 @@
 //! A Conversation's setup: what has to be settled before anything will run it,
 //! drawn along the bottom edge of the box the Brief is written in.
 //!
-//! The branch the work will be done on, the branch it will come off, the other
-//! repos it works alongside, and the pairings its sessions run under. Every
-//! one of them is a fact about the Conversation rather than about any one Event,
-//! and every one of them is the human's to change for as long as it is still
-//! drafting.
+//! The branch the work will be done on, what the work is pointed at where the
+//! Process is pointed at anything, the branch it will come off, the other repos
+//! it works alongside, what kind of work it is, and the pairings its sessions
+//! run under. Every one of them is a fact about the Conversation rather than
+//! about any one Event, and every one of them is the human's to change for as
+//! long as it is still drafting.
 //!
 //! **A row of options rather than a form under the Brief.** Setting a
 //! Conversation up and kicking it off are one act, and the act is written in
-//! one box — so the whole of the setup is four dropdowns inside that box's
+//! one box — so the whole of the setup is three dropdowns inside that box's
 //! bottom edge, each a dimmed label over its value, and what a reader takes off
-//! them at a glance is the sentence *this repo, these three accounts*. The
-//! panel behind the first of them is where the rest of it lives: the branch,
-//! the base and the companion repos are all answers to *which code*, and one
-//! trigger for the four of them is what keeps the row down to what it says. See
+//! them at a glance is the sentence *this repo, this kind of work, this
+//! account*. The first of them drops a panel rather than a list, which is where
+//! the rest of it lives — the branch, the base and the companion repos are all
+//! answers to *which code*, so it is one trigger rather than four — and so does
+//! the last, wherever the Process puts *who runs it* in more than one role. See
 //! [`Composer`](./Composer.tsx) for the box, and [`SetupNotes`] for what the
 //! setup has to say that is not a control.
 //!
@@ -33,12 +35,18 @@
 //! row: two pages that asked these questions apart would come to word them
 //! differently.
 //!
-//! The three pairings are separate choices because they are genuinely separate
+//! The role pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
 //! grilling one on. Two of the pickers carry one row that is not an account at
 //! all: a conversation can be built without being grilled and wrapped up
-//! without being reviewed.
+//! without being reviewed. They are one **Agent** control all the same, because
+//! *who runs this* is one question however many roles a Process puts it in:
+//! which roles those are is [`ROLES`](./processes.ts)'s to say, and so is the
+//! shape the control takes over them: a panel under a trigger reading the
+//! Implementation Pairing and counting the rest, or — where the Process is run
+//! under one role — that one picker standing in the row as the control itself.
+//! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
@@ -53,6 +61,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
@@ -65,12 +74,14 @@ import {
   listBranches,
   listProfiles,
   listRepos,
+  pickProcess,
   removeCompanion,
   renameBranch,
   renameCompanionBranch,
   setBaseBranch,
   setCompanionBase,
   setCompanionMode,
+  nameTarget,
   switchRepo,
 } from "../api/client";
 import type {
@@ -85,10 +96,13 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
+  Process,
+  ProcessPicked,
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
   RepoSwitched,
+  TargetRecorded,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -96,7 +110,18 @@ import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
+import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
+import {
+  away,
+  label,
+  OFFERED,
+  PROCESS,
+  ROLES,
+  targeted,
+  uses,
+} from "./processes";
+import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -117,9 +142,35 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
     "The branch exists by now, so which repo the work is in is settled.",
   Adopting:
     "The stage being continued is in this repo, so the work cannot be moved off it.",
-  HoldingPullRequest:
-    "The pull request being wrapped up is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
+};
+
+/// And saying what kind of work it is.
+///
+/// The first three are the Repo switch's own two questions said again, because
+/// they are the same two: a Conversation with a worktree is not one a dropdown
+/// rewrites. The fourth is a refusal of a different kind — nothing about *this*
+/// Conversation is wrong, and nothing the human does makes that Process
+/// pickable, so what it says is what they are waiting on.
+export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
+  Picked: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The branch exists by now, so what kind of work this is has been settled.",
+  NotLanded: "Verkstead cannot run that process yet.",
+};
+
+/// And naming what the work is pointed at.
+///
+/// Two rather than the branch field's three, and the missing one is the point:
+/// nothing asks git whether what was typed is a well-formed branch name,
+/// because a pull request URL is not one. What the string turns out to name is
+/// settled at Start, and refused there by name.
+export const TARGET_REFUSAL: Record<TargetRecorded, string> = {
+  Recorded: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The work has started, so what it is pointed at was read when it did.",
 };
 
 /// And a base branch.
@@ -199,8 +250,15 @@ export function Setup(props: {
           row about one repository read as four things. */}
       <RepoOption conversation={props.conversation} />
 
-      {/* And the three accounts, one trigger each. */}
-      <Profiles conversation={props.conversation} />
+      {/* Then what kind of work it is, which is what the accounts under it are
+          asked in service of: which roles a Conversation uses is its Process's,
+          so the Process is read before them and after the repository it is
+          about. */}
+      <ProcessOption conversation={props.conversation} />
+
+      {/* And who runs it: one trigger for every role the Process uses, the
+          pickers themselves standing inside the panel behind it. */}
+      <AgentOption conversation={props.conversation} />
     </section>
   );
 }
@@ -281,12 +339,6 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// offer.
   const adopting = () => props.conversation.adopting !== null;
 
-  /// And whether it was settled by the pull request the conversation is holding,
-  /// which is the same fact about the other thing a draft adopts: `#41` is a
-  /// number in one repository, and the same number over there is a different
-  /// pull request or none at all.
-  const holding = () => props.conversation.adopting_pull_request !== null;
-
   return (
     <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
       {() => (
@@ -295,21 +347,31 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
               one this picks. */}
           <RepoPicker
             conversation={props.conversation}
-            disabled={branched() || adopting() || holding()}
+            disabled={branched() || adopting()}
           />
 
           <Show when={!branched()}>
             {/* No branch field where the conversation is adopting a roadmap: a
                 stage is worked on its own slug, so the name invented when the
                 row was made is discarded when the stage is adopted, and naming
-                it here would be a field with nothing behind it. The same is
-                true of a pull request, whose branch is the head branch GitHub
-                names — and of the base under it, which is recorded at the
-                take-up as the head commit rather than picked here. */}
-            <Show when={!adopting() && !holding()}>
+                it here would be a field with nothing behind it. */}
+            <Show when={!adopting()}>
               <BranchName conversation={props.conversation} />
             </Show>
-            <Show when={!holding()}>
+
+            {/* And what the work is pointed at, under the branch it will be
+                done on — drawn for the Processes that are pointed at work
+                already somewhere else and for no other, which is
+                `processes.ts`'s list to keep. */}
+            <Show when={targeted(props.conversation.process)}>
+              <TargetName conversation={props.conversation} />
+            </Show>
+
+            {/* The base, unless the target is a pull request — GitHub's base
+                is the fact then, and the take-up records it. A branch keeps
+                the picker, because what its pull request is opened against is
+                what is picked here. */}
+            <Show when={!onAPullRequest(props.conversation)}>
               <BaseBranch conversation={props.conversation} />
             </Show>
             <AddCompanion conversation={props.conversation} />
@@ -323,6 +385,21 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
         </>
       )}
     </RepoOptions>
+  );
+}
+
+/// Whether this Conversation's Target names a pull request, which is the whole
+/// of what takes the base picker off the panel.
+///
+/// Asked of the Process too, because a target is only read on a Process that
+/// takes one: a Develop Conversation with something left in the field from
+/// before the picker was moved is not pointed at anything, and its base is its
+/// own to pick.
+export function onAPullRequest(conversation: ConversationView): boolean {
+  return (
+    targeted(conversation.process) &&
+    conversation.target !== null &&
+    namesPullRequest(conversation.target)
   );
 }
 
@@ -655,6 +732,118 @@ export function RepoChoice(props: {
     </div>
   );
 }
+
+/// What kind of work this Conversation is for, on a Conversation: the pick
+/// saves itself the moment it is touched, the way the pairings beside it do.
+///
+/// Drawn whatever state the round is in, [`RepoOption`]'s reason — once the
+/// branch is cut the server refuses the press and the control says so by being
+/// disabled, because which Process the work is is still a fact worth reading.
+/// And disabled for a second reason the repo picker is disabled for: a
+/// Conversation that took a pull request up *is* a Review, which is what the
+/// take-up made it rather than anything a dropdown here chose.
+function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<ProcessPicked | null>(null);
+
+  const say = useMutation(() => ({
+    mutationFn: (picked: Process) =>
+      pickProcess(props.conversation.id, picked),
+    onSuccess: (outcome: ProcessPicked) => {
+      if (outcome !== "Picked") {
+        setRefused(outcome);
+        // Refused about the Conversation the pick was about: reading it again
+        // is both the correction — the control goes back to the Process the
+        // record says — and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  /// Whether the branch has been cut, which is [`RepoOption`]'s own reading of
+  /// the same fact: a worktree is made with the branch and forgotten only by
+  /// closing.
+  const branched = () => props.conversation.worktree !== null;
+
+  return (
+    <ProcessPicker
+      chosen={props.conversation.process}
+      disabled={branched() || say.isPending}
+      pick={(picked) => say.mutate(picked)}
+    >
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {PROCESS_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={say.isError}>
+        <ErrorLine class={styles.failure}>
+          The process could not be picked: {say.error?.message}
+        </ErrorLine>
+      </Show>
+    </ProcessPicker>
+  );
+}
+
+/// The control itself: one option of the row, *Process* as its label and what
+/// kind of work this is as its value.
+///
+/// Presentational and shared, for [`RepoOptions`]'s reason — the compose page
+/// asks the same question before there is a Conversation for an answer to be
+/// about. What a pick *does* is the caller's, and so is everything said under
+/// it.
+///
+/// Which Processes it offers is [`OFFERED`]'s, and the server keeps the other
+/// list — a Process is offered only once its stage has landed, as an agent type
+/// is offered only once it can launch the real thing.
+export function ProcessPicker(props: {
+  chosen: Process;
+  pick: (picked: Process) => void;
+  disabled?: boolean;
+  /// What the caller has to say under it — the refusals above all, which are
+  /// facts about the caller's record rather than about this control.
+  children?: JSX.Element;
+}): JSX.Element {
+  /// The rows, and whatever is chosen wherever the list does not hold it —
+  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation that took
+  /// a pull request up reads *Review*, which cannot be picked until its own
+  /// stage lands, and a control showing nothing there would be the row missing
+  /// the one thing that tells a Review apart.
+  const options = (): Process[] =>
+    OFFERED.includes(props.chosen) ? OFFERED : [props.chosen, ...OFFERED];
+
+  return (
+    <div class={styles.processChoice}>
+      {/* A [`Listbox`] rather than a `<select>`, for the reason every other
+          control in this row is one: what is shown and what would be sent
+          cannot come apart, and a native control in the composer box would be
+          the one thing in it drawn as a form. The label goes inside the handle
+          as the pairings' do — a dimmed word over its value, and the pair of
+          them one thing to press. */}
+      <Listbox
+        id="conversation-process"
+        class={styles.processPick}
+        heading={{ words: "Process", class: styles.optionLabel }}
+        options={options()}
+        value={(process) => process}
+        label={(process) => PROCESS[process]}
+        chosen={props.chosen}
+        disabled={props.disabled}
+        pick={(picked) => props.pick(picked as Process)}
+      />
+
+      {props.children}
+    </div>
+  );
+}
+
 /// What a Rust repository loses on a server with no sccache: the compiling.
 ///
 /// Drawn only where all three hold — the repository is a Cargo workspace, the
@@ -678,75 +867,176 @@ function UncachedCompiles(props: {
     </Show>
   );
 }
-/// The three pairings the work will run under — two of which may be picked
-/// away instead — one option of the row each, the role as the label and the
-/// pairing as the value.
+/// The **Agent**: the Pairings the work will run under — some of which may be
+/// picked away instead — one picker per role the Process uses, stacked inside
+/// the panel behind one trigger.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
 /// pairings are made of it here: a row per profile-and-model combination, which
 /// is what a picker offers.
 ///
-/// The three stand in the row rather than in a section of their own, and there
-/// is no heading over them: the role is written on each one, so a word above
-/// all three would be the row saying what its labels already say.
-function Profiles(props: { conversation: ConversationView }): JSX.Element {
+/// **One picker per role the Process uses**, which is [`ROLES`]'s to say rather
+/// than this pane's. A Conversation holding a pull request reads as a Review, and
+/// Review does not use Grilling — so the picker that was taken away by a test
+/// for the held pull request is taken away by the table instead, and the two
+/// composers stop saying the same thing twice.
+///
+/// [`ProfileChoices`] stands outside the option rather than inside its panel:
+/// what it draws in place of the pickers is a workbench with no account saved in
+/// it, and an invitation to go and save one is no use behind a trigger nobody
+/// has a reason to press.
+function AgentOption(props: { conversation: ConversationView }): JSX.Element {
   return (
     <ProfileChoices>
       {(saved) => (
-        <>
-          {/* One of the two pickers with a row that is not an account: a
-              brief can go straight to the work, with no interview between
-              the two.
-
-              Not drawn at all on a conversation holding a pull request. The
-              work on it is built and the take-up moves it straight into the
-              wrap-up, so there is no round for a grilling to open and no later
-              stage to inherit the choice — which is what an adopting
-              conversation's own is carried for. */}
-          <Show when={props.conversation.adopting_pull_request === null}>
-            <PairingPicker
-              conversation={props.conversation}
-              saved={saved()}
-              role="grilling"
-              label="Grilling"
-              away="No grilling"
-              chosen={pairing.settled(props.conversation.grilling_pairing)}
-              pairing={pairing.under(props.conversation.grilling_pairing)}
-              choose={(id, picked) =>
-                chooseGrillingPairing(id, pairing.role(picked))
-              }
-            />
-          </Show>
-          <PairingPicker
-            conversation={props.conversation}
-            saved={saved()}
-            role="implementation"
-            label="Implementation"
-            chosen={pairing.chosen(props.conversation.implementation_pairing)}
-            pairing={props.conversation.implementation_pairing}
-            choose={(id, picked) =>
-              chooseImplementationPairing(id, pairing.choice(picked))
-            }
-          />
-          {/* And the other: a conversation can be wrapped up without being
-              reviewed at all, and that is picked here rather than anywhere
-              else. */}
-          <PairingPicker
-            conversation={props.conversation}
-            saved={saved()}
-            role="review"
-            label="Review"
-            away="No review"
-            chosen={pairing.settled(props.conversation.review_pairing)}
-            pairing={pairing.under(props.conversation.review_pairing)}
-            choose={(id, picked) =>
-              chooseReviewPairing(id, pairing.role(picked))
-            }
-          />
-        </>
+        <AgentOptions
+          process={props.conversation.process}
+          saved={saved()}
+          // What each picker inside is showing, which is what the trigger
+          // reads — the record's own choices, read exactly as the pickers below
+          // read them.
+          picked={{
+            grilling: pairing.chosen(props.conversation.grilling_pairing),
+            implementation: pairing.chosen(
+              props.conversation.implementation_pairing,
+            ),
+            review: pairing.settled(props.conversation.review_pairing),
+          }}
+        >
+          {() => (
+            <>
+              {/* An account and nothing else: *No grilling* is retired, and a
+                  Brief that wants no interview is a Tinker. */}
+              <Show when={uses(props.conversation.process, "grilling")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="grilling"
+                  label={label(props.conversation.process, "grilling")}
+                  chosen={pairing.chosen(props.conversation.grilling_pairing)}
+                  pairing={props.conversation.grilling_pairing}
+                  choose={(id, picked) =>
+                    chooseGrillingPairing(id, pairing.choice(picked))
+                  }
+                />
+              </Show>
+              <Show when={uses(props.conversation.process, "implementation")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="implementation"
+                  label={label(props.conversation.process, "implementation")}
+                  chosen={pairing.chosen(
+                    props.conversation.implementation_pairing,
+                  )}
+                  pairing={props.conversation.implementation_pairing}
+                  choose={(id, picked) =>
+                    chooseImplementationPairing(id, pairing.choice(picked))
+                  }
+                />
+              </Show>
+              {/* And the other: a conversation can be wrapped up without being
+                  reviewed at all, and that is picked here rather than anywhere
+                  else. */}
+              <Show when={uses(props.conversation.process, "review")}>
+                <PairingPicker
+                  conversation={props.conversation}
+                  saved={saved()}
+                  role="review"
+                  label={label(props.conversation.process, "review")}
+                  away={away(props.conversation.process, "review")}
+                  chosen={pairing.settled(props.conversation.review_pairing)}
+                  pairing={pairing.under(props.conversation.review_pairing)}
+                  choose={(id, picked) =>
+                    chooseReviewPairing(id, pairing.role(picked))
+                  }
+                />
+              </Show>
+            </>
+          )}
+        </AgentOptions>
       )}
     </ProfileChoices>
+  );
+}
+
+/// The option itself, in whichever of its two shapes the Process asks for: the
+/// trigger standing in the row with the panel of role pickers behind it, or —
+/// where the Process is run under one role — that one picker standing in the row
+/// where the trigger would have stood, with no panel drawn at all.
+///
+/// **Which shape is the table's third column** rather than a count taken here,
+/// so a Process arriving later is a row added to [`ROLES`](./processes.ts)
+/// rather than a branch added in each of the two places this is drawn. A panel
+/// over one picker would be a press to reach a press.
+///
+/// Presentational, for [`RepoOptions`]'s reason, and the panel drawn its way —
+/// a `Menu` with `panel`, one flat card, because the Repo option beside it is
+/// exactly this and two shapes in one row would be two things to learn. What a
+/// pick *does* belongs to whoever draws the pickers inside: a request on a
+/// Conversation, a field of the draft the compose page's device holds. Which is
+/// also why the dropdown's one picker is the caller's own rather than something
+/// drawn here — it is the Implementation picker whichever shape asks for it, and
+/// a role is a role rather than a place.
+///
+/// **The label is *Agent* and the labels inside the panel are the roles'.** The
+/// tests, the Brief's setup facts and the Steer form all speak Grilling,
+/// Implementation and Review, and a panel that renamed them would be the one
+/// place they are called something else. Under the dropdown there is no panel
+/// and nothing to tell apart, so the one picker wears the row's own label — see
+/// [`label`](./processes.ts).
+export function AgentOptions(props: {
+  /// Which Process the control is shaped by, which is what says how many roles
+  /// the reading counts over.
+  process: Process;
+  /// The Profiles as they stand, for the reading inside the trigger — see
+  /// [`reading`](./agent.ts).
+  saved: ProfileEntry[];
+  /// And what each picker inside is showing, as that picker would send it.
+  picked: Picked;
+  children: () => JSX.Element;
+}): JSX.Element {
+  const shown = () => reading(props.process, props.picked, props.saved);
+
+  return (
+    <Show
+      when={ROLES[props.process].control === "panel"}
+      // The dropdown shape: what the caller drew *is* the control, so there is
+      // nothing over it and nothing around it — the row holds the one picker the
+      // way it held three of them before they became one option.
+      fallback={props.children()}
+    >
+      <Menu
+        panel
+        class={styles.agentOption!}
+        name="Agent setup"
+        trigger={
+          <>
+            <span class={styles.optionLabel}>Agent</span>
+            <span class={styles.optionLine}>
+              {/* The mark in front of the words, as every reading of who runs a
+                  session is drawn — and as the pickers inside draw the same
+                  choice, so the trigger and the panel read as one thing. */}
+              <HarnessMark of={shown().mark} />
+              <span class={styles.optionValue}>
+                {shown().words}
+                {/* The other roles counted rather than named, which is the Repo
+                    trigger's own convention for the companions beside it: the
+                    row is one line, and what each role is on is inside the
+                    panel. */}
+                <Show when={shown().also}>{(many) => <> +{many()}</>}</Show>
+              </span>
+            </span>
+            {/* Which way the panel comes down, beside the label and the value
+                both — [`RepoOptions`]'s caret, for its reason. */}
+            <Icon of={faChevronDown} class={styles.optionArrow!} />
+          </>
+        }
+      >
+        {props.children}
+      </Menu>
+    </Show>
   );
 }
 
@@ -790,8 +1080,9 @@ export function ProfileChoices(props: {
   );
 }
 
-/// One of the three choices: which profile-and-model pairing fills this role —
-/// or, where the role can be picked away, that it runs nothing.
+/// One of the choices inside the Agent panel: which profile-and-model pairing
+/// fills this role — or, where the role can be picked away, that it runs
+/// nothing.
 ///
 /// A dropdown rather than a list of buttons, because the pairings are a short
 /// list that barely changes and the choice is one of them. One flat row per
@@ -801,12 +1092,14 @@ export function ProfileChoices(props: {
 /// The app's own listbox rather than a `<select>`, because every row carries the
 /// mark of the harness it runs and an `<option>` holds nothing but text — the
 /// mark is what makes a column of accounts scannable, which is the whole reason
-/// these three rows are worth drawing by hand.
+/// these rows are worth drawing by hand.
 ///
 /// `away` is the row a role that can run nothing offers above the pairings,
 /// where it offers one. In the same flat list rather than beside it as a switch,
 /// because it is the same decision: what runs this, and one of the answers is
-/// nobody.
+/// nobody. **Whether there is one, and what it says, is the table's** — see
+/// [`away`](./processes.ts), which the caller asks of each picker it draws
+/// exactly as it asks [`uses`] whether to draw it at all.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
@@ -875,13 +1168,18 @@ function PairingPicker(props: {
   );
 }
 
-/// The control itself: one option of the row, the role as its label and the
-/// pairing as its value.
+/// The control itself: one picker, the role as its label and the pairing as its
+/// value.
 ///
 /// Presentational and shared, for [`RepoOptions`]'s reason — the compose page
-/// asks the same three questions before there is a Conversation for an answer
-/// to be about. What a pick *does* is the caller's, and so is everything said
-/// under it.
+/// asks the same questions before there is a Conversation for an answer to be
+/// about. What a pick *does* is the caller's, and so is everything said under
+/// it.
+///
+/// Drawn as it always was: a dimmed label over its value, one rectangle to
+/// press. Inside the Agent panel that is what stacks, and a card of them reads
+/// as a setting per role — the same pickers dressed as the Repo panel's fields
+/// would read as a form to fill in rather than as the controls they are.
 export function RolePicker(props: {
   saved: ProfileEntry[];
   /// What this control is called in the document, for the id the label inside
@@ -1094,13 +1392,119 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// A branch name being typed: the field, the label over it, and whatever the
-/// caller has to say underneath.
+/// What the field asks for, which is any of the three things a Review can be
+/// pointed at.
 ///
-/// The conversation's own name and a read-write companion's are the same field
-/// asked twice, and the compose page asks both again against nothing saved — so
-/// what is here is the field and the form around it, and what a name *does*
-/// stays with whoever owns it.
+/// Said as the placeholder rather than in a note under it: the label is
+/// *Target* and what may go in it is the placeholder's job, exactly as the
+/// branch field's *Verkstead chooses* is.
+export const TARGET = "Pull request or branch";
+
+/// What the work is pointed at: a pull request URL, a `#number` or a branch,
+/// and empty until the human or the Brief names one.
+///
+/// **Not the Branch field re-read.** That one is a rename — it asks git
+/// whether the name is a well-formed ref, and git refuses a pull request URL
+/// over its colon — and underneath they are not the same fact: the branch
+/// field says what this Conversation's branch is called, and take-up decides
+/// that from the pull request's head. See ADR-0020.
+///
+/// **Filled from the Brief while it is empty**, which the server does as the
+/// Brief is saved: a URL or a `#number` in the prose is unambiguous, so the
+/// human writes about the work and the field comes along with it — and never
+/// over what they typed here. So the field follows the record between
+/// keystrokes the way the branch field does, and a URL arriving in the box
+/// shows up in it.
+///
+/// It keeps itself on a pause in the typing and on the way out of the field,
+/// for the reason everything else in this panel does: there is one button on
+/// the composer and it is the one that starts the work.
+function TargetName(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  // What has been typed, or nothing if nothing has been on this device: the
+  // field follows the record until the first keystroke and follows itself
+  // after it, so a read landing mid-URL cannot take the URL with it.
+  const [named, setNamed] = createSignal<string | null>(null);
+  const [refused, setRefused] = createSignal<TargetRecorded | null>(null);
+
+  const target = () => named() ?? props.conversation.target ?? "";
+
+  // The last value a save asked for, whatever became of it — [`BranchName`]'s
+  // own reading, and for its reason: asking again for the same string would
+  // only get the same answer back.
+  const [asked, setAsked] = createSignal<string | null>(null);
+  const recorded = () => asked() ?? props.conversation.target ?? "";
+
+  const unsaved = () => target() !== recorded();
+
+  /// Both refusals are permanent — a Conversation that is gone does not come
+  /// back, and a target that froze does not thaw — so either one stops the
+  /// field. There is no third: nothing here is refused for what was typed.
+  const settled = () => refused() !== null;
+
+  const name = useMutation(() => ({
+    mutationFn: (target: string) => nameTarget(props.conversation.id, target),
+    onSuccess: (outcome: TargetRecorded) => {
+      if (outcome !== "Recorded") {
+        setRefused(outcome);
+        return;
+      }
+
+      setRefused(null);
+      // The readiness verdict under the box waits on this field, and so does
+      // the base picker beside it: both are read again every time it moves.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+    onSettled: () => keeper.done(),
+  }));
+
+  const keeper = keeping({
+    unsaved,
+    settled,
+    save: () => {
+      const named = target();
+      setAsked(named);
+      name.mutate(named);
+    },
+  });
+
+  return (
+    <BranchField
+      id="target"
+      label="Target"
+      class={styles.target!}
+      placeholder={TARGET}
+      value={target()}
+      set={(named) => {
+        setNamed(named);
+        keeper.settle();
+      }}
+      leave={() => keeper.keep()}
+    >
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {TARGET_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={name.isError}>
+        <ErrorLine class={styles.failure}>
+          The target could not be named: {name.error?.message}
+        </ErrorLine>
+      </Show>
+    </BranchField>
+  );
+}
+
+/// A name being typed into the Repo panel: the field, the label over it, and
+/// whatever the caller has to say underneath.
+///
+/// The conversation's own branch name and a read-write companion's are the same
+/// field asked twice, the Target under them is a third, and the compose page
+/// asks all of them again against nothing saved — so what is here is the field
+/// and the form around it, and what a name *does* stays with whoever owns it.
 ///
 /// A `<form>` because there is nothing in it to press: Enter in a field with no
 /// button beside it is a save on the panels that save as they go, and nothing at

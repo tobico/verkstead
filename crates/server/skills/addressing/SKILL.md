@@ -1,20 +1,23 @@
 ---
 name: addressing
-description: Take one piece of feedback about work that is already on a pull request and land a fix for it. Use when a session has been dispatched with a failing check, a review finding, a pull request comment or a merge conflict as its feedback.
+description: Take one piece of feedback about work that is already on a pull request and land a fix for it. Use when a session has been dispatched with a failing check, a review finding, a pull request comment, a merge conflict or a stack that will not sync as its feedback.
 ---
 
 Take the feedback in the prompt and land a fix for it. One piece of feedback,
 one session, one fix: this session has none of the context of the ones that
 wrote the work, and the next one will have none of yours.
 
-The feedback is one of four things, and the job is the same for all four:
+The feedback is one of five things, and the job is the same for all five:
 
 - **a check that failed** on the pull request, with what it said;
 - **a finding from the review** of the branch, which the human has agreed is
   worth fixing;
 - **a comment somebody left** on the pull request;
 - **a merge conflict** between the pull request and its base branch, which
-  nobody has touched the branch to cause and which nothing can land over.
+  nobody has touched the branch to cause and which nothing can land over;
+- **a stack that will not sync**, which is that same conflict on a chain of
+  pull requests rather than on one — the feedback names every branch of it in
+  order from the bottom.
 
 Each of them is somebody — or something — telling you that work already pushed
 is not right yet. None of them is a fresh piece of work, and none of them is an
@@ -34,7 +37,11 @@ pull request. Feedback that names no worktree is about the branch you started
 on, and that is where to work.
 
 Whichever it is, it is one branch and one pull request: the one in the worktree
-you are working in, already pushed and already open.
+you are working in, already pushed and already open. **Except a stack**, which
+is the one kind of feedback that is about several — every branch it names is in
+that same repository and reached through that same worktree, and every one of
+them is yours to put right. Wherever the rest of this says *the branch you were
+sent to*, a stack's feedback sent you to all of them.
 
 ## 1. Find out what it is actually saying
 
@@ -56,6 +63,12 @@ Read the feedback whole before changing anything, then go and see for yourself.
   anything, and read what each was for rather than only what each says. A merge
   that comes through clean is still a merge to commit and push: it is what puts
   the base's work on the branch, and it is what GitHub reads next.
+- **A stack that will not sync**: the feedback names the chain and the verbs.
+  Run them rather than reaching for `git rebase` yourself — the extension is
+  what keeps the chain linked on GitHub, and a branch rebased by hand is one it
+  no longer recognises. Where the sync backs out on a conflict, resolve it the
+  way the paragraph above says, in the branch the rebase stopped in, and carry
+  on through the chain.
 
 If it is already fixed — a check that failed on a commit the branch has since
 moved past, a comment answered by work that landed after it — say so and run
@@ -115,6 +128,13 @@ resolving. Never force-push a branch you merged into, and never plain-push one
 you rebased: each of those is the other strategy's ending, and one of them
 fails while the other quietly undoes what was asked for.
 
+**A stack is pushed by its sync**, which is the third ending and the one
+exception to the branch you were sent to. `gh stack sync` rewrites and
+force-pushes every branch of the chain atomically — that is what it is for, and
+it is the one place force-pushing branches you did not start on is what was
+asked for. So do not push them one at a time by hand, and do check before you
+finish that every branch the feedback named is pushed.
+
 **The commit that resolves a conflict is bookkeeping**, so it carries no message
 body under the rule below: what it puts on the branch is the base branch
 arriving rather than anything you set out to build, and its diff against either
@@ -166,9 +186,10 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
 
 Do not open a pull request, do not merge anything, and do not touch any branch
 beyond the one you were sent to: the branch checked out in the worktree the
-feedback named, or the one you started on where it named none. Every other
-branch — in this repository and in every companion beside it — belongs to
-somebody else's piece of feedback. The pull request exists, and merging is the
+feedback named, or the one you started on where it named none — or, where the
+feedback named a stack, every branch of that stack and none beside them. Every
+other branch — in this repository and in every companion beside it — belongs to
+somebody else's piece of feedback. The pull requests exist, and merging is the
 human's act.
 
 ## 4. Say you are done

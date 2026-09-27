@@ -258,19 +258,7 @@ async fn choose_grilling(app: &Router, id: i64, profile_id: i64, model: &str) ->
     post(
         app,
         &format!("/api/ui/conversations/{id}/grilling-pairing"),
-        &serde_json::json!({
-            "pairing": { "profile_id": profile_id, "model": model },
-        }),
-    )
-    .await
-}
-
-/// And that picker's other row: no grilling at all.
-async fn no_grilling(app: &Router, id: i64) -> ProfileChosen {
-    post(
-        app,
-        &format!("/api/ui/conversations/{id}/grilling-pairing"),
-        &serde_json::json!({ "pairing": null }),
+        &serde_json::json!({ "profile_id": profile_id, "model": model }),
     )
     .await
 }
@@ -1045,7 +1033,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     let half = opened(&app, id).await;
     assert_eq!(
         half.grilling_pairing
-            .pairing()
+            .as_ref()
             .and_then(|p| p.profile.name.as_deref()),
         Some("fable")
     );
@@ -1059,7 +1047,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     let both = opened(&app, id).await;
     assert_eq!(
         both.grilling_pairing
-            .pairing()
+            .as_ref()
             .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
@@ -1083,9 +1071,7 @@ async fn a_pairing_says_back_the_model_it_was_chosen_with() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing
-            .pairing()
-            .and_then(|p| p.model.clone()),
+        view.grilling_pairing.as_ref().and_then(|p| p.model.clone()),
         Some(MODELS[1].to_owned())
     );
     assert_eq!(
@@ -1113,7 +1099,7 @@ async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.grilling_pairing, PickedView::Nothing);
+    assert_eq!(view.grilling_pairing, None);
     assert_eq!(view.implementation_pairing, None);
 }
 
@@ -1174,9 +1160,7 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing
-            .pairing()
-            .and_then(|p| p.model.clone()),
+        view.grilling_pairing.as_ref().and_then(|p| p.model.clone()),
         None
     );
     assert!(!view.ready_to_grill);
@@ -1222,7 +1206,7 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing.pairing().map(|p| p.profile.id),
+        view.grilling_pairing.as_ref().map(|p| p.profile.id),
         Some(only.id)
     );
     assert_eq!(
@@ -1260,7 +1244,7 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.grilling_pairing, PickedView::Nothing);
+    assert_eq!(view.grilling_pairing, None);
     assert_eq!(view.implementation_pairing, None);
     assert_eq!(view.review_pairing, PickedView::Nothing);
     assert!(
@@ -1354,17 +1338,6 @@ async fn grill(dir: &Path, id: i64) {
         .unwrap();
 }
 
-/// And the same moment on a Conversation that will not be grilled: the press
-/// that takes its Brief straight to the work, which fixes the roles and writes
-/// the memory exactly as the one above does.
-async fn build(dir: &Path, id: i64) {
-    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
-
-    store::start_building(&pool, id, "deadbeef", &dir.join("worktree"), &[])
-        .await
-        .unwrap();
-}
-
 /// A second Conversation on the same Repo as the first, started the way the
 /// human starts one.
 async fn another(app: &Router) -> i64 {
@@ -1404,7 +1377,7 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
 
     let grilling = view
         .grilling_pairing
-        .pairing()
+        .as_ref()
         .expect("the grilling picker is filled");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
@@ -1457,7 +1430,7 @@ async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.pairing().map(|p| p.profile.id),
+        view.grilling_pairing.as_ref().map(|p| p.profile.id),
         Some(fable.id),
         "the half nobody touched is still what it was"
     );
@@ -1484,7 +1457,7 @@ async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.pairing().map(|p| p.profile.id),
+        view.grilling_pairing.as_ref().map(|p| p.profile.id),
         Some(fable.id),
         "the half that is still there is still prefilled"
     );
@@ -1514,7 +1487,7 @@ async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
     assert_eq!(rewritten, ProfileSaved::Saved);
 
     let view = opened(&app, another(&app).await).await;
-    assert_eq!(view.grilling_pairing, PickedView::Nothing);
+    assert_eq!(view.grilling_pairing, None);
     assert_eq!(view.implementation_pairing, None);
 }
 
@@ -1538,26 +1511,30 @@ async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grille
     );
 }
 
-/// And the Grilling picker's own such row, remembered and prefilled exactly as
-/// the review one is: a Repo whose last work started from its Brief opens its
-/// next draft on the same row.
+/// And the Grilling picker's own such row is *not* applied, exactly as a
+/// remembered Pairing whose Profile has broken is not: *No grilling* is retired,
+/// so a Repo still remembering one opens its next draft on an empty picker.
+///
+/// The memory is written by hand because nothing writes one any more — this is a
+/// Repo whose last work was started by a Verkstead that still offered the row.
 #[tokio::test]
-async fn a_new_conversation_arrives_with_no_grilling_where_that_is_what_was_started() {
+async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again() {
     let (accounts, dir, app) = workbench().await;
     let id = conversation(&app, accounts.path()).await;
     let fable = saved(&app, accounts.path(), "fable").await;
 
-    assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
+    choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, fable.id, MODEL).await;
     choose_review(&app, id, fable.id, MODEL).await;
-    build(dir.path(), id).await;
+    grill(dir.path(), id).await;
+
+    remember_a_grilling_skip(dir.path()).await;
 
     let view = opened(&app, another(&app).await).await;
 
     assert_eq!(
-        view.grilling_pairing,
-        PickedView::Skipped,
-        "what the human last picked, ready for them to change",
+        view.grilling_pairing, None,
+        "the skip is read and not applied, which is an empty picker",
     );
     assert_eq!(
         view.implementation_pairing
@@ -1565,34 +1542,46 @@ async fn a_new_conversation_arrives_with_no_grilling_where_that_is_what_was_star
         Some(fable.id),
         "and the pickers beside it are filled as they always were",
     );
-}
+    assert_eq!(
+        prefill(&app, only_repo(&app).await).await.grilling,
+        None,
+        "and the page composing one reads the same memory the same way",
+    );
 
-/// And picking an account back on a Repo that remembers the row is what the
-/// next draft after *that* arrives with.
-#[tokio::test]
-async fn a_grilling_pairing_started_after_no_grilling_is_what_gets_prefilled() {
-    let (accounts, dir, app) = workbench().await;
-    let fable = saved(&app, accounts.path(), "fable").await;
-
-    let first = conversation(&app, accounts.path()).await;
-    assert_eq!(no_grilling(&app, first).await, ProfileChosen::Chosen);
-    choose_implementation(&app, first, fable.id, MODEL).await;
-    choose_review(&app, first, fable.id, MODEL).await;
-    build(dir.path(), first).await;
-
-    let second = another(&app).await;
-    choose_grilling(&app, second, fable.id, MODEL).await;
-    grill(dir.path(), second).await;
+    // And starting one is what takes the row away for good: the memory is
+    // written from the Conversation, which has an account on the role and
+    // nothing picked away.
+    let next = another(&app).await;
+    choose_grilling(&app, next, fable.id, MODEL).await;
+    choose_implementation(&app, next, fable.id, MODEL).await;
+    choose_review(&app, next, fable.id, MODEL).await;
+    grill(dir.path(), next).await;
 
     assert_eq!(
         opened(&app, another(&app).await)
             .await
             .grilling_pairing
-            .pairing()
+            .as_ref()
             .map(|pairing| pairing.profile.id),
         Some(fable.id),
         "the account that interviewed last, with the row before it gone",
     );
+}
+
+/// Put a grilling skip in the Repo's memory the way a Verkstead that still
+/// offered *No grilling* would have left it: the row that says the role runs
+/// nothing, and no Pairing beside it.
+async fn remember_a_grilling_skip(dir: &Path) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    sqlx::query("DELETE FROM repo_pairings WHERE role = 'grilling'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO repo_skips (repo_id, role) SELECT id, 'grilling' FROM repos")
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 /// And the same memory read without a Conversation to have applied it to, which
@@ -1626,7 +1615,7 @@ async fn a_repos_pairings_are_offered_before_anything_is_created() {
 
     let grilling = offered
         .grilling
-        .pairing()
+        .as_ref()
         .expect("the grilling picker has something to show");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
@@ -1691,7 +1680,7 @@ async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
 
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(
-        offered.grilling.pairing().map(|pairing| pairing.profile.id),
+        offered.grilling.as_ref().map(|pairing| pairing.profile.id),
         Some(fable.id),
         "the half that is still there is still offered"
     );
@@ -1721,7 +1710,7 @@ async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
     assert_eq!(rewritten, ProfileSaved::Saved);
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(offered.grilling, PickedView::Nothing);
+    assert_eq!(offered.grilling, None);
     assert_eq!(offered.implementation, None);
 }
 
@@ -1733,7 +1722,7 @@ async fn a_repo_with_no_memory_offers_nothing_at_all() {
     conversation(&app, accounts.path()).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(offered.grilling, PickedView::Nothing);
+    assert_eq!(offered.grilling, None);
     assert_eq!(offered.implementation, None);
     assert_eq!(offered.review, PickedView::Nothing);
 }
@@ -1817,7 +1806,7 @@ async fn a_repo_never_grilled_is_offered_what_the_last_start_anywhere_ran_under(
     let askance = fresh_repo(&app, accounts.path(), "askance").await;
     let offered = prefill(&app, askance).await;
 
-    assert_eq!(on(offered.grilling.pairing()), Some((opus.id, MODEL)));
+    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
     assert_eq!(
         on(offered.implementation.as_ref()),
         Some((haiku.id, MODELS[0]))
@@ -1850,12 +1839,12 @@ async fn a_draft_filled_since_the_last_start_is_not_what_a_fresh_repo_copies() {
     choose_review(&app, draft, fable.id, MODELS[0]).await;
 
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
-    assert_eq!(on(offered.grilling.pairing()), Some((opus.id, MODEL)));
+    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
     assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
     assert_eq!(on(offered.review.pairing()), Some((opus.id, MODEL)));
 }
 
-/// A role the last start picked away is not picked away on a fresh Repo: it
+/// The role the last start picked away is not picked away on a fresh Repo: it
 /// takes the platform default, as a role that start left empty does.
 #[tokio::test]
 async fn a_skip_on_the_last_start_is_not_carried_to_a_fresh_repo() {
@@ -1864,20 +1853,18 @@ async fn a_skip_on_the_last_start_is_not_carried_to_a_fresh_repo() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
+    choose_grilling(&app, id, opus.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
-    build(dir.path(), id).await;
+    grill(dir.path(), id).await;
 
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
 
-    // The default is the earliest Claude Profile, on the table's model per role —
-    // both of which that Profile lists.
-    assert_eq!(
-        on(offered.grilling.pairing()),
-        Some((fable.id, "claude-fable-5"))
-    );
+    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
     assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
+
+    // The default is the earliest Claude Profile, on the table's model for the
+    // role — which that Profile lists.
     assert_eq!(
         on(offered.review.pairing()),
         Some((fable.id, "claude-opus-5"))
@@ -1896,7 +1883,7 @@ async fn a_repo_with_partial_memory_is_not_filled_from_anywhere_else() {
     grill(dir.path(), id).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(on(offered.grilling.pairing()), Some((fable.id, MODEL)));
+    assert_eq!(on(offered.grilling.as_ref()), Some((fable.id, MODEL)));
     assert_eq!(offered.implementation, None);
     assert_eq!(offered.review, PickedView::Nothing);
 
@@ -1945,7 +1932,7 @@ async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
 
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.pairing()),
+        on(offered.grilling.as_ref()),
         Some((unnamed.id, "claude-fable-5"))
     );
     assert_eq!(
@@ -1969,7 +1956,7 @@ async fn the_platform_default_takes_the_earliest_named_profile() {
 
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.pairing()),
+        on(offered.grilling.as_ref()),
         Some((zeta.id, "claude-fable-5"))
     );
     assert_eq!(
@@ -2024,7 +2011,7 @@ async fn the_platform_default_falls_to_the_first_listed_model_where_its_own_is_n
     assert_eq!(
         offered
             .grilling
-            .pairing()
+            .as_ref()
             .and_then(|pairing| pairing.model.as_deref()),
         Some("claude-sonnet-5"),
         "Fable 5 is not on the list, so the first model that is",
@@ -2066,7 +2053,7 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
 
     let offered = prefill(&app, askance).await;
     assert_eq!(
-        on(offered.grilling.pairing()),
+        on(offered.grilling.as_ref()),
         Some((fable.id, "claude-fable-5")),
         "the broken copy falls to the default",
     );
@@ -2076,8 +2063,7 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
 
     let offered = prefill(&app, askance).await;
     assert_eq!(
-        offered.grilling,
-        PickedView::Nothing,
+        offered.grilling, None,
         "the default is broken too, and the Codex Profile is not hunted for",
     );
     assert_eq!(offered.implementation, None);

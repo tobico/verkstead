@@ -118,41 +118,6 @@ by: string, } } | "WorktreeRefused" | { "Companion": {
 repo: string, why: CompanionRefusal, } };
 
 /**
- * The pull request a drafting Conversation is holding, as its own page names
- * it: which one, what it is called, and the two branches it sits between.
- *
- * Kept rather than read off GitHub every time the page is drawn, which is where
- * this parts company with [`AdoptionView`] beside it. A roadmap is a document
- * in the Conversation's own repository and costs a file read; a pull request is
- * a call out to GitHub, and a page that made one every time it was opened would
- * be a page waiting on somebody else's server to say what it is about. What is
- * authoritative is asked again at the take-up, which is the one moment it
- * matters.
- */
-export type AdoptedPullRequestView = { 
-/**
- * The number GitHub gave it, which is what everybody calls it by — in the
- * Conversation's own Repo and nowhere else.
- */
-number: number, 
-/**
- * Its title, as it read when the row was listed.
- */
-title: string, 
-/**
- * The whole URL, so the card can lead out to GitHub.
- */
-url: string, 
-/**
- * The branch the work is on, which is the branch the take-up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into.
- */
-base: string, };
-
-/**
  * The stage an adoption would start, named.
  */
 export type AdoptedStage = { 
@@ -1263,7 +1228,7 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1304,7 +1269,21 @@ export type ConversationView = { id: number,
  * shows the same three facts about it, and a second shape for the same
  * thing would be a second opinion about what a Repo is.
  */
-repo: RepoEntry, branch: string, 
+repo: RepoEntry, 
+/**
+ * What kind of work it is: the Process, picked on the composer between the
+ * Repo and the Pairings and frozen when the work starts — see [`Process`].
+ *
+ * Never `null`. Every Conversation has one, including every one started
+ * before there were any: where the record holds no pick the reading stands,
+ * and the reading is the store's.
+ *
+ * Beside the Repo rather than beside the Pairings, which is where the pane
+ * draws it: the Pairings are in the half of the Configuration that is about
+ * the machine the work was done on, and a Process is a fact about the work.
+ * So it is one of the facts a published share says.
+ */
+process: Process, branch: string, 
 /**
  * Whether that name is one somebody settled on, rather than the one
  * Verkstead prefilled the record with — see
@@ -1346,12 +1325,12 @@ companions: Array<CompanionView>, state: Lifecycle,
  * than by id: the pane says what they are, and whether the Profile is
  * still runnable.
  *
- * One of the two roles the picker offers a row that runs no session for,
- * so this says which of three the human picked rather than whether they
- * picked at all. A Conversation that picked *no grilling* is not grilled:
- * its Brief goes straight to an inline implementation.
+ * A Pairing or nothing, the picker having no row that runs no session:
+ * *No grilling* is retired, and a record written while it was there reads
+ * as nothing picked — see [`crate::PickedView`], which the two roles that
+ * do have one still use.
  */
-grilling_pairing: PickedView, 
+grilling_pairing: PairingView | null, 
 /**
  * And the ones the implementation will run under. Chosen separately
  * because it is genuinely a separate account and model.
@@ -1489,16 +1468,20 @@ ready_to_continue: boolean,
  */
 adopting: AdoptionView | null, 
 /**
- * And the pull request it is holding, where it is holding one.
+ * And what the work is pointed at, where the human or the Brief has named
+ * anything: the **Target** field, as it stands.
  *
- * `null` alongside [`Self::adopting`] on every ordinary Conversation, and
- * never both at once: a Draft adopts one thing or none. `Some` is one
- * started off the *Wrap up a pull request* level, and it is what puts the
- * page on that shape — the pull request named over a Brief the human still
- * writes, the two Pairings that will run the wrap-up, and no branch, base
- * or grilling to settle.
+ * `null` is the field empty, which is every Conversation but a **Review**
+ * somebody has named a target on. What is in it is a pull request URL, a
+ * `#number` or a branch, kept as it was typed — which of the three it is
+ * is decided at Start and not before, so there is nothing here saying
+ * which the page is looking at.
+ *
+ * Drawn in the Repo panel under the Branch field, for the Processes that
+ * take a target and no others — see `processes.ts`, where that list is
+ * kept beside the role table.
  */
-adopting_pull_request: AdoptedPullRequestView | null, 
+target: string | null, 
 /**
  * The worktree the grilling was given to work in, once there is one.
  *
@@ -1936,6 +1919,22 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
  * rather than the one past every Linux.
  */
 export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
+
+/**
+ * What the human's Nothing-else mark on this Set would end, which is the whole
+ * of what the two states whose rounds carry the box differ over.
+ *
+ * The box itself is the same box and the mark the same mark — see
+ * `store::nothing_else` — so what this is drawn on is the line *under* the box
+ * rather than a second control: a follow-up wraps the Conversation up and an
+ * investigation ends with nothing committed, and a page that said one where it
+ * meant the other would be promising a review nobody is going to read.
+ *
+ * Not `store::Ending`, which is what became of writing one of them down. This
+ * is what the box on a Set nobody has answered yet would set in motion, and
+ * nothing reads it but the words beside it.
+ */
+export type Ending = "FollowUp" | "Investigation";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
@@ -2471,7 +2470,7 @@ why: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -2607,27 +2606,6 @@ export type NewConversation = { repo_id: number, };
 export type NewOrder = { order: Array<number>, };
 
 /**
- * And starting one to wrap a pull request up with: which Repo, and the row off
- * the *Wrap up a pull request* level that was pressed.
- *
- * The whole row rather than a number, unlike [`NewAdoption`] beside it. A
- * roadmap is a document in the Conversation's own repository and is read back
- * off it wherever it is wanted; a pull request is somebody else's server, and
- * a server that had only the number would have to make a `gh` call of its own
- * to draw the card the human has already been looking at. So the five facts
- * travel, and the take-up is where GitHub is asked again.
- */
-export type NewPullRequestAdoption = { repo_id: number, number: number, title: string, url: string, 
-/**
- * The branch the work is on, which is the branch the take-up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into.
- */
-base: string, };
-
-/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -2736,103 +2714,6 @@ run: RunView | null,
  * at a directory.
  */
 data_directory: string | null, };
-
-/**
- * One open pull request, as a row of that level draws it.
- *
- * Any author, because whose pull request it is says nothing about whether it is
- * worth wrapping up — what the pipeline takes up is the branch rather than the
- * person. Forks are the one exclusion, and they are excluded for what taking
- * one up would have to do rather than out of taste: a head branch in another
- * repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
- * check would have nowhere to put the fix.
- */
-export type OpenPullRequest = { 
-/**
- * The number GitHub gave it, which is what everybody calls it by — in
- * this repository and nowhere else.
- */
-number: number, 
-/**
- * Its title, which is the line a row leads with.
- */
-title: string, 
-/**
- * The whole URL, so a row can lead out to GitHub without a repository
- * name being guessed at.
- */
-url: string, 
-/**
- * The branch the work is on, which is the branch taking it up checks out.
- */
-head: string, 
-/**
- * And the branch it goes into, which is what the wrap-up watches for
- * conflicts against.
- */
-base: string, 
-/**
- * Who opened it, by their GitHub login. Empty where GitHub named nobody,
- * which is what a deleted account leaves behind.
- */
-author: string, 
-/**
- * What it says about itself: the description as it was written, raw
- * markdown. Empty where nobody wrote one.
- *
- * Never drawn on the row — a row is a line, and this is a document — but
- * carried on it all the same, because loading a pull request prefills the
- * box with the title as a heading and this under it. Raw rather than
- * rendered, unlike every other piece of markdown crossing this wire: what
- * it becomes is a Brief the human edits, and a field cannot be filled from
- * HTML.
- */
-body: string, 
-/**
- * The Conversation already holding this pull request, where one does —
- * any state, Done and Closed included, because a pull request stays on a
- * Conversation's record once it is recorded there.
- *
- * `null` is a pull request nothing has taken up. What a held row does
- * instead of loading is lead to the Conversation holding it: there is one
- * Conversation per piece of work, and a second one over the same branch
- * would be two wrap-ups pushing to it.
- */
-conversation_id: number | null, };
-
-/**
- * One Repo's open pull requests, as the *Wrap up a pull request* level lists
- * them.
- *
- * Grouped by Repo for the reason the abandoned roadmaps are — a number is a
- * fact about a repository, and `#41` says something different in each of them,
- * so a flat list would be one whose rows could not be told apart without
- * carrying the repository anyway.
- *
- * Nothing here is stored. Every field is read off GitHub through the host's
- * `gh` at the moment the level is drawn, which is why a pull request somebody
- * has since merged simply stops appearing rather than having to be taken off
- * anything.
- *
- * A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
- * logged in, a GitHub that would not answer — contributes no group at all
- * rather than an empty one or a failure: what Verkstead does not know is not
- * an empty list, but it is not a broken page either.
- */
-export type OpenPullRequestRepo = { 
-/**
- * Which Repo, by the id a Conversation is started against.
- */
-repo_id: number, 
-/**
- * And what it is called, which is what each row says it is in.
- */
-repo: string, 
-/**
- * The open pull requests in it, in the order GitHub listed them. Never
- * empty: a Repo with nothing open contributes no group at all.
- */
-pull_requests: Array<OpenPullRequest>, };
 
 /**
  * One Option as the page draws it: the number a Response answers by, its text
@@ -2985,10 +2866,10 @@ form: SteerForm, };
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
  *
- * Three rather than a nullable Pairing, because a picker offers *no grilling*
- * or *no review* as a row of its own: a Conversation that picked one is as
- * ready to start as one that picked a Pairing, and a page that could not tell
- * it from an empty picker would draw the placeholder over a settled choice.
+ * Three rather than a nullable Pairing, because the review picker offers *no
+ * review* as a row of its own: a Conversation that picked it is as ready to
+ * start as one that picked a Pairing, and a page that could not tell it from an
+ * empty picker would draw the placeholder over a settled choice.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -3064,6 +2945,42 @@ token: Prefilled | null, };
  * blind.
  */
 export type Prefilled = { value: string, source: Source, };
+
+/**
+ * What kind of work a Conversation is for, and so which states it runs
+ * through.
+ *
+ * [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
+ * Set, so it is the viewer's half of a fact of the record's — the store's own
+ * enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
+ * held to each other in one function on the server.
+ *
+ * All five, and all five can start something now that Fix Merge Issues has
+ * landed: which of them the picker offers is a list of its own all the same,
+ * and what a stage adds is a row on that list and a start path behind it —
+ * never a variant. A wire that carried only what could be started would be one
+ * to widen every time one more could.
+ *
+ * See ADR-0020.
+ */
+export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues";
+
+/**
+ * What kind of work a drafting Conversation is for.
+ *
+ * The Process and nothing else, the way [`RepoChoice`] is an id and nothing
+ * else: which one it is is the whole of what the picker says.
+ *
+ * Any of the five may be asked for — the wire carries all of them, and whether
+ * the one asked for can be started yet is the server's list to keep rather than
+ * something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+ */
+export type ProcessChoice = { process: Process, };
+
+/**
+ * What became of picking one.
+ */
+export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded";
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps
@@ -3615,16 +3532,18 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
  */
 export type RepoPairingsView = { 
 /**
- * One of the two roles whose memory can hold the row that runs no session,
- * so this says which of three rather than whether anything is remembered.
+ * A Pairing, or nothing: the grilling role has no row that runs no session,
+ * so a skip some Repo remembers from before *No grilling* retired is read
+ * as nothing remembered and never handed over as a choice.
  */
-grilling: PickedView, 
+grilling: PairingView | null, 
 /**
- * The one role that has no such row: a Pairing, or nothing.
+ * And the other role with no such row.
  */
 implementation: PairingView | null, 
 /**
- * And the other role that has one.
+ * The one whose memory can hold it, so this says which of three rather than
+ * whether anything is remembered.
  */
 review: PickedView, };
 
@@ -3647,7 +3566,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "HoldingPullRequest" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
 
 /**
  * One registered Repo, whole: the row, and everything a reading of the
@@ -3801,7 +3720,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief" | "NoInvestigation";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -4142,8 +4061,8 @@ standing: Standing,
  */
 proposal: ProposalView | null, 
 /**
- * Whether this Set was asked while its Conversation is in Follow-up, which
- * is what puts the Nothing-else option in its closing section.
+ * Which ending the Nothing-else option in this Set's closing section would
+ * bring about, or `null` where there is no option to draw.
  *
  * The other control the viewer injects, and it arrives the same way the
  * proposal does: with the Set, so the page never draws a closing section
@@ -4151,10 +4070,11 @@ proposal: ProposalView | null,
  *
  * A fact about the Conversation rather than about the Set, which is why it
  * is decided here rather than read off the stored body. Nothing about what
- * was asked changes — an ordinary Set is what a follow-up's rounds are made
- * of — and a Set stored before any of this stays exactly as it was.
+ * was asked changes — an ordinary Set is what a follow-up's and an
+ * investigation's rounds are both made of — and a Set stored before any of
+ * this stays exactly as it was.
  */
-follow_up: boolean, 
+ending: Ending | null, 
 /**
  * The files the human put on this Set's Answers, oldest first — which is
  * the order they were attached in, and the order the pills are drawn in.
@@ -4802,6 +4722,15 @@ instruction: string | null,
  */
 follow_up: string | null, 
 /**
+ * And the question, for a steer into Investigating.
+ *
+ * A slot of its own rather than the follow-up's read twice, which is the
+ * rule every payload here is kept under: the form holds what was written
+ * under each target, so a human who moves the picker across and back reads
+ * their own sentence back where they wrote it.
+ */
+investigation: string | null, 
+/**
  * What the work would run under from here, which is what the submit would
  * send — the Conversation's own prefill included, rather than only a pick
  * made by hand.
@@ -4987,6 +4916,21 @@ instruction: string | null,
  */
 follow_up: string | null, 
 /**
+ * And the question, for a steer into Investigating.
+ *
+ * The follow-up's rule word for word: it lands as the Steer Event's own
+ * body, the session started on it is primed with it as its Brief, it is
+ * **required** because nothing on the branch could stand for a question
+ * somebody wanted asked, and whitespace alone is nothing written. A submit
+ * that names Investigating without one is refused by name — see
+ * [`ConversationSteered::NoInvestigationBrief`].
+ *
+ * Its own field rather than [`Self::follow_up`] sent under another name,
+ * because the form keeps the two apart: what a submit carries is what the
+ * human wrote under the target they picked.
+ */
+investigation: string | null, 
+/**
  * Whether the session is primed with everything the human has already
  * answered.
  *
@@ -5041,13 +4985,14 @@ upgraded: Array<CompanionUpgrade>, };
  *
  * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the states the work is *done in* — the four rungs
- * of the ladder, and Follow-up beside them, which has no other way in at all. A
- * target the form offers is a target something can be set going in, which is
- * why the two that turn on a pull request are drawn out where there is none: an
- * instruction is writable anywhere and Done needs nothing, but there is no
- * wrapping up and no following up of work nobody can see.
+ * of the ladder, and Follow-up and Investigating beside them. A target the form
+ * offers is a target something can be set going in, which is why the two that
+ * turn on a pull request are drawn out where there is none: an instruction is
+ * writable anywhere, Done needs nothing and a question can be asked about work
+ * at any stage, but there is no wrapping up and no following up of work nobody
+ * can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done";
 
 /**
  * And one companion the steer opened up, which carries the one field an
@@ -5100,7 +5045,7 @@ export type Subscribed = "Stored" | "Incomplete";
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
 
 /**
- * What became of pressing the take-up on a Draft holding a pull request.
+ * What became of pressing Start on a **Review** Draft.
  *
  * [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
  * named the same way for the same reason: a human is at the workbench pressing
@@ -5111,8 +5056,30 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * refuses an adoption is a name being *taken*; a pull request's head branch is
  * the whole point, so what refuses a take-up is that branch holding something
  * origin does not, or somebody else standing on it.
+ *
+ * And the ones in front of all of those, which an adoption has no equivalent
+ * of: a stage is named by the row that was pressed, where a Review is pointed at
+ * its work in the **Target** field — typed in, or filled out of a Brief that
+ * named a pull request — and what that field holds is read at the press. So this
+ * list begins with what the field said and what GitHub made of it.
  */
-export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoTarget" | { "AnotherRepository": { 
+/**
+ * The `owner/repo` the URL said, as it was written.
+ */
+named: string, } } | { "NoSuchPullRequest": { 
+/**
+ * The number that was asked about.
+ */
+number: number, } } | { "GitHubRefused": { 
+/**
+ * Why, in the sentence the server put it in.
+ */
+why: string, } } | "Fork" | { "AlreadyHeld": { 
+/**
+ * The Conversation that has it, for the way there.
+ */
+conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -5121,6 +5088,29 @@ at: string, } } | "WorktreeRefused" | { "Companion": {
  * The Repo's registered name.
  */
 repo: string, why: CompanionRefusal, } };
+
+/**
+ * And what the work is pointed at: a pull request URL, a `#number` or a
+ * branch, as it was typed.
+ *
+ * One string whichever of the three it is, because which it is, is not a
+ * question the field asks — it is decided when the Target is read, at Start.
+ * Blank is the field cleared, which is the target taken away rather than one
+ * called nothing, exactly as a blank [`BranchRename`] is.
+ */
+export type TargetNamed = { target: string, };
+
+/**
+ * What became of naming what the work is pointed at.
+ *
+ * Two refusals rather than the branch field's three, and the missing one is
+ * the point: nothing here asks git whether the string is a well-formed branch
+ * name, because a pull request URL is not one and is the commonest thing to
+ * type in. What the string names is decided at Start, where there is a GitHub
+ * and a git to ask — a branch origin has never heard of and a URL of another
+ * repository are refused there, by name.
+ */
+export type TargetRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting";
 
 /**
  * One task's document as the pane draws it: the entry it belongs to, and the

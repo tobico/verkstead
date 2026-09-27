@@ -995,10 +995,10 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
 
 /// The Nothing-else option is drawn from where the Conversation stands rather
 /// than from anything in the Set, so what the payload has to carry is that
-/// standing — and it has to carry it on the Sets of a follow-up and on no
-/// others.
+/// standing — and which ending the mark would bring about with it, the two
+/// states whose rounds carry the box ending differently.
 #[tokio::test]
-async fn only_a_follow_ups_sets_say_the_closing_section_carries_the_option() {
+async fn only_a_follow_ups_and_an_investigations_sets_carry_the_option() {
     for state in [
         store::Lifecycle::Draft,
         store::Lifecycle::Grilling,
@@ -1011,22 +1011,32 @@ async fn only_a_follow_ups_sets_say_the_closing_section_carries_the_option() {
         store::set_state(&pool, ASKING_FROM, state).await.unwrap();
 
         let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
-        assert!(
-            !view.follow_up,
+        assert_eq!(
+            view.ending, None,
             "a Set asked from a Conversation in {state:?} carries no option"
         );
     }
 
-    let (_dir, pool, app) = fresh_app().await;
-    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
-        .await
-        .unwrap();
+    for (state, ending) in [
+        (
+            store::Lifecycle::FollowUp,
+            verkstead_render::Ending::FollowUp,
+        ),
+        (
+            store::Lifecycle::Investigating,
+            verkstead_render::Ending::Investigation,
+        ),
+    ] {
+        let (_dir, pool, app) = fresh_app().await;
+        store::set_state(&pool, ASKING_FROM, state).await.unwrap();
 
-    let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
-    assert!(
-        view.follow_up,
-        "and a follow-up's own round is the one that does"
-    );
+        let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
+        assert_eq!(
+            view.ending,
+            Some(ending),
+            "a round of {state:?} carries the option, worded for what it ends"
+        );
+    }
 }
 
 /// What the option is drawn from is the Conversation, so a Set stored before any
@@ -1043,7 +1053,7 @@ async fn nothing_about_the_option_reaches_the_stored_set() {
     let asked = full_grammar_set();
     let stored = put(&pool, &asked).await.unwrap();
     let (view, _) = fetch_set(&app, stored.id).await;
-    assert!(view.follow_up);
+    assert_eq!(view.ending, Some(verkstead_render::Ending::FollowUp));
 
     let body: (String,) = sqlx::query_as("SELECT body FROM question_sets WHERE id = ?")
         .bind(stored.id)
@@ -1745,17 +1755,27 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
     write("set-proposed.json", &pinned(&json));
 
-    // A round of a follow-up, which is the one kind whose closing section
-    // carries the Nothing-else option. An ordinary Set in every other respect:
-    // what puts the option there is the Conversation being in Follow-up while it
-    // is answered, which is why this one is asked from a steered Conversation
-    // rather than built differently.
+    // A round of a follow-up, which is one of the two kinds whose closing
+    // section carries the Nothing-else option. An ordinary Set in every other
+    // respect: what puts the option there is the Conversation being in Follow-up
+    // while it is answered, which is why this one is asked from a steered
+    // Conversation rather than built differently.
     let (_dir, pool, app) = fresh_app().await;
     store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
         .await
         .unwrap();
     let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
     write("set-following-up.json", &json);
+
+    // And a round of an investigation, which is the other: the same box over the
+    // other ending, so the page has both wordings to draw from the payload rather
+    // than one of them and a guess.
+    let (_dir, pool, app) = fresh_app().await;
+    store::set_state(&pool, ASKING_FROM, store::Lifecycle::Investigating)
+        .await
+        .unwrap();
+    let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
+    write("set-investigating.json", &json);
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
@@ -1901,16 +1921,22 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And what pressing a free row of the *Wrap up a pull request* level makes:
-    // a Draft against that Repo holding the pull request, which is the page that
-    // names one over a Brief the human still writes. Put in through the store
-    // for the reason the adoption above is, and with a Brief saved on it —
-    // loading a pull request prefills the box with the title and the description,
-    // and the create's replay is what puts that on the record.
-    let wrapping_up = store::start_pull_request_adoption(
+    // And a **Draft** from before there were Processes: one started off the
+    // retired *Wrap up a pull request* level, which reads as a Review pointed at
+    // the pull request it was made for. Put in through the store for the reason
+    // the adoption above is, and because that level's own start is gone — what it
+    // left behind is the adoption row, and this is it.
+    //
+    // Its Brief is the human's, as every Review's is: nothing about the pull
+    // request is read into it.
+    let wrapping_up = store::start_unnamed_conversation(&pool, registered.id, "quiet-heron")
+        .await
+        .unwrap()
+        .unwrap();
+
+    store::hold_pull_request(
         &pool,
-        registered.id,
-        "quiet-heron",
+        wrapping_up,
         &store::AdoptedPullRequest {
             number: 41,
             title: "Rate limiting for the public API".to_owned(),
@@ -1920,7 +1946,6 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         },
     )
     .await
-    .unwrap()
     .unwrap();
 
     store::save_brief(
@@ -2782,6 +2807,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -2810,7 +2837,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // every poll — recorded here rather than watched for, as the pull request
     // above is. Still running, which is the ordinary state of a wrap-up: the
     // suite is what it is waiting on.
-    store::record_check_rollup(&pool, wrapping, store::Rollup::Running)
+    store::record_check_rollup(&pool, wrapping, repos[0].id, 41, store::Rollup::Running)
         .await
         .unwrap();
 
@@ -2819,7 +2846,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // fine and GitHub is still thinking about the tests. A conflict is the
     // reading the viewer's own tests compose over this one — what is being
     // carried here is the field.
-    store::record_merging(&pool, wrapping, repos[0].id, store::Merging::Cleanly)
+    store::record_merging(&pool, wrapping, repos[0].id, 41, store::Merging::Cleanly)
         .await
         .unwrap();
 
@@ -2837,9 +2864,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // because what a round boundary looks like is exactly what this fixture is
     // for — the first round's Brief above it, the round steered into below.
     let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
-        verkstead_store::WaitingOn::Checks(repos[0].id),
-        verkstead_store::WaitingOn::Comments(repos[0].id),
-        verkstead_store::WaitingOn::Mergeable(repos[0].id),
+        verkstead_store::WaitingOn::Checks {
+            repo_id: repos[0].id,
+            number: 41,
+        },
+        verkstead_store::WaitingOn::Comments {
+            repo_id: repos[0].id,
+            number: 41,
+        },
+        verkstead_store::WaitingOn::Mergeable {
+            repo_id: repos[0].id,
+            number: 41,
+        },
     ]);
 
     for waiting_on in waiting_on {
@@ -2852,7 +2888,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The suite went green on the way, which is what settling the checks above
     // means: the last thing the watcher wrote down before it stopped watching,
     // and what the card on a finished Conversation goes on showing.
-    store::record_check_rollup(&pool, wrapping, store::Rollup::Passed)
+    store::record_check_rollup(&pool, wrapping, repos[0].id, 41, store::Rollup::Passed)
         .await
         .unwrap();
 
@@ -2874,6 +2910,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             checkouts: &[],
             said: None,
             recorded: verkstead_store::Recorded::default(),
+            scratch: &[],
         },
     )
     .await
