@@ -135,11 +135,18 @@ stage's entry, change its `- [ ]` to `- [x]`, and drop the
 `*(in progress: `<branch>`)*` annotation after its link — the stage is done
 rather than in flight, and the annotation was only ever saying whose it was.
 
-    - [ ] 03: Grant filters — [brief](03-grant-filters.md) *(in progress: `missing-roles/03-grant-filters`)*
+    - [ ] 03: Grant filters — [brief](03-grant-filters.md) — after 02 *(in progress: `missing-roles/03-grant-filters`)*
 
 becomes
 
-    - [x] 03: Grant filters — [brief](03-grant-filters.md)
+    - [x] 03: Grant filters — [brief](03-grant-filters.md) — after 02
+
+**The annotation is all that goes.** What the line declares the stage stands on
+and the platform it wants — `after 02` there, `no dependencies` or `on windows`
+on another line — is written after the same link, and Verkstead reads it off
+the line: it stays exactly as it was. A roadmap that has lost one line's
+declaration declares on some lines and not others, which is refused. A line
+that declares nothing had none to keep.
 
 Nothing else in the file changes: no renumbering, no reordering, no rewording,
 and no touching another stage's box. Verkstead reads those boxes to decide what

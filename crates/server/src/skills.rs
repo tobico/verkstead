@@ -1236,6 +1236,23 @@ mod tests {
         skill(name).split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
+    /// Every example stage line a skill writes, as a line the roadmap's own
+    /// reader would be handed.
+    ///
+    /// An example is what an agent copies, so an example that declares nothing
+    /// is a roadmap line that declares nothing. The placeholder label `NN`
+    /// becomes a number on the way past: `checklist::entry` reads digits, a
+    /// roadmap's labels being numbers, and a line standing in for a line is
+    /// still the line being held to this.
+    fn stage_lines(skill: &str) -> Vec<String> {
+        skill
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("- [") && line.contains("[brief]("))
+            .map(|line| line.replace("] NN:", "] 07:"))
+            .collect()
+    }
+
     /// Every path a session is sent to, which is every skill this binary ships.
     ///
     /// The constants are relative to the directory the skills are in, which is
@@ -1943,6 +1960,68 @@ mod tests {
         }
     }
 
+    /// And the line says what the stage stands on. Verkstead reads that off the
+    /// line rather than out of the brief — see [`crate::declarations`] — so the
+    /// fork has to ask for one on every stage line, in the wording the reading
+    /// expects, and the prose notes above the list stay as the *why* behind
+    /// them rather than a substitute for them.
+    #[test]
+    fn the_staging_skill_asks_for_a_declaration_on_every_stage_line() {
+        let staging = flowed(STAGING);
+
+        for wording in [
+            "after 01",
+            "no dependencies",
+            "on linux",
+            "on macos",
+            "on windows",
+        ] {
+            assert!(
+                staging.contains(wording),
+                "`{wording}` is wording the reading expects: {staging}"
+            );
+        }
+
+        assert!(
+            staging.contains("Every line carries a declaration or none of them does"),
+            "all or nothing, because a bare line there cannot be told from a forgotten \
+             one: {staging}"
+        );
+        assert!(
+            staging.contains("Dependency notes"),
+            "and the prose notes stay, as the why behind the declarations: {staging}"
+        );
+    }
+
+    /// Three skills write the end of a stage line — `staging` writes the line,
+    /// `next-stage` annotates it in progress, `next-task` ticks it off — and
+    /// every example line in all three carries a declaration, an example being
+    /// what an agent copies. A roadmap that has lost one line's declaration
+    /// declares on some lines and not others, which is the shape
+    /// [`crate::declarations::judge`] refuses.
+    #[test]
+    fn every_example_stage_line_the_skills_write_declares() {
+        for named in [STAGING, NEXT_STAGE, NEXT_TASK] {
+            let text = skill(named);
+            let lines = stage_lines(&text);
+
+            assert!(
+                !lines.is_empty(),
+                "{named} writes that end of a stage line, so it shows one"
+            );
+
+            for line in lines {
+                let entry = crate::checklist::entry(&line)
+                    .unwrap_or_else(|| panic!("{named} writes a stage line: {line}"));
+
+                assert!(
+                    crate::declarations::read(entry.after).stands_on.is_some(),
+                    "{named}'s example declares what its stage stands on: {line}"
+                );
+            }
+        }
+    }
+
     /// The fork drops what a workstation-driven flow assumes and Verkstead
     /// supplies instead, and gains what only Verkstead's shape needs: the branch
     /// is already made, nobody approves the commit, and the stages are
@@ -2137,6 +2216,30 @@ mod tests {
             next_stage.contains("`- [x]`"),
             "the stage before it is ticked, its work having settled: {next_stage}"
         );
+
+        let said = flowed(NEXT_STAGE);
+
+        assert!(
+            said.contains("Leave the line's declaration where it is"),
+            "what the line already declared shares that tail, and the annotation goes \
+             beside it rather than over it: {said}"
+        );
+
+        let lines = stage_lines(&next_stage);
+        let [annotated] = lines.as_slice() else {
+            panic!("the step shows the one line it writes: {lines:?}")
+        };
+        let annotated = crate::checklist::entry(annotated).expect("the example is a stage line");
+
+        assert!(
+            annotated.after.contains("in progress:")
+                && crate::declarations::read(annotated.after)
+                    .stands_on
+                    .is_some(),
+            "and the example carries both, a declaration written away here being the \
+             mixed roadmap `verkstead done` refuses: {}",
+            annotated.after
+        );
     }
 
     /// Stacking is the repository's mechanism rather than Verkstead's, so the
@@ -2289,6 +2392,55 @@ mod tests {
             next_task.contains("in progress:"),
             "and the annotation goes with it — the stage is done rather than in flight: \
              {next_task}"
+        );
+    }
+
+    /// And the tick takes the annotation and nothing else. What the stage stands
+    /// on is declared after that same link, so the fork's before-and-after pair
+    /// is what says a declaration survives being ticked off: a roadmap that has
+    /// lost one line's is refused for declaring on some lines and not others.
+    #[test]
+    fn the_next_task_forks_tick_leaves_the_lines_declaration_alone() {
+        let next_task = skill(NEXT_TASK);
+        let said = flowed(NEXT_TASK);
+
+        assert!(
+            said.contains("The annotation is all that goes"),
+            "the declaration after the link is not the annotation's to take with it: \
+             {said}"
+        );
+
+        let lines = stage_lines(&next_task);
+        let [in_flight, ticked] = lines.as_slice() else {
+            panic!("the step shows the line before the tick and after it: {lines:?}")
+        };
+
+        let in_flight = crate::checklist::entry(in_flight).expect("the example is a stage line");
+        let ticked = crate::checklist::entry(ticked).expect("and so is what it becomes");
+
+        assert!(
+            !in_flight.checked && ticked.checked,
+            "the box is what the tick moves: {in_flight:?} then {ticked:?}"
+        );
+        assert!(
+            in_flight.after.contains("in progress:") && !ticked.after.contains("in progress:"),
+            "and the annotation is what it takes off: {} then {}",
+            in_flight.after,
+            ticked.after
+        );
+
+        let declared = crate::declarations::read(in_flight.after);
+
+        assert!(
+            declared.stands_on.is_some(),
+            "the line it starts from declares, or the pair says nothing about a \
+             declaration: {}",
+            in_flight.after
+        );
+        assert_eq!(
+            declared,
+            crate::declarations::read(ticked.after),
+            "and it declares the same thing after the tick as before it"
         );
     }
 

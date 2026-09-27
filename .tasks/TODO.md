@@ -18,4 +18,4 @@ Roadmap stage: [01: Dependencies on the record](docs/roadmaps/parallel-stages/01
 
 - [x] 01: The declaration, read and shown — [details](01-the-declaration-read-and-shown.md)
 - [x] 02: A roadmap that declares badly, refused at done — [details](02-refused-at-done.md)
-- [ ] 03: The skills that keep the declaration — [details](03-the-skills-that-keep-it.md)
+- [x] 03: The skills that keep the declaration — [details](03-the-skills-that-keep-it.md)

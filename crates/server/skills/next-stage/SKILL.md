@@ -138,11 +138,19 @@ the time you are reading it. Two edits, both in the plan commit below:
 - **Tick every stage above this one that is still annotated as in progress.**
   Their work is finished — a stage is only started once the one before it has
   settled, which is why this session is running at all. Change `- [ ]` to
-  `- [x]` and drop the `*(in progress: …)*` annotation.
+  `- [x]` and drop the `*(in progress: …)*` annotation, and nothing else on
+  the line.
 - **Annotate this stage as in progress**, with the branch you are on, after its
-  link:
+  link and after whatever that line already said:
 
-      - [ ] NN: <title> — [brief](NN-<slug>.md) *(in progress: `<branch>`)*
+      - [ ] NN: <title> — [brief](NN-<slug>.md) — after 01 *(in progress: `<branch>`)*
+
+  **Leave the line's declaration where it is.** What a stage stands on and the
+  platform it wants — `after 01`, `no dependencies`, `on windows` — is written
+  after the link too, and Verkstead reads it off the line: the annotation goes
+  beside it rather than over it. A roadmap that has lost one line's declaration
+  declares on some lines and not others, which is refused. A line that declares
+  nothing had none to keep, and gains none here.
 
   Leave the box unticked: the stage is under way rather than done, and the
   session that starts the stage after this one is what ticks it.
