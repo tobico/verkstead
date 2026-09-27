@@ -24,8 +24,8 @@
 //! names every file for the app id and puts each in a directory of its own. The
 //! pixels are the same either way — this is a rename, and one that keeps
 //! `tools/generate-packaging.sh` the only thing that writes that tree. The
-//! `.icns` a Mac bundle carries is staged beside it, out of the same directory
-//! and for the same reason.
+//! `.icns` a Mac bundle carries and the `.ico` a Windows one does are staged
+//! beside it, out of the same directory and for the same reason.
 //!
 //! Plain JavaScript and outside `src/`, for the reason `start.mjs` is: it is
 //! what packs the app rather than part of it.
@@ -36,6 +36,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
 /// This project, which is one directory up from this script.
@@ -154,6 +155,7 @@ function stage(binaries) {
   }
 
   copyFileSync(join(ROOT, "packaging", `${APP_ID}.icns`), join(STAGED, "icon.icns"));
+  copyFileSync(join(ROOT, "packaging", `${APP_ID}.ico`), join(STAGED, "icon.ico"));
 }
 
 /// Join both Apple builds into the one file at `packed`, and read back that it
@@ -239,11 +241,17 @@ function asking(given) {
   ];
 }
 
-/// electron-builder itself, which the install has put a command for in
-/// `node_modules/.bin`.
+/// electron-builder itself — its own entry script, rather than the launcher the
+/// install wrote for it in `node_modules/.bin`.
+///
+/// **Because Windows' launcher is a `.cmd` and Node will not spawn one.** Since
+/// CVE-2024-27980 a batch file has to be run through a shell to be run at all,
+/// and `spawn` refuses it outright with `EINVAL` — so the platform this stage is
+/// about was the one platform `pnpm run pack` could not run on. Handing the
+/// script to this Node is one spelling for all three, and it keeps the
+/// developer's arguments out of a shell that would have re-quoted them.
 function builder() {
-  const name = process.platform === "win32" ? "electron-builder.cmd" : "electron-builder";
-  return join(DESKTOP, "node_modules", ".bin", name);
+  return createRequire(import.meta.url).resolve("electron-builder/cli.js");
 }
 
 const binaries = cli();
@@ -254,7 +262,7 @@ stage(binaries);
 // No platform flag: electron-builder packs for the machine it is running on,
 // which is what each of the three artifacts has always been built by — and what
 // keeps this one command rather than one per platform.
-const packing = spawn(builder(), args, {
+const packing = spawn(process.execPath, [builder(), ...args], {
   cwd: DESKTOP,
   stdio: "inherit",
 });

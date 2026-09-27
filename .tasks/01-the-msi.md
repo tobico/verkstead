@@ -120,3 +120,42 @@ version reach the package is task 02's, along with the leg.
       unchanged, and two paths and a dmg on a Mac.
 
 [releasing.md]: ../docs/releasing.md
+
+## What was checked, and what a disposable machine still has to check
+
+**The install half of the three criteria above was not run on the machine this
+was built on, and deliberately.** This package carries the live Verkstead's
+`UpgradeCode` by decision — that is the whole point of carrying it — and the
+Verkstead running the session that builds it is an install of that same product,
+registered machine-wide. So `msiexec /i` here is not a test of the package but a
+major upgrade of the orchestrator doing the testing: `FindRelatedProducts`
+matches, `RemoveExistingProducts` takes the running `verkstead.exe` and
+`verkstead-desktop.exe` out from under themselves, and the `PATH` and Start-menu
+entries go with them. Two earlier attempts at this task did exactly that and
+stopped Verkstead both times — the second only after the downgrade block
+(`WIX_DOWNGRADE_DETECTED`, a `1603` reading *a newer version of Verkstead is
+already installed*) had been worked around by bumping the version past the live
+one, which is the block doing its job.
+
+So what stands in for the install here is the package's own account of itself,
+read out of its tables: the carried-over `UpgradeCode` and the upgrade row that
+searches on it, `VersionMax` inclusive for the same-version rule,
+`ALLUSERS=2` with `MSIINSTALLPERUSER=1`, `APPLICATIONFOLDER` named `Verkstead`
+under `ProgramFiles64Folder`, one `Environment` row appending
+`[APPLICATIONFOLDER]resources\cli` and removed on uninstall, that row's
+component being the one holding `verkstead.exe`, the launcher at the root, a
+Start-menu shortcut and no desktop one. `scripts/msi.mjs` was exercised
+separately against a project of the generated shape and against four manglings
+of it, every one of which stops the pack rather than writing an msi with no
+`PATH` entry in it.
+
+**What still wants a machine nobody minds losing**, because nothing read off the
+package can answer it: that the app the install leaves opens its window, reaches
+the notification area and serves the workbench; that `verkstead guide` in a
+terminal opened afterwards prints the Guide and `where verkstead` answers with
+the file under `resources\cli`; and that installing over an msi built from
+`main`'s `tools/build-windows-msi.sh` leaves one row in **Installed apps**, one
+`PATH` entry and one Start-menu entry. The uninstall's half of the third — that
+the `PATH` entry goes with the files — did get seen here, in the course of
+clearing an earlier attempt's install away: the entry was in this account's
+`HKCU` `Path` before `msiexec /x` and gone after it.

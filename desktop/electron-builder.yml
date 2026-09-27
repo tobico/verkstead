@@ -1,10 +1,9 @@
 # What a packed Verkstead is, on every platform it is packed for.
 #
 # One configuration for the three artifacts a Release ships (ADR-0020) — an
-# x86_64 AppImage, a universal dmg and an msi — with the Linux and the Mac
-# targets filled in: stage 07 of the Electron roadmap adds a `win:` section
-# beside them, and nothing here is a step it has to undo first. Everything above
-# those sections is every platform's.
+# x86_64 AppImage, a universal dmg and an msi — with all three of them filled
+# in. Everything above the `linux:`, `mac:` and `win:` sections is every
+# platform's.
 #
 # **What runs it is `pnpm run pack`** — see `scripts/pack.mjs`, which is where
 # the CLI this app carries comes from and what the staged paths below are
@@ -228,3 +227,86 @@ dmg:
   # `release.yml` uploads this name, `docs/adoption.md` spells it, and
   # electron-builder's own pattern would put the version in the middle of both.
   artifactName: Verkstead-universal.dmg
+
+# **The generated WiX project, patched.** This is the one hook in this
+# configuration, and it is here because the msi target has the one gap: on this
+# version it reads its `template.xml` out of `app-builder-lib`, hands candle a
+# single `project.wxs` and light a single `project.wixobj`, and there is nothing
+# a WiX source of our own could be linked into. `msiProjectCreated` names a file
+# that runs after that project is written and before candle compiles it, which is
+# where the `PATH` entry comes from and where the install directory's name is
+# forced — see `scripts/msi.mjs`, which says what it changes and why each is not
+# a configuration key instead.
+#
+# A top-level key rather than one under `msi:` below, because that is where
+# electron-builder reads it: it is a build hook like `afterPack`, and the msi is
+# only the artifact it happens to fire for.
+msiProjectCreated: ./scripts/msi.mjs
+
+win:
+  # **The committed `.ico`, staged rather than pointed at**, the way the `.icns`
+  # and the launcher icons are — `tools/generate-packaging.sh` writes it from the
+  # same artwork, and `scripts/pack.mjs` is what puts it where this reads it.
+  #
+  # Wanted three times over: electron-builder edits it into `Verkstead.exe` as
+  # the launcher's own resource, the msi names it as `ARPPRODUCTICON` so that
+  # **Installed apps** draws the row with it, and the Start-menu shortcut is
+  # advertised against it.
+  icon: ../target/electron/staged/icon.ico
+
+  # No `executableName` here, unlike the Linux section: what a Windows launcher
+  # is called is the product name already — `Verkstead.exe` — and the msi target
+  # recognises the launcher among the packed files by exactly that name, which is
+  # what carries the Start-menu shortcut. A name said here would have to agree
+  # with it.
+
+  target:
+    - target: msi
+      # x86_64 only, as the AppImage is (ADR-0012, kept by ADR-0020): Windows on
+      # arm64 runs an x86_64 exe under the emulation it has for exactly this.
+      arch:
+        - x64
+
+msi:
+  # Written down rather than defaulted, for the reason the AppImage's and the
+  # dmg's are: `release.yml` checks this name, `docs/adoption.md` spells it, and
+  # electron-builder's own pattern would put the version in the middle of both.
+  artifactName: Verkstead-x86_64.msi
+
+  # **The UpgradeCode carried over from the Rust msi**, out of the
+  # `tools/verkstead.wxs` this stage retires. It is the one identifier that says
+  # two packages are the same product, and electron-builder derives its own from
+  # the app id unless it is told — derived afresh, this package would install
+  # *beside* a machine's Rust msi rather than over it: two install directories,
+  # two `PATH` entries, two Start-menu entries and two rows in **Installed
+  # apps**, against what `docs/adoption.md` promises in as many words.
+  #
+  # Never changed again, for the same reason it is not regenerated here.
+  upgradeCode: "{A4727089-F5B9-40A6-A196-1856E8D6827A}"
+
+  # **The Start-menu entry is what this download promises, and nothing else.**
+  # electron-builder creates a desktop shortcut as well unless told not to;
+  # `createStartMenuShortcut` is left unsaid because it already defaults on.
+  createDesktopShortcut: false
+
+  # And three things left unsaid on purpose, because the defaults are the
+  # decisions (ADR-0020):
+  #
+  # - `perMachine` is off, so the package installs into the profile —
+  #   `ALLUSERS=2` with `MSIINSTALLPERUSER=1`, which is what redirects the
+  #   package's `ProgramFiles64Folder` to `%LOCALAPPDATA%\Programs`. The app is
+  #   unsigned, and an installer asking for administrator would be an unsigned
+  #   program asking for the machine.
+  # - `oneClick` is on, so there is no wizard: a progress window, and the
+  #   install. The assisted installer would bring WiX's own UI with it and a
+  #   per-machine choice in front of the decision above.
+  # - `runAfterFinish` is on, which the Rust msi did not do: the installer starts
+  #   the app when it finishes. The custom action is conditioned on the UI level,
+  #   so this is a human double-clicking the file and never a `msiexec /qn` in
+  #   CI.
+  #
+  # `AllowSameVersionUpgrades="yes"` and light's `-sw1076` are in
+  # electron-builder's own template already, so the same-version upgrade rule
+  # `docs/releasing.md` needs — a `v0.1.0-rc.2` msi replacing the `v0.1.0-rc.1`
+  # one, both of them reading as `0.1.0` to Windows Installer — needs nothing
+  # added here.

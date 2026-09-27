@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "The workbench, in the system tray",
+  "author": {
+    "name": "Tobias Cohen"
+  },
   "desktopName": "net.tobico.Verkstead.desktop",
   "type": "module",
   "main": "dist/main.js",
