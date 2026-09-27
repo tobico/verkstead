@@ -9662,6 +9662,10 @@ fn gh_answering() -> Gh {
         "/bin/sh".to_owned(),
         "-c".to_owned(),
         r#"if [ "$2" = list ]; then
+               if [ -f ./pr-list-refused ]; then
+                   printf 'gh: the open pull requests could not be listed\n' >&2
+                   exit 1
+               fi
                if [ -f ./pr-list.json ]; then cat ./pr-list.json; else printf '[]'; fi
                exit 0
            fi
@@ -10989,6 +10993,59 @@ async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
         stack(dir.path(), under, repo_id).await,
         [50],
         "the chain stops where the fork is rather than following it out of the Repo",
+    );
+}
+
+/// And a `gh` that would not list the repository's pull requests says so,
+/// rather than leaving a wrap-up over one link of a chain reading exactly like
+/// a wrap-up over a lone pull request.
+///
+/// The two are the same record otherwise: the same take-up note, the same one
+/// pull request watched. And the walk runs where a pull request is recorded and
+/// at no poll after it, so there is no later look to put it right — this Notice
+/// is the only thing that ever says the chain was not read.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_chain_gh_would_not_list_is_said_on_the_timeline() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "stage-02");
+    a_stack_on_github(&repo);
+
+    // The chain is there on GitHub, and the one question that would have found
+    // it is the one this `gh` refuses.
+    std::fs::write(repo.join("pr-list-refused"), "x").unwrap();
+
+    let id = ready_to_fix(
+        &app,
+        elsewhere.path(),
+        repo_id,
+        "https://github.com/tobico/verkstead/pull/41 will not merge.\n",
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        stack(dir.path(), id, repo_id).await,
+        [41],
+        "nothing of the chain was recorded, there being no answer to record it from",
+    );
+
+    let said = notices(&opened(&app, id).await).join("\n");
+
+    assert!(
+        said.contains("could not list") && said.contains("#41 alone"),
+        "the Timeline says the chain was not read and what the wrap-up is \
+         therefore over: {said}",
+    );
+    assert!(
+        said.contains("could not be listed"),
+        "and carries what gh said about it, which is what says whether this is \
+         a token to renew: {said}",
+    );
+    assert!(
+        !said.contains("stack of"),
+        "and claims no stack, none having been found: {said}",
     );
 }
 

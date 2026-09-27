@@ -113,9 +113,9 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
 /// link of it, and say in words what the stack is.
 ///
 /// `None` where there is nothing to say: a Process that does not walk, a
-/// Conversation with no pull request recorded yet, a `gh` that would not answer,
-/// or a lone pull request — which is the ordinary case and reads exactly as it
-/// read before there were stacks.
+/// Conversation with no pull request recorded yet, or a lone pull request —
+/// which is the ordinary case and reads exactly as it read before there were
+/// stacks.
 ///
 /// Called before the watchers start, which is what watches the neighbours: a
 /// wrap-up starts one checks watcher and one comments watcher per *recorded*
@@ -127,6 +127,13 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
 /// which is what every Fix Merge Issues was until this stage: the press it is
 /// answering has already succeeded, and there is nothing here worth undoing it
 /// for.
+///
+/// **But it is said, rather than left to look like a lone pull request.** A
+/// `gh` that would not answer and a pull request with nothing above or below it
+/// leave the same record otherwise — the same silence on the same Timeline,
+/// over a wrap-up that may be watching one link of three — and this runs where
+/// a pull request is recorded and at no poll after it, so nothing later puts it
+/// right. See [`unread`].
 pub(crate) async fn walked(state: &AppState, conversation_id: i64) -> Option<String> {
     let pool = &state.pool;
 
@@ -176,6 +183,9 @@ pub(crate) async fn walked(state: &AppState, conversation_id: i64) -> Option<Str
 
     let open = match asked {
         Ok(Ok(open)) => open,
+        // Said on the Timeline rather than only in the log, for [`unread`]'s
+        // reason: nothing walks again, so a silence here is a wrap-up quietly
+        // over one link of a chain nobody can see it missed.
         Ok(Err(trouble)) => {
             tracing::warn!(
                 conversation_id,
@@ -184,11 +194,15 @@ pub(crate) async fn walked(state: &AppState, conversation_id: i64) -> Option<Str
                 "the Repo's open pull requests could not be listed, so nothing was walked",
             );
 
-            return None;
+            return Some(unread(own.number, &trouble.why()));
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "asking gh for the Repo's open pull requests failed");
-            return None;
+
+            return Some(unread(
+                own.number,
+                "Verkstead could not run `gh` to find out",
+            ));
         }
     };
 
@@ -403,6 +417,32 @@ fn found(chain: &[&Numbered], own: i64, said: &[(i64, Option<String>)]) -> Strin
     )
 }
 
+/// And what it is told where the chain could not be read at all: that the
+/// question was asked, that GitHub did not answer it, and what the wrap-up is
+/// therefore over.
+///
+/// [`found`]'s opposite, and the reason it exists is that without it the two
+/// are the same record. A walk that could not ask and a pull request with
+/// nothing above or below it both leave the take-up's note saying only what was
+/// taken up — so a human reading a wrap-up over one pull request cannot tell
+/// whether that is all there was, or whether there are two more above it that
+/// nothing is waiting on.
+///
+/// Which nothing later puts right: the walk runs where a pull request is
+/// recorded and at no poll after it, so this is the record's one chance to say
+/// so. It says what is *not* known rather than promising a retry, there being
+/// none.
+///
+/// `why` is `gh`'s own account of it, which is the half that says whether this
+/// is a token to renew or a network that was down for a second.
+fn unread(own: i64, why: &str) -> String {
+    format!(
+        "Verkstead could not list this repository's open pull requests, so whether #{own} is \
+         one of a stack is not known: {why}. This wrap-up is over #{own} alone — if there is \
+         a chain above or below it, nothing here is waiting on it."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +556,25 @@ mod tests {
              the bottom: #40 (`stage-01`), #41 (`stage-02`), #42 (`stage-03`). The rest of the \
              chain is recorded here to be watched rather than taken up: #40 belongs to the \
              Conversation on `stage-01`, #42 belongs to no Conversation.",
+        );
+    }
+
+    /// And a chain that could not be read says so, rather than leaving the
+    /// record a lone pull request's.
+    ///
+    /// The two are the same silence otherwise, and nothing walks again — so
+    /// what this says is what the human has to go on: that the question was
+    /// asked, what `gh` said about it, and that the wrap-up is over the one
+    /// pull request.
+    #[test]
+    fn a_chain_that_could_not_be_read_is_said_apart_from_a_lone_pull_request() {
+        let said = unread(41, "gh is not logged in");
+
+        assert_eq!(
+            said,
+            "Verkstead could not list this repository's open pull requests, so whether #41 \
+             is one of a stack is not known: gh is not logged in. This wrap-up is over #41 \
+             alone — if there is a chain above or below it, nothing here is waiting on it.",
         );
     }
 }

@@ -1962,7 +1962,9 @@ the pull request the Conversation was pointed at is the one it is on, the
 neighbours are watched, and a press pointed straight at one of them is refused
 by the Conversation that took *it* up, exactly as it always was. A lone pull
 request finds a chain of itself, and nothing is said about a stack there is
-none of. **Over a bare branch the walk waits**, there being nothing to walk
+none of — but a `gh` that would not answer the question is said, that and a
+lone pull request leaving the same record otherwise and nothing walking a
+second time. **Over a bare branch the walk waits**, there being nothing to walk
 from until the `submitting` session has opened one: it runs where that pull
 request is recorded, with a Notice of its own.
 

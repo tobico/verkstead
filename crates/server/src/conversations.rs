@@ -3216,14 +3216,16 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// Nothing is said for any other Process, there being nothing to say: the
 /// ordinary wrap-up is what a taken-up Conversation has always run.
 ///
-/// **And the stack, where the take-up found one.** `stack` is
+/// **And the stack, where the take-up walked one.** `stack` is
 /// [`crate::stacks::walked`]'s own account of the chain — what it is, from the
 /// bottom, and which of it belongs to another Conversation — and it goes in
 /// ahead of the narrowing for the reason it is said at all: the pull requests
 /// above and below arrived on this record without anybody pressing anything, and
 /// a wrap-up that quietly waits on two more than the human named is a wrap-up
-/// they cannot read. `None` is a lone pull request, which is every take-up there
-/// was before there were stacks.
+/// they cannot read. Or its account of a chain it could not read, which is said
+/// for the same reason turned around — a wrap-up over one pull request of a
+/// stack nobody knows the size of is as unreadable as the other way. `None` is a
+/// lone pull request, which is every take-up there was before there were stacks.
 fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) -> String {
     let taken = match taking {
         Target::PullRequest(held) => format!(
