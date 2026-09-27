@@ -2068,10 +2068,19 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
 /// the rest of it says and the call is taken. An id naming no Conversation at
 /// all goes the same way: the `UPDATE` finds nothing and writes nothing.
 ///
-/// **The rank this writes carries `device`**, which is the device that owns the
-/// row: a device ranks its own Conversations, and a hub that computes a key for
-/// somebody else's hands it to that device to write. So the moved row comes back
-/// with its own device's suffix whoever its neighbours belong to.
+/// **The rank this writes carries `device`**, which on every call there is today
+/// is the device serving it — a device ranks its own Conversations, so the moved
+/// row comes back with its own device's suffix whoever its neighbours belong to.
+///
+/// **`below` is an id, and an id is this database's own.** Conversations are
+/// numbered per device, so the row a hub means by `7` is not the row the device
+/// it relays to would find under that number — which is why every call in the
+/// viewer's client is addressed through a device. So this is the shape a drag on
+/// one device's own list takes, and it is not the shape a drag across devices can
+/// take: the stage that merges the lists has to tell the owning device the rank
+/// itself, computed by the hub from the merged neighbours, rather than a
+/// neighbour it cannot name. What the id buys is the paragraph below — both
+/// neighbours read inside the transaction the rank is written in.
 ///
 /// Read and written in one transaction, for [`started`]'s reason: two rows
 /// dropped into the same gap a moment apart would otherwise read the same pair

@@ -49,7 +49,11 @@ refused by name. Demonstrable end to end with two devices and a phone.
    the header mark, the aria label.
    - A lone device draws no device on any row.
 4. **Cross-device drag** — the rank computed on the merged neighbours and
-   written to `/api/ui/devices/{device}/…` for a remote row.
+   written to `/api/ui/devices/{device}/…` for a remote row. Stage 05's own
+   route says the move as *this row, under that one*, by an id its database
+   numbered, so it cannot carry a drag whose neighbour belongs to another
+   device: what the owning device has to be told is the rank itself. So that
+   route gains a way to say one, or a sibling beside it does.
    - Reloading either device shows the same order.
    - Two rows created on two devices at the same moment sort in one order, and
      a row dragged into the gap between them lands somewhere stated rather than

@@ -1213,7 +1213,13 @@ async fn start_conversation(
 /// lands a row may have been closed and swept. There is nothing to answer with
 /// beyond that it was taken, so it answers with nothing.
 ///
-/// The rank carries this device's id, which is the device that owns the row.
+/// The rank carries this device's id, which is the device that owns the row —
+/// and `below` names that row's neighbour by an id this database numbered, so
+/// this is a drag on one device's own list. A drag across a merged list cannot
+/// be said this way: the neighbour may be a row this device has never heard of,
+/// and the id that named it on the hub names something else here. What the stage
+/// that merges the lists sends the owning device is the rank itself — see
+/// [`store::rank_conversation`], where that is set out.
 ///
 /// The Nudge is what carries it to the other devices: a row that moved is the
 /// one thing every open sidebar has to read again.
