@@ -972,6 +972,79 @@ describe("the target a compose page is pointed at", () => {
     );
   });
 
+  /// And it keeps up with a name being typed out, which is the only way a name
+  /// ever reaches this box: `#4` is a whole name on the way to `#412`, so a fill
+  /// that stopped at the first one would leave the field naming a pull request
+  /// nobody meant.
+  it("follows a name being typed a character at a time", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    const typed = "Wrap up #412 today.";
+    for (let upto = 1; upto <= typed.length; upto += 1) {
+      fireEvent.input(box, { target: { value: typed.slice(0, upto) } });
+    }
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Target") as HTMLInputElement).value).toBe(
+        "#412",
+      ),
+    );
+    expect(stored().target).toBe("#412");
+  });
+
+  /// The same for a URL, which is longer and goes the same way.
+  it("follows a url being typed a character at a time", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    await waitFor(() => screen.getByLabelText("Target"));
+
+    const typed = "See https://github.com/tobico/verkstead/pull/412 please.";
+    for (let upto = 1; upto <= typed.length; upto += 1) {
+      fireEvent.input(box, { target: { value: typed.slice(0, upto) } });
+    }
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Target") as HTMLInputElement).value).toBe(
+        "https://github.com/tobico/verkstead/pull/412",
+      ),
+    );
+  });
+
+  /// And it lets go the moment the human types in the field, whatever the box
+  /// says afterwards: correcting its own fill is not the same as overwriting
+  /// theirs.
+  it("stops following once the field has been typed in", async () => {
+    composedAsReview();
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    await openRepo(container);
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+
+    fireEvent.input(box, { target: { value: "Wrap up #41" } });
+    await waitFor(() => expect(field.value).toBe("#41"));
+
+    fireEvent.input(field, { target: { value: "rate-limiting" } });
+    await waitFor(() => expect(stored().target).toBe("rate-limiting"));
+
+    fireEvent.input(box, { target: { value: "Wrap up #412 today." } });
+    await waitFor(() => expect(stored().brief).toContain("today"));
+    expect(field.value).toBe("rate-limiting");
+  });
+
   /// And never over what was typed into it: a branch somebody named survives a
   /// URL arriving in the box afterwards.
   it("leaves a target somebody typed exactly as it was", async () => {
@@ -2769,7 +2842,8 @@ describe("what a device holds between visits", () => {
       repo: 2,
       brief: "Make the widget",
       branch: "widget-work",
-      target: "",
+      target: "#41",
+      filled: "#41",
       base: "release-1.4",
       companions: [
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },

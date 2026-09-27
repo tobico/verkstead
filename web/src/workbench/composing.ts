@@ -35,10 +35,9 @@
 //! rather than a draft against a Repo, and what kicks it off at the end is the
 //! adopt endpoint rather than the grill one.
 //!
-//!
-//! **And the Target field is filled from the box as it is typed**, while it is
-//! empty — see [`written`], which is the rule the server keeps for a saved
-//! Brief kept here, this page having no record to keep it for.
+//! **And the Target field is filled from the box as it is typed** — see
+//! [`written`], which is the rule the server keeps for a saved Brief kept here,
+//! this page having no record to keep it for.
 
 import { createSignal } from "solid-js";
 
@@ -147,11 +146,22 @@ export type Composed = {
   /// And what the work is pointed at, empty being nothing named: a pull
   /// request URL, a `#number` or a branch, for the Processes that take one.
   ///
-  /// Filled from the box while it is empty, by the same reading the server
-  /// does when a Brief is saved — see [`written`], where the fill happens.
-  /// Never over what was typed here, which is why what was typed is what this
-  /// holds rather than a flag beside it.
+  /// Filled from the box by the same reading the server does when a Brief is
+  /// saved — see [`written`], where the fill happens. Never over what was typed
+  /// here, which is what [`Composed.filled`] beside it is for.
   target: string;
+  /// What that fill last wrote into [`Composed.target`], empty until it has
+  /// written anything.
+  ///
+  /// **Because filling once is not enough here.** The server fills a saved
+  /// Brief, which is a whole document; this page fills as the box is typed
+  /// into, so the first fill lands on a half-typed name — `#4` on the way to
+  /// `#41` — and a field that would not correct itself would stand there
+  /// naming a pull request nobody meant. So the fill owns what it wrote and
+  /// goes on correcting it, and stops for good the moment the field says
+  /// something else. Which is the human having typed in it, that being the one
+  /// other thing that writes to the field.
+  filled: string;
   /// And the branch it comes off, `null` being that repo's default-branch rule.
   base: string | null;
   companions: Alongside[];
@@ -180,7 +190,7 @@ export type Composed = {
   adopting: Adopting | null;
 };
 
-/// The box written into, with the Target filled out of it where it is empty.
+/// The box written into, with the Target filled out of it.
 ///
 /// The same rule the server keeps for a Conversation's Brief, kept here
 /// because this page has no Conversation to keep it for: a pull request URL or
@@ -188,13 +198,30 @@ export type Composed = {
 /// would take up rather than standing empty over it — and never over what
 /// somebody typed into the field itself.
 ///
+/// **Read on every keystroke, so the fill has to be able to correct itself.**
+/// A name is typed a character at a time, and `#4` is a whole name on the way
+/// to `#41`: a fill that stopped at the first one would leave the field naming
+/// pull request 4 over a Brief that says 41, which is the field lying about
+/// what the press would find — the very thing it is drawn from the Brief to
+/// stop. So it goes on reading while the field still holds what it last wrote,
+/// and lets go the moment the field says anything else. See
+/// [`Composed.filled`].
+///
+/// Only ever a fill. A Brief that names nothing leaves whatever is in the field
+/// standing, because emptying the field is the human's act and not a Brief's —
+/// the server's own `fill_target` never clears one either.
+///
 /// The reading is `targets.ts`'s, which is the server's own expression written
 /// again on this side. What it decides is what is *drawn*; what the target
 /// turns out to be is the server's at Start.
 export function written(state: Composed, brief: string): Composed {
-  const named = state.target === "" ? pullRequestIn(brief) : null;
+  const named = state.target === state.filled ? pullRequestIn(brief) : null;
 
-  return { ...state, brief, target: named ?? state.target };
+  if (named === null) {
+    return { ...state, brief };
+  }
+
+  return { ...state, brief, target: named, filled: named };
 }
 
 /// A compose page nobody has touched.
@@ -204,6 +231,7 @@ export function blank(): Composed {
     brief: "",
     branch: "",
     target: "",
+    filled: "",
     base: null,
     companions: [],
     process: null,
@@ -610,10 +638,13 @@ function parsed(body: string): Composed | null {
     !whole(held.repo) ||
     typeof held.brief !== "string" ||
     typeof held.branch !== "string" ||
-    // A body from a build before this field has no `target` at all, which is
-    // nothing named rather than a fault — [`loaded`]'s absence, read the same
-    // way.
+    // A body from a build before these two has neither, which is nothing named
+    // and nothing filled rather than a fault — [`loaded`]'s absence, read the
+    // same way. A `target` from such a body reads as the human's, which is what
+    // a `filled` of nothing says: whatever put it there, the fill does not own
+    // it and will not write over it.
     !(held.target === undefined || typeof held.target === "string") ||
+    !(held.filled === undefined || typeof held.filled === "string") ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
     !kind(held.process) ||
@@ -649,6 +680,7 @@ function parsed(body: string): Composed | null {
     brief: held.brief,
     branch: held.branch,
     target: held.target ?? "",
+    filled: held.filled ?? "",
     base: held.base,
     companions,
     process: held.process ?? null,
