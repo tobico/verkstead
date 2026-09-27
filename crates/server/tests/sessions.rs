@@ -9385,6 +9385,71 @@ esac
     )
 }
 
+/// A resolution session on a wrap-up that is meant to run nothing else, with the
+/// two sessions it never runs spilling where a test can see that they never ran.
+///
+/// [`a_backlog_then_resolves`] is the same session on an ordinary wrap-up, whose
+/// review is a line of prose because a review is expected there. On a narrowed
+/// one the branch being read at all is the thing under test, so both roads a
+/// session could come down write down that they were taken — and a spill that is
+/// not there is the assertion.
+///
+/// `held` is a file the resolution waits for before it commits, for the test that
+/// wants to look at a conflicted wrap-up standing still with its go spent and
+/// nothing moved; `None` resolves as soon as it arrives. Talking rather than
+/// sleeping while it waits, because a session that fell silent with nothing
+/// committed would be ended out from under the test. Then it commits and puts
+/// `resolved` there, which is the push as far as the `gh` beside it is concerned.
+fn a_conflict_and_nothing_beside_it(
+    reviews: &Path,
+    batches: &Path,
+    dispatched: &Path,
+    held: Option<&Path>,
+    resolved: &Path,
+) -> String {
+    let waiting = match held {
+        Some(held) => format!(
+            "while [ ! -e {held} ]; do printf 'merging the base branch in\\n'; sleep 0.1; done",
+            held = quoted(held),
+        ),
+        None => "printf 'merging the base branch in\\n'".to_owned(),
+    };
+
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*responding/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {batches}
+    printf 'I read what was said and found nothing to do\n'
+    exit 0
+    ;;
+*addressing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {dispatched}
+    {waiting}
+    printf 'a merge\n' >> merged.md
+    git add -A
+    git commit --quiet -m 'fix: merge the base branch in and resolve the conflicts'
+    : > /tmp/verkstead/done
+    printf 'x' > {resolved}
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+        batches = quoted(batches),
+        dispatched = quoted(dispatched),
+        resolved = quoted(resolved),
+    )
+}
+
 /// The same, with the batch sessions' prompts spilled somewhere of their own and
 /// doing whatever `responding` says.
 fn a_backlog_then_answers_comments(
@@ -19713,6 +19778,7 @@ async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
         spill,
         stub,
         gh,
+        *BRISKLY,
         Pickers::UnderEveryPairing,
         Process::Review,
         "",
@@ -19723,7 +19789,16 @@ async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
 /// The same with the Review picker moved onto the row that runs nothing, which
 /// is the take-up that wraps up without a review.
 async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    taking_up_however_reviewed(spill, stub, gh, Pickers::Unreviewed, Process::Review, "").await
+    taking_up_however_reviewed(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        Pickers::Unreviewed,
+        Process::Review,
+        "",
+    )
+    .await
 }
 
 /// And the same pull request taken up under **Fix Merge Issues**, which is the
@@ -19735,10 +19810,31 @@ async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) ->
 /// all — see [`Bench::the_one_an_investigation_runs_under`]. Everything else about
 /// the press is the Review's own, this being one take-up.
 async fn taking_up_to_fix(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_to_fix_at_pace(spill, stub, gh, *BRISKLY).await
+}
+
+/// The same on a server that sweeps a Done Conversation's pull requests briskly
+/// enough to watch it do so — see [`LANDING`].
+///
+/// Which is what the Resolve-conflicts press needs standing behind it: the press
+/// is offered on what the record says about the merge, and nothing but that
+/// sweep writes it down once the work is finished with.
+async fn taking_up_to_fix_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_to_fix_at_pace(spill, stub, gh, *LANDING).await
+}
+
+/// And both of them: the Fix take-up at whatever pace the test is about.
+async fn taking_up_to_fix_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+) -> Grilling {
     taking_up_however_reviewed(
         spill,
         stub,
         gh,
+        pace,
         Pickers::UnderEveryPairing,
         Process::FixMergeIssues,
         "",
@@ -19757,6 +19853,7 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
         spill,
         stub,
         gh,
+        *BRISKLY,
         Pickers::UnderEveryPairing,
         Process::Review,
         "share_on_done: true\n",
@@ -19764,7 +19861,8 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     .await
 }
 
-/// And the whole of it, the pickers, the Process and `config.yaml` included.
+/// And the whole of it, the pace, the pickers, the Process and `config.yaml`
+/// included.
 ///
 /// `process` is which of the two Processes pointed at a target is pressing. A
 /// **Review** settles the two roles a wrap-up runs under; a **Fix Merge Issues**
@@ -19773,11 +19871,12 @@ async fn taking_up_however_reviewed(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
+    pace: Pace,
     pickers: Pickers,
     process: Process,
     config: &str,
 ) -> Grilling {
-    let bench = bench(spill, stub, gh).await;
+    let bench = bench_at_pace(spill, stub, gh, pace, None).await;
 
     std::fs::write(
         bench.state.path().join("config.yaml"),
@@ -21406,6 +21505,338 @@ async fn a_resume_of_a_narrowed_wrap_up_reads_no_branch_either() {
         !reviews.exists(),
         "and the branch has still never been read: {:?}",
         std::fs::read_to_string(&reviews).ok(),
+    );
+}
+
+/// A **Fix Merge Issues** wrap-up whose pull request will not merge sends one
+/// resolution session at it and nothing else at all, and reaches Done once the
+/// merge lands.
+///
+/// Which is the thing this Process exists for. The conflict dispatch is the one
+/// it has always been — the same `addressing` session, told the pull request, the
+/// worktree and the configured strategy, with its go counted as it is dispatched
+/// — and what is different is the surroundings: there is no review session and no
+/// batch session in front of it, so the resolution is dispatched on the first
+/// poll that sees the conflict rather than queueing behind a reading of the
+/// branch.
+///
+/// The three comments standing on the pull request are what says *nothing else*
+/// is more than the absence of work: they are enough to have dispatched a batch
+/// session on any other wrap-up, and here the only thing ever sent is the merge.
+#[tokio::test]
+async fn a_fix_merge_issues_conflict_gets_one_resolution_and_nothing_beside_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let released = spill.path().join("released");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_conflict_and_nothing_beside_it(
+            &reviews,
+            &batches,
+            &dispatched,
+            Some(&released),
+            &resolved,
+        ),
+        &gh_about(&green_but_conflicting_until(&resolved), THREE_COMMENTS, ""),
+    )
+    .await;
+
+    // The resolution session in the Worktree with its go spent and nothing
+    // committed yet, which is the conflicted wrap-up standing still.
+    let told = until_written_by(&dispatched, 1).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "nothing can land a conflicted pull request, so the work is not finished with",
+    );
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "the two the take-up settled are settled still, which is what leaves the \
+         conflict the whole of what this wrap-up is doing",
+    );
+    assert!(
+        checks_settled(&fixture).await,
+        "the suite itself is green and settled — a conflict does not make one red",
+    );
+    assert!(
+        !merge_settled(&fixture).await,
+        "and the conflict is what is left",
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        1,
+        "the go was counted as the session was dispatched, so a restart does not \
+         spend it again",
+    );
+
+    // What that session was told, which is what it is told on any other wrap-up:
+    // the narrowing took the review and the comments out and left this untouched.
+    let worktree = view.worktree.clone().expect("the work is checked out").path;
+    let prompt = prompts(&told)[0];
+
+    assert!(
+        prompt.contains("addressing/SKILL.md"),
+        "the session is put inside the bundled skill, as a check's fix is: {prompt}",
+    );
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "under the one Pairing this Process waits on: {prompt}",
+    );
+    assert!(
+        prompt.contains("#41") && prompt.contains("verkstead"),
+        "and told which pull request in which repository: {prompt}",
+    );
+    assert!(
+        prompt.contains(&worktree),
+        "and the worktree to do the merge in, {worktree} being where that branch \
+         is: {prompt}",
+    );
+    assert!(
+        prompt.contains("Merge the pull request's base branch"),
+        "and what to do about it, in the words of the strategy this repository \
+         resolves conflicts by: {prompt}",
+    );
+    assert!(
+        prompt.contains("rather than a rebase") && prompt.contains("force-push"),
+        "a merge rather than a rebase, each strategy saying the thing the other \
+         would have done: {prompt}",
+    );
+
+    // And nothing beside it, on a pull request with three comments standing on
+    // it and a branch nobody here wrote.
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "no review and no batch session queued in front of the conflict: {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert!(
+        notices(&view).len() == 1 && notices(&view)[0].contains("was taken up for wrapping"),
+        "and nothing stopped over it: the pull request has a go left, and this is \
+         it: {:?}",
+        notices(&view),
+    );
+
+    // The session lets go, which commits the merge and puts the pull request in
+    // front of GitHub again — and this time GitHub says it merges.
+    std::fs::write(&released, "x").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "a pull request GitHub says it can merge settles the last of what a \
+         narrowed wrap-up waits on",
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&dispatched).unwrap()).len(),
+        1,
+        "and one session was the whole of it: the conflict is gone, so nothing \
+         further was dispatched",
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// Two resolution sessions on a narrowed wrap-up and then the human, exactly as
+/// there are on any other.
+///
+/// The base stays moved under the branch however many times it is merged, so
+/// nothing the machine does lands the pull request. After its two goes Verkstead
+/// stops asking, and the Notice names the pull request that would not merge clean
+/// — which is what a Conversation with more than one of them is read back by. A
+/// third poll dispatches nothing: the goes are the pull request's own and they
+/// are spent.
+///
+/// And still nothing else has run. What a narrowed wrap-up leaves out it leaves
+/// out on the way to a stop as well as on the way to Done.
+#[tokio::test]
+async fn two_goes_at_a_narrowed_conflict_and_then_the_human() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN_BUT_CONFLICTING, "", ""),
+    )
+    .await;
+
+    // Read past the take-up's own note, which is the first thing on this
+    // Timeline and is not a stop.
+    let stopped = fixture
+        .until(|view| notices_since_the_take_up(view).into_iter().next_back())
+        .await;
+
+    assert!(
+        stopped.contains("conflict"),
+        "what stopped it is the merge nothing could make clean: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("#41") && stopped.contains("verkstead"),
+        "and the Notice names the pull request that would not merge: {stopped:?}",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "every resolution session the branch was allowed has been spent, so a \
+         restart that started the merging over would spend them all again",
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        2,
+        "two goes at it and no more",
+    );
+    assert!(
+        !merge_settled(&fixture).await,
+        "and a pull request that will not merge settles nothing",
+    );
+
+    // Long enough for many more polls, had anything still been dispatching.
+    pause(Duration::from_millis(500)).await;
+
+    let told = std::fs::read_to_string(&dispatched).unwrap();
+
+    assert_eq!(
+        prompts(&told).len(),
+        2,
+        "the run does not go round again once it has stopped: {told}",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "and the branch was never read and nothing said on it was ever answered: \
+         {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+}
+
+/// And the **Resolve conflicts** press on one: a Fix Conversation that reached
+/// Done and started conflicting weeks later comes back through the same narrowed
+/// wrap-up, from no goes spent and with no review session run.
+///
+/// Both halves matter. *From no goes spent* is what the press is for — this
+/// wrap-up spent a go on the conflict it was started over, and a count left
+/// standing would be a watcher that dispatched once and stopped. And *no review*
+/// is the Process's, not the press's: the press leaves the review's settle
+/// standing because the work was reviewed, and here there was never a review to
+/// leave standing in the first place.
+#[tokio::test]
+async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let conflicting = spill.path().join("conflicting");
+    let resolved = spill.path().join("conflict-resolved");
+
+    // Conflicting from the moment the press lands, so that the first wrap-up
+    // spends a go of its own — which is what makes the count below a claim about
+    // forgetting rather than about a count that was never there.
+    std::fs::write(&conflicting, "x").unwrap();
+
+    let fixture = taking_up_to_fix_landing(
+        spill,
+        &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
+        &gh_conflicting_between(&conflicting, &resolved),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        1,
+        "the wrap-up that carried it to Done spent a go on the conflict it started \
+         over",
+    );
+
+    // And then the base moves under the branch again, long after anybody was
+    // working in it. The sweep after Done writes that down and does nothing about
+    // it, a conflict on finished work being the human's to decide about.
+    std::fs::remove_file(&resolved).unwrap();
+
+    until_merging(&fixture, verkstead_server::store::Merging::Conflicting).await;
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&dispatched).unwrap()).len(),
+        1,
+        "nothing is dispatched after Done",
+    );
+
+    // Which they do, on the pull request's own details pane.
+    assert_eq!(fixture.resolve_conflicts().await, Resolved::Resolving);
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "the press moves it back into the wrap-up itself",
+    );
+
+    // The second resolution session, which is only possible on a count that was
+    // forgotten — and then the merge lands and the ordinary settling rule carries
+    // the work back to Done.
+    let told = until_written_by(&dispatched, 2).await;
+
+    assert!(
+        prompts(&told)[1].contains("addressing/SKILL.md") && prompts(&told)[1].contains("#41"),
+        "sent at the pull request that will not merge: {:?}",
+        prompts(&told)[1],
+    );
+    assert!(
+        prompts(&told)[1].contains("Merge the pull request's base branch"),
+        "and told what to do about it, by the strategy this repository resolves \
+         conflicts by: {:?}",
+        prompts(&told)[1],
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        1,
+        "the count started again from nothing, and that session is the first of \
+         the new two",
+    );
+
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "a pull request GitHub says it can merge settles the last of it",
+    );
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "and the two this Process never waits on were settled throughout",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "so the branch was never read and nothing said on it was ever answered, \
+         on either side of the press: {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "and nothing stopped anywhere along the way: {:?}",
+        notices_since_the_take_up(&view),
     );
 }
 
