@@ -103,10 +103,18 @@ under both limits.** The recommendation was that it take none under the
 server-wide one, nothing being running; the human chose otherwise, so a server
 full of stages waiting on answers starts nothing more until one is answered.
 
-**A stage that halts holds up only the stages that depend on it.** A usage
-limit, a failed start, a question nobody answers: every other ready stage
-carries on. Stopping the whole roadmap was rejected as giving away what the
-parallelism is for.
+**A stage that halts before it has joined holds up only the stages that depend
+on it.** A usage limit, a failed start, a question nobody answers: every other
+ready stage carries on. Stopping the whole roadmap was rejected as giving away
+what the parallelism is for.
+
+**A stage halted after it has joined holds up every later join.** Nothing joins
+until the one below it has settled — see *The chain* — so a wrap-up that cannot
+finish is a queue behind it, whether or not anything depends on the stage that
+is stuck. **Only the join is held**: a waiting stage's own work carries on, and
+its checks, its comments and its review wait on nobody. What is paid is the
+order the chain is built in, and the place each waiting stage keeps under both
+limits until it gets in.
 
 **Continue a roadmap starts every ready stage**, up to the limits, the press
 standing in for whatever would have started them.
@@ -142,6 +150,12 @@ The wait on the chain settling is the human's addition and is what makes that
 true: a stage finishing while the one below is still wrapping up — a review
 finding being fixed, a check going green — would otherwise rebase onto a branch
 that is still moving.
+
+**So the joins are the one thing a roadmap does in single file**, and what that
+costs is worth saying plainly: a stage whose wrap-up cannot finish — an
+unanswered review Set, a check that stays red, a pull request nobody can land —
+holds up every later stage's join, dependent on it or not. The joining is all it
+holds up, and it is the price of never rebasing a branch anybody is reading.
 
 **A conflict at the join is the joining session's to resolve.** It resolves
 it, runs the checks again, and asks the human only where it cannot tell which

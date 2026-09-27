@@ -22,8 +22,12 @@ for both.
   on the human or waiting to join **takes a place** — the human's choice.
 - **Which ready stages, where there are more than places**: lowest number
   first. The roadmap's order is still the roadmap's own.
-- **A halt holds only dependents.** A usage limit, a failed start, a question
-  unanswered: the rest carry on, and the halted stage still holds its place.
+- **A halt before the join holds only dependents.** A usage limit, a failed
+  start, a question unanswered: the rest carry on, and the halted stage still
+  holds its place. **A halt after it has joined holds up every later join** —
+  stage 03's chain is built one stage at a time and nothing joins until the one
+  below has settled — which is not this stage's to fix and is what a stage
+  waiting to join is waiting for.
 - **Continue a roadmap starts every ready stage**, up to the limit. The card
   that named *the Stage that would be started* names them all.
 - **A running roadmap that declares badly starts nothing and says why on the

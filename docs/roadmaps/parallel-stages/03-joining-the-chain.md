@@ -26,6 +26,12 @@ order.
   step; it is not the session's to judge.
 - **One at a time, in the order the tasks finished.** A second stage waiting to
   join waits on the first joining *and settling*.
+  **The joins are the one thing the roadmap does in single file**, so a stage
+  whose wrap-up cannot finish holds up every later stage's join, dependent on it
+  or not. Only the join: a waiting stage's own work, its checks and its review
+  wait on nobody. That is the price of never rebasing a branch anybody is
+  reading, and the Timeline says which stage is being waited on so it does not
+  read as a stall.
 - **A joined stage is never rebased by a later one.** What moves it afterwards
   is what moves a stacked branch today: `gh stack sync` after the default
   branch moves or a pull request below merges.
