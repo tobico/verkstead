@@ -20,8 +20,14 @@ refused by name. Demonstrable end to end with two devices and a phone.
 - **Merged by rank** (stage 05): a drag computes one key between its
   neighbours whichever devices they belong to, and writes it to the owning
   device through the relay. Stage 05's suffix is what makes that safe across
-  devices — every key is distinct cluster-wide, so the merge has a total order
-  without a tiebreaker and there is always a key to compute between two rows.
+  devices — every rank is distinct cluster-wide, so the merge has a total order
+  without a tiebreaker.
+  **Two rows at one key are the exception, and this stage settles it**: the two
+  sort apart but no rank sits between them — every rank at that key names a
+  device, and the moving row carries its own — so `ranks::between` refuses. It
+  is the first rows of two devices rather than a rare case. Either re-rank one
+  of the pair through its own device to open the gap, or land the dragged row
+  beside them rather than between them, and say which in the row's own docs.
 - **The row** reads OS icon, device, repo on the second line once anything is
   linked, on every row; the Brief's *before the branch name* was read as the
   second line since the branch is the first. The header and the spoken row
@@ -46,7 +52,8 @@ refused by name. Demonstrable end to end with two devices and a phone.
    written to `/api/ui/devices/{device}/…` for a remote row.
    - Reloading either device shows the same order.
    - Two rows created on two devices at the same moment sort in one order, and
-     a row dragged between them lands between them.
+     a row dragged into the gap between them lands somewhere stated rather than
+     failing — there is no rank between two rows at one key.
 5. **Push relay and the archived switch** — member news heard over the link
    and pushed locally with the device name leading; the archived flag passed
    to each member's list read.

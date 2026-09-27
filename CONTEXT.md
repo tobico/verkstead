@@ -213,15 +213,15 @@ ordered by: a **fractional-indexing key**, a separator, and the **Device Id** of
 the device that issued it — `a0-aa00bb…`. Every Conversation has one from the
 moment it is started, so there is no unranked row and no rule about where one
 would go.
-**A key between any two always exists**, which is what makes a drag expressible
-wherever it lands: the keys are base62 strings with a head character saying how
-long the integer part is, so ranking above the current top — which is what every
-start does — goes `a0`, `Zz`, `Zy`, … and carries rather than running out. They
-grow only where somebody keeps dropping cards in the one spot, and there is no
-bucket to size and no rebalance pass to run. Jira-style lexorank was rejected for
-that pass, and a dense integer per row for what it cost: the whole table rewritten
-on every drag, which is a sentence that cannot be sent to two devices that each
-own part of the list.
+**A key between any two keys always exists**, which is what makes a drag between
+two of this device's rows expressible wherever it lands: the keys are base62
+strings with a head character saying how long the integer part is, so ranking
+above the current top — which is what every start does — goes `a0`, `Zz`, `Zy`, …
+and carries rather than running out. They grow only where somebody keeps dropping
+cards in the one spot, and there is no bucket to size and no rebalance pass to
+run. Jira-style lexorank was rejected for that pass, and a dense integer per row
+for what it cost: the whole table rewritten on every drag, which is a sentence
+that cannot be sent to two devices that each own part of the list.
 **The device is suffixed because a device computes its keys off its own list
 alone.** Two devices each ranking a new Conversation above their own top produce
 the *same* key — on a fresh device that is its first few rows rather than a rare
@@ -231,7 +231,11 @@ between two equal ones. Suffixed, they are distinct by construction and no merge
 needs a tiebreaker of its own. The separator sorts below every character of the
 alphabet, which is what makes ordering the whole strings ordering by key and then
 by device — and what keeps a key minted between two neighbours between them once
-the suffixes are on.
+the suffixes are on. What it does not buy is room *between* two rows at one key:
+those two sort apart, but every rank at that key names a device and the row being
+moved carries its own, so nothing sorts between them and minting is refused.
+Only a merged list reaches it, and stage 06 settles what a drag into that gap
+does.
 **A drag writes one row.** The viewer says which Conversation moved and which row
 it now sits under — nothing at all being the top of the list — and the server
 mints the key between that row's rank and the rank under the gap. So the

@@ -213,11 +213,20 @@ coincidence. Two rows that sorted equal would leave the merged order ambiguous
 — it would read differently on different hubs, which is the one thing ranks are
 here to prevent — and fractional indexing has no key strictly between two equal
 ones, so a drag between them could not be expressed at all. Suffixed, the keys
-are distinct cluster-wide by construction, a key between any two still exists
-because they are still strings over the same alphabet, and the merge needs no
-tiebreaker of its own. A tiebreak on device id at the merge alone was the other
-way and was rejected: it settles the order and leaves the drag with nothing to
-compute between.
+are distinct cluster-wide by construction and the merge needs no tiebreaker of
+its own. A tiebreak on device id at the merge alone was the other way and was
+rejected: it settles the order and leaves the drag with nothing to compute
+between.
+
+**What the suffix does not buy is room between two rows at one key.** The two
+sort apart, which is what the merge needs of them, but every rank at that key
+reads `key-<device>`: a rank between `a0-A` and `a0-B` would take a device id
+sorting between those two, and the row being moved carries its own. There is no
+such rank, and stage 05 refuses rather than inventing one. It cannot arise on
+one device, whose own keys are distinct — on a merged list it is the first rows
+of two devices, and the stage that merges settles what a drag into that one gap
+does: re-ranking one of the pair through its own device, or landing the row
+beside them rather than between them.
 
 A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule

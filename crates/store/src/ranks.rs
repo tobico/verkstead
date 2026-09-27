@@ -18,9 +18,11 @@
 //! `ORDER BY` this is.
 //!
 //! **Fractional indexing rather than a dense integer**, for the reason the ADR
-//! gives: a key between any two always exists, so there is no arrangement a drag
-//! cannot express, and the keys grow only where somebody keeps inserting in one
-//! spot — no bucket to size and no rebalance pass to run.
+//! gives: a key between any two keys always exists, so a drag between two rows
+//! this device ranked is always expressible, and the keys grow only where
+//! somebody keeps inserting in one spot — no bucket to size and no rebalance
+//! pass to run. Between two *ranks* at one key it is not, which is the one gap
+//! the suffix leaves standing — see [`between`].
 //!
 //! **The published scheme rather than a variant of it.** Base62 over
 //! `0-9A-Za-z`, with the leading character encoding the length of the integer
@@ -87,8 +89,23 @@ const SMALLEST: &str = "A00000000000000000000000000";
 /// is what makes a drag on a merged list a write to the row's owner alone.
 ///
 /// An error is a rank that will not parse, a pair the wrong way round, or a
-/// neighbour pair with nothing between them at all — which is two rows at the
-/// same key, the one thing the suffix is there to stop happening.
+/// neighbour pair with nothing between them at all.
+///
+/// **That last is two rows at one key, and it is a gap the suffix cannot
+/// close.** Two devices ranking above their own top mint the same key — a fresh
+/// device's first rows rather than a coincidence — and suffixed those two rows
+/// sort apart, which is what a merged order needs of them. What no rank can do
+/// is sit between them: every rank at that key reads `key-<device>`, so landing
+/// between `a0-A` and `a0-B` would take a device id sorting between those two,
+/// and the row that moved carries its own. There is nothing to hand back, so
+/// this refuses.
+///
+/// **A merged list is where that will be met**, and settling what a drag into
+/// that one gap does is stage 06's — re-ranking one of the pair through its own
+/// device, or landing the row beside them rather than between them. Nothing on
+/// one device reaches it: this device's own keys are distinct, two starts a
+/// moment apart never minting one because the read and the write are inside a
+/// single transaction.
 pub fn between(above: Option<&str>, below: Option<&str>, device: &str) -> Result<String> {
     let key = key_between(above.map(key_of), below.map(key_of)).with_context(|| {
         match (above, below) {
@@ -129,8 +146,8 @@ fn key_between(above: Option<&str>, below: Option<&str>) -> Result<String> {
 
     match (above, below) {
         (Some(above), Some(below)) if above == below => bail!(
-            "{above} is both of them: nothing sorts strictly between two rows ranked at the same \
-             key, which is what the device suffix is there to keep from happening"
+            "{above} is both of them: no rank sorts strictly between two rows at one key, the \
+             suffix making the two sort apart without making room between them — see `between`"
         ),
         (Some(above), Some(below)) => {
             ensure!(above < below, "{above} does not sort above {below}");
@@ -581,9 +598,11 @@ mod tests {
         assert_ne!(mine, theirs, "and two ranks all the same");
     }
 
-    /// And nothing sorts between two rows at one key, which is what the suffix
-    /// is there to keep from happening: said as a refusal rather than as a rank
-    /// that would read differently on two devices.
+    /// And nothing sorts between two rows at one key, which the suffix makes
+    /// sort apart without making room between them: said as a refusal rather
+    /// than as a rank that would read differently on two devices. A merged list
+    /// is where it will be met — see [`between`], where what stage 06 has to
+    /// settle about it is.
     #[test]
     fn two_rows_at_one_key_have_nothing_between_them() {
         let mine = format!("a0{SEPARATOR}{THIS_DEVICE}");
@@ -592,7 +611,7 @@ mod tests {
         let refused = between(Some(&mine), Some(&theirs), THIS_DEVICE).unwrap_err();
 
         assert!(
-            format!("{refused:#}").contains("the same key"),
+            format!("{refused:#}").contains("two rows at one key"),
             "{refused:#}",
         );
     }
