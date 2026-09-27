@@ -107,6 +107,19 @@ export function insets(area: Area | undefined, across: number): Insets {
 /// is not always the true one, and a maximise, an unmaximise and a resize each
 /// change what the page is left. A window with no overlay to ask has nothing to
 /// follow either, so it stands at [`CLEAR`] for as long as it is open.
+///
+/// **Both events, because the inset is a sum of two readings.** What the
+/// controls took is the window's width less the strip the page was left, so a
+/// change to either half has to be read again — and Windows moves the two of
+/// them at different moments. Measured on Windows 11 under Electron 43 against
+/// the packed app: dragging the window narrower fires `geometrychange` with the
+/// new rectangle while `innerWidth` is still the old window's, and the `resize`
+/// a moment later is what carries the new width. Following the first alone
+/// pairs a new rectangle with a stale window: a window taken from 1187 to 787
+/// across padded its head by 537px, and one grown instead computed a negative
+/// inset, wrote no variable at all, and left the three controls standing over
+/// the head the padding is there to keep clear. COSMIC delivered the two
+/// together and never showed it; the sum was always of two numbers.
 export function controls(): Accessor<Insets> {
   const overlay = reached();
   const [taken, setTaken] = createSignal(taking(overlay));
@@ -115,7 +128,12 @@ export function controls(): Accessor<Insets> {
     const moved = () => setTaken(taking(overlay));
 
     overlay.addEventListener?.("geometrychange", moved);
-    onCleanup(() => overlay.removeEventListener?.("geometrychange", moved));
+    window.addEventListener("resize", moved);
+
+    onCleanup(() => {
+      overlay.removeEventListener?.("geometrychange", moved);
+      window.removeEventListener("resize", moved);
+    });
   }
 
   return taken;

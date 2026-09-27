@@ -27,6 +27,6 @@ Roadmap stage: [07: Windows](docs/roadmaps/electron-desktop/07-windows.md)
 
 - [x] 01: The msi, packed from a checkout — [details](01-the-msi.md)
 - [x] 02: The release leg, and the WiX sources retired — [details](02-the-release-leg.md)
-- [ ] 03: The overlay, and the window on Windows — [details](03-the-overlay.md)
+- [x] 03: The overlay, and the window on Windows — [details](03-the-overlay.md)
 - [ ] 04: The Run value taken over, and a hidden sign-in start — [details](04-the-run-value.md)
 - [ ] 05: The words — [details](05-the-words.md)

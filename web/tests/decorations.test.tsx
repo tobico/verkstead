@@ -569,6 +569,35 @@ describe("the frame", () => {
     );
   });
 
+  /// And read again when the *window* changes size, which is the other half of
+  /// the same reading and the half Windows needs.
+  ///
+  /// Measured on Windows 11 under Electron 43, against the packed app: a resize
+  /// fires `geometrychange` first, while `innerWidth` is still the width the
+  /// window had — a rectangle 650 across arrived against an `innerWidth` of 1187
+  /// — and the `resize` a moment later is the event carrying the new width. The
+  /// inset is a sum of the two, so the reading made on the first event alone
+  /// pairs a new rectangle with a stale window and is wrong by the difference
+  /// between them: 537px of padding in a window 787 across, and nothing at all
+  /// where the window grew instead, which is the three controls left standing
+  /// over the head.
+  it("reads the rectangle again when the window itself resizes", async () => {
+    theApp("win32");
+    vi.stubGlobal("innerWidth", 1187);
+    const moved = overlaid({ x: 0, width: 1050 });
+
+    const frame = theFrame();
+    expect(frame.style.getPropertyValue("--controls-right")).toBe("137px");
+
+    moved({ x: 0, width: 650 });
+    vi.stubGlobal("innerWidth", 787);
+    window.dispatchEvent(new Event("resize"));
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--controls-right")).toBe("137px"),
+    );
+  });
+
   /// And in a browser the frame carries nothing at all: there is no overlay to
   /// measure, so neither variable is written and the element is as bare as it was
   /// before any of this existed.

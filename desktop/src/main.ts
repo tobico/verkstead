@@ -56,6 +56,7 @@ import { dataDir, logDir } from "./platform.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import {
+  APP_ID,
   hidden,
   type LoginItem,
   type Registering,
@@ -314,6 +315,27 @@ async function run(): Promise<void> {
   // as in the file; a machine with nowhere to put one says that instead, and
   // goes on running.
   const kept = keep(logDir(machine));
+
+  // And the name Windows knows this application by, said before there is a
+  // window to be named — which is what ties the window to the Start-menu entry
+  // the msi wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
+  // net.tobico.Verkstead`, and a window whose own id is something else is a
+  // second, unnamed button on the taskbar beside it. Measured on Windows 11
+  // under Electron 43 against the packed app: with nothing said here the window
+  // carried no id at all and the process answered to `electron.app.Verkstead`,
+  // so only a launch made *through* the shortcut grouped — the installer's own
+  // run-after-finish, the Run key at login and the launcher double-clicked in
+  // the install directory each drew a button of their own.
+  //
+  // [`APP_ID`](./startup.js)'s, which is the same string the registrations are
+  // named for and the same one `electron-builder.yml` packs as the `appId`:
+  // one name for the entry, the login item and the window. It is the Windows
+  // arm of what `syncDesktopName` does on Linux, and Electron implements the
+  // call on Windows alone.
+  if (machine.platform === "win32") {
+    app.setAppUserModelId(APP_ID);
+    say(`this window is ${APP_ID} on the taskbar, which is the Start-menu entry's own name`);
+  }
 
   // First of the app's own steps, and before anything is started: a second
   // launch of the app is this one's window brought forward, and the launch
