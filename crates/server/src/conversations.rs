@@ -2747,6 +2747,13 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // The comments are settled against the Conversation's own Repo, which is where
     // the pull request is — the one it has now, or the one a bare branch has
     // `submitting` open into the same repository a moment from now.
+    //
+    // This door's own writing of them, and neither watcher's licence to skip its
+    // own: each of them reads the Process a moment from now and writes its settle
+    // back whatever it finds — see [`narrows_the_wrap_up`]. What writing them here
+    // buys is that there is no instant in which a wrapping Conversation is not
+    // narrowed, which is what a sweep or a restart between the move and the first
+    // poll would otherwise find.
     let narrowed = narrows_the_wrap_up(conversation.process);
 
     let settled = if narrowed {
@@ -3773,12 +3780,19 @@ pub(crate) fn takes_a_target(process: store::Process) -> bool {
 /// wrapping it up is the two things GitHub itself refuses a merge for.
 ///
 /// Asked in three places and by each of them for itself, which is the pattern the
-/// rest of the wrap-up follows: the take-up writes the settles as it enters — see
+/// rest of the wrap-up follows: the take-up writes both settles as it enters — see
 /// [`take_up`] — and the review watcher and the comments watcher each read this a
-/// moment later and do nothing, see [`crate::review`] and [`crate::comments`].
-/// Settling alone would not hold, because a steer into Wrapping takes the
-/// review's settle with it and a comment landing unsettles the comments; read
-/// this way every door into Wrapping behaves alike, with no bookkeeping per door.
+/// moment later and write their own back, see [`crate::review`] and
+/// [`crate::comments`].
+///
+/// Settling at the door alone would not hold, because a door is not the only way
+/// a settle goes: a steer into Wrapping takes the review's with it, a steer into
+/// Grilling forgets every settle the round made, a comment landing unsettles the
+/// comments, and a companion's pull request recorded mid-wrap-up is a repository
+/// the door had nothing to say about. Read this way every door into Wrapping
+/// behaves alike, with no bookkeeping per door — and a wrap-up that lost a settle
+/// by some road nobody thought of gets it back on the next poll rather than
+/// waiting for ever on it.
 pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
     matches!(process, store::Process::FixMergeIssues)
 }

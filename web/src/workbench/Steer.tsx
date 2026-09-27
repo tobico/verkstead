@@ -118,6 +118,7 @@ import type {
   ConversationView,
   Lifecycle,
   PairingView,
+  Process,
   RepoEntry,
   SteerCompanionRefusal,
   SteerEvent,
@@ -136,6 +137,7 @@ import { Listbox } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
+import { narrowed } from "./processes";
 import { keeping, type Keeping } from "./settling";
 import { STATE } from "./states";
 import { BasePicker, RULE } from "./Setup";
@@ -219,6 +221,25 @@ const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
 /// to go and look at is one of several repos rather than the obvious one. The
 /// grill start's own refusals are drawn the same way — see `grillRefusal` in
 /// [`Timeline`](./Timeline.tsx).
+/// Which of a target's notes this conversation reads, there being one target that
+/// means two different things.
+///
+/// **Wrapping up**, where the Process's wrap-up is narrowed to what GitHub refuses
+/// a merge for: no session reads the branch, nothing said on the pull request is
+/// answered, and the one pick settles the Implementation Pairing alone — so the
+/// note promising a review and its comments would promise an hour of work that
+/// never happens. Which is the argument the take-up's own Timeline note already
+/// makes about the same absence: a wrap-up nothing reviews looks from the outside
+/// like one whose review has not started yet, so it is worth a sentence.
+///
+/// Asked of [`narrowed`](./processes.ts) rather than of the Process by name, that
+/// being where a fact about a Process is kept.
+function note(offered: (typeof TARGETS)[number], process: Process): string {
+  return offered.narrowedNote !== undefined && narrowed(process)
+    ? offered.narrowedNote
+    : offered.note;
+}
+
 export function steerRefusal(outcome: ConversationSteered): string {
   if (typeof outcome === "object") {
     return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[outcome.Companion.why]}`;
@@ -246,7 +267,11 @@ export function steerRefusal(outcome: ConversationSteered): string {
 /// settled, and one nothing runs in needs none. `role` is which pairing that
 /// is, there being one for the interviewing, one for everything that builds and
 /// one for the review — and wrapping up settles the review one alongside the
-/// building one from the same pick, a wrap-up doing both.
+/// building one from the same pick, a wrap-up doing both, unless the Process's
+/// wrap-up is a narrowed one and there is no review for it to do.
+///
+/// `narrowedNote` is what that one target says instead where the wrap-up it sends
+/// the work to is narrowed — see [`note`], which is the whole of why it is here.
 ///
 /// In the order the work goes through them, because that is the order the human
 /// reads the pipeline in everywhere else.
@@ -254,6 +279,7 @@ const TARGETS: {
   target: SteerTarget;
   label: string;
   note: string;
+  narrowedNote?: string;
   runs: boolean;
   role?: "grilling" | "implementation";
 }[] = [
@@ -275,6 +301,8 @@ const TARGETS: {
     target: "Wrapping",
     label: "Wrapping up",
     note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs the fixes, and the review too where nothing was picked for it. The fix attempts start over.",
+    narrowedNote:
+      "The pull request looked at again: the checks watched, and whether it merges. This process wraps up narrowed to what GitHub refuses a merge for, so nothing reads the branch and nothing said on the pull request is answered. What you pick runs the fixes. The fix attempts start over.",
     runs: true,
     role: "implementation",
   },
@@ -1268,7 +1296,9 @@ export function Steer(props: {
                   />
                   {offered.label}
                 </label>
-                <Note class={styles.optionNote}>{offered.note}</Note>
+                <Note class={styles.optionNote}>
+                  {note(offered, props.conversation.process)}
+                </Note>
               </div>
             )}
           </For>

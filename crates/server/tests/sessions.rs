@@ -21453,6 +21453,102 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
     );
 }
 
+/// And a narrowed wrap-up that has had every settle forgotten under it settles
+/// them again and finishes, which is the door the take-up's own writing does not
+/// cover.
+///
+/// A steer into Grilling opens a round, so the round before it is over and its
+/// wrap-up bookkeeping goes with it — every settle, not only the review's. So the
+/// wrap-up after it arrives with nothing written at all, and the take-up that
+/// wrote the narrowing is two rounds behind: what has to hold it up is the two
+/// watchers reading the Process for themselves and settling what they will never
+/// act on. The review watcher always did; the comments watcher settling before it
+/// stops is what makes the pair of them enough.
+///
+/// Which is worth its own test because the failure is a silence. Nothing stops and
+/// no Notice is written — the narrowing Notice reads the comments' settle too — so
+/// a wrap-up that lost it would sit in Wrapping with a green suite and a mergeable
+/// pull request for as long as anybody left it. The same settle is what covers a
+/// companion's pull request recorded mid-wrap-up, that being another repository the
+/// take-up had nothing to say about.
+#[tokio::test]
+async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_to_fix(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "the take-up wrote both, and that is what carried this one to Done",
+    );
+
+    // A round of its own, under the one Profile this Process has: the pick goes on
+    // the grilling role the form asks for, a Fix having none of its own.
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened,
+        "everything had finished, so the click found nothing to interrupt",
+    );
+
+    let profile = fixture.profile("implementation").await;
+
+    assert_eq!(
+        fixture
+            .steer_under("Grilling", profile, "claude-implementation-5")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // Read before the round it opened could have reached a wrap-up of its own,
+    // which is several sessions away and this is one read of a table.
+    assert!(
+        !review_settled(&fixture).await && !comments_settled(&fixture).await,
+        "the round that ended took every settle with it",
+    );
+
+    // Then straight back into a wrap-up, which is the shortest road to the door
+    // that writes nothing: the interview is interrupted where it stands, and what
+    // arrives in Wrapping is a narrowed wrap-up with nothing settled under it.
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_into("Wrapping", true).await,
+        ConversationSteered::Steered,
+    );
+
+    // Which finishes all the same — the two watchers having settled for
+    // themselves, and neither of them having read a line or dispatched a thing.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .await;
+
+    assert!(
+        review_settled(&fixture).await && comments_settled(&fixture).await,
+        "each watcher wrote its own back on the first look that reached it",
+    );
+    assert!(
+        checks_settled(&fixture).await && merge_settled(&fixture).await,
+        "and the suite and the merge settled the way they always do",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists(),
+        "with still no review and no batch session anywhere on it: {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+    );
+}
+
 /// And a Resume on one reads no branch either, though a Resume is the one press
 /// that means *read it from the start*.
 ///

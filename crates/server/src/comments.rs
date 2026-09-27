@@ -118,11 +118,17 @@
 //! it.** A **Fix Merge Issues** Conversation is pointed at a pull request that
 //! has been reviewed and talked about already, so what is said on it is not this
 //! wrap-up's to answer: the watcher reads the Process off the record on its first
-//! look and stops there — nothing dispatched, nothing settled, nothing put back
-//! to waiting. What lets such a wrap-up reach Done is the settle written as it
-//! entered Wrapping, and the only thing that could take that away is the unsettle
-//! below. See [`crate::conversations::narrows_the_wrap_up`], and
-//! [`crate::review`], which reads the same fact for the review.
+//! look, settles this pull request's comments where it stands, and stops —
+//! nothing dispatched, and nothing left for a later poll to put back to waiting.
+//!
+//! Settling on the way out rather than trusting the one the take-up wrote is what
+//! makes every door into Wrapping alike. Nothing else ever writes this settle, so
+//! a wrap-up that arrived by a road the take-up was not on — a round steered into
+//! Grilling forgets every settle it made, and a companion's pull request recorded
+//! mid-wrap-up is a repository the take-up had nothing to say about — would wait
+//! for ever on a comment nobody was ever going to answer. See
+//! [`crate::conversations::narrows_the_wrap_up`], and [`crate::review`], which
+//! does the same thing for the review.
 //!
 //! Nothing here ever asks the human itself. What asks is the session dispatched
 //! about a batch, which puts what it would do to them rather than what they
@@ -234,14 +240,25 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // see [`crate::conversations::narrows_the_wrap_up`], and [`crate::review`] for
     // the other half of it.
     //
-    // Ended rather than merely quietened, because the whole of what this watcher
-    // does is on the far side of it: nothing is dispatched, nothing is settled and
-    // nothing is put back to waiting, so a poll that went on asking GitHub twice a
-    // minute would be two calls spent to reach this same line. What lets the
-    // wrap-up reach Done is the settle written as it entered Wrapping — see
-    // [`store::take_up`] — and the unsettle that would take it away is this
-    // watcher's alone.
+    // Settled on the way out, which is the whole of what this watcher owes such a
+    // wrap-up and what makes every door into Wrapping behave alike. The take-up
+    // writes this settle as it enters — see [`store::take_up`] — but that is one
+    // door of several, and nothing else ever writes it: a round steered into
+    // Grilling forgets every settle the round before it made, and a companion's
+    // pull request recorded mid-wrap-up is a repository the take-up had nothing to
+    // say about. A wrap-up that got here without it would wait for ever on a
+    // comment nobody was ever going to answer, and silently — the narrowing Notice
+    // reads this same settle, so it would not even say what it was waiting on. So
+    // it is written here, by the watcher whose pull request it is about, exactly as
+    // [`crate::review`] writes the review's back on every look that reaches it.
+    //
+    // Then ended rather than merely quietened: nothing is dispatched and nothing
+    // is put back to waiting, so a poll that went on asking GitHub twice a minute
+    // would be two calls spent to reach this same line. The unsettle that could
+    // take this away is this watcher's alone, and this watcher is gone.
     if crate::conversations::narrows_the_wrap_up(conversation.process) {
+        settle(state, conversation_id, repo_id).await;
+
         return Watching::Done("this wrap-up does not answer what is said on the pull request");
     }
 
@@ -351,7 +368,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
         // is held across the settling itself, so that a batch dispatched between
         // the asking and the writing cannot be settled over either.
         if let Some(_turn) = state.sessions.try_turn(conversation_id) {
-            settle(state, conversation_id, &watched).await;
+            settle(state, conversation_id, watched.repo.id).await;
         } else {
             tracing::debug!(
                 conversation_id,
@@ -804,15 +821,21 @@ fn said_by(watched: &Watched, fresh: &[Comment]) -> String {
 /// One of however many it is waiting on: a Conversation ends on a pull request
 /// per repository it was worked in, and every one of them has to be quiet before
 /// the wrap-up is over — see [`store::finish_wrap_up`].
-async fn settle(state: &AppState, conversation_id: i64, watched: &Watched) {
+///
+/// By the Repo's id rather than by the [`Watched`] the comments were read in,
+/// because the one caller with no comments to read has no `Watched` either: a
+/// narrowed wrap-up settles this on its first look and stops, before the pull
+/// request has been read off the record and before anything is asked of GitHub —
+/// see [`once`].
+async fn settle(state: &AppState, conversation_id: i64, repo_id: i64) {
     if let Err(error) = store::settle_wrap_up(
         &state.pool,
         conversation_id,
-        store::WaitingOn::Comments(watched.repo.id),
+        store::WaitingOn::Comments(repo_id),
     )
     .await
     {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording that the comments are all addressed failed");
+        tracing::error!(error = ?error, conversation_id, repo_id, "recording that the comments are all addressed failed");
     }
 }
 

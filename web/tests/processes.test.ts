@@ -14,6 +14,8 @@ import type { Process } from "../src/api/types";
 import {
   away,
   label,
+  narrowed,
+  NARROWED,
   needed,
   OFFERED,
   PROCESS,
@@ -268,6 +270,33 @@ describe("what a role's picker is labelled", () => {
       for (const role of ROLES[process].uses) {
         expect(label(process, role)).not.toBe("");
       }
+    }
+  });
+});
+
+describe("the processes whose wrap-up is narrowed", () => {
+  /// **Fix Merge Issues** and nothing else: the one Process pointed at a pull
+  /// request that has been reviewed and talked about already, so what is left of
+  /// wrapping it up is the two things GitHub itself refuses a merge for.
+  ///
+  /// The viewer keeps this list so that what the human is *told* is about to
+  /// happen comes off the same kind of fact as what happens — the Steer form's
+  /// wrapping-up note is drawn off it, and a note promising a review on a Process
+  /// that never runs one would promise an hour of work that never happens.
+  it("is Fix Merge Issues and nothing else", () => {
+    expect(NARROWED).toEqual(["FixMergeIssues"]);
+
+    for (const process of EVERY) {
+      expect(narrowed(process)).toBe(process === "FixMergeIssues");
+    }
+  });
+
+  /// And it is one of the two pointed at a target, which is what makes it a
+  /// wrap-up over work already somewhere else rather than a pipeline of its own.
+  it("narrows only a process that takes a target", () => {
+    for (const process of NARROWED) {
+      expect(TARGETED).toContain(process);
+      expect(OFFERED).toContain(process);
     }
   });
 });

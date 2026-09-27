@@ -11342,6 +11342,32 @@ describe("steering a conversation", () => {
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
   });
 
+  /// And what wrapping up *means* is the Process's, which is the one target that
+  /// says two different things. A **Fix Merge Issues** wraps up narrowed to what
+  /// GitHub refuses a merge for, so nothing reads the branch and nothing said on
+  /// the pull request is answered — and a note promising the human a review and
+  /// its comments would be promising an hour of work that never runs.
+  it("says what wrapping up means where the process narrows it", async () => {
+    theGrillingSteering(
+      {
+        ready_to_stop: true,
+        working: true,
+        pinned: WRAPPING.pinned,
+        process: "FixMergeIssues",
+      },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toContain("Wrapping");
+    expect(screen.getByText(/The pull request looked at again/)).toBeTruthy();
+    expect(
+      screen.queryByText(/the review run, the comments answered/),
+    ).toBeNull();
+  });
+
   /// Following up is the same rule plus one: the work has to be on a pull
   /// request, and the pipeline has to have seen it through. A conversation still
   /// building has the ordinary ways of saying what to do next, so the target is

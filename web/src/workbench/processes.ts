@@ -71,6 +71,26 @@ export function targeted(process: Process): boolean {
   return TARGETED.includes(process);
 }
 
+/// And which of them wrap up narrowed to what GitHub refuses a merge for: the
+/// review and the comments settled, so nothing reads the branch, nothing said on
+/// the pull request is answered, and what is left to wait on is the checks and
+/// whether the pull request merges.
+///
+/// **The viewer's list, and the server keeps the other** — `narrows_the_wrap_up`
+/// in `crates/server/src/conversations.rs`, which the take-up and the two
+/// watchers read. Two lists for `OFFERED`'s reason: that one decides what runs,
+/// and this one decides what the human is told is about to.
+///
+/// **Fix Merge Issues**, and nothing else — every other Process reads the branch
+/// and answers what is said on the pull request.
+export const NARROWED: Process[] = ["FixMergeIssues"];
+
+/// Whether this Process's wrap-up is a narrowed one — the question the Steer form
+/// asks before it says what wrapping up will do.
+export function narrowed(process: Process): boolean {
+  return NARROWED.includes(process);
+}
+
 /// One of the roles a Conversation's sessions are run under, spelled the way
 /// the record's own fields spell it — `grilling_pairing`, and the two beside
 /// it.

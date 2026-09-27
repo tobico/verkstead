@@ -218,8 +218,9 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
 /// what is on the pull request — so the wrap-up from here on is exactly the one
 /// a review that found nothing leaves behind: the checks with their two fix
 /// attempts apiece, the comments answered in batches, and Done once the suites
-/// are green. On a narrowed one there are no batches either, the comments having
-/// been settled as it entered — see [`crate::comments`].
+/// are green. On a narrowed one there are no batches either: the comments watcher
+/// reads the same fact this does, settles what is said on its own pull request and
+/// stops — see [`crate::comments`].
 ///
 /// Nothing is written to the Timeline for it. What the human picked is on the
 /// setup card and read on the details pane ever after, the Process is on the
