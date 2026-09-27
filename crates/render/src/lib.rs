@@ -84,7 +84,7 @@ pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
-pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
+pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{

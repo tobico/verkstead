@@ -148,8 +148,12 @@ pub(crate) async fn renewed(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    let held = match renewing.members.rows().await {
-        Ok(held) => held,
+    // Which member the caller *is*, read off the certificate rather than off the
+    // payload: an id is a string anybody may write, and the whole of what is
+    // being changed here is which certificate stands against one. See
+    // [`Members::presenting`], which is where that reading is written.
+    let caller_is = match renewing.members.presenting(&presented).await {
+        Ok(caller_is) => caller_is,
 
         Err(why) => {
             tracing::error!(%why, "the membership a renewal is recorded against could not be read");
@@ -160,14 +164,6 @@ pub(crate) async fn renewed(
             );
         }
     };
-
-    // Which member the caller *is*, read off the certificate rather than off the
-    // payload: an id is a string anybody may write, and the whole of what is
-    // being changed here is which certificate stands against one.
-    let caller_is = held.iter().find(|member| {
-        member.fingerprint == presented
-            || member.renewing_from.as_deref() == Some(presented.as_str())
-    });
 
     match caller_is {
         Some(member) if member.device == announced.identity.device => {}

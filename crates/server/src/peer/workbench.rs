@@ -40,6 +40,13 @@
 //! over what an answer holds rather than a second route to keep, which is what
 //! keeps *one router of routes* true; [`OverTheLink`] is how they know.
 //!
+//! **And one route here is a member's own rather than the viewer's**: the news a
+//! member tells its members when it has something worth a phone — see
+//! [`super::news`]. It is not in the namespace and is on no browser's router, and
+//! it is built here all the same, because what it shows the news to is the push
+//! subscriptions this state holds: a router over a second state would be pushing
+//! to a second device's phones.
+//!
 //! **And the agents' half is not here.** A session's Conversation-scoped API
 //! answers the loopback and the named pipe, which is all a session ever dials,
 //! and the health check is nobody's Conversation; the viewer's fallback is a
@@ -94,8 +101,18 @@ pub(crate) struct OverTheLink;
 ///
 /// The state is [`crate::standing`]'s, made once and shared with the workbench's
 /// own router — see this module's own documentation, and [`crate::Routers`].
+/// And the one route on this listener that is a member's own rather than the
+/// viewer's: the news a member tells its members when it has something worth a
+/// phone — see [`super::news`].
+///
+/// Built here because it answers out of this same state: what it shows the news
+/// to is the push subscriptions of *this* device's browsers, and a router over a
+/// second state would be pushing to a second device's phones. It is not part of
+/// the viewer's namespace and is on no browser's router — which is why it is
+/// merged here rather than added to [`crate::ui::routes`].
 pub(crate) fn served(state: AppState) -> Router {
     crate::ui::routes()
+        .merge(super::news::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))
 }

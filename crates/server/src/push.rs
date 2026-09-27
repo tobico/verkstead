@@ -47,7 +47,27 @@
 //! the app was uninstalled, the subscription expired — and it says so with a
 //! `404` or a `410`. Those are pruned. Everything else, a timeout or a `503`,
 //! is a notification lost and the device is left alone.
+//!
+//! **And in a cluster the news goes to the members too** (ADR-0020, *The opened
+//! device relays*). A phone is installed from one device and subscribes to *that*
+//! device's browsers, so without this a cluster would want a phone per machine.
+//! So [`say`] has a second step: once the local push has gone out, the same
+//! sentence goes to every member over the Peer Listener, and each of them shows
+//! it with the sending device leading the title — see
+//! [`crate::device::Devices::spread`], and [`crate::peer::news`], which is what
+//! answers at the far end. Behind the local push and behind the record, exactly
+//! as the local push is behind the record: a member that is switched off costs a
+//! notification and nothing else, and nothing is queued and nothing is retried.
+//!
+//! Coming the other way, [`heard_from`] is a third kind beside [`News`] and
+//! [`Word`]: a member's news, whose sentence this device did not write, titled
+//! with the device in front of it and opened at that device's own URL. It relays
+//! nothing onward — in a cluster everybody holds a link to everybody, so a device
+//! passing on a third one's news would be saying that news was its own.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -57,6 +77,7 @@ use p256::ecdsa::signature::Signer;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
+use verkstead_render::RelayedNews;
 use verkstead_schema::QuestionSet;
 use verkstead_store::{PushSubscription, VapidKeys};
 use web_push_native::{Auth, WebPushBuilder};
@@ -311,11 +332,32 @@ pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
     });
 }
 
-/// The notice one piece of news is worth, sent.
+/// Tell the devices that a Conversation has reached Done.
+///
+/// **One arm of [`News`] with a name of its own**, and the only one that has one,
+/// because it is the only one a caller outside this crate can say: every other
+/// arm is written by a stop, a session gone idle, an account out of window or a
+/// roadmap moving on, each of which is a session running inside Verkstead. The
+/// settle that says this is [`crate::settling`]'s, and a suite asking what a
+/// *cluster* makes of a piece of news says it here rather than standing a
+/// wrap-up up to produce one — see `tests/news.rs`. The path it takes is the
+/// whole of the real one: the local push, and then every member.
+pub fn the_work_is_done(pool: &SqlitePool, conversation_id: i64) {
+    told(pool, conversation_id, News::Done);
+}
+
+/// The notice one piece of news is worth, sent — to this device's own phones,
+/// and then to its members.
 ///
 /// With the Repo underneath the title, so that a lock screen says which piece of
 /// work this is about — that is the one thing that tells two notifications apart
 /// where their titles read alike.
+///
+/// **The members are the second step rather than the first**, which is the same
+/// ordering the whole of this module is written in: what a notification is about
+/// is already on the record, this device's own phones are its own, and a member
+/// whose machine is shut must not hold them up. See
+/// [`crate::device::Devices::spread`].
 async fn say(pool: &SqlitePool, conversation_id: i64, news: &News) -> Result<()> {
     let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
     else {
@@ -334,12 +376,84 @@ async fn say(pool: &SqlitePool, conversation_id: i64, news: &News) -> Result<()>
 
     let notice = serde_json::to_vec(&notice).context("building the push notice")?;
 
-    notify(
+    // This device's own phones first, and what they were told is kept rather than
+    // returned: the members are owed the news whether or not a push service took
+    // it, those being two different machines' problems.
+    let locally = notify(
         pool,
         &format!("{} on {conversation_id}", news.about()),
         &notice,
     )
-    .await
+    .await;
+
+    // And then every member, with the sentence this device's own lock screens
+    // just got and no device on it: the receiver is what puts one in front, off
+    // the certificate this call is made under — see [`crate::peer::news`].
+    if let Some(cluster) = cluster_of(pool) {
+        cluster
+            .spread(&RelayedNews {
+                conversation: conversation_id,
+                said: title,
+                project: Some(conversation.repo.name),
+            })
+            .await;
+    }
+
+    locally
+}
+
+/// Every Verkstead in this process and the cluster each of them owes its news to,
+/// by the database it writes that news down in.
+///
+/// **Held rather than threaded**, the way the named pipe's grant is — see
+/// [`crate::pipe::hold_the_grant`]. A piece of news is sent from nine places: a
+/// stop, a rescue, an account out of window, a pull request, three roadmap moves,
+/// a Conversation done. Between the deepest of them and here sit a session's
+/// relay loop and a limit watcher that hold a pool and a Nudge channel and
+/// nothing else on purpose, and threading a membership through the lot would put
+/// a parameter about a cluster through code that has never heard of one.
+///
+/// **Keyed by the store, because that is what says which Verkstead the news
+/// happened in**, and it is the one thing every one of those places has in hand.
+/// A served process holds exactly one entry; a suite holds one per Verkstead it
+/// stood up, which is what lets two of them tell each other news in one process
+/// without either answering out of the other's membership.
+static THE_CLUSTER: LazyLock<Mutex<HashMap<PathBuf, crate::device::Devices>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Hold `devices` as the cluster the news written into `pool` is owed to.
+///
+/// Called once as the server comes up, with the handle the Devices section is
+/// answered out of — see `crate::run_on_keyed`. A Verkstead that is linked to
+/// nothing still holds one: what makes the difference is that its membership has
+/// no rows, which is a walk over nothing rather than a thing to check for here.
+pub fn hold_the_cluster(pool: &SqlitePool, devices: &crate::device::Devices) {
+    THE_CLUSTER
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .insert(keyed(pool), devices.clone());
+}
+
+/// And the cluster the news written into `pool` is owed to, where one is held.
+///
+/// `None` is every router stood up without a Data Directory — a suite's, which
+/// invented no identity and holds no membership — and a server between opening
+/// its database and reading its identity. Neither is a cluster with nobody in it:
+/// it is a Verkstead with nobody to tell.
+fn cluster_of(pool: &SqlitePool) -> Option<crate::device::Devices> {
+    THE_CLUSTER
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .get(&keyed(pool))
+        .cloned()
+}
+
+/// What a pool is held under: the database file it is open on.
+///
+/// One Verkstead is one Data Directory and one database in it, so this is that
+/// Verkstead said in the one term a caller here has — see [`THE_CLUSTER`].
+fn keyed(pool: &SqlitePool) -> PathBuf {
+    pool.connect_options().get_filename().to_path_buf()
 }
 
 /// What a push about something that is not a piece of work is saying.
@@ -403,6 +517,79 @@ impl Word {
     }
 }
 
+/// Tell every subscribed device a piece of news a member has just told this one,
+/// without making the member wait for it (ADR-0020, *The opened device relays*).
+///
+/// **The third entry point beside [`News`] and [`Word`]**, and the one thing that
+/// makes it its own: the sentence was written on another machine. Nothing here
+/// chooses what the news *is* — there is no variant to match on, which is exactly
+/// what lets a member running a newer Verkstead tell this one about a kind of news
+/// it has never heard of. What this device decides is the two things that are its
+/// own: the title, which leads with the device the news came from, and the path,
+/// which is that device's own URL for the Conversation.
+///
+/// Returns as soon as the work is handed to the runtime, exactly as the three
+/// above it do: the route's job is to answer the member, and a push service that
+/// cannot be reached costs a notification and nothing else.
+///
+/// **And nothing goes on from here.** The news stops at this device: in a cluster
+/// everybody holds a link to everybody, so a device passing on what a third one
+/// told it would be saying that news was its own — which is why this does not go
+/// through [`say`], the one place that spreads.
+pub(crate) fn heard_from(pool: &SqlitePool, device: &str, name: &str, news: RelayedNews) {
+    let pool = pool.clone();
+    let path = format!("/devices/{device}/conversations/{}", news.conversation);
+    let title = relayed(name, &news.said);
+    let device = device.to_owned();
+
+    tokio::spawn(async move {
+        let notice = Notice {
+            path,
+            title: &title,
+
+            // The repository the member named, which stands under a relayed title
+            // exactly as it stands under a local one: what tells two
+            // notifications apart at a glance is the same thing whichever machine
+            // the work is on.
+            project: news.project.as_deref(),
+        };
+
+        let notice = match serde_json::to_vec(&notice) {
+            Ok(notice) => notice,
+            Err(error) => {
+                tracing::error!(device, error = ?error, "the push notice could not be built");
+                return;
+            }
+        };
+
+        if let Err(error) = notify(&pool, &format!("news from device {device}"), &notice).await {
+            tracing::error!(
+                device,
+                error = ?error,
+                "telling the devices what a member said failed",
+            );
+        }
+    });
+}
+
+/// A member's news as this device's lock screens read it: the device it came
+/// from, and then what it said.
+///
+/// **The device leads**, because that is the whole of what a relayed notification
+/// adds: the human has one phone for a cluster, and which machine the work was on
+/// is what they are reading the title for. A push about this device's own work
+/// carries no device at all — see [`News::title`], which is unchanged — so the
+/// mark of a member's news is that something is in front of the sentence.
+///
+/// **And both halves are bounded**, which is the rule [`fitting`] was written
+/// for, here applied twice: a relayed title is the one this tree writes where
+/// *neither* the name nor the sentence is its own. A member that called itself
+/// something enormous, or sent a sentence that was not one, is cut rather than
+/// allowed to be the whole of a lock screen.
+fn relayed(device: &str, said: &str) -> String {
+    format!("{} — {}", fitting(device), fitting_sentence(said))
+}
+
 /// How much of a name a title will carry.
 ///
 /// Forty, which is the longest a name can be before the sentence around it goes
@@ -417,20 +604,48 @@ const A_NAME: usize = 40;
 /// A name as a title will carry it: whole where it fits, and cut with an ellipsis
 /// where it does not.
 ///
-/// **Because this is the one thing in a notification that a stranger wrote.** A
+/// **Because this is a thing in a notification that another machine wrote.** A
 /// device asking to link is a non-member by definition, and the name it gives is
-/// its own word for itself — so what stops it from being the whole of a lock
+/// its own word for itself; a member's news leads with the name that member said
+/// at its last exchange. Either way what stops it from being the whole of a lock
 /// screen is this rather than anything the far end did.
+fn fitting(name: &str) -> String {
+    cut_to(name, A_NAME)
+}
+
+/// How much of a sentence another machine wrote a title will carry.
+///
+/// Eighty, which is what a lock screen shows whole — the width every title here
+/// is written to. A sentence longer than that is one the phone would cut anyway,
+/// so cutting it here loses nothing the human would have read and stops a member
+/// from being a paragraph on somebody's lock screen. It is not a bound on what a
+/// member may *send*: the route that takes one has its own, in
+/// [`crate::peer::news`], and it is generous enough to hold any title this tree
+/// writes.
+///
+/// A relayed title therefore runs past eighty where the device's name and the
+/// sentence together do — as a local title already runs past it where the branch
+/// in it is long. What the two bounds are for is the half of a title this machine
+/// did not write, rather than the width, which the branch decided long ago.
+const A_SENTENCE: usize = 80;
+
+/// The same for a sentence — see [`A_SENTENCE`].
+fn fitting_sentence(said: &str) -> String {
+    cut_to(said.trim(), A_SENTENCE)
+}
+
+/// A string as a title will carry it: whole where it fits `most` characters, and
+/// cut with an ellipsis where it does not.
 ///
 /// Counted in characters rather than bytes, and cut on one: a name in kanji is
 /// forty characters like any other, and cutting a string mid-character would
 /// panic rather than shorten anything.
-fn fitting(name: &str) -> String {
-    if name.chars().count() <= A_NAME {
-        return name.to_owned();
+fn cut_to(said: &str, most: usize) -> String {
+    if said.chars().count() <= most {
+        return said.to_owned();
     }
 
-    name.chars().take(A_NAME).collect::<String>() + "…"
+    said.chars().take(most).collect::<String>() + "…"
 }
 
 /// Tell every subscribed device something that happened to this machine, without
@@ -656,7 +871,7 @@ fn signed(private_key: &str, claims: &[u8]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{JWT_HEADER, News, Word, audience, signed};
+    use super::{JWT_HEADER, News, Word, audience, relayed, signed};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use p256::ecdsa::signature::Verifier;
@@ -799,6 +1014,86 @@ mod tests {
             .title(),
             "laptop is asking to link with this device",
         );
+    }
+
+    /// A member's news reads as a member's: the device in front of the sentence
+    /// it sent, and the sentence itself left as the machine that wrote it wrote
+    /// it.
+    #[test]
+    fn a_members_news_leads_with_the_device_it_came_from() {
+        assert_eq!(
+            relayed("the-laptop", "pwa-and-push is done"),
+            "the-laptop — pwa-and-push is done",
+        );
+    }
+
+    /// And a title about this device's own work carries no device, which is the
+    /// other half of that: what says a notification is a member's is that
+    /// something is in front of the sentence, so nothing may be in front of a
+    /// local one.
+    #[test]
+    fn this_devices_own_news_has_no_device_in_front_of_it() {
+        for title in all().iter().map(|news| news.title("pwa-and-push")) {
+            assert!(
+                !title.contains(" — "),
+                "a local title reading like a relayed one: {title:?}",
+            );
+        }
+    }
+
+    /// And a member that calls itself something enormous is cut to fit rather
+    /// than allowed to be the whole of a lock screen — the same bound a device
+    /// asking to link is held to, and for the same reason: the name is a string
+    /// another machine wrote.
+    #[test]
+    fn a_members_name_is_cut_to_fit_a_lock_screen() {
+        let title = relayed(&"l".repeat(400), "pwa-and-push is done");
+
+        assert!(
+            title.starts_with(&format!("{}…", "l".repeat(40))),
+            "the name has to be cut rather than carried whole: {title:?}",
+        );
+        assert!(
+            title.ends_with("— pwa-and-push is done"),
+            "the sentence has to survive the cutting: {title:?}",
+        );
+    }
+
+    /// And so is a sentence that is not one. It is the other half of a relayed
+    /// title another machine wrote, so it is bounded for that reason rather than
+    /// trusted to be a title.
+    #[test]
+    fn a_sentence_a_member_sent_is_cut_to_fit_a_lock_screen() {
+        let title = relayed("the-laptop", &"s".repeat(4000));
+
+        assert!(
+            title.chars().count() <= 40 + " — ".chars().count() + 80 + 1,
+            "a relayed title with no bound on the sentence in it: {}",
+            title.chars().count(),
+        );
+        assert!(
+            title.starts_with("the-laptop — "),
+            "the device still leads it: {title:?}",
+        );
+        assert!(
+            title.ends_with('…'),
+            "a sentence that was cut says so: {title:?}",
+        );
+    }
+
+    /// A relayed title of the two things they really are — a hostname and one of
+    /// the titles above — fits the lock screen every other title here is written
+    /// to.
+    #[test]
+    fn a_relayed_title_of_real_words_is_shown_whole() {
+        for said in all().iter().map(|news| news.title("pwa-and-push")) {
+            let title = relayed("the-laptop", &said);
+
+            assert!(
+                title.chars().count() <= 80,
+                "a title a lock screen would cut off mid-sentence: {title:?}",
+            );
+        }
     }
 
     #[test]

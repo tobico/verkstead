@@ -561,7 +561,44 @@ impl Peers {
         .await
     }
 
-    /// What all three of those are: one call made to a member, at every address
+    /// And tell `member` something this device has just told its own phones,
+    /// which is what a piece of news worth a notification owes the cluster
+    /// (ADR-0020, *The opened device relays*).
+    ///
+    /// **A member's own call like the three above it**, and for their reason: it
+    /// goes down a link the far end has verified, and nobody over there presses
+    /// anything — see [`crate::peer::news`], which is what answers. A hub cannot
+    /// subscribe to a member's push instead, the subscriptions a device pushes to
+    /// being one of the three prefixes never served over the link.
+    ///
+    /// **What travels is a sentence rather than a variant**, so a news kind a
+    /// newer member has and this one has not still reads at the far end — see
+    /// [`verkstead_render::RelayedNews`]. And no device is on it: the certificate
+    /// this call is made under is what says which device the news is about, which
+    /// is also what stops a member passing a third one's news off as its own.
+    ///
+    /// The same walk down the addresses and the same reading of a member that
+    /// answers nowhere. What is not here is a retry, and here that is the whole
+    /// arrangement rather than a caller's business: a notification is only what
+    /// reaches a pocket, and a member that was switched off costs exactly what a
+    /// push service that could not be reached already costs.
+    pub async fn news(&self, member: &Member, news: &verkstead_render::RelayedNews) -> Result<()> {
+        self.telling(
+            member,
+            &format!(
+                "being told news about its cluster-mate's conversation {}",
+                news.conversation,
+            ),
+            |dialling, at| {
+                dialling
+                    .post(reaching(at, crate::peer::news::NEWS))
+                    .json(news)
+            },
+        )
+        .await
+    }
+
+    /// What all four of those are: one call made to a member, at every address
     /// the row holds and in the order it holds them, until one answers.
     ///
     /// **One walk rather than one per thing said.** What differs between an

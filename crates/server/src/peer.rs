@@ -78,6 +78,7 @@ pub mod announcing;
 pub mod dialling;
 pub mod exchange;
 pub mod joining;
+pub mod news;
 pub mod renewing;
 pub mod unlinking;
 pub mod workbench;
@@ -283,8 +284,9 @@ impl Listener {
 /// [`exchange`]. Nothing grows that list afterwards: a member's relayed traffic
 /// goes the other way, inside [`members_only`] with the gate over it, and so
 /// does every call the stages after this one add — the announcement in
-/// [`announcing`], where a member names a newcomer to this one, and the whole of
-/// the viewer's own namespace, which is what `workbench` is.
+/// [`announcing`], where a member names a newcomer to this one, the news in
+/// [`news`], where one tells this device something worth a phone, and the whole
+/// of the viewer's own namespace, which is what `workbench` is.
 ///
 /// `workbench` is that namespace over this device's state, built outside for the
 /// reason `nudges` is made outside: it is the state the *other* listener answers
@@ -427,10 +429,13 @@ struct Answering {
 /// that reads as working code. So there is one call, and everything that goes
 /// through it is gated.
 ///
-/// Two things on this listener. One is a membership said three ways: the
+/// Three things on this listener. One is a membership said three ways: the
 /// announcement in [`announcing`], which puts a device on this one's list, the
 /// unlink in [`unlinking`], which takes one off it, and the renewal in
-/// [`renewing`], which changes the certificate one of them stands under. The
+/// [`renewing`], which changes the certificate one of them stands under. One is
+/// a member's news, in [`news`], which is a device saying that something worth a
+/// phone has happened to a piece of its work — mounted with the namespace below
+/// because it answers out of that same state. The
 /// other is the viewer's own namespace, which is a member reaching this device's
 /// whole workbench over the link it already holds — see [`workbench`]. It is
 /// public all the same, because
@@ -696,6 +701,30 @@ impl Members {
 
             Recorded::Stated(_) => Ok(Vec::new()),
         }
+    }
+
+    /// And which member presented `fingerprint`, where one did.
+    ///
+    /// **Read off the certificate rather than off a payload**, which is the whole
+    /// of why this is here: an id is a string anybody may write, and what a
+    /// member *is* on this listener is the certificate the handshake took from
+    /// it. So every route that has to know *which* member is calling — a renewal
+    /// of that member's own certificate, a piece of news it is telling its
+    /// members — asks this rather than reading a name off the body.
+    ///
+    /// **And the certificate a changeover is changing *from* answers too.** A
+    /// device in the middle of one goes on presenting the one every member holds
+    /// until the last of them has acknowledged the new one, so a member matched
+    /// on the new fingerprint alone would be a member unrecognised for the length
+    /// of somebody else's changeover — see [`verkstead_store::Member::renewing_from`].
+    ///
+    /// `None` is a caller through the gate and off the list a moment later, which
+    /// is an unlink between the two readings.
+    pub(crate) async fn presenting(&self, fingerprint: &str) -> Result<Option<Member>> {
+        Ok(self.rows().await?.into_iter().find(|member| {
+            member.fingerprint == fingerprint
+                || member.renewing_from.as_deref() == Some(fingerprint)
+        }))
     }
 
     /// Write down what a member said about itself at an exchange that has just

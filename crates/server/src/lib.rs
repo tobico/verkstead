@@ -195,7 +195,9 @@ mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
-mod push;
+/// Telling the phones what happened while nobody was watching — and, in a
+/// cluster, telling the members so that one phone hears from all of them.
+pub mod push;
 /// Where the human just dropped one row of the merged sidebar: the **Rank**
 /// minted here and written to the device that owns the row.
 mod ranking;
@@ -2315,11 +2317,20 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         async move { devices.stay_fresh(nudges).await }
     });
 
+    // And the cluster left where a notification can reach it, which is the one
+    // thing in a cluster that is set off from the far end of the tree: a stop, a
+    // rescue or a roadmap moving on sends a push, and in a cluster it owes the
+    // same sentence to every member so that a phone installed from any one device
+    // hears from all of them (ADR-0020, *The opened device relays*) — see
+    // [`push::hold_the_cluster`], which says why it is held rather than threaded
+    // through a session's relay loop.
+    push::hold_the_cluster(&pool, &devices);
+
     let Routers {
         workbench: app,
         over_the_link,
     } = routers_with_ui(
-        pool,
+        pool.clone(),
         config.releases(),
         data_dir,
         Agents::new(

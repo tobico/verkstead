@@ -1529,6 +1529,33 @@ keeps what it last read and goes stale, exactly as it does when its own stream
 is down. What goes over the **Peer Listener** is this device's own news alone —
 in a cluster everybody holds a stream to everybody, so a device passing on what
 a third one told it would be saying that news was its own.
+**And news worth a phone goes the other way, as the news happens.** A device that
+has just told its own browsers something — a run stopped, a session gone idle, an
+account out of window, work on a pull request, a roadmap moved on or run out, a
+Conversation done — tells every **Member** the same sentence over the **Peer
+Listener**, behind the **Member Gate** with the announcement and the renewal, and
+each of them pushes it to its own phones. Which is what makes one phone enough for
+a cluster: a phone is installed from one device and subscribes to *that* device's
+browsers, and the subscriptions a device pushes to are one of the three prefixes
+never served over the link, so a hub cannot subscribe to a member's push instead. A
+**Nudge** is the wrong carrier for it by construction — it says what kind of thing
+moved and never what it was, and a notification is a sentence.
+**The device leads the title** — *the-laptop — pwa-and-push is done* — so that a
+lock screen says which machine the work was on, while a device's own news carries
+nothing in front of it. The receiving device writes that title rather than passing
+a sentence through untouched, and bounds both the name and the sentence the way a
+title already bounds the one thing in a notification that another machine wrote.
+**What travels is prose**, so a news kind a newer member has and this one has not
+still reads; and no device is on it, the certificate the call was made under being
+what says whose news it is. **And the tap is routed onto the sending device's own
+segment**, `/devices/{device}/conversations/{id}`: a path taken verbatim would open
+the receiver's Conversation of the same number, ids being each device's own.
+It goes out behind the local push, which is behind the record, and **a member that
+is off costs the notification and nothing else** — nothing is queued and nothing is
+retried, which is what a push service that cannot be reached already costs, and the
+**Timeline** says it in full either way. Nothing is passed on: a device tells its
+own phones what a member told it and no third machine, for the reason the streams
+above carry each device's own news alone.
 _Avoid_: proxy, forwarding, tunnel, the bridge (which is the socket half of it
 alone), remote mode
 

@@ -1308,6 +1308,64 @@ impl Devices {
         }
     }
 
+    /// Tell every member a piece of news this device has just told its own
+    /// phones, so that a phone installed from any one device in the cluster
+    /// hears from all of them (ADR-0020, *The opened device relays*).
+    ///
+    /// **Here because the two things it is made of are here**: the membership it
+    /// works down, and the dial it makes at each member's addresses. What is
+    /// being said is [`crate::push`]'s — the sentence it wrote for this device's
+    /// own lock screens — and this is the cluster it is owed to.
+    ///
+    /// **Behind the local push, never in front of it**, which is the same bargain
+    /// a push service is already on: the record was written before any of this
+    /// started, and a machine that cannot be reached costs a notification and
+    /// nothing else.
+    ///
+    /// **And nothing is queued and nothing is retried**, which is where this
+    /// parts company with the announcement and the renewal above it. Those two
+    /// are a *membership* said over the link, so a member that was off is owed
+    /// the telling until it answers; a notification is only what reaches a
+    /// pocket, and one that was not delivered is not worth showing an hour
+    /// later. The Timeline says it in full on the device the work is on either
+    /// way.
+    ///
+    /// A member that answers at none of its addresses is dimmed by the dial
+    /// itself, exactly as every other call here dims one — see
+    /// [`Peers::news`].
+    pub(crate) async fn spread(&self, news: &verkstead_render::RelayedNews) {
+        let members = match self.members.rows().await {
+            Ok(members) => members,
+
+            Err(why) => {
+                tracing::error!(%why, "the members a piece of news is owed could not be read");
+
+                return;
+            }
+        };
+
+        for member in &members {
+            match self.peers.news(member, news).await {
+                Ok(()) => tracing::debug!(
+                    device = %member.device,
+                    conversation = news.conversation,
+                    "a member was told news worth a phone",
+                ),
+
+                // Logged and left, because there is nothing else to do with it:
+                // the device's own phones have been told, the record is written,
+                // and a machine that is switched off is that machine's business.
+                Err(why) => tracing::info!(
+                    %why,
+                    device = %member.device,
+                    conversation = news.conversation,
+                    "a member could not be told news worth a phone, which costs it the \
+                     notification and nothing else",
+                ),
+            }
+        }
+    }
+
     /// Tell every member that has yet to acknowledge it about the certificate
     /// this device is changing over to, and finish the changeover if that was the
     /// last of them (ADR-0020, *The certificate is renewed before it runs out*).
