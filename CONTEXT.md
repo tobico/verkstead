@@ -466,7 +466,15 @@ API's to say, being kept in a key of its own that the value knows nothing about:
 a human who turns Verkstead off in Task Manager's **Startup apps** has unticked
 the box, exactly as one who turns off a Linux entry with their desktop's own
 settings has, and the rewrite at a launch leaves it alone rather than putting
-back what they took away.
+back what they took away. **What the two halves cannot both answer is an app
+that has moved *and* was switched off**: the list the second half reads is of
+the values naming the executable that is running, so a value naming where the
+app used to be carries no answer about its switch at all, and the box reads on.
+The rewrite then heals the path and clears the switch with it. Left that way
+knowingly — Explorer keeps on or off in the bytes of a value the registry read
+here only says the presence of — because the choice is between a moved app that
+never heals and one that heals too much, and a registration pointing at a
+binary that is gone starts nothing at all.
 **And a Mac can hold a registration that is there off.** The login item is
 `SMAppService` from macOS 13, which reports a `status` beside it: a
 `requires-approval` registration is in place, is not starting Verkstead, and is

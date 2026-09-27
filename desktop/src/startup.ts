@@ -440,6 +440,24 @@ export function startup(
       // executable — so an app that has moved would read as unregistered and
       // never heal. Whether the value has been switched off in Task Manager is
       // Electron's to say, that being kept in a key of Explorer's own.
+      //
+      // **And the one case the two halves cannot both answer is an app that
+      // has moved *and* was switched off.** The list the second half reads is
+      // of the values naming the executable that is running, so a value naming
+      // where the app used to be is not in it at all — no `enabled` to read,
+      // [`switchedOff`] answers `false`, and this reads on. [`Startup.refresh`]
+      // then rewrites the registration, which clears the disable: the human
+      // gets Verkstead back at their next sign-in having switched it off.
+      //
+      // Left as it is, because the reading that would catch it is not one this
+      // app can make. Explorer keeps on or off in the *bytes* of a value under
+      // `StartupApproved\Run`, where [`Registry`](./registry.js) answers
+      // whether a value is there and nothing more — and a value's presence
+      // there says only that somebody has touched the switch, either way. So
+      // the honest choice is between a moved app that never heals and a moved
+      // app that heals too much, and this takes the second: a registration
+      // pointing at a binary that is gone is a sign-in that starts nothing at
+      // all, where this is one the human can switch off again.
       return registry.has(RUN, VALUE) && !switchedOff(login.values());
     }
 
