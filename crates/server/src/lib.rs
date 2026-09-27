@@ -200,8 +200,9 @@ mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.
 mod stops;
-/// What a **Review** Conversation is to take up, read out of the Brief: the
-/// first pull request URL or bare `#number` in it.
+/// What a **Review** Conversation is to take up: the **Target** field read at the
+/// press, and the Brief read for the pull request URL or bare `#number` that
+/// fills that field while it is empty.
 mod targets;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one

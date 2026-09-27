@@ -428,7 +428,6 @@ export async function create(
   // page left on Develop sends nothing, exactly as a role left on its prefill
   // does, and the server's own reading of a Conversation with no row of its own
   // is what stands.
-  //
   if (state.process !== null) {
     const outcome = await pickProcess(id, state.process);
     said(

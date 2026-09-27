@@ -4422,9 +4422,10 @@ pub enum Adopted {
 /// origin does not, or somebody else standing on it.
 ///
 /// And the ones in front of all of those, which an adoption has no equivalent
-/// of: a stage is named by the row that was pressed, where a Review's target is
-/// named in the Brief and resolved through `gh` at the press. So this list
-/// begins with what the Brief said and what GitHub made of it.
+/// of: a stage is named by the row that was pressed, where a Review is pointed at
+/// its work in the **Target** field — typed in, or filled out of a Brief that
+/// named a pull request — and what that field holds is read at the press. So this
+/// list begins with what the field said and what GitHub made of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum TakenUp {

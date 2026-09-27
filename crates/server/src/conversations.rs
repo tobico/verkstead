@@ -2760,17 +2760,9 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     );
 
     // A Conversation moved, so every page drawing it says so without being
-    // reloaded: its own, and the row it has in the sidebar.
-    //
-    // **Not the level under the compose box**, which has one row fewer free in
-    // it and goes on saying otherwise until it is opened again. That is the
-    // viewer's own decision and a deliberate one — the level is a `gh` per
-    // registered Repo, so a Nudge that re-read it would be a call out to GitHub
-    // every time anything anywhere moved, and it is read on open and reopen
-    // instead. See `Compose.tsx`, where it is taken. What a stale row leads to
-    // is a take-up refused by name rather than a second wrap-up over the same
-    // branch: the head branch is checked out by then, and git holds one
-    // checkout per branch.
+    // reloaded: its own, and the row it has in the sidebar. Nothing else draws
+    // what was taken up — there is no list of open pull requests any more, and a
+    // compose page holds a Target somebody typed rather than a row off one.
     state
         .nudges
         .announce(Nudge::Conversation { conversation: id });
