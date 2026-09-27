@@ -37,6 +37,13 @@
 //! what a *third* device said would be saying it was this device's: in a cluster
 //! everybody holds a stream to everybody, so the news of C reaches every member
 //! from C itself.
+//!
+//! **And one word of this device's own stops here too**: the merged sidebar
+//! catching up, which is this device saying that the account it holds of a member
+//! has been re-read and its own pages have something new to draw. Sent, it would
+//! read on the far end as this device's Conversations moving, and the two devices
+//! would tell each other about each other for ever — see [`Nudged::only_here`],
+//! and [`Nudges::announce_here`], which is how a caller says it.
 
 use std::convert::Infallible;
 use std::time::Duration;
@@ -109,6 +116,21 @@ impl Nudges {
         let _ = self.0.send(Nudged::of(device, moved));
     }
 
+    /// And this device's own news that is **its own business**: told to the pages
+    /// in front of it and to no member.
+    ///
+    /// What it is for is the merged sidebar catching up — this device having
+    /// re-read the list it holds of a member, and its own pages having something
+    /// new to draw for it (see [`crate::merging`]). Said as ordinary news it
+    /// would go down the stream a member holds and read over there as *this
+    /// device's Conversations moved*, which would have that member re-read this
+    /// device's list and tell its own pages, which is news back over here, and
+    /// round for ever — see [`Nudged::only_here`], which is where that is set
+    /// out, and [`nudges`], which is the filter that keeps it here.
+    pub(crate) fn announce_here(&self, moved: Nudge) {
+        let _ = self.0.send(Nudged::only_here(moved));
+    }
+
     /// Listen to what is announced. The stream is one listener; a test that
     /// wants to know whether a caller told the pages anything is another.
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Nudged> {
@@ -127,12 +149,18 @@ impl Default for Nudges {
 ///
 /// **The one endpoint in this namespace that answers the two listeners
 /// differently**, and the difference is one filter: what goes over the Peer
-/// Listener is this device's own news, where a browser's stream carries that and
-/// every member's besides. A device that passed on what a *third* device told it
-/// would be saying a stream's news was its own, and the reader would re-announce
-/// it under the wrong Device Id — while there is nothing to pass on in the first
-/// place, a cluster being a membership every device holds the whole of: the news
-/// of C reaches every member from C's own stream.
+/// Listener is this device's own news that is not being kept here, where a
+/// browser's stream carries that and every member's besides.
+///
+/// Two things stop at this device and the filter is one line for both. A
+/// *member's* news would, passed on, be saying a stream's news was this device's,
+/// and the reader would re-announce it under the wrong Device Id — while there is
+/// nothing to pass on in the first place, a cluster being a membership every
+/// device holds the whole of: the news of C reaches every member from C's own
+/// stream. And this device's own account of a member having caught up is nobody's
+/// news at all: sent, it would read over there as this device's Conversations
+/// moving, and the two devices would tell each other about each other for ever —
+/// see [`Nudged::only_here`].
 ///
 /// Which listener this is, is [`OverTheLink`] — put beside the request by the
 /// router a member reaches, and absent from the one a browser does.
@@ -146,7 +174,7 @@ pub(crate) async fn nudges(
     // the page is still opening the stream is one it hears rather than one that
     // slips past it.
     let moved = BroadcastStream::new(state.nudges.subscribe()).filter(move |moved| match moved {
-        Ok(moved) => !its_own_news || moved.device.is_none(),
+        Ok(moved) => !its_own_news || !moved.kept_here,
         // Kept, because what it says is that this reader fell behind, and
         // the take-while below is what reads it — see there.
         Err(_) => true,

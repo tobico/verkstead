@@ -2076,6 +2076,10 @@ mod tests {
                 Ok(Nudged {
                     device: None,
                     moved: Nudge::Commit { conversation: told },
+                    // Ordinary news, so it goes to the members as well as to the
+                    // pages here — see `nudge::Nudges::announce_here`, which is
+                    // the one word that does not.
+                    kept_here: false,
                 }) if told == conversation
             ),
             "and the pages were told to look again",

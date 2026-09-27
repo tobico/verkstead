@@ -95,6 +95,13 @@ const WAITING: Duration = Duration::from_secs(10);
 /// And how often it looks while it waits.
 const LOOKING: Duration = Duration::from_millis(50);
 
+/// And how long a test waits to be sure a Nudge is *not* coming.
+///
+/// Far longer than the hop it is watching for: a word that crossed the link is
+/// announced by the far end the instant it comes off the stream, which is one
+/// loopback hop rather than a read of anything.
+const SETTLING: Duration = Duration::from_secs(2);
+
 /// One Verkstead: its store, its identity, the Nudge channel its own pages and
 /// its members both read, and both of the routers standing over its one state.
 struct Verkstead {
@@ -654,6 +661,33 @@ impl Listening {
         }
     }
 
+    /// Insist that no Nudge saying `device`'s Conversations moved ever arrives.
+    ///
+    /// What it is watching for is the word this device tells its own pages having
+    /// crossed the link — see
+    /// [`the_word_that_a_members_list_has_landed_stops_at_this_device`]. A device
+    /// that heard it would announce it under the device it came from, which is
+    /// this frame, and nothing else in the test that asks makes one.
+    async fn no_word_of(&mut self, device: &str) {
+        let looking = serde_json::json!({ "device": device, "kind": "conversations" });
+
+        let arrived = tokio::time::timeout(SETTLING, async {
+            loop {
+                let frame = self.frame().await;
+
+                if frame.starts_with("event: nudge") && said(&frame) == looking {
+                    return frame;
+                }
+            }
+        })
+        .await;
+
+        assert!(
+            arrived.is_err(),
+            "the word that a member's list had landed crossed the link: {arrived:?}",
+        );
+    }
+
     /// The next Nudge this device announced about its **own** world: one naming a
     /// device is a member's news said again, and a page hearing that has nothing
     /// new of this device's to read yet.
@@ -813,6 +847,39 @@ async fn the_sidebar_is_told_again_once_a_members_list_has_landed() {
         ["the-cross-device-drag", "the-merged-list"],
         "the list a page reads back on that Nudge holds the member's row",
     );
+}
+
+/// And that word stops at this device: it is told to the pages in front of it and
+/// to no member of its cluster.
+///
+/// **Because sent, it would go round for ever.** It names no device, so on the
+/// stream a member holds it would read as *this device's Conversations moved* —
+/// that member would announce it under this device, re-read this device's list,
+/// and tell its own pages, which is the word back over here, a relayed read
+/// apiece every time. And a member has no use for it either way: its own list is
+/// its own, and this is only this device's account of it catching up.
+///
+/// Watched from B, which is where it would land: B holds a stream to A, so a word
+/// of A's that crossed is one B announces under A. Nothing else here makes that
+/// frame — A starts nothing and is pressed for nothing, and all it does is read
+/// the list B has just moved.
+#[tokio::test]
+async fn the_word_that_a_members_list_has_landed_stops_at_this_device() {
+    let (a, b) = linked_up().await;
+    let _here = a.holding();
+    let _there = b.holding();
+
+    let there = b.holding_a_repo().await;
+
+    let mut page = Listening::open(&b.workbench).await;
+
+    b.starts(there, "the-merged-list").await;
+
+    // A hears that, reads B's list, and tells its own pages — which is the word
+    // under test, and by the time the row is on A's sidebar it has been said.
+    a.sidebar_saying(|rows| rows.len() == 1).await;
+
+    page.no_word_of(A).await;
 }
 
 /// Two Conversations the two devices each numbered 1 are two rows, and what

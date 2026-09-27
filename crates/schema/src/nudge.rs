@@ -174,6 +174,19 @@ pub struct Nudged {
     /// And what moved, which is the whole of what a Nudge says.
     #[serde(flatten)]
     pub moved: Nudge,
+
+    /// Whether this one is for this device's own pages and for no member of its
+    /// cluster — see [`Nudged::only_here`].
+    ///
+    /// **Never on the wire**, which is what makes it safe to have at all: it is
+    /// read where a stream decides what to carry and nowhere else, so no page
+    /// and no Verkstead ever sees it and the frame a browser has been reading
+    /// since ADR-0009 is untouched. Skipped rather than flattened away for that
+    /// reason — a field a member could set would be a member deciding what this
+    /// device tells its own pages.
+    #[serde(skip)]
+    #[cfg_attr(feature = "typescript", ts(skip))]
+    pub kept_here: bool,
 }
 
 impl Nudged {
@@ -183,6 +196,7 @@ impl Nudged {
         Nudged {
             device: None,
             moved,
+            kept_here: false,
         }
     }
 
@@ -191,6 +205,33 @@ impl Nudged {
         Nudged {
             device: Some(device.to_owned()),
             moved,
+            kept_here: true,
+        }
+    }
+
+    /// And this device's own news that is **this device's own business**: told to
+    /// the pages in front of it and to no member of its cluster.
+    ///
+    /// **The one thing a member must not hear.** What it is for is the merged
+    /// sidebar catching up — this device having re-read the list it holds of a
+    /// member, and its own pages having something new to draw because of it (see
+    /// `server::merging`). Said as ordinary news it would go down the stream a
+    /// member holds, where it would read as *this device's Conversations moved*:
+    /// that member would announce it under this device, re-read this device's
+    /// list, and tell *its* pages — which is news back over here again, and round
+    /// for ever, a relayed read apiece every time.
+    ///
+    /// **Not the same thing as a member's news, which is kept here for its own
+    /// reason.** That one is a *third* device's, and passing it on would be
+    /// claiming it; this one is nobody's news at all, only an account that has
+    /// caught up. Both stop at this device and the stream tells them apart by
+    /// nothing: it carries what is this device's own and not marked as staying
+    /// here.
+    pub fn only_here(moved: Nudge) -> Nudged {
+        Nudged {
+            device: None,
+            moved,
+            kept_here: true,
         }
     }
 }

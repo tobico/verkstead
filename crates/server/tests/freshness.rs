@@ -394,7 +394,7 @@ impl Listening {
             loop {
                 let frame = self.frame().await;
 
-                if frame.starts_with("event: nudge") {
+                if frame.starts_with("event: nudge") && !catching_up(&said(&frame)) {
                     return said(&frame);
                 }
             }
@@ -409,7 +409,7 @@ impl Listening {
             loop {
                 let frame = self.frame().await;
 
-                if frame.starts_with("event: nudge") {
+                if frame.starts_with("event: nudge") && !catching_up(&said(&frame)) {
                     return frame;
                 }
             }
@@ -418,6 +418,27 @@ impl Listening {
 
         assert!(arrived.is_err(), "an unwanted Nudge arrived: {arrived:?}");
     }
+}
+
+/// Whether a Nudge is the merged sidebar saying it has caught up, which is what
+/// this suite reads past.
+///
+/// **Not what this suite is about, and said whenever it is.** A's held list of B
+/// is re-read on every Nudge of B's that moves a sidebar, and A tells its own
+/// pages once it has — see `server::merging`, and `tests/merging.rs`, which is
+/// where that word is asserted. Here it is traffic behind the thing under test:
+/// every assertion below is about *whose* news a frame says it is, and this one
+/// is about nobody's — only that an account has caught up.
+///
+/// Read off the frame rather than counted, because when it lands is the hub's
+/// business: it follows a relayed read, so it may arrive before or after the news
+/// that set it going.
+///
+/// It is this device's own and unscoped, which is what tells it from the two
+/// things this suite would want to see: a member's word carries that device, and
+/// every local frame asserted below names a Conversation.
+fn catching_up(said: &serde_json::Value) -> bool {
+    said == &json!({ "kind": "conversations" })
 }
 
 /// What one frame said: the JSON of its `data` line, read as the page reads it.

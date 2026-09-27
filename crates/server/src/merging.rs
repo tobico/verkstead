@@ -35,6 +35,12 @@
 //! [`crate::ranking`] takes after it puts a rank it has just written onto a held
 //! list, and for the same reason.
 //!
+//! **And that announcement is kept to this device's own pages.** It is about the
+//! account this device holds rather than about anybody's work, and a member sent
+//! it would read it as this device's Conversations moving — so it would re-read
+//! this device's list and say so, which is the word back over here, and round for
+//! ever. See [`crate::nudge::Nudges::announce_here`].
+//!
 //! **A member that answers nothing holds whatever it last said.** A read that
 //! could not be made leaves the held list exactly as it is — the rows stay on
 //! the merged list, drawn dimmed by the flag the row carries — and a member
@@ -464,10 +470,15 @@ async fn read_member(state: &AppState, device: &str) {
     // and what it drew was the merge as it stood before any of this landed. Said
     // the way [`crate::ranking`] says it after writing a rank onto a held list.
     //
-    // Naming no device, which is what keeps it out of the loop above: a Nudge
-    // with no device on it is a Nudge about no member's list, so this cannot set
-    // itself going again.
-    state.nudges.announce(Nudge::Conversations);
+    // **Kept to this device's own pages**, which is what stops it going round.
+    // It names no device, so as ordinary news it would go down the stream each
+    // member holds and read over there as this device's Conversations moving:
+    // that member would re-read this device's list, tell its own pages, and the
+    // word would be back over here — two devices telling each other about each
+    // other for ever, a relayed read apiece. And a member has no use for it
+    // either way: its own list is its own, and this is only this device's account
+    // of it catching up. See [`crate::nudge::Nudges::announce_here`].
+    state.nudges.announce_here(Nudge::Conversations);
 }
 
 /// One of those two reads, up to the bound: what `device` said, or nothing and a
