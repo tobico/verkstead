@@ -541,12 +541,16 @@ const ABOUT: Record<string, readonly string[]> = {
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section
-  // is a settings pane this sweep never opens.
-  joins: [],
-  // And the cluster moving with no join here to have moved it, which names the
-  // same Devices section and nothing else — a settings pane this sweep never
-  // opens either.
-  devices: [],
+  // is a settings pane this sweep never opens. The sidebar is, for the reason
+  // the kind below names it — an Allow settled is a membership that moved.
+  joins: [SIDEBAR],
+  // And the cluster moving with no join here to have moved it, which names that
+  // same Devices section — a settings pane this sweep never opens — and the
+  // sidebar. The membership decides which rows are on the merged list and
+  // whether any row carries a machine at all, so a device unlinked is its
+  // Conversations to take off the list and the last one unlinked is every
+  // remaining row to redraw without a device.
+  devices: [SIDEBAR],
   // And what is out there rather than in the cluster: a device nobody has typed
   // an address for was heard advertising itself, or one that had been heard
   // stopped. It names the Discovered list under that same section — not the

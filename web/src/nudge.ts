@@ -433,15 +433,27 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // same. And the Devices list beside it, because an Allow has just written a
     // member into it: the section on the Remote access pane is where the device
     // that was let in shows up, and nothing else would say so.
+    //
+    // And the sidebar, for the reason the kind below names it: a membership that
+    // has just gained its first member is every row of that list gaining a
+    // machine.
     case "joins":
-      return [["joins"], ["devices"]];
+      return [["joins"], ["devices"], ["conversations"]];
 
     // And the cluster moving with no join here to have moved it: a member of it
-    // named a device this one had not heard of, and it is a member now. Nobody
-    // over here pressed anything, so the Devices section is the whole of what
-    // this says — there is a row in it that was not there a moment ago.
+    // named a device this one had not heard of and it is a member now, a member
+    // said a device is out, a certificate was renewed, or Add or Remove was
+    // pressed on another workbench of this device's.
+    //
+    // **And the sidebar with it**, which is what the merged list made of this
+    // kind: the membership decides which rows are on that list at all and whether
+    // any row carries a machine, so a device unlinked is its Conversations to
+    // take off and the last one unlinked is every remaining row to redraw with no
+    // device on it. The server prunes the lists it holds against the membership
+    // every time a sidebar is asked for — see `merging.rs` — so what was missing
+    // was anything asking it.
     case "devices":
-      return [["devices"]];
+      return [["devices"], ["conversations"]];
 
     // And what is *out there* moving, which is a different list and a different
     // question: a device nobody has typed an address for was heard advertising
