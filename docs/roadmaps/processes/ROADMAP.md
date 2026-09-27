@@ -37,4 +37,4 @@ stage has landed, so the picker grows a row per stage — Fix Merge Issues from
 - [x] 04: Investigate — [brief](04-investigate.md)
 - [x] 05: Review — [brief](05-review.md)
 - [x] 06: Fix Merge Issues — [brief](06-fix-merge-issues.md)
-- [ ] 07: A stack of pull requests — [brief](07-a-stack-of-pull-requests.md)
+- [ ] 07: A stack of pull requests — [brief](07-a-stack-of-pull-requests.md) *(in progress: `roadmaps/processes/07-a-stack-of-pull-requests`)*
