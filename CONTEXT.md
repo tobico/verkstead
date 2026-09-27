@@ -1768,6 +1768,9 @@ a session meant to end on a pull request, while the branch has none open, or any
 companion repo the work committed in has none, GitHub out of reach reading as
 accepted. The companions are asked about here rather than only by the wrap-up
 afterwards, so the session that could open the missing one is still there to.
+And a **roadmap**'s own session is refused while the roadmap it wrote declares
+badly, the same way it is refused while the roadmap is not committed — see
+**Stage**, which has the four faults.
 
 A Blocking Ask of the session's own still open does not refuse it: the Set is
 locked unanswered, nothing being left to read the Answer. An accepted signal
@@ -2220,12 +2223,22 @@ brief: `after 01, 03` names other stages of the same roadmap by their labels as
 the roadmap writes them, and `no dependencies` is a root. The line may name a
 **platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
 details pane says what each stage stands on and names its platform where it has
-one. **Nothing acts on any of it yet**: every roadmap still runs in order, and
-placing a stage on a device that matches its platform is a follow-up once
+one. **Nothing schedules by any of it yet**: every roadmap still runs in order,
+and placing a stage on a device that matches its platform is a follow-up once
 cluster mode has landed. Every line of a declaring roadmap carries a
 declaration, a bare line there being a root and a forgotten declaration at once
 — and **a roadmap declaring nothing at all is one run in order**, which is every
-roadmap written before this and is read exactly as it was. See ADR-0021.
+roadmap written before this and is read exactly as it was.
+
+**And a roadmap that declares badly is refused**, in words a human can act on:
+a declaration on some lines and not others, an `after` naming no stage of the
+roadmap, a platform that is not one of `linux`, `macos` and `windows`, or a
+cycle. Judged over the whole file at once, because all-or-nothing is a fact
+about the file rather than about a line. In this stage the refusal is the
+roadmap session's own **Done signal**, beside the two already there — that the
+branch wrote no roadmap, and that the roadmap is not committed. Nothing repairs
+a roadmap and nothing falls back to running it in order, which would run one in
+a way nobody wrote down. See ADR-0021.
 
 **Its branch is named for where the stage lives**: `roadmaps/`, then the
 roadmap's own directory name, then the stage brief's filename —

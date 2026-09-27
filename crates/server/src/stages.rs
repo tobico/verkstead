@@ -715,6 +715,33 @@ fn briefs(directory: &Path) -> HashMap<u32, String> {
         .collect()
 }
 
+/// Why any of `names` — roadmaps of `worktree`, by directory name — declares
+/// badly, in the words [`declarations::judge`] refuses it in, or `None` where
+/// every one of them is a roadmap something could run.
+///
+/// The roadmaps this branch has written to, as [`touched`] hands them over,
+/// because that is the same reading the landing this stands beside is made of:
+/// a roadmap the branch is answerable for is one the session at this terminal
+/// can put right. In directory-name order, so a branch that wrote two of them
+/// and got both wrong is refused over the same one every time it signals.
+///
+/// A directory with no readable `ROADMAP.md` is nothing to judge, exactly as it
+/// is nothing to pin — see [`roadmap`]. And an undeclared roadmap is no fault at
+/// all: that is every roadmap written before any of this, and it runs strictly in
+/// order as it always did.
+///
+/// Blocking work: one file read per roadmap.
+pub(crate) fn misdeclared(worktree: &Path, names: &BTreeSet<String>) -> Option<String> {
+    names.iter().find_map(|name| {
+        let list = std::fs::read_to_string(worktree.join(ROADMAPS).join(name).join(INDEX)).ok()?;
+
+        match declarations::judge(name, &list) {
+            declarations::Judgement::Refused(why) => Some(why),
+            declarations::Judgement::Undeclared | declarations::Judgement::Declared(_) => None,
+        }
+    })
+}
+
 /// A roadmap in a registered Repo that nothing is driving, with the stage
 /// adopting it would start.
 ///
@@ -2169,6 +2196,38 @@ Turns this askance clone into Verkstead.
             repo.created().is_empty(),
             "and created none of it: the index was there before this branch was",
         );
+    }
+
+    /// Which of the roadmaps this branch has written to declares badly, in the
+    /// judgement's own words and naming the roadmap it is about.
+    ///
+    /// The undeclared one is no fault — that is every roadmap written before any
+    /// of this — and a directory under `docs/roadmaps/` with no index in it is
+    /// nothing to judge, exactly as it is nothing to pin.
+    #[test]
+    fn a_roadmap_declaring_badly_is_named_and_a_directory_is_not() {
+        let repo = Repo::with(&[]);
+
+        repo.write("mvp", MVP);
+        repo.brief("notes", "01-something.md", "# not a roadmap at all\n");
+
+        assert_eq!(
+            misdeclared(repo.path(), &repo.touched()),
+            None,
+            "a roadmap declaring nothing runs in order, and a directory is not a roadmap",
+        );
+
+        repo.write(
+            "parallel-stages",
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md) — after 02\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md) — after 01\n",
+        );
+
+        let why = misdeclared(repo.path(), &repo.touched()).expect("a cycle is refused");
+
+        assert!(why.contains("parallel-stages roadmap"), "{why}");
+        assert!(why.contains("01 stands on 02"), "{why}");
     }
 
     /// Whether the repository records a way to stack a stage on its predecessor

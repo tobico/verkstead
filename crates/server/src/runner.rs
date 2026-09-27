@@ -3544,20 +3544,32 @@ fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
         // pinned stage list is drawn by, so the list the human is watching and
         // the step the runner is waiting on cannot disagree.
         Landing::Roadmap(base) => {
-            if crate::stages::touched(worktree, base).is_empty() {
+            let touched = crate::stages::touched(worktree, base);
+
+            if touched.is_empty() {
                 return Some(format!(
                     "this branch has not written a roadmap under `{}`",
                     crate::stages::ROADMAPS,
                 ));
             }
 
-            return match pending(worktree, Path::new(crate::stages::ROADMAPS)) {
-                Some(false) => None,
-                _ => Some(format!(
+            if pending(worktree, Path::new(crate::stages::ROADMAPS)) != Some(false) {
+                return Some(format!(
                     "the roadmap under `{}` is not committed",
                     crate::stages::ROADMAPS,
-                )),
-            };
+                ));
+            }
+
+            // And the third thing asked of a landed roadmap: that what it
+            // declares is a roadmap something could run. Written and committed is
+            // not enough where the lines declare badly — a declaration on some
+            // lines and not others, an `after` naming no stage of the roadmap, a
+            // platform that is not one, or a cycle — because the session that
+            // wrote it is the one that can put it right, and it is alive until
+            // this signal is taken. See [`crate::declarations::judge`], whose
+            // sentence is said as it is: what the scheduler will show is the same
+            // one.
+            return crate::stages::misdeclared(worktree, &touched);
         }
         // And this one is not in the Worktree at all, so there is no commit to
         // wait for: the document being there with something in it is the whole
@@ -4727,6 +4739,79 @@ mod tests {
         run(path, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// And the third thing asked of a landed roadmap: that what it declares is a
+    /// roadmap something could run.
+    ///
+    /// Written and committed is not enough where the lines declare badly, and
+    /// this is the moment to say so — the session that wrote the roadmap is at a
+    /// terminal until its signal is taken, and nothing after it would ever be
+    /// sent to fix a declaration. An undeclared roadmap is no fault at all, that
+    /// being every roadmap written before any of this.
+    #[test]
+    fn a_roadmap_that_declares_badly_has_not_landed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(path.join("README.md"), "# Somewhere\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(
+            path,
+            &["commit", "-m", "chore: the commit the branch came off"],
+        );
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+        let landing = Landing::Roadmap(base);
+
+        let index = path
+            .join(crate::stages::ROADMAPS)
+            .join("parallel-stages")
+            .join(crate::stages::INDEX);
+        std::fs::create_dir_all(index.parent().unwrap()).unwrap();
+
+        let staged = |list: &str| {
+            std::fs::write(&index, list).unwrap();
+            run(path, &["add", "-A"]);
+            run(path, &["commit", "-m", "docs: stage the roadmap"]);
+        };
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md) — no dependencies\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md) — after 04\n",
+        );
+
+        let why = lacking(path, &landing).expect("a roadmap naming a stage that is not there");
+        assert!(why.contains("stage 02"), "{why}");
+        assert!(why.contains("after 04"), "{why}");
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md) — no dependencies\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md) — after 01 — on windows\n",
+        );
+
+        assert_eq!(
+            lacking(path, &landing),
+            None,
+            "written, committed and declaring a graph something could run",
+        );
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md)\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md)\n",
+        );
+
+        assert_eq!(
+            lacking(path, &landing),
+            None,
+            "and a roadmap declaring nothing at all is every roadmap written before this",
+        );
     }
 
     /// A Done signal refused over a step that has not landed says which half is
