@@ -683,19 +683,21 @@ pub(crate) fn comment(
 
 /// The pull request on `branch`, as the host's `gh` finds it.
 ///
-/// The four facts worth recording and no more — see [`store::PullRequest`].
+/// The five facts worth recording and no more — see [`store::PullRequest`].
 /// Whether it is a draft, whether its checks are green and what is on it are all
 /// things that move while the PR is open, and this runs once.
 ///
 /// The head comes back from GitHub rather than off `branch`, though the two are
 /// the same branch: a selector is what was asked and `headRefName` is what GitHub
-/// answered about, and the answer is the one worth writing down.
+/// answered about, and the answer is the one worth writing down. The base comes
+/// back beside it, which is what says where this pull request sits in a chain —
+/// see [`store::stack`].
 pub(crate) fn pull_request(
     gh: &Gh,
     repo: &Path,
     branch: &str,
 ) -> Result<store::PullRequest, Trouble> {
-    /// What `--json number,title,url,headRefName` comes back as.
+    /// What `--json number,title,url,headRefName,baseRefName` comes back as.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Opened {
@@ -703,6 +705,8 @@ pub(crate) fn pull_request(
         title: String,
         url: String,
         head_ref_name: String,
+        #[serde(default)]
+        base_ref_name: Option<String>,
     }
 
     // `--` is not gh's; the branch goes where gh takes a PR selector, which is a
@@ -714,7 +718,7 @@ pub(crate) fn pull_request(
             "view",
             branch,
             "--json",
-            "number,title,url,headRefName",
+            "number,title,url,headRefName,baseRefName",
         ],
     )?;
 
@@ -726,11 +730,81 @@ pub(crate) fn pull_request(
         title: opened.title,
         url: opened.url,
         head: Some(opened.head_ref_name),
+        base: opened.base_ref_name,
         // Unnamed: which repository this was asked in is what the caller already
         // knows, and the name on a recorded pull request is the label a reader
         // wants rather than anything written here. See [`store::PullRequest`].
         repo: None,
     })
+}
+
+/// Every pull request the Repo has open, as the host's `gh` lists them.
+///
+/// What a **stack** is walked out of: the chain is open pull requests each based
+/// on the one below's head branch, and one list is the whole of what it takes to
+/// assemble — see [`crate::stacks`]. Asked once rather than followed link by
+/// link, a chain of four otherwise being four round trips to GitHub for what one
+/// answer holds.
+///
+/// [`Numbered`] apiece, which is the same shape a pull request asked for by
+/// number comes back in and for the same reasons: the head and the base are the
+/// links, the fork flag says whether a link is one this Conversation could ever
+/// push to, and the URL says which repository GitHub answered about.
+///
+/// `--state open` because a chain runs through open pull requests: one that has
+/// been merged is a branch that is *in* the base rather than a link above it, and
+/// one that was closed is not a link at all.
+///
+/// The limit is `gh`'s own page rather than every pull request a busy repository
+/// ever had. A stack is a handful deep and its links are the most recently opened
+/// pull requests of the repository; a repository with more than this many open at
+/// once has a chain somewhere in them, and a link that falls off the end reads
+/// as a chain that stops there.
+pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Numbered>, Trouble> {
+    /// What one entry of `gh pr list --json …` comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Listed {
+        number: i64,
+        title: String,
+        url: String,
+        head_ref_name: String,
+        base_ref_name: String,
+        #[serde(default)]
+        is_cross_repository: bool,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,url,headRefName,baseRefName,isCrossRepository",
+        ],
+    )?;
+
+    let listed: Vec<Listed> = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(listed
+        .into_iter()
+        .map(|listed| Numbered {
+            number: listed.number,
+            title: listed.title,
+            url: listed.url,
+            head: listed.head_ref_name,
+            base: listed.base_ref_name,
+            fork: listed.is_cross_repository,
+            // Everything `--state open` answered with is open, which is what
+            // was asked for.
+            open: true,
+        })
+        .collect())
 }
 
 /// One pull request of a repository, by its number, as the host's `gh` answers
@@ -1601,9 +1675,9 @@ mod tests {
 
     /// The ordinary answer: a branch with a PR on it.
     #[test]
-    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_url_and_head() {
+    fn a_branch_with_a_pull_request_reads_back_as_its_number_title_url_and_branches() {
         let (dir, gh) = stub(
-            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting"}"#,
+            r#"{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main"}"#,
             "",
         );
 
@@ -1616,11 +1690,50 @@ mod tests {
                 // GitHub's own answer rather than the selector it was asked with,
                 // which is what a green suite is afterwards held against.
                 head: Some("rate-limiting".to_owned()),
+                // And what it goes into, which is what says where in a chain it
+                // sits.
+                base: Some("main".to_owned()),
                 // Which repository is the caller's to know: what `gh` was asked
                 // in is not something it reads back.
                 repo: None,
             },
         );
+    }
+
+    /// Every open pull request of the repository, which is what a stack is
+    /// walked out of: the head and the base apiece are the links, and a fork is
+    /// said so that the walk can stop at one.
+    #[test]
+    fn the_repositorys_open_pull_requests_read_back_with_their_heads_and_bases() {
+        let (dir, gh) = stub(
+            r#"[{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false},
+                {"number":41,"title":"Stage 02","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"stage-02","baseRefName":"stage-01","isCrossRepository":true}]"#,
+            "",
+        );
+
+        let listed = open_pull_requests(&gh, dir.path()).unwrap();
+
+        assert_eq!(
+            listed.iter().map(|one| one.number).collect::<Vec<_>>(),
+            [40, 41],
+        );
+        assert_eq!(listed[0].head, "stage-01");
+        assert_eq!(listed[0].base, "main");
+        assert!(!listed[0].fork);
+        assert!(listed[1].fork, "and a head in a fork is said to be one");
+        assert!(
+            listed.iter().all(|one| one.open),
+            "everything `--state open` answered with is open",
+        );
+    }
+
+    /// And a repository with nothing open is an empty list rather than a
+    /// failure, which is what `gh pr list` says about one.
+    #[test]
+    fn a_repository_with_nothing_open_lists_nothing() {
+        let (dir, gh) = stub("[]", "");
+
+        assert_eq!(open_pull_requests(&gh, dir.path()), Ok(Vec::new()));
     }
 
     /// The one every finish step can reasonably run into: the branch is pushed
@@ -2162,8 +2275,8 @@ mod tests {
                 r#"token="${GH_TOKEN-unset}"
                    if [ "$1" = api ]; then printf '[]'; exit 0; fi
                    case "$5" in
-                     number,title,url,headRefName)
-                       printf '{"number":41,"title":"%s","url":"u","headRefName":"b"}' "$token" ;;
+                     number,title,url,headRefName,baseRefName)
+                       printf '{"number":41,"title":"%s","url":"u","headRefName":"b","baseRefName":"main"}' "$token" ;;
                      statusCheckRollup,headRefOid,mergeable)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)

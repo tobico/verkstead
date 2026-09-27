@@ -237,6 +237,23 @@ pub(crate) async fn record(
                 },
             );
 
+            // And the rest of the stack, where this Conversation's Process is one
+            // that walks a chain: the same walk a take-up runs at the press, from
+            // the other door. What gets here is a **Fix Merge Issues** taken up
+            // over a bare branch — there was nothing to walk from at the press,
+            // and the `submitting` session it sent has just opened the pull
+            // request there is one from now.
+            //
+            // A Notice of its own rather than a sentence on the take-up's, that
+            // one having been written before there was anything to say; and
+            // before the watchers, which is what watches what it recorded. See
+            // [`crate::stacks`].
+            if let Some(said) = crate::stacks::walked(state, conversation_id).await
+                && let Err(error) = store::note(&state.pool, conversation_id, &said).await
+            {
+                tracing::error!(error = ?error, conversation_id, "recording what the stack is failed");
+            }
+
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is
             // going to look — and nobody has read the branch at all.

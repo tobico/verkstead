@@ -4155,6 +4155,7 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -4276,6 +4277,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -4340,6 +4342,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -4660,6 +4663,7 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -4761,6 +4765,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -9642,6 +9647,11 @@ async fn taking_up_is_refused_by_name_when_the_fetch_fails() {
 /// resolve to a PullRequest with the number of*, and a stub that said the branch
 /// sentence to both would be a stub written to the parser rather than to `gh`.
 ///
+/// **And `gh pr list` out of `pr-list.json`**, which is what a stack is walked
+/// out of: every open pull request the repository has, kept beside the files the
+/// view answers from and written by the same helper. A repository nothing was
+/// opened in lists nothing, which is what `gh` says about one.
+///
 /// A stand-in for a program is a program, which is what keeps this off Windows;
 /// the `pull_requests` suite is off it for the same reason. `sh -c` gives `$0`
 /// the script's own name, so what Verkstead passes lands in `$1` onwards and the
@@ -9651,7 +9661,11 @@ fn gh_answering() -> Gh {
     Gh::running(vec![
         "/bin/sh".to_owned(),
         "-c".to_owned(),
-        r#"if [ -f "./pr-$3.json" ]; then cat "./pr-$3.json"; exit 0; fi
+        r#"if [ "$2" = list ]; then
+               if [ -f ./pr-list.json ]; then cat ./pr-list.json; else printf '[]'; fi
+               exit 0
+           fi
+           if [ -f "./pr-$3.json" ]; then cat "./pr-$3.json"; exit 0; fi
            case "$3" in
            ''|*[!0-9]*)
                printf 'no pull requests found for branch "%s"\n' "$3" >&2
@@ -9693,6 +9707,26 @@ fn on_github(repo: &Path, number: i64, head: &str, base: &str, state: &str, fork
     // And under the branch as well, which is the other selector `gh pr view`
     // takes and the one a branch Target is asked with.
     std::fs::write(repo.join(format!("pr-{head}.json")), said.to_string()).unwrap();
+
+    // And in the repository's list of open pull requests, which is what a stack
+    // is walked out of. Only the open ones: `gh pr list --state open` is what
+    // Verkstead asks, a merged or closed pull request being a link nothing sits
+    // on.
+    if state != "OPEN" {
+        return;
+    }
+
+    let list = repo.join("pr-list.json");
+
+    let mut open: Vec<serde_json::Value> = std::fs::read_to_string(&list)
+        .ok()
+        .map(|held| serde_json::from_str(&held).unwrap())
+        .unwrap_or_default();
+
+    open.retain(|listed| listed["number"] != said["number"]);
+    open.push(said);
+
+    std::fs::write(&list, serde_json::Value::Array(open).to_string()).unwrap();
 }
 
 /// Everything a Review needs before the press: the Process picked, the Brief
@@ -10838,6 +10872,183 @@ async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
     nothing_taken_up(&app, forked, &repo).await;
 }
 
+/// A three-deep chain on GitHub, which is what a stack of stages leaves behind:
+/// `stage-01` off `main`, `stage-02` off it, `stage-03` off that.
+#[cfg(unix)]
+fn a_stack_on_github(repo: &Path) {
+    for (number, head, base) in [
+        (40, "stage-01", "main"),
+        (41, "stage-02", "stage-01"),
+        (42, "stage-03", "stage-02"),
+    ] {
+        on_github(repo, number, head, base, "OPEN", false);
+    }
+}
+
+/// Every pull request a Conversation has recorded in its own Repo, in stack
+/// order — what the walk is read back through.
+#[cfg(unix)]
+async fn stack(dir: &Path, id: i64, repo_id: i64) -> Vec<i64> {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    store::stack(&pool, id, repo_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|opened| opened.number)
+        .collect()
+}
+
+/// Pointed at the middle of a stack, the take-up walks GitHub's chain both ways
+/// and records all three — and the Timeline note says what the stack is.
+///
+/// Which is the one thing the human cannot see from the press: they named one
+/// pull request and the wrap-up is now over three, the two around it having
+/// arrived on the record without anybody pressing anything.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_pointed_into_a_stack_records_the_whole_chain() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "stage-02");
+    a_stack_on_github(&repo);
+
+    let id = ready_to_fix(
+        &app,
+        elsewhere.path(),
+        repo_id,
+        "https://github.com/tobico/verkstead/pull/41 will not merge.\n",
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        stack(dir.path(), id, repo_id).await,
+        [40, 41, 42],
+        "all three on the record, ordered from the bottom of the chain",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.branch, "stage-02", "and the work is still its own");
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("one of a stack of 3") && said.contains("from the bottom"),
+        "the Timeline says what the stack is: {said}",
+    );
+    assert!(
+        said.contains("#40") && said.contains("#42"),
+        "and names the pull requests it found: {said}",
+    );
+}
+
+/// A lone pull request records one, and a chain whose next link is in a fork is
+/// not followed.
+///
+/// A fork's head is in another repository, so nothing this Conversation could
+/// push would reach it — which is the refusal the pull request it was pointed at
+/// already gets, applied to the links around it. A link in another repository
+/// never arises: `gh pr list` answers for the Repo `gh` was run in and nothing
+/// else.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    let lone = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    assert_eq!(press_take_up(&app, lone).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        stack(dir.path(), lone, repo_id).await,
+        [41],
+        "a pull request with nothing above or below it is a stack of itself",
+    );
+
+    let said = notices(&opened(&app, lone).await).join("\n");
+
+    assert!(
+        !said.contains("stack of"),
+        "and nothing is said about a stack there is none of: {said}",
+    );
+
+    // And a second Conversation over a chain whose only link above is a fork.
+    head_on_origin(&upstream, "stage-01");
+    on_github(&repo, 50, "stage-01", "main", "OPEN", false);
+    on_github(&repo, 51, "from-a-fork", "stage-01", "OPEN", true);
+
+    let under = ready_to_fix_under(&app, repo_id, "Wrap #50 up.\n", implementation).await;
+    assert_eq!(press_take_up(&app, under).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        stack(dir.path(), under, repo_id).await,
+        [50],
+        "the chain stops where the fork is rather than following it out of the Repo",
+    );
+}
+
+/// A neighbour another Conversation holds is recorded and watched all the same,
+/// and the note says whose it is — while pointing a second Conversation straight
+/// at that neighbour is still refused by name.
+///
+/// The two halves of *recorded without being claimed*. A stack in this workbench
+/// is a Conversation per pull request, so the neighbours nearly always belong to
+/// somebody: recording them is what lets this wrap-up wait on the whole chain,
+/// and it is not a claim on any of them.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claimed() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "stage-01");
+    head_on_origin(&upstream, "stage-02");
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    // The bottom of the stack, taken up by a Conversation of its own — which is
+    // what a stacked stage leaves behind.
+    let below = ready_to_fix_under(&app, repo_id, "Wrap #40 up.\n", implementation).await;
+    assert_eq!(press_take_up(&app, below).await, TakenUp::TakenUp);
+
+    // And the middle, which is a link of the same chain and nobody's work.
+    let id = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::TakenUp,
+        "a pull request recorded beside another Conversation's work is not held by it",
+    );
+
+    assert_eq!(stack(dir.path(), id, repo_id).await, [40, 41, 42]);
+
+    let said = notices(&opened(&app, id).await).join("\n");
+
+    assert!(
+        said.contains("#40 belongs to the Conversation on") && said.contains("stage-01"),
+        "and the note names the Conversation the neighbour is: {said}",
+    );
+    assert!(
+        said.contains("#42 belongs to no Conversation"),
+        "and says so where there is nobody to name: {said}",
+    );
+
+    // And the refusal is untouched where it is about the pull request somebody
+    // was pointed at: a third Conversation over `#40` leads to the one on it.
+    let second = ready_to_fix_under(&app, repo_id, "Wrap #40 up too.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::AlreadyHeld {
+            conversation: below,
+        },
+    );
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+}
+
 /// How a pull request's checks are is carried to both copies of its card: the
 /// one pinned above the record and the one at the moment it opened.
 ///
@@ -10862,6 +11073,7 @@ async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -10936,6 +11148,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11047,6 +11260,7 @@ async fn each_pull_request_carries_how_its_own_checks_are() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11062,6 +11276,7 @@ async fn each_pull_request_carries_how_its_own_checks_are() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/askance/pull/7".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11124,6 +11339,7 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11139,6 +11355,7 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/askance/pull/7".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11208,6 +11425,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11295,6 +11513,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -11379,6 +11598,7 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -11478,6 +11698,7 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )

@@ -304,6 +304,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             title: "Conversation sharing".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/56".to_owned(),
             head: Some("conversation-sharing".to_owned()),
+            base: None,
             repo: None,
         },
     )

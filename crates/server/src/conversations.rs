@@ -2805,6 +2805,10 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
             // named when the Target was resolved — see [`store::PullRequest::head`]
             // for what is afterwards held against it.
             head: Some(held.head.clone()),
+            // And the branch it goes into, which GitHub named beside it: what
+            // says where this pull request sits in a chain, and so which of a
+            // stack is under which — see [`store::stack`].
+            base: Some(held.base.clone()),
             repo: None,
         };
 
@@ -2819,7 +2823,15 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // some watchers, and none of them makes a directory.
     drop(making);
 
-    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed)).await {
+    // And the rest of the stack, where this Process is one that walks: GitHub's
+    // chain both ways from the pull request just recorded, every link of it
+    // recorded beside it — see [`crate::stacks`]. Here rather than after the
+    // note, because what it found is part of what the note says; and after the
+    // checkouts are let go, because it goes to the network and makes no
+    // directory.
+    let stack = crate::stacks::walked(state, id).await;
+
+    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed, stack)).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
     }
 
@@ -3203,7 +3215,16 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// review has not started yet, and the human picked the Process minutes ago.
 /// Nothing is said for any other Process, there being nothing to say: the
 /// ordinary wrap-up is what a taken-up Conversation has always run.
-fn taken(taking: &Target, named: &str, narrowed: bool) -> String {
+///
+/// **And the stack, where the take-up found one.** `stack` is
+/// [`crate::stacks::walked`]'s own account of the chain — what it is, from the
+/// bottom, and which of it belongs to another Conversation — and it goes in
+/// ahead of the narrowing for the reason it is said at all: the pull requests
+/// above and below arrived on this record without anybody pressing anything, and
+/// a wrap-up that quietly waits on two more than the human named is a wrap-up
+/// they cannot read. `None` is a lone pull request, which is every take-up there
+/// was before there were stacks.
+fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) -> String {
     let taken = match taking {
         Target::PullRequest(held) => format!(
             "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
@@ -3216,6 +3237,11 @@ fn taken(taking: &Target, named: &str, narrowed: bool) -> String {
              being opened against `{named}` before the wrap-up reads it. What this Timeline records \
              starts at that branch's head — the commits already on it are the work's own.",
         ),
+    };
+
+    let taken = match stack {
+        Some(stack) => format!("{taken} {stack}"),
+        None => taken,
     };
 
     if !narrowed {
@@ -3808,6 +3834,25 @@ pub(crate) fn takes_a_target(process: store::Process) -> bool {
 /// by some road nobody thought of gets it back on the next poll rather than
 /// waiting for ever on it.
 pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
+    matches!(process, store::Process::FixMergeIssues)
+}
+
+/// And which of them are pointed at a link of a chain rather than at one pull
+/// request: the **stack** walked on GitHub where the pull request is recorded,
+/// and every one of it recorded beside it.
+///
+/// **Fix Merge Issues**, and nothing else — the same one Process, asked as its
+/// own question because it is its own fact. What this one is about is what the
+/// wrap-up is *over*: a conflict low in a stack moves every branch above it, so
+/// a Conversation pointed at any link of one is a Conversation over all of them.
+/// Every other Process is pointed at work Verkstead built, on the one branch it
+/// cut, and there is no chain around it to find.
+///
+/// Asked at both doors a pull request is recorded through, for the reason the
+/// narrowing is asked at each of its own: a take-up over a pull request walks at
+/// the press, and a take-up over a bare branch has nothing to walk from until
+/// its `submitting` session has opened one — see [`crate::stacks`].
+pub(crate) fn walks_the_stack(process: store::Process) -> bool {
     matches!(process, store::Process::FixMergeIssues)
 }
 

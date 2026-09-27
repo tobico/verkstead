@@ -544,6 +544,7 @@ fn opened() -> PullRequest {
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
         head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     }
 }

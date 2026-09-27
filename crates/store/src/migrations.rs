@@ -25,15 +25,15 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Nine of them are a column arriving rather than rows moving between tables —
+//! Ten of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
 //! is a merge, which Answer an attached file was put on, whether a Profile
-//! shares its account's memory, and the question a half-written steer would open
-//! an investigation on — which is the same kind of one-time rewrite: the rows
-//! already there are given the value that says what was true of them before the
-//! column existed.
+//! shares its account's memory, the question a half-written steer would open
+//! an investigation on, and the branch a recorded pull request merges into —
+//! which is the same kind of one-time rewrite: the rows already there are given
+//! the value that says what was true of them before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -71,7 +71,45 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     merges_that_named_no_pull_request(pool).await?;
     standings_that_named_no_pull_request(pool).await?;
     settlements_that_were_one_per_repository(pool).await?;
-    fix_attempts_that_were_one_per_repository(pool).await
+    fix_attempts_that_were_one_per_repository(pool).await?;
+    pull_requests_that_named_no_base_branch(pool).await
+}
+
+/// Give every pull request recorded before the chain was worth reading the
+/// column that holds the branch it merges into.
+///
+/// Nobody has one: the base arrives with the column, and every row this reaches
+/// was recorded when a repository held one pull request and there was nothing
+/// above or below it to sit on. So the column's own default is the whole of the
+/// rewrite and there is no `UPDATE` under it — which is the record saying what
+/// is true. A wrap-up whose rows do not say what sits on what is read in the
+/// order they were recorded in, which is the order everything had before there
+/// were stacks; see [`super::stack`].
+///
+/// A column arriving rather than a rebuild, unlike the six above it: nothing
+/// about the table's own rule changes, and `ALTER TABLE ... ADD COLUMN` is
+/// something SQLite will do in place.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn pull_requests_that_named_no_base_branch(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_requests') WHERE name = ?")
+            .bind("base_branch")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the branch a recorded pull request merges into")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE pull_requests ADD COLUMN base_branch TEXT")
+        .execute(pool)
+        .await
+        .context("giving the pull requests recorded before this a base branch to have named")?;
+
+    Ok(())
 }
 
 /// Give every half-written steer from before Investigating was a target the

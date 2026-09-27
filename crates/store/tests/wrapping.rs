@@ -20,12 +20,12 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     AdoptedPullRequest, Entering, Event, Finished, Landing, Lifecycle, Merging, PullRequest,
     Rebuilding, Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
-    close_conversation, finish_wrap_up, hold_pull_request, implement_again, load_conversation,
-    merges, merging, open_database, pick_direction, pull_request, pull_request_repo, pull_requests,
-    record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
-    record_standing, register_repo, resolve_conflicts, rollups, save_brief, settle_wrap_up,
-    standing, start_conversation, start_grilling, start_tinkering, take_up, timeline,
-    unfinished_pull_requests, wrap_up_settled,
+    close_conversation, conversation_on_pull_request, finish_wrap_up, hold_pull_request,
+    implement_again, load_conversation, merges, merging, open_database, pick_direction,
+    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
+    resolve_conflicts, rollups, save_brief, settle_wrap_up, stack, standing, start_conversation,
+    start_grilling, start_tinkering, take_up, timeline, unfinished_pull_requests, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -119,6 +119,7 @@ fn opened() -> PullRequest {
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
         head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     }
 }
@@ -704,6 +705,7 @@ fn beside_it() -> PullRequest {
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/askance/pull/7".to_owned(),
         head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     }
 }
@@ -828,6 +830,7 @@ fn stacked(number: i64, head: &str) -> PullRequest {
         title: "Rate limiting".to_owned(),
         url: format!("https://github.com/tobico/verkstead/pull/{number}"),
         head: Some(head.to_owned()),
+        base: None,
         repo: None,
     }
 }
@@ -1709,5 +1712,250 @@ async fn only_a_done_conversation_is_sent_back_to_wrapping_up() {
     assert_eq!(
         resolve_conflicts(&pool, 404).await.unwrap(),
         Resolving::NoSuchConversation,
+    );
+}
+
+/// One link of a chain: a number, the branch its work is on, and the branch it
+/// merges into — which together are what says which of a stack sits on which.
+fn link(number: i64, head: &str, base: &str) -> PullRequest {
+    PullRequest {
+        number,
+        title: format!("Stage 0{number}"),
+        url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        head: Some(head.to_owned()),
+        base: Some(base.to_owned()),
+        repo: None,
+    }
+}
+
+/// A stack reads back from the bottom, whatever order its pull requests were
+/// recorded in.
+///
+/// Which is the whole reason the base is on the row: what a Conversation was
+/// pointed at is recorded first — that is the move — and the chain it turned out
+/// to be a link of is recorded around it. So the order they arrived in is the
+/// order the human named them in, and the order they *sit* in is the one the
+/// branches say.
+#[tokio::test]
+async fn a_stack_reads_back_from_the_bottom_whatever_order_it_was_recorded_in() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+
+    // The middle of the chain, which is the one the Conversation is on.
+    record_pull_request(&pool, id, own, &link(42, "stage-02", "stage-01"))
+        .await
+        .unwrap();
+
+    // And the two around it, recorded top first so that the order they arrived
+    // in is nothing like the order they sit in.
+    for beside in [
+        link(43, "stage-03", "stage-02"),
+        link(41, "stage-01", "main"),
+    ] {
+        assert!(
+            record_another_pull_request(&pool, id, own, &beside)
+                .await
+                .unwrap()
+        );
+    }
+
+    assert_eq!(
+        stack(&pool, id, own)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|opened| opened.number)
+            .collect::<Vec<_>>(),
+        [41, 42, 43],
+        "from the bottom: the one nothing else is based on, then each one up",
+    );
+
+    assert_eq!(
+        pull_requests(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, opened)| opened.number)
+            .collect::<Vec<_>>(),
+        [42, 43, 41],
+        "and the record still says which one the Conversation was pointed at first",
+    );
+}
+
+/// A lone pull request is a chain of one, and a repository the Conversation has
+/// nothing in is a chain of none.
+#[tokio::test]
+async fn a_lone_pull_request_is_a_stack_of_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stack(&pool, id, own)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|opened| opened.number)
+            .collect::<Vec<_>>(),
+        [41],
+    );
+    assert!(
+        stack(&pool, id, beside).await.unwrap().is_empty(),
+        "and a companion with nothing recorded in it has no chain at all",
+    );
+}
+
+/// Another Conversation of the same Repo, carried to Implementing the way
+/// [`implementing`] carries the first: a stack in this workbench is a pull
+/// request per Conversation, so the neighbours have Conversations of their own.
+async fn beside_it_in(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
+    let id = start_conversation(pool, repo, branch)
+        .await
+        .unwrap()
+        .unwrap();
+
+    save_brief(pool, id, "# Rate limiting\n").await.unwrap();
+    start_grilling(
+        pool,
+        id,
+        "c0ffee",
+        &std::path::PathBuf::from(format!("/state/worktrees/{branch}")),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    pick_direction(pool, id, verkstead_schema::Direction::Inline)
+        .await
+        .unwrap();
+
+    id
+}
+
+/// Rows that do not make one chain come back in the order they were recorded,
+/// which is the order every reader had before there were stacks.
+///
+/// Two of them, because there are two ways to not be a chain: rows that say
+/// nothing about what they sit on, and rows that say two things sit on the same
+/// branch.
+#[tokio::test]
+async fn pull_requests_that_are_not_one_chain_read_in_the_order_they_were_recorded() {
+    for beside in [
+        vec![
+            stacked(42, "rate-limiting-2"),
+            stacked(43, "rate-limiting-3"),
+        ],
+        vec![
+            link(42, "stage-02", "stage-01"),
+            link(43, "stage-02-again", "stage-01"),
+        ],
+    ] {
+        let (_dir, pool) = fresh_pool().await;
+        let id = implementing(&pool).await;
+        let own = own(&pool, id).await;
+
+        record_pull_request(&pool, id, own, &link(41, "stage-01", "main"))
+            .await
+            .unwrap();
+
+        for one in beside {
+            assert!(
+                record_another_pull_request(&pool, id, own, &one)
+                    .await
+                    .unwrap()
+            );
+        }
+
+        assert_eq!(
+            stack(&pool, id, own)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|opened| opened.number)
+                .collect::<Vec<_>>(),
+            [41, 42, 43],
+        );
+    }
+}
+
+/// The pull request a press is refused over is the one a Conversation's work is
+/// *on*, rather than every row recorded beside it.
+///
+/// Which is what recording a stack made worth asking. A wrap-up over a chain of
+/// three has three rows, and two of them are pull requests it is watching rather
+/// than holding — so a second Conversation pointed at one of those is pointed at
+/// work nobody has taken up, and the Conversation that *has* taken one up is
+/// still the one a press is sent to.
+#[tokio::test]
+async fn the_conversation_a_pull_request_leads_to_is_the_one_whose_work_is_on_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+
+    record_pull_request(&pool, id, own, &link(42, "stage-02", "stage-01"))
+        .await
+        .unwrap();
+
+    for beside in [
+        link(41, "stage-01", "main"),
+        link(43, "stage-03", "stage-02"),
+    ] {
+        assert!(
+            record_another_pull_request(&pool, id, own, &beside)
+                .await
+                .unwrap()
+        );
+    }
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 42).await.unwrap(),
+        Some(id),
+        "the one it was pointed at is the one it is on",
+    );
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        None,
+        "and the neighbours are watched rather than held",
+    );
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 43).await.unwrap(),
+        None,
+    );
+
+    // And the Conversation that is on one of them is what a press is sent to,
+    // which is the refusal in full: its own row is the first in its repository,
+    // whatever anybody else recorded beside it.
+    let neighbour = beside_it_in(&pool, own, "stage-01").await;
+
+    record_pull_request(&pool, neighbour, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(neighbour),
+    );
+
+    // A companion's pull request is its repository's first and stays a refusal:
+    // a Conversation ends on one per repository it committed in, and none of
+    // them is a neighbour.
+    let beside = companion(&pool).await;
+
+    assert!(
+        record_another_pull_request(&pool, id, beside, &beside_it())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        conversation_on_pull_request(&pool, beside, 7)
+            .await
+            .unwrap(),
+        Some(id),
     );
 }

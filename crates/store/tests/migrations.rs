@@ -87,7 +87,7 @@ use verkstead_store::{
     fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
     pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
-    record_fix_attempt, recorded_commits, register_repo, save_pending_steer, settle_wrap_up,
+    record_fix_attempt, recorded_commits, register_repo, save_pending_steer, settle_wrap_up, stack,
     standing, start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop,
     stopped, timeline, update_profile, wrap_up_settled,
 };
@@ -1125,6 +1125,7 @@ async fn every_pull_request_of_before_is_the_conversations_own_repositorys() {
             // can recover it now — which for the Conversation's own repository is
             // its own branch, and is the empty column the rebuild leaves.
             head: None,
+            base: None,
             repo: None,
         }),
         "the wrap-up's watchers still find the pull request they always did",
@@ -1171,6 +1172,7 @@ async fn the_rebuilt_pull_requests_table_keeps_one_per_conversation_per_repo() {
         title: "Rate limiting".to_owned(),
         url: "https://github.com/tobico/askance/pull/7".to_owned(),
         head: Some("rate-limiting".to_owned()),
+        base: None,
         repo: None,
     };
 
@@ -1457,6 +1459,7 @@ async fn the_rebuilt_tables_hold_a_stack_and_are_rewritten_once() {
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
                 head: Some("rate-limiting-2".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -1547,6 +1550,7 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -1861,6 +1865,7 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -1876,6 +1881,7 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
             title: "The other half".to_owned(),
             url: "https://github.com/tobico/askance/pull/7".to_owned(),
             head: Some("the-other-half".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -2068,6 +2074,7 @@ async fn the_rebuilt_wrap_up_tables_hold_a_stack_and_are_rewritten_once() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
             head: Some("rate-limiting-2".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -2961,4 +2968,168 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
 
         pool.close().await;
     }
+}
+
+/// A database whose pull requests carry a head branch and no base, which is what
+/// every one recorded before the chain was worth reading is.
+///
+/// The table is written out as the Verkstead that made it declared it — one row
+/// per Conversation, Repo and number, with the head written down and nothing
+/// saying what it merges into — and two pull requests of one repository put in
+/// it, which is the shape a stack leaves.
+async fn pull_requests_before_the_base_branch(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    sqlx::query("DROP TABLE pull_requests")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_requests (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             head_branch     TEXT,
+             UNIQUE (conversation_id, repo_id, number)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (number, head) in [(41, "rate-limiting"), (42, "rate-limiting-2")] {
+        let (event_id,): (i64,) = sqlx::query_as(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, '2026-08-01T09:14:22.000Z', 'pull-request', '')
+             RETURNING id",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO pull_requests
+                 (event_id, conversation_id, repo_id, number, title, url, head_branch)
+             VALUES (?, ?, ?, ?, 'Rate limiting',
+                     'https://github.com/tobico/verkstead/pull/' || ?, ?)",
+        )
+        .bind(event_id)
+        .bind(id)
+        .bind(repo)
+        .bind(number)
+        .bind(number)
+        .bind(head)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+
+    (id, repo)
+}
+
+/// The column arrives empty and everything the table held is still there — and a
+/// repository whose rows say nothing about what sits on what reads in the order
+/// it was recorded in, which is the order it always read in.
+#[tokio::test]
+async fn pull_requests_recorded_before_the_base_branch_keep_what_they_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = pull_requests_before_the_base_branch(dir.path()).await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pull_requests(&pool, id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(_, opened)| (opened.number, opened.head, opened.base))
+                .collect::<Vec<_>>(),
+            [
+                (41, Some("rate-limiting".to_owned()), None),
+                (42, Some("rate-limiting-2".to_owned()), None),
+            ],
+            "{opening}, and both rows are where they were with the new column empty",
+        );
+
+        assert_eq!(
+            stack(&pool, id, repo)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|opened| opened.number)
+                .collect::<Vec<_>>(),
+            [41, 42],
+            "and rows that say nothing about the chain are read as they were recorded",
+        );
+
+        pool.close().await;
+    }
+}
+
+/// And a pull request recorded from here on writes its base down, beside the rows
+/// that never could.
+#[tokio::test]
+async fn a_pull_request_recorded_after_the_column_arrives_names_its_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = pull_requests_before_the_base_branch(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        record_another_pull_request(
+            &pool,
+            id,
+            repo,
+            &PullRequest {
+                number: 43,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/43".to_owned(),
+                head: Some("rate-limiting-3".to_owned()),
+                base: Some("rate-limiting-2".to_owned()),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+    );
+
+    assert_eq!(
+        pull_requests(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, opened)| (opened.number, opened.base))
+            .collect::<Vec<_>>(),
+        [
+            (41, None),
+            (42, None),
+            (43, Some("rate-limiting-2".to_owned())),
+        ],
+    );
 }

@@ -1931,9 +1931,11 @@ Conversation at Start, named in the Target field rather than picked off a list �
 the list of every open pull request read off GitHub when the compose page opened
 is gone with the menu level. One a Conversation already holds, Closed included,
 is refused by name and leads to that Conversation instead, the branch being that
-Conversation's; one from a fork is refused too, its head branch being nowhere
-origin can be pushed to. Taking it up puts the Conversation on the pull
-request's head branch, named for it and never
+Conversation's — *holds* meaning the pull request that Conversation was pointed
+at or its finish step opened, rather than one it records beside that to watch,
+which is what a stack's neighbours are; one from a fork is refused too, its
+head branch being nowhere origin can be pushed to. Taking it up puts the
+Conversation on the pull request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
 one ahead, diverged, not on origin at all or checked out anywhere else is refused
 by name, on the composer where the press was — with the head at take-up as its
@@ -1944,6 +1946,25 @@ and the wrap-up is the Process's from there: the ordinary one with its review fo
 Review, and one narrowed to Mergeable and the checks for Fix Merge Issues. No
 grilling and no handoff: the human's Brief is the Brief, and nothing about the
 pull request itself — its draft flag, its description — is touched.
+
+**And a Fix Merge Issues walks the chain around it**, where the other Processes
+take the one pull request they were pointed at. The Repo's open pull requests
+are read through `gh` once and the **stack** assembled out of that answer, both
+ways from what was named — a base that is another open pull request's head, a
+head that is another's base — as far as the chain goes; a fork is no link, its
+head being in another repository, and neither is a branch two pull requests sit
+on, that being a tree rather than a chain. Every link is recorded beside the
+Conversation's own, so the narrowed wrap-up waits on **Mergeable** and the
+checks for all of them, and the Timeline says what the stack is from the bottom
+and which of it belongs to a Conversation of its own — which it usually does,
+that being what a stacked stage leaves behind. Recorded without being claimed:
+the pull request the Conversation was pointed at is the one it is on, the
+neighbours are watched, and a press pointed straight at one of them is refused
+by the Conversation that took *it* up, exactly as it always was. A lone pull
+request finds a chain of itself, and nothing is said about a stack there is
+none of. **Over a bare branch the walk waits**, there being nothing to walk
+from until the `submitting` session has opened one: it runs where that pull
+request is recorded, with a Notice of its own.
 
 **A branch is taken up the same way, with nothing at the end of it.** A Target
 that is neither a URL nor a `#number` is a branch: nothing is asked of GitHub,

@@ -69,6 +69,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -134,6 +135,7 @@ async fn beside(pool: &SqlitePool, id: i64) -> i64 {
             title: "The other half".to_owned(),
             url: "https://github.com/tobico/askance/pull/7".to_owned(),
             head: Some("the-other-half".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -164,6 +166,7 @@ async fn stacked(pool: &SqlitePool, id: i64, repo_id: i64) {
                 title: "Rate limiting".to_owned(),
                 url: format!("https://github.com/tobico/verkstead/pull/{number}"),
                 head: Some(format!("rate-limiting-{number}")),
+                base: None,
                 repo: None,
             },
         )
@@ -1670,6 +1673,7 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )

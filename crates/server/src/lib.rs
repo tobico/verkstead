@@ -186,6 +186,9 @@ mod sharing;
 /// runs on rather than an implementation detail of an endpoint, and standing a
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
+/// The chain of pull requests a Fix Merge Issues was pointed into the middle
+/// of: walked on GitHub at Start, recorded, and said on the Timeline.
+mod stacks;
 mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.

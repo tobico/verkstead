@@ -1213,6 +1213,7 @@ static UNSPOKEN: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// fields nobody asked it for.
 const PULL_REQUEST: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 *commits*)
     printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}],"mergeable":"MERGEABLE","state":"OPEN"}'
@@ -1236,6 +1237,7 @@ fn gh_checking(how: &str) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
     printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
@@ -1369,6 +1371,7 @@ fn gh_landing(asked: &Path, landing: &Path) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 mergeable,state)
     printf '%s\n' "$5" >> {asked}
@@ -1476,6 +1479,7 @@ fn gh_conflicting_between(conflicting: &Path, resolved: &Path) -> String {
         r#"
 if [ -e {conflicting} ] && [ ! -e {resolved} ]; then merges=CONFLICTING; else merges=MERGEABLE; fi
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 mergeable,state)
     printf '{{"mergeable":"%s","state":"OPEN"}}' "$merges"
@@ -1696,6 +1700,7 @@ fn gh_checking_after(started: &Path) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 if [ -s {started} ]; then status=COMPLETED; how=FAILURE; else status=IN_PROGRESS; how=; fi
 case "$5" in
 *statusCheckRollup*)
@@ -1721,6 +1726,7 @@ esac
 /// goes wrong on a machine nobody is sitting at.
 const CHECKS_UNASKABLE: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
     printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
@@ -1755,6 +1761,7 @@ fn gh_opened_by_hand(opened: &Path) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 if [ ! -f {opened} ]; then
     printf 'no pull requests found for branch "%s"\n' "$3" >&2
     exit 1
@@ -1808,6 +1815,7 @@ case "$(pwd -P)" in
     ;;
 esac
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
 {green}
@@ -7929,27 +7937,45 @@ async fn own_repo(fixture: &Grilling) -> i64 {
 /// recorded.
 async fn own_pull_request(fixture: &Grilling) -> (i64, i64) {
     let repo = own_repo(fixture).await;
-    let pool = open_database(&fixture.database).await.unwrap();
-    let opened = verkstead_server::store::pull_request(&pool, fixture.id, repo)
-        .await
-        .unwrap()
-        .expect("the Conversation is on a pull request");
-    pool.close().await;
 
-    (repo, opened.number)
+    (repo, recorded_in(fixture, repo, "the Conversation").await)
 }
 
 /// And the pull request the companion beside it is on, read the same way.
 async fn companion_pull_request(fixture: &Grilling) -> (i64, i64) {
     let repo = companion_repo(fixture).await;
-    let pool = open_database(&fixture.database).await.unwrap();
-    let opened = verkstead_server::store::pull_request(&pool, fixture.id, repo)
-        .await
-        .unwrap()
-        .expect("the companion is on a pull request");
-    pool.close().await;
 
-    (repo, opened.number)
+    (repo, recorded_in(fixture, repo, "the companion").await)
+}
+
+/// What both of those wait for: the number of the pull request recorded in
+/// `repo`, once there is one.
+///
+/// Waited for rather than read once, for the reason every other read of a
+/// running wrap-up is: the callers are polling loops started the moment the work
+/// finished, and the pull request lands a `gh` call or two later. Read once,
+/// such a loop is a coin toss between the record arriving first and the first
+/// poll doing.
+async fn recorded_in(fixture: &Grilling, repo: i64, whose: &str) -> i64 {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let pool = open_database(&fixture.database).await.unwrap();
+        let opened = verkstead_server::store::pull_request(&pool, fixture.id, repo)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        if let Some(opened) = opened {
+            return opened.number;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "{whose} never landed on a pull request",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
 }
 
 /// And the one beside it, for the fixtures that are configured with a companion.
@@ -11732,6 +11758,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
                 head: Some("rate-limiting".to_owned()),
+                base: None,
                 repo: None,
             },
         )
@@ -20294,6 +20321,154 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
     );
 }
 
+/// And a `gh` whose repository holds a chain, once the branch is on a pull
+/// request at all.
+///
+/// [`gh_opened_by_hand`]'s answers with `pr list` added: `#40` under the branch
+/// the work sits on, `#41` the branch itself, and `#42` above it. Which is what
+/// a bare branch inside a stack looks like — the work is a link of a chain and
+/// nobody had opened its own pull request yet.
+fn gh_listing_a_stack(opened: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then
+    printf '[{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false}},'
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false}},'
+    printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false}}]'
+    exit 0
+fi
+if [ ! -f {opened} ]; then
+    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1
+fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false,"state":"OPEN"}}'
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// A bare branch inside a stack is walked where its `submitting` step's pull
+/// request is recorded, and every pull request of the chain is watched from
+/// there.
+///
+/// The second door, and the one thing about it that is a door rather than the
+/// press: there was no pull request at the take-up to walk from, so the walk
+/// waits for the one the branch was owed — and writes a Notice of its own,
+/// the take-up's having been written before there was anything to say.
+#[tokio::test]
+async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // Nothing was walked at the press: there was no pull request to walk from.
+    assert!(
+        !notices(&fixture.view().await)
+            .iter()
+            .any(|notice| notice.contains("stack of")),
+        "the take-up said nothing about a stack it could not have found",
+    );
+
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+    );
+
+    // And the walk ran where that was recorded, a moment behind it: the chain
+    // on the record, in order from the bottom.
+    let deadline = Instant::now() + *PATIENCE;
+
+    let recorded = loop {
+        let pool = open_database(&fixture.database).await.unwrap();
+        let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
+            .await
+            .unwrap()
+            .expect("it is on the record")
+            .repo
+            .id;
+
+        let recorded: Vec<i64> = verkstead_server::store::stack(&pool, fixture.id, repo)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|opened| opened.number)
+            .collect();
+        pool.close().await;
+
+        if recorded.len() == 3 {
+            break recorded;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stack was never walked: {recorded:?}",
+        );
+        pause(Duration::from_millis(50)).await;
+    };
+
+    assert_eq!(recorded, [40, 41, 42], "walked both ways from #41");
+
+    let said = notices(&fixture.view().await).join("\n");
+
+    assert!(
+        said.contains("one of a stack of 3") && said.contains("#40") && said.contains("#42"),
+        "and the Timeline says what was found: {said}",
+    );
+
+    // And every one of them is watched, which is a reading of GitHub apiece:
+    // the wrap-up starts one checks watcher per *recorded* pull request, so the
+    // chain recorded here is the chain waited on.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let pool = open_database(&fixture.database).await.unwrap();
+        let merges = verkstead_server::store::merges(&pool, fixture.id)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        if merges.len() == 3 {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "only {} of the stack were ever asked about",
+            merges.len(),
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+}
+
 /// And one whose session opens none stops the run with what that session last
 /// said — with Resume another go at the one thing still owed.
 ///
@@ -20466,6 +20641,7 @@ async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grill
 /// watchers ask.
 const THE_PULL_REQUEST_NUMBERED: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$5" in
 *headRefName*)
     printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
@@ -23340,6 +23516,7 @@ async fn wrapping_unwatched(fixture: &Grilling) {
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
             head: Some("rate-limiting".to_owned()),
+            base: None,
             repo: None,
         },
     )
@@ -26181,6 +26358,7 @@ fn gh_alongside_opened_when_asked(opened: &Path, companion: &Path) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$(pwd -P)" in
 */askance)
     if [ ! -f {companion} ]; then
@@ -32413,6 +32591,7 @@ fn gh_alongside_checking(own: &str, companion: &str) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$(pwd -P)" in
 */askance*)
     case "$5" in
@@ -33110,6 +33289,7 @@ fn gh_alongside_saying(own: &str, companion: &str) -> String {
     format!(
         r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
 case "$(pwd -P)" in
 */askance*)
     case "$5" in

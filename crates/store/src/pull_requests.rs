@@ -76,6 +76,20 @@ pub struct PullRequest {
     /// anybody can recover.
     pub head: Option<String>,
 
+    /// And the branch it goes into, unqualified the same way.
+    ///
+    /// Written down for the one thing a head cannot say by itself: which pull
+    /// request of a repository is *below* which. A **stack** is a chain of
+    /// branches each based on the one under it, so a base that is another
+    /// recorded pull request's head is the link between the two — and with both
+    /// on the row the chain is a fact about the record rather than something to
+    /// go back to GitHub for. See [`stack`], which is that reading.
+    ///
+    /// `None` on a row written before Verkstead wrote it down. Where a chain
+    /// cannot be read off the rows, [`stack`] falls back on the order they were
+    /// recorded in, which is what such a row was implicitly ordered by before.
+    pub base: Option<String>,
+
     /// What the Repo it was opened in is called, where that is not the
     /// Conversation's own — the label the pinned card draws.
     ///
@@ -279,9 +293,11 @@ pub enum Wrapping {
 /// has to be rebuilt, and that is not something a `CREATE TABLE IF NOT EXISTS`
 /// can reach.
 ///
-/// `head_branch` is nullable for the same migration's sake: every row written
-/// before Verkstead wrote the head down has nothing to put there. See
-/// [`PullRequest::head`].
+/// `head_branch` and `base_branch` are nullable for the same migration's sake:
+/// every row written before Verkstead wrote the two branches down has nothing to
+/// put there. See [`PullRequest::head`] and [`PullRequest::base`], and
+/// [`super::migrations`] for the column arriving on a database that has rows
+/// already.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pull_requests (
@@ -292,6 +308,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              title           TEXT NOT NULL,
              url             TEXT NOT NULL,
              head_branch     TEXT,
+             base_branch     TEXT,
              UNIQUE (conversation_id, repo_id, number)
          ) STRICT",
     )
@@ -609,8 +626,8 @@ async fn record(
 
     sqlx::query(
         "INSERT INTO pull_requests
-             (event_id, conversation_id, repo_id, number, title, url, head_branch)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (event_id, conversation_id, repo_id, number, title, url, head_branch, base_branch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(event_id)
     .bind(conversation_id)
@@ -619,6 +636,7 @@ async fn record(
     .bind(&pull_request.title)
     .bind(&pull_request.url)
     .bind(pull_request.head.as_deref())
+    .bind(pull_request.base.as_deref())
     .execute(&mut **tx)
     .await
     .with_context(|| {
@@ -651,12 +669,19 @@ pub async fn pull_request(
     repo_id: i64,
 ) -> Result<Option<PullRequest>> {
     /// The columns in the order the query below selects them: the pull request,
-    /// the branch its work is on, and the Repo's name where it is not the
-    /// Conversation's own.
-    type Row = (i64, String, String, Option<String>, Option<String>);
+    /// the branches its work is on and goes into, and the Repo's name where it is
+    /// not the Conversation's own.
+    type Row = (
+        i64,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
 
     let row: Option<Row> = sqlx::query_as(
-        "SELECT p.number, p.title, p.url, p.head_branch, r.name
+        "SELECT p.number, p.title, p.url, p.head_branch, p.base_branch, r.name
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
@@ -672,13 +697,16 @@ pub async fn pull_request(
         format!("reading the pull request of Repo {repo_id} on Conversation {conversation_id}")
     })?;
 
-    Ok(row.map(|(number, title, url, head, repo)| PullRequest {
-        number,
-        title,
-        url,
-        head,
-        repo,
-    }))
+    Ok(
+        row.map(|(number, title, url, head, base, repo)| PullRequest {
+            number,
+            title,
+            url,
+            head,
+            base,
+            repo,
+        }),
+    )
 }
 
 /// One pull request by name: `number` of Repo `repo_id`, or `None` where the
@@ -701,12 +729,19 @@ pub async fn pull_request_numbered(
     number: i64,
 ) -> Result<Option<PullRequest>> {
     /// The columns in the order the query below selects them: the pull request,
-    /// the branch its work is on, and the Repo's name where it is not the
-    /// Conversation's own.
-    type Row = (i64, String, String, Option<String>, Option<String>);
+    /// the branches its work is on and goes into, and the Repo's name where it is
+    /// not the Conversation's own.
+    type Row = (
+        i64,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
 
     let row: Option<Row> = sqlx::query_as(
-        "SELECT p.number, p.title, p.url, p.head_branch, r.name
+        "SELECT p.number, p.title, p.url, p.head_branch, p.base_branch, r.name
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
@@ -723,13 +758,16 @@ pub async fn pull_request_numbered(
         )
     })?;
 
-    Ok(row.map(|(number, title, url, head, repo)| PullRequest {
-        number,
-        title,
-        url,
-        head,
-        repo,
-    }))
+    Ok(
+        row.map(|(number, title, url, head, base, repo)| PullRequest {
+            number,
+            title,
+            url,
+            head,
+            base,
+            repo,
+        }),
+    )
 }
 
 /// Every pull request a Conversation's work is on, each with the Repo it was
@@ -763,11 +801,12 @@ pub async fn pull_requests(
         String,
         String,
         Option<String>,
+        Option<String>,
     );
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT r.id, r.path, r.name, r.default_branch, r.id <> v.repo_id,
-                p.number, p.title, p.url, p.head_branch
+                p.number, p.title, p.url, p.head_branch, p.base_branch
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          JOIN repos r ON r.id = p.repo_id
@@ -782,7 +821,7 @@ pub async fn pull_requests(
     Ok(rows
         .into_iter()
         .map(
-            |(id, path, name, default_branch, beside, number, title, url, head)| {
+            |(id, path, name, default_branch, beside, number, title, url, head, base)| {
                 let repo = Repo {
                     id,
                     path: std::path::PathBuf::from(path),
@@ -801,12 +840,120 @@ pub async fn pull_requests(
                         title,
                         url,
                         head,
+                        base,
                         repo: named,
                     },
                 )
             },
         )
         .collect())
+}
+
+/// The pull requests a Conversation has recorded in one Repo, in stack order:
+/// the bottom of the chain first, and each one based on the one before it.
+///
+/// What a wrap-up over a **stack** is read by. A stack is a chain of branches
+/// each based on the one under it, and that chain is on the rows themselves —
+/// each pull request's head and the branch it goes into — so this is a reading
+/// of what is recorded rather than another question for GitHub. Which matters
+/// because the reading outlives the walk: the chain was found at Start and the
+/// session that syncs it is dispatched whenever a conflict turns up, hours and a
+/// restart later.
+///
+/// One repository at a time, because a stack is one repository's: a companion's
+/// pull request is based on a branch of its own repository and has nothing to do
+/// with this chain.
+///
+/// **A set that is not one chain comes back in the order it was recorded**, which
+/// is the order [`pull_requests`] gives and the one every reader had before there
+/// were stacks: a row from before Verkstead wrote the branches down, a repository
+/// holding two unrelated pull requests, a chain that forks in two. None of those
+/// has a bottom to start from, and inventing one would be an order nobody could
+/// check. A lone pull request is a chain of one and comes back as itself either
+/// way.
+pub async fn stack(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<Vec<PullRequest>> {
+    let recorded: Vec<PullRequest> = pull_requests(pool, conversation_id)
+        .await?
+        .into_iter()
+        .filter(|(repo, _)| repo.id == repo_id)
+        .map(|(_, opened)| opened)
+        .collect();
+
+    let Some(order) = chained(&recorded) else {
+        return Ok(recorded);
+    };
+
+    Ok(order.into_iter().map(|at| recorded[at].clone()).collect())
+}
+
+/// Which of `recorded` sits on which, as the branches on the rows say — or
+/// `None` where they do not say one chain.
+///
+/// The whole of [`stack`]'s ordering, and a function of its own because it is
+/// the part worth reading twice: a chain is *one* row nothing is based on, and
+/// then one row based on each head in turn until there are no more. Anything
+/// else — a head missing, two rows at the bottom, two rows on one head, a row
+/// the walk never reaches — is not a chain, and is refused rather than
+/// half-ordered.
+fn chained(recorded: &[PullRequest]) -> Option<Vec<usize>> {
+    // Every head, and every one of them distinct: two pull requests open on one
+    // branch is not something GitHub allows, and a row that never recorded its
+    // head is one nothing can be said to sit on.
+    let heads: HashMap<&str, usize> = recorded
+        .iter()
+        .enumerate()
+        .filter_map(|(at, opened)| Some((opened.head.as_deref()?, at)))
+        .collect();
+
+    if heads.len() != recorded.len() {
+        return None;
+    }
+
+    // The bottom: the one row whose base is nobody else's head, which is the
+    // branch the whole stack eventually merges into.
+    let mut bottoms = recorded.iter().enumerate().filter(|(_, opened)| {
+        !opened
+            .base
+            .as_deref()
+            .is_some_and(|base| heads.contains_key(base))
+    });
+
+    let (bottom, _) = bottoms.next()?;
+
+    if bottoms.next().is_some() {
+        return None;
+    }
+
+    let mut order = vec![bottom];
+
+    // And up from it, one link at a time: the row based on the last one's head.
+    loop {
+        let head = recorded[*order.last()?].head.as_deref()?;
+
+        let mut above = recorded
+            .iter()
+            .enumerate()
+            .filter(|(_, opened)| opened.base.as_deref() == Some(head))
+            .map(|(at, _)| at);
+
+        let Some(next) = above.next() else {
+            break;
+        };
+
+        if above.next().is_some() {
+            return None;
+        }
+
+        order.push(next);
+    }
+
+    // And every row reached. A row the chain walked past is a second stack in
+    // the one repository, which is no more one chain than a fork is.
+    (order.len() == recorded.len()).then_some(order)
 }
 
 /// Which registered Repo one of a Conversation's pull requests was opened in.
@@ -866,12 +1013,20 @@ pub(crate) async fn on_timeline(
     conversation_id: i64,
 ) -> Result<HashMap<i64, PullRequest>> {
     /// The columns in the order the query below selects them: the Event, the pull
-    /// request, the branch its work is on, and the Repo's name where it is not the
-    /// Conversation's own.
-    type Row = (i64, i64, String, String, Option<String>, Option<String>);
+    /// request, the branches its work is on and goes into, and the Repo's name
+    /// where it is not the Conversation's own.
+    type Row = (
+        i64,
+        i64,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT p.event_id, p.number, p.title, p.url, p.head_branch, r.name
+        "SELECT p.event_id, p.number, p.title, p.url, p.head_branch, p.base_branch, r.name
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          LEFT JOIN repos r ON r.id = p.repo_id AND r.id <> v.repo_id
@@ -884,7 +1039,7 @@ pub(crate) async fn on_timeline(
 
     Ok(rows
         .into_iter()
-        .map(|(event_id, number, title, url, head, repo)| {
+        .map(|(event_id, number, title, url, head, base, repo)| {
             (
                 event_id,
                 PullRequest {
@@ -892,6 +1047,7 @@ pub(crate) async fn on_timeline(
                     title,
                     url,
                     head,
+                    base,
                     repo,
                 },
             )
@@ -916,13 +1072,29 @@ pub(crate) async fn on_timeline(
 /// the same branch would be two of them pushing to it whether or not the first
 /// has finished. Which is also why an Archived one counts: archiving is a Closed
 /// Conversation off the sidebar rather than a state of its own.
+///
+/// **The pull request a Conversation's work is *on*, rather than every row
+/// recorded beside it.** A wrap-up over a stack records the whole chain so that
+/// it can watch it — see [`stack`] — and those neighbours usually belong to a
+/// Conversation each, that being what a stack in this workbench is. Read
+/// straight off the rows, a pull request in a stack of three would be three
+/// Conversations' at once and the last two would be refused leading to the first.
+/// So what is asked is the *first* row recorded in each repository, which is what
+/// [`pull_request`] means by the pull request a wrap-up is defined by: the one it
+/// was pointed at, or the one its finish step opened there. Everything after it
+/// in that repository was recorded because it is watched.
 pub async fn conversation_on_pull_request(
     pool: &SqlitePool,
     repo_id: i64,
     number: i64,
 ) -> Result<Option<i64>> {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT conversation_id FROM pull_requests WHERE repo_id = ? AND number = ?",
+        "SELECT p.conversation_id
+         FROM pull_requests p
+         WHERE p.repo_id = ? AND p.number = ?
+           AND p.event_id = (SELECT MIN(q.event_id) FROM pull_requests q
+                             WHERE q.conversation_id = p.conversation_id
+                               AND q.repo_id = p.repo_id)",
     )
     .bind(repo_id)
     .bind(number)
