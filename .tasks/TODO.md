@@ -16,6 +16,6 @@ Roadmap stage: [06: Fix Merge Issues](docs/roadmaps/processes/06-fix-merge-issue
 
 ## Tasks
 
-- [ ] 01: Fix Merge Issues starts — [details](01-fix-merge-issues-starts.md)
+- [x] 01: Fix Merge Issues starts — [details](01-fix-merge-issues-starts.md)
 - [ ] 02: The narrowed wrap-up — [details](02-the-narrowed-wrap-up.md)
 - [ ] 03: A conflict on the way — [details](03-a-conflict-on-the-way.md)

@@ -181,11 +181,11 @@ impl Lifecycle {
 /// where a Direction rides a Question Set as a field of `Proposal` and so lives
 /// in the schema crate the agents write against. A Process is on no Set.
 ///
-/// All five from the start, though only [`Process::Develop`] can launch
-/// anything yet: the record reads and writes every one of them, and what a
-/// stage after this one adds is a start path and a row on the picker — never a
-/// variant. A store that held only what could be started would be one to
-/// migrate every time one more could.
+/// All five from the start, and all five can launch something now that Fix
+/// Merge Issues has landed: the record reads and writes every one of them, and
+/// what a stage adds is a start path and a row on the picker — never a variant.
+/// A store that held only what could be started would be one to migrate every
+/// time one more could.
 ///
 /// See ADR-0020.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

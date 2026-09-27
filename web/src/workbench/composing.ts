@@ -66,7 +66,7 @@ import type { Holding } from "../holding";
 import * as pairing from "../pairing";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL } from "./Composer";
-import { PROCESS } from "./processes";
+import { PROCESS, targeted } from "./processes";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -491,10 +491,15 @@ export async function create(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
       );
-    } else if (state.process === "Review") {
+    } else if (state.process !== null && targeted(state.process)) {
       // The third kickoff, and the one that starts no session: the take-up reads
       // the Target, puts the Conversation on what it names and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
+      //
+      // Asked of the Process's own list rather than of its name — a **Review**
+      // and a **Fix Merge Issues** are both pointed at work that is already
+      // somewhere else, and both reach it by this one endpoint. Nothing picked
+      // is the Develop every draft defaults to, which is pointed at nothing.
       const outcome = await takeUpPullRequest(id);
       said(
         outcome === "TakenUp",

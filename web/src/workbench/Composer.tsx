@@ -89,7 +89,7 @@ import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
 import { TakeUpRefusal } from "./TakeUp";
-import { needed } from "./processes";
+import { needed, targeted } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -378,22 +378,27 @@ const missing = (process: Process): string =>
 ///
 /// One press on a composer, so both shapes read *Start work* and both stand in
 /// the same row beside the paperclip. What differs is the endpoint behind it and
-/// the words a refusal comes back in: a **Review** is the wrap-up over whatever
-/// the Target names, so its press is the take-up — and every refusal the
-/// take-up already had keeps its name and its sentence. See [`Starting`], which
-/// is the row both draw.
+/// the words a refusal comes back in: a Process pointed at work that is already
+/// somewhere else is a wrap-up over whatever the Target names, so its press is
+/// the take-up — and every refusal the take-up already had keeps its name and
+/// its sentence. See [`Starting`], which is the row both draw.
+///
+/// Asked of [`targeted`] rather than of the Process by name, that being
+/// `processes.ts`'s list to keep: the Target field and the endpoint behind the
+/// press are the one fact about a Process, so a stage giving one a target gives
+/// it this press along with the field.
 function Start(props: {
   conversation: ConversationView;
   files: Attaching;
 }): JSX.Element {
   return (
     <Show
-      when={props.conversation.process === "Review"}
+      when={targeted(props.conversation.process)}
       fallback={
         <StartGrilling conversation={props.conversation} files={props.files} />
       }
     >
-      <StartReview conversation={props.conversation} files={props.files} />
+      <StartTakeUp conversation={props.conversation} files={props.files} />
     </Show>
   );
 }
@@ -520,9 +525,10 @@ function StartGrilling(props: {
   );
 }
 
-/// And the press on a **Review**, which opens no round at all: what the Target
-/// names is taken up, and the Conversation lands in Wrapping with the ordinary
-/// wrap-up running over it.
+/// And the press on a Process pointed at a target — a **Review** or a **Fix
+/// Merge Issues** — which opens no round at all: what the Target names is taken
+/// up, and the Conversation lands in Wrapping with the wrap-up its Process has
+/// running over it.
 ///
 /// Everything it turns on is the server's — the field read for a pull request or
 /// a branch, GitHub asked about the one and origin about the other, and the branch
@@ -530,7 +536,7 @@ function StartGrilling(props: {
 /// not *TakenUp* is say it and read the page again. A branch has one more step
 /// behind the press and it is the server's too: the pull request nobody opened is
 /// sent for, and the wrap-up runs over what comes back.
-function StartReview(props: {
+function StartTakeUp(props: {
   conversation: ConversationView;
   files: Attaching;
 }): JSX.Element {

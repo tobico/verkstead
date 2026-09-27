@@ -106,14 +106,21 @@ describe("the roles a process is run under", () => {
       );
     }
 
-    // And which of them a draft can be, which is the landed ones: three run
-    // under several roles and draw the panel, and the Investigate is the one
-    // that draws the dropdown.
-    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate", "Review"]);
+    // And which of them a draft can be, which is all five now: three run under
+    // several roles and draw the panel, and the Investigate and the Fix Merge
+    // Issues are the two that draw the dropdown.
+    expect(OFFERED).toEqual([
+      "Develop",
+      "Tinker",
+      "Investigate",
+      "Review",
+      "FixMergeIssues",
+    ]);
     expect(ROLES.Develop.control).toBe("panel");
     expect(ROLES.Tinker.control).toBe("panel");
     expect(ROLES.Review.control).toBe("panel");
     expect(ROLES.Investigate.control).toBe("dropdown");
+    expect(ROLES.FixMergeIssues.control).toBe("dropdown");
   });
 
   /// Every Process the wire carries has a row, for the reason all five are
@@ -168,6 +175,15 @@ describe("what an inert start says it is waiting on", () => {
     );
   });
 
+  /// A **Fix Merge Issues** waits on the same three things a Review does and
+  /// names one role rather than two, nothing about it ever reading the branch:
+  /// the clause is counted off the table, so this is the row saying so.
+  it("names one role for a fix merge issues, and its target with it", () => {
+    expect(needed("FixMergeIssues", { brief: true, target: true })).toBe(
+      "a brief, a target, and one role picked and working",
+    );
+  });
+
   /// And leaves out what the caller says is answered already: a page holding a
   /// roadmap has its brief, and one holding a pull request has its target.
   it("leaves out the clauses the caller does not ask for", () => {
@@ -181,14 +197,26 @@ describe("what an inert start says it is waiting on", () => {
 });
 
 describe("the processes that are pointed at a target", () => {
-  /// **Review** for now, and Fix Merge Issues when its stage lands: the field
-  /// in the Repo panel comes out of this list, so a Process that gains a
-  /// target gains the field without a line changing in either composer.
-  it("is Review and nothing else yet", () => {
-    expect(TARGETED).toEqual(["Review"]);
+  /// **Review** and **Fix Merge Issues**, which are the two wrap-ups over work
+  /// already somewhere else: the field in the Repo panel comes out of this
+  /// list, so a Process that gains a target gains the field without a line
+  /// changing in either composer — and so does the press that takes it up.
+  it("is the two wrap-ups over work already somewhere else", () => {
+    expect(TARGETED).toEqual(["Review", "FixMergeIssues"]);
 
     for (const process of EVERY) {
-      expect(targeted(process)).toBe(process === "Review");
+      expect(targeted(process)).toBe(
+        process === "Review" || process === "FixMergeIssues",
+      );
+    }
+  });
+
+  /// Every one of them is offered, which is the pair of lists agreeing: a
+  /// Process with a Target field and no row to pick it on would be a field
+  /// nobody could reach.
+  it("names only processes the picker offers", () => {
+    for (const process of TARGETED) {
+      expect(OFFERED).toContain(process);
     }
   });
 

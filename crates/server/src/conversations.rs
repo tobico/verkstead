@@ -1004,14 +1004,17 @@ pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Res
 /// accept, and that is what the human is offered. A stage that brings a Process
 /// to life adds to both, and each of them is written knowing the other is there.
 ///
-/// Four for now. The record reads and writes all five — see [`store::Process`]
-/// — so this list is the whole of what holds the last one back, and nothing
-/// about it has to be added when it arrives.
+/// All five, the last of them landing with Fix Merge Issues: the record reads
+/// and writes exactly this set — see [`store::Process`] — so nothing is held
+/// back here today. The list stays all the same, because it is the mechanism
+/// rather than the tally: a Process is spelled in [`store::Process`] before
+/// there is a stage that can run it, and this is where it waits.
 const LANDED: &[Process] = &[
     Process::Develop,
     Process::Tinker,
     Process::Investigate,
     Process::Review,
+    Process::FixMergeIssues,
 ];
 
 /// Say what kind of work a drafting Conversation is for.
@@ -2453,10 +2456,13 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// becomes the pull request's or the branch's, on that branch, with the ordinary
 /// wrap-up running over it.
 ///
-/// **Which is what Start does on a Review**, there being one press on a
-/// composer. The button reads *Start work* like every other Process's, and what
-/// it reaches is this — so every refusal below keeps the name and the sentence
-/// it already had.
+/// **Which is what Start does on a Review and on a Fix Merge Issues**, there
+/// being one press on a composer. The button reads *Start work* like every other
+/// Process's, and what it reaches is this — so every refusal below keeps the
+/// name and the sentence it already had, whichever of the two pressed it. What
+/// decides that it is this press rather than a grill start is
+/// [`takes_a_target`]: whether the Process is pointed at work that is already
+/// somewhere else, rather than whether it is a Review.
 ///
 /// **And the target is the Target field's.** A Review is pointed at its work
 /// there — typed in, or filled out of the Brief when it was saved — and the
@@ -2496,9 +2502,12 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// request another Conversation is on is refused naming it and the refusal leads
 /// there, however the Target named it. Then git.
 ///
-/// **Two roles rather than three.** The work on a pull request is built, so
-/// there is no round for a grilling to open and no grilling picker on the page
-/// — see [`unready_to_wrap`].
+/// **Two roles rather than three, and one where the Process never reviews.** The
+/// work on a pull request is built, so there is no round for a grilling to open
+/// and no grilling picker on the page — see [`unready_to_wrap`]. A **Fix Merge
+/// Issues** takes the review out as well, nothing about it reading the branch,
+/// and waits on the Implementation Pairing alone — see
+/// [`unready_to_investigate`].
 ///
 /// **The branch is settled against origin, and origin is fetched first.**
 /// The work lives on the remote — that is what makes it something to wrap up —
@@ -2549,11 +2558,14 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     }
 
     // Whether this press is a take-up at all, which is the Process and nothing
-    // else. A Draft from before there were Processes that was started holding a
-    // pull request reads as a **Review** for that very reason — see
-    // [`store::process`] — so it reaches this by the one road every other Review
-    // does, and anything else has nothing to wrap up.
-    if conversation.process != store::Process::Review {
+    // else — and the question is whether it is pointed at work that is already
+    // somewhere else rather than whether it is a Review, there being two of
+    // those now. A Draft from before there were Processes that was started
+    // holding a pull request reads as a **Review** for that very reason — see
+    // [`store::process`] — so it reaches this by the one road every other
+    // targeted Process does, and anything pointed at nothing has nothing to
+    // wrap up.
+    if !takes_a_target(conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
     }
 
@@ -2564,7 +2576,18 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready_to_wrap(implementation.as_ref(), &review) {
+    // And how many of them this Process waits on, which is the one thing about
+    // the press its own row decides: a **Review** reads the branch under the
+    // Review Pairing and waits on it, and a **Fix Merge Issues** never reviews
+    // anything, so it waits on the Implementation Pairing alone — exactly as an
+    // Investigate does, and reusing that reading rather than writing it out
+    // again beside this one.
+    let unready = match conversation.process {
+        store::Process::FixMergeIssues => unready_to_investigate(implementation.as_ref()),
+        _ => unready_to_wrap(implementation.as_ref(), &review),
+    };
+
+    if let Some(refusal) = unready {
         return Ok(refusal.taking_up());
     }
 
@@ -3480,8 +3503,9 @@ impl Unready {
     }
 
     /// And to the press that takes a pull request up, which has no word for a
-    /// grilling because it never asks about one — see [`unready_to_wrap`], the
-    /// only thing that makes one of these for it.
+    /// grilling because it never asks about one — see [`unready_to_wrap`] and
+    /// [`unready_to_investigate`], the two readings that make one of these for
+    /// it, neither of which looks at a grilling.
     fn taking_up(self) -> TakenUp {
         match self {
             Unready::NoImplementationProfile | Unready::NoGrillingProfile => {
@@ -3527,6 +3551,11 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
 /// review, and the composer draws the one **Agent** dropdown over the
 /// Implementation picker and nothing else. What is left is the Profile the
 /// session runs under, judged exactly as it is beside a grilling.
+///
+/// **And the whole of a Fix Merge Issues too**, which is why a take-up asks it —
+/// see [`take_up`]. That Process is a wrap-up whose review is settled before it
+/// looks, so no session ever reads the branch under a Review Pairing and there
+/// is no picker drawn for one: the same one role, judged the same way.
 fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unready> {
     let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoImplementationProfile);
@@ -3630,10 +3659,11 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// never interviewed, so the Grilling picker is drawn for it nowhere and the
 /// button waits on the two roles a wrap-up waits on; a **Review** is the wrap-up
 /// itself and waits on exactly those two, and on something in the Target field
-/// besides; and an **Investigate** is run under the Implementation role alone,
-/// so it waits on that one. The press asks exactly this again when it is
-/// pressed — see [`start_grilling`] and [`take_up`], where the readings stand
-/// beside their refusals.
+/// besides; an **Investigate** is run under the Implementation role alone, so it
+/// waits on that one; and a **Fix Merge Issues** waits on that one role and on
+/// the Target field, being a wrap-up nothing reviews. The press asks exactly this
+/// again when it is pressed — see [`start_grilling`] and [`take_up`], where the
+/// readings stand beside their refusals.
 ///
 /// **A target and not a *good* target.** Whether what is in the field is a pull
 /// request GitHub has, or a branch origin has, is decided at the press, where
@@ -3652,7 +3682,9 @@ pub(crate) fn ready_to_grill(
         store::Process::Review | store::Process::Tinker => {
             crate::profiles::ready_to_wrap(implementation, review)
         }
-        store::Process::Investigate => crate::profiles::ready_to_investigate(implementation),
+        store::Process::Investigate | store::Process::FixMergeIssues => {
+            crate::profiles::ready_to_investigate(implementation)
+        }
         _ => crate::profiles::ready_to_grill(grilling, implementation, review),
     };
 
@@ -3670,10 +3702,18 @@ pub(crate) fn ready_to_grill(
 /// kept in both: one says what the record waits on, the other says what the
 /// panel draws, and a stage that gives a Process a target adds to both.
 ///
-/// **Review** for now. Fix Merge Issues joins it when its stage lands: it is
-/// pointed at a pull request the same way, and walks the stack from there.
+/// **Review and Fix Merge Issues**, the two Processes pointed at work that is
+/// already somewhere else: each is a wrap-up over a pull request or a branch
+/// somebody built without Verkstead, and the field is where it is named.
+///
+/// Which is the question the take-up asks of a press as well — see [`take_up`],
+/// whose door this is: *is this Process pointed at work that is already
+/// somewhere else* rather than *is this a Review*.
 pub(crate) fn takes_a_target(process: store::Process) -> bool {
-    matches!(process, store::Process::Review)
+    matches!(
+        process,
+        store::Process::Review | store::Process::FixMergeIssues
+    )
 }
 
 /// Whether git would take this as a branch name.

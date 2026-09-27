@@ -825,8 +825,9 @@ describe("the process a compose page is composing under", () => {
     expect(showing("Process")).toBe("Develop");
   });
 
-  /// Four rows for now. A Process is offered only once its stage has landed, as
-  /// an agent type is offered only once it can launch the real thing.
+  /// All five now, Fix Merge Issues having landed last. A Process is offered
+  /// only once its stage has landed, as an agent type is offered only once it
+  /// can launch the real thing.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
     const { container } = mount("/compose");
@@ -835,7 +836,13 @@ describe("the process a compose page is composing under", () => {
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
     expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate", "Review"]);
+    expect(OFFERED).toEqual([
+      "Develop",
+      "Tinker",
+      "Investigate",
+      "Review",
+      "FixMergeIssues",
+    ]);
   });
 
   /// The server applies its own reading to the Conversation it creates — no row
@@ -942,6 +949,29 @@ describe("the target a compose page is pointed at", () => {
       screen.getByLabelText("Target"),
     )) as HTMLInputElement;
     expect(field.placeholder).toBe(TARGET);
+  });
+
+  /// And under a **Fix Merge Issues**, which is the other Process pointed at
+  /// work already somewhere else: the field follows the pick on this page as it
+  /// does on a draft's own composer, off the same list.
+  it("follows a pick onto Fix merge issues and off it again", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await openRepo(container);
+
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
+
+    pick("Process", PROCESS.FixMergeIssues);
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    expect(field.placeholder).toBe(TARGET);
+
+    pick("Process", PROCESS.Develop);
+    await waitFor(() => expect(screen.queryByLabelText("Target")).toBeNull());
   });
 
   /// Filled from the box while it is empty, by the reading the server does
@@ -1188,6 +1218,77 @@ describe("the target a compose page is pointed at", () => {
     // And the kickoff is what the refusal stops, exactly as a refused branch
     // name stops it.
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
+  });
+
+  /// And a **Fix Merge Issues** page is the same press over the same field: it
+  /// waits on a brief, a target and the one role its table names, and the
+  /// kickoff behind it is the take-up rather than a grill start.
+  it("takes up what a fix merge issues page is pointed at", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: "FixMergeIssues" satisfies Process,
+        target: "#41",
+      }),
+    );
+
+    const fetching = creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+
+    // Nothing written yet, so the press is inert and says the three things it
+    // is waiting on — one role, this Process using one.
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("true"),
+    );
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, a target, and one role picked and working.",
+    );
+
+    fireEvent.input(box, { target: { value: "The limiter will not merge." } });
+    await waitFor(() => expect(showing("Agent")).toBeTruthy());
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("false"),
+    );
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toEqual(
+        { process: "FixMergeIssues" satisfies Process },
+      ),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toEqual(
+        { target: "#41" },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
 });
 

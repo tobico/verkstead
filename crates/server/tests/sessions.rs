@@ -19801,7 +19801,7 @@ async fn taking_up_however_reviewed(
 }
 
 /// Stand a workbench up with somebody's branch on the upstream and no pull
-/// request anywhere, and press Start on a **Review** pointed at it.
+/// request anywhere, and press Start on a Process pointed at it.
 ///
 /// The fourth way into the pipeline and the shape this one is about: the work is
 /// built and pushed and nobody opened a pull request, so the press takes the
@@ -19809,11 +19809,17 @@ async fn taking_up_however_reviewed(
 /// one thing missing. `base` is the branch the picker is left holding, or `None`
 /// for the rule — the Repo's default branch — which is what the pull request is
 /// to be opened against either way.
+///
+/// `process` is which of the two Processes pointed at a target is pressing, the
+/// bare-branch road being the one road both come down: a **Review** settles the
+/// two roles a wrap-up runs under, and a **Fix Merge Issues** the one role it
+/// has, nothing about it ever reading the branch.
 async fn reviewing_a_branch(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     base: Option<&str>,
+    process: Process,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
 
@@ -19837,12 +19843,16 @@ async fn reviewing_a_branch(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.the_two_a_wrap_up_runs_under(id).await;
+    if process == Process::FixMergeIssues {
+        bench.the_one_an_investigation_runs_under(id).await;
+    } else {
+        bench.the_two_a_wrap_up_runs_under(id).await;
+    }
 
     let picked: ProcessPicked = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Review }),
+        &serde_json::json!({ "process": process }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -19941,6 +19951,7 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
+        Process::Review,
     )
     .await;
 
@@ -20016,6 +20027,67 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
     );
 }
 
+/// And a **Fix Merge Issues** over a bare branch comes down the same road: the
+/// press takes the branch up, lands Wrapping with no pull request, and sends the
+/// one session the branch is owed, told the base the picker held.
+///
+/// Which is the whole of what a bare branch is for either Process — the take-up
+/// is the one take-up, and what the Process decides is the wrap-up that runs
+/// after it rather than how the branch is taken up. The narrowing of that wrap-up
+/// is stage 06's next task; what this says is that the road into it is shared.
+#[tokio::test]
+async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_opened_by_hand(&opened),
+        Some("release/2.1"),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // Wrapping at the press and on no pull request: the move is the take-up's
+    // own, there being no record of one arriving to make it.
+    let view = fixture.view().await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "and on no pull request yet: {:?}",
+        view.pinned,
+    );
+
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the pull request the session opened is the one it wraps up",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull request and nothing else",
+    );
+
+    // And told the base the picker held, exactly as a Review's is.
+    let told = std::fs::read_to_string(&told_to).expect("the one session wrote its prompt down");
+
+    assert_eq!(prompts(&told).len(), 1, "one prompt, once: {told}");
+    assert!(
+        told.contains("The branch to open it against") && told.contains("release/2.1"),
+        "the session is told the base rather than left to the repository's default: {told}",
+    );
+}
+
 /// And one whose session opens none stops the run with what that session last
 /// said — with Resume another go at the one thing still owed.
 ///
@@ -20033,6 +20105,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
         &gh_opened_by_hand(&opened),
         None,
+        Process::Review,
     )
     .await;
 

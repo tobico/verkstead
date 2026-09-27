@@ -801,24 +801,48 @@ async fn a_draft_can_be_set_to_review() {
     assert_eq!(opened(&app, id).await.process, Process::Review);
 }
 
-/// The one whose stage has not landed is refused by a name of its own, rather
-/// than under the refusal about this Conversation: nothing the human does here
-/// makes it pickable, and what it is waiting on is Verkstead.
-///
-/// The endpoint is reachable without the picker, so this is the server's
-/// refusal rather than a control that simply drew no row — and what the
-/// Conversation is is untouched by an ask it refused.
+/// And Fix Merge Issues is the fifth and last, its stage having landed: the
+/// record takes every Process the picker offers, and the picker offers every one
+/// the record takes.
 #[tokio::test]
-async fn a_process_whose_stage_has_not_landed_is_refused_by_name() {
+async fn a_draft_can_be_set_to_fix_merge_issues() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
         pick_process(&app, id, Process::FixMergeIssues).await,
-        ProcessPicked::NotLanded,
-        "Fix Merge Issues has no stage behind it yet"
+        ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::Develop);
+    assert_eq!(opened(&app, id).await.process, Process::FixMergeIssues);
+}
+
+/// Which is every one of them, so nothing is refused for want of a stage any
+/// more — the endpoint is reachable without the picker, and what it accepts is
+/// the whole of what the record can hold.
+///
+/// The refusal stays where it is all the same: a Process is spelled in the store
+/// before there is a stage that can run it, and that list is where the next one
+/// will wait.
+#[tokio::test]
+async fn every_process_the_record_holds_can_be_picked() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+
+    for process in [
+        Process::Develop,
+        Process::Tinker,
+        Process::Investigate,
+        Process::Review,
+        Process::FixMergeIssues,
+    ] {
+        let id = started(&app, repo_id).await;
+
+        assert_eq!(
+            pick_process(&app, id, process).await,
+            ProcessPicked::Picked,
+            "{process:?} is offered on the picker, so the record takes it",
+        );
+        assert_eq!(opened(&app, id).await.process, process);
+    }
 }
 
 /// And the freeze: past drafting, the Process stops being the human's to change,
@@ -10498,14 +10522,284 @@ async fn a_review_pressed_with_no_profiles_is_refused_about_them_first() {
     nothing_taken_up(&app, id, &repo).await;
 }
 
-/// A Conversation that is neither a Review nor one started holding a pull
-/// request has nothing to wrap up, and the endpoint says so.
+/// A Conversation pointed at nothing — neither of the two Processes that take a
+/// target, nor one started holding a pull request — has nothing to wrap up, and
+/// the endpoint says so.
 #[tokio::test]
 async fn a_develop_draft_has_nothing_to_take_up() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(press_take_up(&app, id).await, TakenUp::NotHoldingOne);
+}
+
+/// A **Fix Merge Issues** draft, everything settled: the Process picked, the
+/// Brief saved and the one Pairing it runs under chosen.
+///
+/// No Review Pairing anywhere, which is the whole of what this Process asks
+/// differently — nothing about it ever reads the branch, so there is no picker
+/// drawn for a review and nothing for the press to wait on.
+/// The draft is made before the Profile is saved, so that the Review picker is
+/// left empty rather than prefilled off it: what a Fix Merge Issues never asks
+/// for should be provably absent rather than merely unused.
+#[cfg(unix)]
+async fn ready_to_fix(app: &Router, elsewhere: &Path, repo_id: i64, brief: &str) -> i64 {
+    let id = started(app, repo_id).await;
+    let implementation = profile(app, elsewhere, "opus").await;
+
+    settled_as_a_fix(app, id, brief, implementation).await;
+
+    id
+}
+
+/// The same over a Profile already saved, which is what a test wanting two Fix
+/// drafts wants: a Profile's name is unique across the workbench, so saving it
+/// twice is a refusal rather than a second Profile.
+#[cfg(unix)]
+async fn ready_to_fix_under(app: &Router, repo_id: i64, brief: &str, implementation: i64) -> i64 {
+    let id = started(app, repo_id).await;
+
+    settled_as_a_fix(app, id, brief, implementation).await;
+
+    id
+}
+
+/// What both of those settle on the draft they were handed.
+#[cfg(unix)]
+async fn settled_as_a_fix(app: &Router, id: i64, brief: &str, implementation: i64) {
+    assert_eq!(
+        pick_process(app, id, Process::FixMergeIssues).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(write_brief(app, id, brief).await, BriefSaved::Saved);
+
+    choose(app, id, "implementation", implementation).await;
+}
+
+/// A Fix draft's Start waits on a brief, a target and the one Pairing — and on
+/// nothing else, a Review Pairing never being asked for.
+///
+/// The pane's reading and the press's are the same reading, so this is the half
+/// of it a page can see: the three clauses its tooltip counts off.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_is_ready_on_a_brief_a_target_and_one_pairing() {
+    let (elsewhere, _dir, app, _repo, _upstream, repo_id) = workbench_reviewing().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::FixMergeIssues).await,
+        ProcessPicked::Picked
+    );
+    assert!(!opened(&app, id).await.ready_to_grill, "nothing is settled");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    choose(&app, id, "implementation", implementation).await;
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "the one role, and neither a brief nor a target",
+    );
+
+    assert_eq!(
+        write_brief(&app, id, "The limiter will not merge.\n").await,
+        BriefSaved::Saved
+    );
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "and a Brief naming no pull request leaves the Target empty",
+    );
+
+    assert_eq!(
+        name_target(&app, id, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+
+    let view = opened(&app, id).await;
+    assert!(view.ready_to_grill, "which is the third of the three");
+    assert!(
+        view.grilling_pairing.is_none(),
+        "and no grilling was ever asked for",
+    );
+    assert!(
+        matches!(view.review_pairing, PickedView::Nothing),
+        "nor a review: {:?}",
+        view.review_pairing,
+    );
+}
+
+/// And Start on it is the take-up, which is the press a Review's is: the pull
+/// request the Target names is checked out, recorded and wrapped up, and the
+/// Conversation is a Fix Merge Issues throughout.
+///
+/// Everything about the take-up itself is today's — the head at take-up as the
+/// base commit with GitHub's base beside it, the pull request recorded as the
+/// move — because what this stage widened is the door rather than the room. What
+/// the wrap-up behind it waits on is the next task's.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_takes_up_the_pull_request_its_brief_names() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let id = ready_to_fix(
+        &app,
+        elsewhere.path(),
+        repo_id,
+        "https://github.com/tobico/verkstead/pull/41 will not merge.\n",
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.branch, "rate-limiting");
+    assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
+
+    let pinned = view
+        .pinned
+        .iter()
+        .find_map(|event| match event {
+            PinnedEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .expect("a wrapping Conversation pins its pull request");
+    assert_eq!(pinned.number, 41);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let record = store::load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("it is on the record");
+    assert_eq!(
+        record.base_ref.as_deref(),
+        Some("main"),
+        "the branch GitHub says it merges into, which is what a conflict is measured against",
+    );
+
+    assert!(view.implementation_pairing.is_some());
+    assert!(
+        matches!(view.review_pairing, PickedView::Nothing),
+        "and it wraps up under the one role it was started on: {:?}",
+        view.review_pairing,
+    );
+}
+
+/// And over a bare branch it is the same take-up with nothing at the end of it:
+/// Wrapping with no pull request recorded, and the base the picker held as the
+/// branch the one owed will be opened against.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_takes_up_a_branch_with_no_pull_request() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+    git(&repo, &["branch", "release/2.1"]);
+
+    let id = ready_to_fix(
+        &app,
+        elsewhere.path(),
+        repo_id,
+        "The limiter is built and on no pull request.\n",
+    )
+    .await;
+
+    assert_eq!(
+        name_target(&app, id, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+    assert_eq!(
+        base(&app, id, Some("release/2.1")).await,
+        BaseRecorded::Recorded
+    );
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Wrapping],
+        "the take-up made the move itself, there being no record of a pull request to make it",
+    );
+    assert_eq!(view.branch, "rate-limiting");
+    assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let record = store::load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("it is on the record");
+    assert_eq!(
+        record.base_ref.as_deref(),
+        Some("release/2.1"),
+        "which is what the `submitting` session opens the pull request against",
+    );
+
+    assert!(
+        !view
+            .pinned
+            .iter()
+            .any(|event| matches!(event, PinnedEvent::PullRequest(_))),
+        "a branch is on no pull request, so there is none to pin: {:?}",
+        view.pinned,
+    );
+    assert_eq!(
+        store::adopted_pull_request(&pool, id).await.unwrap(),
+        None,
+        "and nothing was written down as taken up",
+    );
+}
+
+/// And every refusal keeps the name and the sentence it had for a Review: the
+/// take-up is the one take-up, so a fork is a fork and a branch origin has
+/// nothing under is a missing head branch, whichever Process pressed.
+///
+/// The one it asks differently is about its Profiles, which is the row above: a
+/// Fix Merge Issues is short of the one role rather than of two, so a press with
+/// nothing chosen is refused about the Implementation Pairing and about no other.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    // Nothing chosen at all, which is the cheapest refusal and the one this
+    // Process words for itself.
+    let bare = started(&app, repo_id).await;
+    assert_eq!(
+        pick_process(&app, bare, Process::FixMergeIssues).await,
+        ProcessPicked::Picked
+    );
+    assert_eq!(
+        press_take_up(&app, bare).await,
+        TakenUp::NoImplementationProfile,
+        "the one role it is short of, and nothing about GitHub was asked to find out",
+    );
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    // A branch origin has nothing under.
+    let astray = ready_to_fix_under(&app, repo_id, "It will not merge.\n", implementation).await;
+    assert_eq!(
+        name_target(&app, astray, "rate-limits").await,
+        TargetRecorded::Recorded,
+    );
+    assert_eq!(press_take_up(&app, astray).await, TakenUp::NoHeadBranch);
+    nothing_taken_up(&app, astray, &repo).await;
+
+    // And a pull request whose head is in a fork, which is nothing a wrap-up
+    // could push a fix to.
+    on_github(&repo, 41, "rate-limiting", "main", "OPEN", true);
+
+    let forked = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    assert_eq!(press_take_up(&app, forked).await, TakenUp::Fork);
+    nothing_taken_up(&app, forked, &repo).await;
 }
 
 /// How a pull request's checks are is carried to both copies of its card: the

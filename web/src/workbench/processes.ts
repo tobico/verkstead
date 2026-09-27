@@ -17,9 +17,9 @@ import type { Process } from "../api/types";
 
 /// What each Process is called on the page.
 ///
-/// All five, including the one nothing offers yet: the wire carries every one
-/// of them, so a record naming one this viewer refused to word would be a pane
-/// with a hole in it.
+/// All five, which is every one the picker offers and every one the wire
+/// carries: a record naming a Process this viewer refused to word would be a
+/// pane with a hole in it.
 export const PROCESS: Record<Process, string> = {
   Develop: "Develop",
   Investigate: "Investigate",
@@ -37,13 +37,16 @@ export const PROCESS: Record<Process, string> = {
 /// is offered in the first place. A stage that brings a Process to life adds to
 /// both, and each of them is written knowing the other is there.
 ///
-/// Four rows for now. A Process is offered only once its stage has landed, as an
-/// agent type is offered only once it can launch the real thing.
+/// All five, Fix Merge Issues having landed last. A Process is offered only once
+/// its stage has landed, as an agent type is offered only once it can launch the
+/// real thing — and *Fix merge issues* sits under the Review it is the narrowed
+/// form of, the order being the order the rows are drawn in.
 export const OFFERED: Process[] = [
   "Develop",
   "Tinker",
   "Investigate",
   "Review",
+  "FixMergeIssues",
 ];
 
 /// And which of them are pointed at work that is already somewhere else, and
@@ -56,10 +59,10 @@ export const OFFERED: Process[] = [
 /// target adds to both.
 ///
 /// Beside the role table because it is the same kind of fact about a Process,
-/// written in the same place: **Fix Merge Issues** adds itself here when its
-/// stage lands, and the field appears under its Branch field without a line
+/// written in the same place: **Fix Merge Issues** added itself here when its
+/// stage landed, and the field appeared under its Branch field without a line
 /// changing in either composer.
-export const TARGETED: Process[] = ["Review"];
+export const TARGETED: Process[] = ["Review", "FixMergeIssues"];
 
 /// Whether this Process is pointed at a target — the question each composer
 /// asks before drawing the field, as [`uses`] is the one it asks before drawing
@@ -121,7 +124,8 @@ export const ROLES: Record<Process, Roles> = {
   Review: {
     // No row that is no account: a Review without a review is Fix Merge Issues
     // with the comments answered, so the review here is answered with a Pairing
-    // or the press waits. The one Process of the four that offers none.
+    // or the press waits. Which is the Process below, and it reaches the same
+    // place by using the role rather than by picking it away.
     uses: ["implementation", "review"],
     away: [],
     control: "panel",

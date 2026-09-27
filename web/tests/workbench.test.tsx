@@ -4455,9 +4455,10 @@ describe("a conversation's setup", () => {
 /// of ADR-0020's second half: the rename asks git whether the string is a
 /// well-formed ref, and a pull request URL is not one.
 describe("the target a review is pointed at", () => {
-  /// Drawn for a Review and for nothing else, which is `processes.ts`'s list
-  /// to keep — so the row that adds a Process adds the field with it.
-  it("is drawn under Review and under no other process", async () => {
+  /// Drawn for the two Processes pointed at work already somewhere else and for
+  /// nothing else, which is `processes.ts`'s list to keep — so the row that adds
+  /// a Process adds the field with it.
+  it("is drawn under the targeted processes and under no other", async () => {
     for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
       theWorkbenchWith({ process });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
@@ -4470,15 +4471,20 @@ describe("the target a review is pointed at", () => {
       unmount();
     }
 
-    theWorkbenchWith({ process: "Review" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-    await openRepo(container);
+    for (const process of ["Review", "FixMergeIssues"] satisfies Process[]) {
+      theWorkbenchWith({ process });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+      await openRepo(container);
 
-    const field = (await waitFor(() =>
-      screen.getByLabelText("Target"),
-    )) as HTMLInputElement;
-    expect(field.placeholder).toBe(TARGET);
-    expect(TARGETED).toEqual(["Review"]);
+      const field = (await waitFor(() =>
+        screen.getByLabelText("Target"),
+      )) as HTMLInputElement;
+      expect(field.placeholder).toBe(TARGET);
+
+      unmount();
+    }
+
+    expect(TARGETED).toEqual(["Review", "FixMergeIssues"]);
   });
 
   /// And it takes the one value the Branch field beside it will not: a pull
@@ -4899,15 +4905,23 @@ describe("a conversation's process", () => {
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// Four rows for now, and that list is the one place a later stage adds to: a
-  /// Process is offered only once its stage has landed.
+  /// All five now, and that list is the one place a Process's row is written: a
+  /// Process is offered only once its stage has landed, and *Fix merge issues*
+  /// is the row this stage added.
   it("offers the processes that have landed and no others", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
     expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual(["Develop", "Tinker", "Investigate", "Review"]);
+    expect(OFFERED).toEqual([
+      "Develop",
+      "Tinker",
+      "Investigate",
+      "Review",
+      "FixMergeIssues",
+    ]);
+    expect(offers("Process")).toContain("Fix merge issues");
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there
@@ -6126,6 +6140,30 @@ describe("the pickers a conversation's process draws", () => {
     expect(ROLES.Investigate.uses).toEqual(["implementation"]);
     expect(OFFERED).toContain("Investigate");
   });
+
+  /// And one under a **Fix Merge Issues**, which is the other Process run under
+  /// the one role: it is a wrap-up whose review is settled before it looks, so
+  /// nothing ever reads the branch under a Review Pairing and there is no picker
+  /// drawn for one — and so no *No review* row anywhere on it either.
+  it("draws one picker under a Fix Merge Issues, and no review row", async () => {
+    theWorkbenchWith({ process: "FixMergeIssues" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => picker("Agent"));
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+    expect(screen.queryByLabelText("Implementation")).toBeNull();
+    expect(screen.queryByLabelText("Review")).toBeNull();
+    expect(screen.queryByText("No review")).toBeNull();
+
+    // The one picker it draws is the Implementation role's, offering accounts
+    // and nothing else — there is no work without something building it.
+    expect(picker("Agent").id).toBe("implementation-pairing");
+    expect(offers("Agent")).toEqual(READINGS);
+
+    expect(ROLES.FixMergeIssues.uses).toEqual(["implementation"]);
+    expect(away("FixMergeIssues", "review")).toBeUndefined();
+    expect(OFFERED).toContain("FixMergeIssues");
+  });
 });
 
 /// The other shape the one control takes: where the table says the Process is
@@ -7136,6 +7174,20 @@ describe("starting the work", () => {
     );
   });
 
+  /// And a **Fix Merge Issues** says one role *and* a target, which is the two
+  /// columns of the table read together: it is pointed at work already somewhere
+  /// else the way a Review is, and nothing about it reviews anything.
+  it("names one role and a target on a fix merge issues", async () => {
+    theWorkbenchWith({ process: "FixMergeIssues", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, a target, and one role picked and working.",
+    );
+  });
+
   /// A **Review** presses the take-up instead: one press on a composer, so the
   /// button is the same button and reads the same words — and what it reaches is
   /// the endpoint that checks the pull request out and moves the conversation
@@ -7146,6 +7198,36 @@ describe("starting the work", () => {
   it("posts to the take-up route where the process is a review", async () => {
     const fetching = theWorkbenchWith(
       { process: "Review" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+    expect(start.textContent).toContain("Start work");
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toEqual({}),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+
+  /// And so does a **Fix Merge Issues**, which is the same press by the same
+  /// road: what decides it is whether the Process is pointed at work already
+  /// somewhere else — `processes.ts`'s list — rather than which of the two it is.
+  it("posts to the take-up route where the process is a fix merge issues", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "FixMergeIssues" },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
