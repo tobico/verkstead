@@ -160,7 +160,15 @@ fn outside(after: &str) -> Vec<&str> {
 
 /// What a piece of the tail joins its words with, beside whitespace: the dash
 /// before a declaration, and the commas inside an `after`.
-const JOINERS: [char; 4] = [',', '—', '–', ';'];
+///
+/// All three dashes, because a line typed by hand is typed with whichever one
+/// came to hand — `checklist::split` trims the same three off the end of a title
+/// for that reason. An ASCII hyphen left out of this would join nothing, and a
+/// hand-written `— after 01 - on windows` would stand on `01` and on a stage
+/// called `-`, refusing the roadmap over a label nobody wrote. Nothing a
+/// declaration says is spelled with one: the labels are digits and the platforms
+/// are three words.
+const JOINERS: [char; 5] = [',', '-', '—', '–', ';'];
 
 /// The words of one piece of the tail.
 fn words(piece: &str) -> impl Iterator<Item = &str> {
@@ -551,6 +559,11 @@ mod tests {
             "— after 01, 03, on windows",
             "- after 01 03 on windows",
             "after 01,03 – on windows",
+            // The ASCII hyphen among them, which is what a hand typing a
+            // platform onto the end of a line reaches for: without it the `-`
+            // would be collected as a stage of its own, and the roadmap refused
+            // over a label nobody wrote.
+            "- after 01, 03 - on windows",
         ] {
             assert_eq!(
                 read(tail),
