@@ -24,10 +24,23 @@
 //! rather than a file — the app is always a bundle now, which is what the tray
 //! app's hand-written plist was working around. Those two arms are written here
 //! and proven in stages 06 and 07; the registration is still the state there,
-//! the box being drawn from reading it back through the same call. That plist is
-//! still on the machines the tray app ran on, and it is taken over once at a
-//! launch — [`launchd.ts`](./launchd.js), which is the only thing on a Mac that
-//! is a file at all.
+//! the box being drawn from reading it back. **What it is read back *with* is the
+//! one thing the two do not share**: a Mac's is `openAtLogin`, and Windows
+//! answers that about the value named after the AppUserModelId alone — which is
+//! the tray app's own value name rather than the one this app writes. So Windows
+//! is read in two halves instead, neither of which can see what the other does:
+//! whether Verkstead's own value is under the Run key at all, which is
+//! [`registry.ts`](./registry.js)'s because Electron lists only the values naming
+//! the executable that is running, and whether Explorer has switched it off,
+//! which is Electron's. See [`LoginItem.registered`], [`LoginItem.values`] and
+//! [`switchedOff`].
+//!
+//! **And the tray app's own registrations are still on the machines it ran on,
+//! each taken over once at a launch**: the plist on a Mac —
+//! [`launchd.ts`](./launchd.js), the only thing there that is a file at all —
+//! and the Run value on Windows, [`runkey.ts`](./runkey.js). Neither is
+//! something the API has ever heard of, and [`VALUE`] is what keeps the Windows
+//! one to a single shot.
 //!
 //! **And on a Mac the platform can hold a registration that is there off.**
 //! `setLoginItemSettings` is `SMAppService` on macOS 13 and up, which carries a
@@ -85,6 +98,7 @@ import { dirname, join } from "node:path";
 
 import { say } from "./log.js";
 import { absolute, type Machine } from "./platform.js";
+import { reg, type Registry, RUN } from "./registry.js";
 import type { Settings } from "./settings.js";
 
 /// The id every registration Verkstead makes with a platform is named for, and
@@ -102,6 +116,24 @@ export const APP_ID = "net.tobico.Verkstead";
 /// it means here is that the window stays off the screen while there is an icon
 /// to reach the app by; [`hidden`] is the whole of that reading.
 export const HIDDEN = "--hidden";
+
+/// What the value this app's own registration writes is called, under Windows'
+/// Run key — and so what Task Manager's **Startup apps** list draws beside it.
+///
+/// **Said rather than left to Electron, because the name it would choose is the
+/// one name this must not be.** `setLoginItemSettings` names the value after the
+/// application's AppUserModelId where it is told nothing else, and `main.ts` sets
+/// that to [`APP_ID`] so that the window groups with the Start-menu entry the msi
+/// writes. [`APP_ID`] is also the tray app's own value name, which is the one
+/// [`runkey.ts`](./runkey.js) reads and deletes — so under one name the launch
+/// after a take-over would read this app's own registration as the tray app's,
+/// register again and delete it: a box that unregisters itself every other
+/// launch. The two are distinct on purpose, and `runkey.test.ts` is what keeps
+/// them so.
+///
+/// The word the Linux entry's `Name` carries, for the same reason it carries it:
+/// this is what a human reads in a list of what their machine starts.
+export const VALUE = "Verkstead";
 
 /// Where autostart entries go under a configuration directory.
 const AUTOSTART = "autostart";
@@ -202,17 +234,20 @@ export interface Registration {
 /// registration is a call — the flag, exactly as the Linux entry's `Exec` line
 /// writes it, and nothing else.
 ///
-/// **One list rather than two, because Electron compares them.** Asking whether
-/// the app opens at login is asking about a *command line* on Windows, so a read
-/// that named different arguments from the write answers `false` about a
-/// registration this app had just made — see [`LoginItem.registered`]. Both
-/// calls are handed this same value, and there is nowhere for the two of them to
-/// disagree.
+/// **Windows' in effect, and the write's rather than the read's.** A registration
+/// there is a command line under the Run key and this is the tail of it, so
+/// [`HIDDEN`] reaches `process.argv` at a sign-in start and [`hidden`] is the
+/// whole of the reading. A Mac's login item carries no arguments, which is why
+/// [`Startup.atLogin`] exists; they are sent there all the same, Electron
+/// ignoring them on that platform, because one value sent to both is one less
+/// thing to keep in step.
 ///
-/// **And Windows is the one of the two that reads them at all.** A Mac's login
-/// item carries no arguments, which is why [`Startup.atLogin`] exists; they are
-/// sent there all the same, Electron ignoring them on that platform, because one
-/// value sent to both is one less thing to keep in step.
+/// **What they are not is half of the question Windows is asked.** They were,
+/// while `openAtLogin` was what that platform answered with — that reading is a
+/// comparison against the arguments the call was asked about. It is not what is
+/// read any more, for the reason [`LoginItem.registered`] gives: the value this
+/// app writes is named [`VALUE`], and `openAtLogin` only ever looks at the one
+/// named after the AppUserModelId.
 export const ARGS: string[] = [HIDDEN];
 
 /// What Electron's `app.setLoginItemSettings` is told, on the two platforms that
@@ -224,27 +259,74 @@ export interface LoginAsked {
   /// And the arguments the login start carries, which is how Windows is told to
   /// come up with no window — [`ARGS`], rather than anything worked out here.
   args: string[];
+
+  /// And what to call the value it writes under the Run key: [`VALUE`], which is
+  /// deliberately not [`APP_ID`] — see there.
+  ///
+  /// Windows' alone, and sent to a Mac all the same for the reason `args` are:
+  /// Electron reads it on one platform and ignores it on the other, and one
+  /// asked-for registration is one less thing to keep in step.
+  name: string;
 }
 
-/// Electron's login-item API, as the two calls this needs of it.
+/// A Run value naming this executable, as Electron's `launchItems` carries one —
+/// the two fields this app reads of it.
+///
+/// **Windows' own account of what it would start at a sign-in**, as far as
+/// Electron will report it: the values under the Run key that name *this*
+/// executable, whatever each of them happens to be called.
+export interface Registered {
+  /// What the value is called under the Run key. [`VALUE`] is this app's own;
+  /// anything else naming this executable is somebody else's business, the tray
+  /// app's [`APP_ID`] value included.
+  readonly name: string;
+
+  /// Whether Explorer says it is switched on — `false` for a value a human
+  /// turned off in Task Manager's **Startup apps**, which is recorded in a key
+  /// of Explorer's own rather than in the value itself.
+  readonly enabled: boolean;
+}
+
+/// Electron's login-item API, as the readings and the write this needs of it —
+/// four questions put to `getLoginItemSettings` and one call of
+/// `setLoginItemSettings`, each of them a platform's own rather than every
+/// platform's.
 ///
 /// Injected rather than imported, for the reason the wall in `eslint.config.js`
 /// gives: `app` is `main.ts`'s, and everything that decides anything is a
 /// function of values vitest can hand in.
 export interface LoginItem {
-  /// Whether the app is registered to open at login with `args` —
-  /// `app.getLoginItemSettings({ args }).openAtLogin`.
+  /// Whether the app is registered to open at login —
+  /// `app.getLoginItemSettings().openAtLogin`.
   ///
-  /// **The arguments are half the question rather than a detail of it.** On
-  /// Windows a registration is a command line under the Run key, and Electron
-  /// answers `openAtLogin` by comparing that line against the executable and
-  /// the arguments it was *asked* about — which it defaults to none. So a read
-  /// that left them out says Verkstead does not start with the session while it
-  /// does: a box that springs back the moment it is ticked, and a registration
-  /// [`Startup.refresh`] never rewrites. They are taken here rather than known
-  /// at the far end for that reason — what was written and what is read back are
-  /// one value.
-  registered(args: string[]): boolean;
+  /// **A Mac's question, and only a Mac's.** Windows answers it too, and answers
+  /// it about the wrong value: `openAtLogin` there is read off the one value
+  /// named after the application's AppUserModelId, which is [`APP_ID`] — the
+  /// tray app's own name — while the value this app writes is [`VALUE`]. So that
+  /// reading says Verkstead does not start with the sign-in while it does, and
+  /// no arguments passed to the call can change which value it looked at.
+  /// Measured on Windows 11 under Electron 43 against the packed app: a
+  /// registration written as `Verkstead` reads back `openAtLogin: false` and
+  /// `launchItems` carrying it, and one written under the id reads back `true`.
+  /// [`values`](#values) is what that platform is asked instead.
+  registered(): boolean;
+
+  /// The Run values that would start this executable at a sign-in —
+  /// `app.getLoginItemSettings().launchItems`.
+  ///
+  /// **Windows' question, and only Windows'.** Empty on a Mac, which carries no
+  /// such list: `openAtLogin` is the whole of the answer there, and
+  /// [`registered`](#registered) is what asks for it.
+  ///
+  /// **And it is half of Windows' answer rather than the whole of it**, because
+  /// the list is only of the values naming the executable that is *running*.
+  /// Measured on Windows 11 under Electron 43: a value rewritten to name
+  /// `D:\where\it\used\to\be\Verkstead.exe` disappeared from it altogether —
+  /// which is exactly the registration [`Startup.refresh`] exists to heal, so
+  /// whether Verkstead's own value is there at all is read from the registry
+  /// instead. What this is asked for is the other half: whether the value it can
+  /// see has been switched off — see [`switchedOff`].
+  values(): readonly Registered[];
 
   /// Whether *this launch* is the login item's own doing —
   /// `app.getLoginItemSettings().wasOpenedAtLogin`.
@@ -323,7 +405,16 @@ export interface Startup {
 }
 
 /// Where this machine keeps the registration, and what may be done to it.
-export function startup(registering: Registering, login: LoginItem): Startup {
+///
+/// `registry` is Windows' half of the reading and nothing else's — see
+/// [`registry.ts`](./registry.js) — defaulted the way
+/// [`opening`](./opening.js)'s look along the `PATH` is, so that the arm this
+/// Linux runner will never take is still an arm its tests call.
+export function startup(
+  registering: Registering,
+  login: LoginItem,
+  registry: Registry = reg,
+): Startup {
   const put = where(registering);
 
   /// Whether Verkstead starts with the session, asked of the registration.
@@ -336,7 +427,20 @@ export function startup(registering: Registering, login: LoginItem): Startup {
       return false;
     }
     if ("login" in put) {
-      return login.registered(ARGS);
+      // Each platform's own account of its own registration, and they part
+      // company here — see [`LoginItem.registered`]. A Mac's is one call.
+      if (registering.platform !== "win32") {
+        return login.registered();
+      }
+
+      // Windows' comes in two halves from two places, because neither can see
+      // what the other does. Whether Verkstead's value is under the Run key at
+      // all is the registry's to say, `openAtLogin` being read off another name
+      // and `launchItems` listing only the values that name the running
+      // executable — so an app that has moved would read as unregistered and
+      // never heal. Whether the value has been switched off in Task Manager is
+      // Electron's to say, that being kept in a key of Explorer's own.
+      return registry.has(RUN, VALUE) && !switchedOff(login.values());
     }
 
     const written = read(put.entry);
@@ -376,7 +480,7 @@ export function startup(registering: Registering, login: LoginItem): Startup {
 
     try {
       if ("login" in put) {
-        login.register({ openAtLogin: asked, args: ARGS });
+        login.register({ openAtLogin: asked, args: ARGS, name: VALUE });
       } else if (asked) {
         write(put.entry, written(named(registering)));
       } else {
@@ -553,6 +657,32 @@ export function saysOn(entry: string): boolean {
       (key === "x-gnome-autostart-enabled" && value === "false")
     );
   });
+}
+
+/// Whether `values` — the Run values naming this executable, as Windows reported
+/// them — carry Verkstead's own switched off.
+///
+/// **The Windows half of what [`saysOn`] reads on Linux**: a registration that is
+/// there and is not starting Verkstead, because somebody turned it off with the
+/// platform's own settings rather than deleting it. A human who switches
+/// Verkstead off in Task Manager's **Startup apps** is recorded under a key of
+/// Explorer's own — nothing the value itself says — and `enabled` is Electron
+/// reading that key back. Turning it off *is* unchecking the box, so it is read
+/// and not argued with.
+///
+/// **And reading it is what keeps [`Startup.refresh`] from arguing.** Measured on
+/// Windows 11 under Electron 43: a disable written under
+/// `Explorer\StartupApproved\Run` reads back here as `enabled: false`, and a bare
+/// re-registration through the API *deletes* it — so a launch that rewrote a
+/// registration it read as on would put back at every sign-in what the human had
+/// just taken away. The rewrite only happens while the box reads on, and this is
+/// what makes it read off.
+///
+/// [`VALUE`] rather than any name, for the reason the presence read names it: a
+/// value naming this executable that this app did not write is not this app's
+/// registration, and the tray app's [`APP_ID`] value is exactly that.
+export function switchedOff(values: readonly Registered[]): boolean {
+  return values.some((value) => value.name === VALUE && !value.enabled);
 }
 
 /// Whether this launch comes up with no window on the screen.

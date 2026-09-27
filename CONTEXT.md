@@ -446,6 +446,27 @@ Verkstead reads it — its presence, and the two keys `launchd` turns an agent o
 by — registers through the API where it said on, registers nothing where it said
 off, and removes it either way. Read at a launch rather than offered as a
 control: it is a registration this app made another way, not a second setting.
+**And so is the tray app's Run value, on a Windows machine that had it**: a value
+under `HKCU\...\CurrentVersion\Run` named for the app id and holding that app's
+binary with a verb after it. The same take-over, shorter by the keys a plist can
+be turned off with — a registry value has none, so the value being there is the
+whole of what it says, and the first packed launch registers through the API and
+deletes it whatever it named.
+**Which is why the value Verkstead registers is not named for the app id.**
+Electron names the value it writes after the application's Windows identity,
+which is that id — the very name the take-over reads — so it is told a name of
+its own instead, and the two staying different is what keeps the take-over to a
+single shot rather than a box that unregisters itself every other launch.
+**And Windows is read in two halves, because neither can see what the other
+does.** Whether Verkstead's value is under the Run key at all is read from the
+registry, the login-item API accounting only for the values that name the
+executable which is running — so an app that had moved would read as
+unregistered and never heal. Whether Explorer has switched that value off is the
+API's to say, being kept in a key of its own that the value knows nothing about:
+a human who turns Verkstead off in Task Manager's **Startup apps** has unticked
+the box, exactly as one who turns off a Linux entry with their desktop's own
+settings has, and the rewrite at a launch leaves it alone rather than putting
+back what they took away.
 **And a Mac can hold a registration that is there off.** The login item is
 `SMAppService` from macOS 13, which reports a `status` beside it: a
 `requires-approval` registration is in place, is not starting Verkstead, and is

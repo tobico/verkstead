@@ -39,13 +39,17 @@
 //! every arm is an ordinary unit test on this Linux runner — the agents
 //! directory is read out of the values [`Machine`](./platform.js) carries, the
 //! way the autostart directory is.
+//!
+//! **Windows has the same upgrade and its own twin of this file** — the tray
+//! app's Run value, in [`runkey.ts`](./runkey.js), which is this one without the
+//! two keys a plist can be turned off with.
 
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { say } from "./log.js";
 import { absolute, type Machine } from "./platform.js";
-import { APP_ID, ARGS, where, type LoginItem, type Registering } from "./startup.js";
+import { APP_ID, ARGS, VALUE, where, type LoginItem, type Registering } from "./startup.js";
 
 /// Where a user's own launch agents go, under the home directory.
 const LAUNCH_AGENTS = "Library/LaunchAgents";
@@ -130,7 +134,10 @@ export function takeOver(registering: Registering, login: LoginItem): void {
     // an unregistration, this app never having made the registration it would
     // be taking away.
     if (on) {
-      login.register({ openAtLogin: true, args: ARGS });
+      // The value name goes with it, as it goes with every registration this app
+      // makes: Electron ignores it on a Mac, and one asked-for registration is
+      // one less thing to keep in step — see [`VALUE`](./startup.js).
+      login.register({ openAtLogin: true, args: ARGS, name: VALUE });
     }
 
     // After the registration rather than before it, so that a take-over that

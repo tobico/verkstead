@@ -209,5 +209,90 @@ which is the shortcut's own.
   backslashes. They are the Linux runner's, CI runs them there, and nothing here
   moved the count.
 
+## What task 04 found on Windows
+
+**Launch on Startup**, driven on Windows 11 (26200) against the packed app: the
+app's own compiled modules with the real login-item API and the real Run key, and
+then the box on the real Desktop page over the DevTools protocol. **Two things
+about Electron's API were not what the plan assumed, both are answered here, and
+the rest of the arm holds as written.**
+
+**`openAtLogin` reads one value name, and it is the one this app must not use.**
+`setLoginItemSettings` names the value after the application's AppUserModelId
+unless it is told otherwise — which task 03 set to `net.tobico.Verkstead`, so
+that the window groups with the Start-menu entry, and which is exactly the name
+the take-over reads and deletes. So the value is given a name of its own,
+`Verkstead`, which is what Task Manager's **Startup apps** draws. And then
+`getLoginItemSettings` will not read it back: measured, a registration written as
+`Verkstead` answers `openAtLogin: false` while the value sits under the Run key
+and the same call's `launchItems` carries it; written under the id it answers
+`true`. There is no `name` on the read — passing one changes nothing — so
+`openAtLogin` is a Mac's reading now and Windows is read some other way.
+
+**And `launchItems` only accounts for the executable that is running.** Which is
+the reading the arm first moved to, and it is blind to the one registration the
+rewrite-at-a-launch exists for: a value rewritten to name
+`D:\where\it\used\to\be\Verkstead.exe` vanished from the list, so the box read
+off about a registration that was there and the launch that could have healed it
+left it alone. So Windows is read in two halves from two places, neither of which
+can see what the other does — whether Verkstead's own value is under the Run key
+at all, which is `reg.exe`'s to answer, and whether Explorer has switched it off,
+which is the API's. `reg.exe` is what a registry read is here: Electron has none
+and this app has no dependencies, so it is a program run and its exit status
+read, injected the way the API is.
+
+**The third thing is a rewrite that argued with the human, and reading the second
+half is what stops it.** `launchItems` carries an `enabled` that reads
+`Explorer\StartupApproved\Run` — the key Task Manager's **Startup apps** switch
+writes, and the one `crates/desktop/src/startup/run_key.rs` honestly said it could
+not see. It can be seen now, and it has to be: measured, a bare re-registration
+through the API *deletes* a disable written there, so a launch that read the box
+as on off presence alone would have put Verkstead back into every sign-in the
+morning after somebody switched it off. Read, the box reads off instead, the
+rewrite never happens, and ticking the box again clears the disable and turns it
+on — which is the reading the Linux entry's `Hidden` and
+`X-GNOME-Autostart-enabled` already get.
+
+### What the run proved
+
+Against the packed app, with the Run key read outside it at every step, and the
+machine left exactly as it was found:
+
+- a profile carrying `net.tobico.Verkstead` = `"…verkstead.exe" desktop
+  --no-open` came up with that value gone, `Verkstead` = `"…\Verkstead.exe"
+  --hidden` in its place and the box reading `{possible: true, on: true}` — the
+  log line saying so — while the same launch on a profile carrying neither
+  touched nothing;
+- the launch after that take-over read its own registration rather than the tray
+  app's and left it standing, which is the whole of what the two names buy;
+- the box on the Desktop page, over the bridge: ticked writes the value naming
+  the app's own path, `startup()` reads it back on, unticked removes it;
+- a value naming `D:\where\it\used\to\be` was rewritten at a launch to name where
+  the app is now — and the whole run again from a second install directory, where
+  every value named that one;
+- a `StartupApproved` disable planted under `Verkstead` read the box off, survived
+  the launch untouched, and was cleared by ticking the box again;
+- and `--hidden`, which is what the Run value holds, came up with no window on the
+  screen and the log saying so while the tray icon was on, and with a window when
+  it was off.
+
+### What was not reached, and why
+
+- **A real sign-out and back in.** The sessions this work runs in are a local
+  account of Verkstead's own that never signs in interactively, and a sign-out
+  would take the server hosting the session with it. What stands in for it is the
+  registration's own command line run by hand — which on this platform is the
+  whole of what a sign-in start is, the registration being a command line and
+  `--hidden` reaching `process.argv` — so what is untested is Windows reading the
+  value it was measured to hold.
+- **The msi was not installed**, for the reason task 03 gives: this machine's
+  Verkstead lives in the directory it installs into. The app was run out of a copy
+  of `win-unpacked` on a port and a Data Directory of its own, and the values it
+  wrote were read back with `reg.exe` and deleted afterwards.
+- **`desktop`'s unit tests still do not pass on Windows**, and did not before this
+  task: 37 of 288 assert POSIX path shapes against a `join` that answers in
+  backslashes. They are the Linux runner's, CI runs them there, and every one of
+  this task's own arms passes on both.
+
 [ADR-0020]: ../../adr/0020-electron-desktop.md
 [releasing.md]: ../../releasing.md

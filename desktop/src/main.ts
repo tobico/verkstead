@@ -49,10 +49,11 @@ import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
-import { takeOver } from "./launchd.js";
+import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { dataDir, logDir } from "./platform.js";
+import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
 import {
@@ -552,13 +553,18 @@ async function run(): Promise<void> {
     ...machine,
   };
 
-  // The arguments go into the read as well as the write, and they have to: on
-  // Windows a registration is a command line, and Electron answers
-  // `openAtLogin` by comparing it against the arguments it was asked about — so
-  // a bare read would say Verkstead does not start with the session while it
-  // does. Which ones they are is `startup.ts`'s, in [`ARGS`](./startup.js).
+  // Four reads of the one call and one write of the other, each of them
+  // mechanical: which of them a platform is asked, and what its answer comes to,
+  // is `startup.ts`'s — including the one this file cannot make look the same on
+  // both, `openAtLogin` being Windows' answer about a value named after the
+  // AppUserModelId rather than about the one this app writes.
   const login: LoginItem = {
-    registered: (args) => app.getLoginItemSettings({ args }).openAtLogin,
+    registered: () => app.getLoginItemSettings().openAtLogin,
+
+    // Which is why Windows is handed its own list instead: every Run value that
+    // would start this executable at a sign-in, Verkstead's own among them.
+    // Undefined on a Mac, which carries no such list.
+    values: () => app.getLoginItemSettings().launchItems ?? [],
 
     // The Mac's own account of this launch, which is what it has instead of the
     // flag the other two carry on their command lines.
@@ -572,12 +578,14 @@ async function run(): Promise<void> {
     register: (asked) => app.setLoginItemSettings(asked),
   };
 
-  // The tray app's launch agent, taken over once — before anything below reads
-  // the registration, because on a machine that had that app the agent is what
-  // the human asked for and the API has never heard of it. Nothing at all on
-  // the other two platforms, and nothing where there is no agent to find, which
-  // is every machine from the version this ships in onwards.
-  takeOver(registering, login);
+  // The tray app's own registrations, taken over once — before anything below
+  // reads this app's, because on a machine that had that app they are what the
+  // human asked for and the API has never heard of either. The launch agent on a
+  // Mac and the Run value on Windows: each is nothing at all off its own
+  // platform, and nothing where there is none to find, which is every machine
+  // from the version this ships in onwards.
+  takeOverAgent(registering, login);
+  takeOverValue(registering, login);
 
   const starts = startup(registering, login);
 

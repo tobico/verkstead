@@ -38,6 +38,7 @@ import {
   type LoginAsked,
   type LoginItem,
   type Registering,
+  VALUE,
 } from "../src/startup.js";
 
 /// The app as an upgraded Mac runs it: a packed Verkstead whose home directory
@@ -73,6 +74,7 @@ function loginItem(): LoginItem & { asked: LoginAsked[] } {
   return {
     asked,
     registered: () => false,
+    values: () => [],
     openedAtLogin: () => false,
     status: () => undefined,
     register: (wanted) => asked.push(wanted),
@@ -166,7 +168,7 @@ describe("the take-over", () => {
 
     takeOver(packed(home), login);
 
-    expect(login.asked).toEqual([{ openAtLogin: true, args: ARGS }]);
+    expect(login.asked).toEqual([{ openAtLogin: true, args: ARGS, name: VALUE }]);
     expect(existsSync(file)).toBe(false);
   });
 

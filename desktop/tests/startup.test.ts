@@ -29,6 +29,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { type Registry, RUN } from "../src/registry.js";
 import type { Settings } from "../src/settings.js";
 import {
   APP_ID,
@@ -41,9 +42,13 @@ import {
   type LoginAsked,
   type LoginItem,
   type LoginStatus,
+  type Registered,
   type Registering,
   saysOn,
   startup,
+  type Startup,
+  switchedOff,
+  VALUE,
   where,
   written,
 } from "../src/startup.js";
@@ -62,48 +67,73 @@ const packed = (dir: string, over: Partial<Registering> = {}): Registering => ({
 /// every test about the file reads.
 const entryIn = (dir: string): string => join(dir, "autostart", `${APP_ID}.desktop`);
 
-/// Whether two argument lists are the one list.
-const same = (one: string[], two: string[]): boolean =>
-  one.length === two.length && one.every((word, at) => word === two[at]);
-
-/// Electron's login-item API, stood in for: what it was asked, what it was read
-/// with, and whatever it is to answer next.
+/// Electron's login-item API, stood in for: what it was asked, and what it
+/// answers next.
 ///
-/// **It answers the way Windows does**, which is the whole of what it is for
-/// beyond recording: a registration there is a command line under the Run key,
-/// and `openAtLogin` is Electron comparing that line against the arguments it
-/// was *asked* about. So a read that named different ones from the write gets a
-/// `false` about a registration this app itself made — and that is a stub that
-/// can see it rather than one that answers its own writes whatever they said.
+/// **It answers the way both platforms do, which is not the same way** — that
+/// being the whole of what it is for beyond recording. A Mac's `openAtLogin` is
+/// the registration as a yes or a no, and `registered` answers that. Windows'
+/// half of it is a list of the values under the Run key that name this
+/// executable, and `values` answers that: under whatever name the write carried,
+/// so that a reading which looked for the wrong one finds nothing here either.
+/// The other half is [`registryOf`], which is where a value that is there at all
+/// comes from.
 function loginItem(
   on = false,
   args: string[] = [...ARGS],
   opened = false,
   status: LoginStatus | undefined = undefined,
-): LoginItem & { asked: LoginAsked[]; read: string[][] } {
+  named = VALUE,
+  enabled = true,
+): LoginItem & { asked: LoginAsked[]; written: () => LoginAsked | undefined } {
   const asked: LoginAsked[] = [];
-  const read: string[][] = [];
-  let registered: string[] | undefined = on ? args : undefined;
+  let registered: LoginAsked | undefined = on
+    ? { openAtLogin: true, args, name: named }
+    : undefined;
 
   return {
     asked,
-    read,
-    registered: (wanted) => {
-      read.push(wanted);
-      return registered !== undefined && same(registered, wanted);
-    },
+    written: () => registered,
+    registered: () => registered !== undefined,
+    values: () =>
+      registered === undefined ? [] : [{ name: registered.name, enabled }],
     openedAtLogin: () => opened,
     status: () => status,
     register: (wanted) => {
       asked.push(wanted);
-      registered = wanted.openAtLogin ? wanted.args : undefined;
+      registered = wanted.openAtLogin ? wanted : undefined;
     },
   };
 }
 
+/// The registry Windows' half of the reading is asked of, stood in for: whether
+/// Verkstead's own value is under the Run key, which is a question about the value
+/// rather than about what it names.
+///
+/// **Read off the login item's own record rather than kept beside it**, because a
+/// machine has one Run key: what the API wrote is what `reg.exe` would find, and a
+/// stub with two records of that could agree when a machine would not. `has` is
+/// the only call the reading makes; a `remove` here would be the take-over's, and
+/// that is `runkey.test.ts`'s.
+const registryOf = (login: { written: () => LoginAsked | undefined }): Registry => ({
+  has: (key, value) => key === RUN && login.written()?.name === value,
+  remove: () => {
+    throw new Error("the reading does not delete anything");
+  },
+});
+
+/// Verkstead's startup on a Windows machine whose Run key holds what `login` was
+/// told to write — the one arm whose reading is two calls rather than one, so the
+/// one arm with a third argument.
+const windows = (login: ReturnType<typeof loginItem>): Startup =>
+  startup(packed(dir, { platform: "win32" }), login, registryOf(login));
+
 /// One that is never called, for the arms that are a file rather than a call.
 const noLogin: LoginItem = {
   registered: (): boolean => {
+    throw new Error("the Linux arm is a file, and asked the login-item API");
+  },
+  values: (): Registered[] => {
     throw new Error("the Linux arm is a file, and asked the login-item API");
   },
   openedAtLogin: (): boolean => {
@@ -428,7 +458,7 @@ describe("the login-item arm", () => {
       possible: true,
       on: true,
     });
-    expect(startup(packed(dir, { platform: "win32" }), loginItem()).standing()).toEqual({
+    expect(windows(loginItem()).standing()).toEqual({
       possible: true,
       on: false,
     });
@@ -444,7 +474,7 @@ describe("the login-item arm", () => {
     const starts = startup(packed(dir, { platform: "darwin" }), login);
 
     expect(starts.set(true)).toEqual({ possible: true, on: true });
-    expect(login.asked).toEqual([{ openAtLogin: true, args: [HIDDEN] }]);
+    expect(login.asked).toEqual([{ openAtLogin: true, args: [HIDDEN], name: VALUE }]);
 
     expect(starts.set(false).on).toBe(false);
     expect(login.asked[1]?.openAtLogin).toBe(false);
@@ -454,29 +484,74 @@ describe("the login-item arm", () => {
   /// bundle that was moved is re-registered where it is now.
   it("registers again at a launch while it is on, and not while it is off", () => {
     const on = loginItem(true);
-    startup(packed(dir, { platform: "win32" }), on).refresh();
+    windows(on).refresh();
     expect(on.asked).toHaveLength(1);
 
     const off = loginItem();
-    startup(packed(dir, { platform: "win32" }), off).refresh();
+    windows(off).refresh();
     expect(off.asked).toHaveLength(0);
   });
 
-  /// **The read carries the arguments the write sent**, which Electron needs of
-  /// it: `openAtLogin` there is a comparison against the arguments it is asked
-  /// about, defaulting to none, so a bare read answers `false` about a
-  /// registration this app has just made — a box that springs back the moment it
-  /// is ticked, on a machine that really will start Verkstead at the next login.
-  it("reads the box back with the arguments it was registered with", () => {
+  /// **Windows writes a value of its own name and is read back by it**, because
+  /// the reading that platform has for `openAtLogin` looks at one name and it is
+  /// not this one — the AppUserModelId's, which is the tray app's value and
+  /// `runkey.ts`'s to take over. A box read through that call springs back the
+  /// moment it is ticked, on a machine that really will start Verkstead at the
+  /// next sign-in, and never rewrites the registration at a launch.
+  it("reads the box back off the value it wrote", () => {
     const login = loginItem();
-    const starts = startup(packed(dir, { platform: "win32" }), login);
+    const starts = windows(login);
 
     expect(starts.set(true)).toEqual({ possible: true, on: true });
+    expect(login.asked).toEqual([{ openAtLogin: true, args: ARGS, name: VALUE }]);
+    expect(login.values()).toEqual([{ name: VALUE, enabled: true }]);
+  });
 
-    expect(login.read.length).toBeGreaterThan(0);
-    for (const wanted of login.read) {
-      expect(wanted).toEqual(login.asked[0]?.args);
-    }
+  /// And a value naming this executable that this app did not write is not this
+  /// app's registration: the tray app's own is exactly that, and reading it as a
+  /// tick is a box that says on about a binary the upgrade deleted.
+  it("reads no box off a value written under another name", () => {
+    const login = loginItem(true, [...ARGS], false, undefined, APP_ID);
+
+    expect(windows(login).standing()).toEqual({ possible: true, on: false });
+  });
+
+  /// **And a value naming somewhere else is still the registration**, which is
+  /// the arm the whole two-part reading exists for: Electron lists only the
+  /// values naming the executable that is running, so a machine whose app has
+  /// moved would read as unregistered and the launch that could heal it would
+  /// leave it alone — see `LoginItem.values`. The registry sees the value
+  /// whatever it names, and the rewrite is what puts it right.
+  it("reads the box on off a value the API cannot see, and rewrites it", () => {
+    const login = loginItem(true);
+    const moved: Registry = { has: () => true, remove: () => undefined };
+    const starts = startup(
+      packed(dir, { platform: "win32" }),
+      { ...login, values: () => [] },
+      moved,
+    );
+
+    expect(starts.standing()).toEqual({ possible: true, on: true });
+
+    starts.refresh();
+    expect(login.asked).toEqual([{ openAtLogin: true, args: ARGS, name: VALUE }]);
+  });
+
+  /// **And a value Task Manager switched off is an unchecked box**, which is the
+  /// same reading the Linux entry's two off-keys get: Explorer keeps that answer
+  /// in a key of its own, Electron reads it back beside the value, and turning
+  /// Verkstead off there *is* unticking this. Which is also what keeps the
+  /// rewrite-at-a-launch from putting back what somebody took away — a
+  /// registration that reads off is one `refresh` leaves alone, and every write
+  /// through this API clears that record.
+  it("reads no box off a value switched off in Task Manager", () => {
+    const login = loginItem(true, [...ARGS], false, undefined, VALUE, false);
+    const starts = windows(login);
+
+    expect(starts.standing()).toEqual({ possible: true, on: false });
+
+    starts.refresh();
+    expect(login.asked).toEqual([]);
   });
 
   /// And what the API refused is carried up to the page rather than thrown at
@@ -484,6 +559,7 @@ describe("the login-item arm", () => {
   it("says what the API refused", () => {
     const login: LoginItem = {
       registered: () => false,
+      values: () => [],
       openedAtLogin: () => false,
       status: () => undefined,
       register: () => {
@@ -498,6 +574,34 @@ describe("the login-item arm", () => {
       on: false,
       refused: expect.stringContaining("could not"),
     });
+  });
+});
+
+describe("Verkstead's own value among the Run values Windows reported", () => {
+  /// **The one thing nothing else protects.** Electron names the value it writes
+  /// after the AppUserModelId where it is told nothing, and `main.ts` sets that
+  /// to the app id so the window groups with the Start-menu entry — which is the
+  /// name `runkey.ts` reads as the tray app's and deletes. One name for both and
+  /// the launch after a take-over reads its own registration as that app's,
+  /// registers again and removes it: a box that unregisters itself every other
+  /// launch.
+  it("is not the name the take-over reads", () => {
+    expect(VALUE).not.toBe(APP_ID);
+  });
+
+  /// Windows' own way of turning a value off rather than deleting it — the twin
+  /// of the two keys `saysOn` reads, and Verkstead's own value alone.
+  it("is switched off where Explorer says the value is not approved", () => {
+    expect(switchedOff([{ name: VALUE, enabled: false }])).toBe(true);
+    expect(switchedOff([{ name: VALUE, enabled: true }])).toBe(false);
+    expect(switchedOff([])).toBe(false);
+    expect(switchedOff([{ name: APP_ID, enabled: false }])).toBe(false);
+    expect(
+      switchedOff([
+        { name: "Something Else", enabled: true },
+        { name: VALUE, enabled: false },
+      ]),
+    ).toBe(true);
   });
 });
 
@@ -549,17 +653,14 @@ describe("a registration macOS is holding", () => {
   /// And it is not asked of Windows at all — a status is a Mac's word, and the
   /// stub that throws when it is asked is what says so.
   it("is not asked of Windows", () => {
-    const login: LoginItem = {
+    const login = {
       ...loginItem(true),
       status: (): LoginStatus => {
         throw new Error("Windows has no SMAppService, and was asked for a status");
       },
     };
 
-    expect(startup(packed(dir, { platform: "win32" }), login).standing()).toEqual({
-      possible: true,
-      on: true,
-    });
+    expect(windows(login).standing()).toEqual({ possible: true, on: true });
   });
 });
 
@@ -584,9 +685,7 @@ describe("a Mac's own account of a login start", () => {
   });
 
   it("is not asked of Windows, whose Run key carries it", () => {
-    expect(
-      startup(packed(dir, { platform: "win32" }), loginItem(true, [...ARGS], true)).atLogin(),
-    ).toBe(false);
+    expect(windows(loginItem(true, [...ARGS], true)).atLogin()).toBe(false);
   });
 
   /// Nor of a machine with nowhere to keep a registration: one that was never
