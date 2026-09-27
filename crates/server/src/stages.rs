@@ -869,6 +869,22 @@ pub(crate) struct Abandoned {
     /// The stage adopting it would start — the lowest-numbered one that is not
     /// done, its brief already read.
     pub(crate) stage: Stage,
+
+    /// Whether the commit this was read at is **missing the work of a stage below
+    /// the one offered**: a stage the record says settled whose box is still
+    /// unticked here, which is its finish commit — and its work — sitting on a
+    /// branch this commit does not hold.
+    ///
+    /// What it is for is [`waiting`], which reads one roadmap at several commits
+    /// and draws each stage once: a reading that is behind offers work the base
+    /// under it cannot build on, so it loses to a reading of the same stage that
+    /// is not. Nothing about the stage differs between the two — it is the base
+    /// that does.
+    ///
+    /// `false` wherever the boxes and the record agree, which is every roadmap
+    /// read at a commit that holds everything settled so far, and every roadmap
+    /// the record knows nothing about.
+    pub(crate) behind: bool,
 }
 
 /// What a roadmap has to start at a commit: the stage, or which of the ways it
@@ -1024,10 +1040,21 @@ fn notice(repo: &store::Repo, record: &store::StageStandings) -> Option<Abandone
 /// kept. In a working repository that is a handful out of a hundred.
 ///
 /// The same reading twice over is drawn once — deduplicated on the branch the
-/// stage would be worked on, which is the roadmap and the stage together, and
-/// the default branch's reading is the one kept. Two branches offering
-/// genuinely different stages of one roadmap are two different pieces of work
-/// off two different bases, and both are drawn.
+/// stage would be worked on, which is the roadmap and the stage together. Two
+/// branches offering genuinely different stages of one roadmap are two different
+/// pieces of work off two different bases, and both are drawn.
+///
+/// **Which of two readings of one stage is kept is a question about the base**,
+/// because the base is the only thing that differs between them and it is what
+/// the press fixes the new Conversation to. A reading that is
+/// [`behind`](Abandoned::behind) — one that had to count a settled stage as done
+/// while its box was still unticked at that commit — is offering work whose
+/// predecessor is not there, so it loses to a reading of the same stage that is
+/// not behind. That is the case the record put back in this notice in the first
+/// place: a roadmap whose stage 01 settled on an unmerged branch is offered at
+/// the default tip *and* off that branch, and only one of the two holds stage
+/// 01's commits. Where neither is behind, or both are, the default branch's is
+/// kept: it is the base that needs no fixing.
 ///
 /// No fetch, unlike those two. This is read for every registered Repo every
 /// time the workbench reads the sidebar, and a network call per Repo per read is
@@ -1053,24 +1080,48 @@ pub(crate) fn waiting(repo: &store::Repo, record: &store::StageStandings) -> Vec
         return Vec::new();
     };
 
-    // The default branch first, so that where the same stage is offered twice
-    // the reading kept is the one needing no base fixed at all. Its base is
-    // empty for that reason: there is nothing for the press to override.
+    // The default branch first, so that where two readings of a stage are as good
+    // as each other the one kept is the one needing no base fixed at all. Its base
+    // is empty for that reason: there is nothing for the press to override.
     let bases = std::iter::once((String::new(), commit)).chain(unmerged(&repo.path, &named));
 
-    let mut drawn = BTreeSet::new();
-
-    bases
+    let readings = bases
         .flat_map(|(base, commit)| {
             abandoned_at(&repo.path, &commit, record)
                 .into_iter()
                 .map(move |abandoned| (base.clone(), abandoned))
         })
-        // On the stage's branch rather than on the roadmap: it carries the
-        // roadmap and the stage both, and two bases offering the same stage are
-        // offering the one piece of work.
-        .filter(|(_, abandoned)| drawn.insert(abandoned.stage.branch()))
-        .map(|(base, abandoned)| AbandonedRoadmap {
+        .collect::<Vec<_>>();
+
+    // Which reading of each stage to draw, keyed on the stage's branch rather
+    // than on the roadmap: it carries the roadmap and the stage both, and two
+    // bases offering the same stage are offering the one piece of work.
+    //
+    // Read order decides a tie, the default branch's being first, and a reading
+    // that is behind gives way to one that is not — which is the whole of the
+    // preference, and which base each came off never enters into it.
+    let mut kept: HashMap<String, usize> = HashMap::new();
+
+    for (at, (_, abandoned)) in readings.iter().enumerate() {
+        let better = match kept.get(&abandoned.stage.branch()) {
+            None => true,
+            Some(&held) => readings[held].1.behind && !abandoned.behind,
+        };
+
+        if better {
+            kept.insert(abandoned.stage.branch(), at);
+        }
+    }
+
+    // Back in read order, so the rows come out in the order the bases were read
+    // however the preference above landed.
+    let drawn = kept.into_values().collect::<BTreeSet<_>>();
+
+    readings
+        .into_iter()
+        .enumerate()
+        .filter(|(at, _)| drawn.contains(at))
+        .map(|(_, (base, abandoned))| AbandonedRoadmap {
             name: abandoned.stage.roadmap,
             title: abandoned.title,
             stage: abandoned.stage.label,
@@ -1235,11 +1286,23 @@ pub(crate) fn startable(
     // is a roadmap that finished, and its directory stays where it is as the
     // record of what it was.
     //
-    // The standing comes out beside the entry rather than being asked for again
-    // below: the two clauses that turn on it are the same lookup.
-    let found = entries
-        .map(|entry| (record.of(name, entry.label), entry))
-        .find(|(standing, entry)| !done(entry, *standing));
+    // What is passed over on the way is worth one bit: a stage counted as done by
+    // the record while its box is still unticked *here* is a stage whose finish
+    // commit has not reached this commit, so neither has its work — see
+    // [`Abandoned::behind`], which is what that is for.
+    let mut behind = false;
+    let mut found = None;
+
+    for entry in entries {
+        let standing = record.of(name, entry.label);
+
+        if !done(&entry, standing) {
+            found = Some((standing, entry));
+            break;
+        }
+
+        behind |= !entry.checked;
+    }
 
     let Some((standing, entry)) = found else {
         return Startable::Complete;
@@ -1309,6 +1372,7 @@ pub(crate) fn startable(
     Startable::Stage(Box::new(Abandoned {
         title: checklist::heading(&index),
         stage,
+        behind,
     }))
 }
 
@@ -3209,6 +3273,11 @@ Turns this askance clone into Verkstead.
     /// the Repo and refuses: the roadmap that most needs carrying on is the one
     /// that offers nothing. With the record it offers stage 02, and the notice and
     /// the press name the same one.
+    ///
+    /// And the notice names stage 01's branch as the base. Both bases offer stage
+    /// 02 — the default tip by the record, and the branch by its own ticked box —
+    /// and only the branch holds stage 01's commits, so the reading that is behind
+    /// gives way to the one that is not.
     #[test]
     fn a_stage_settled_on_an_unmerged_branch_leaves_the_stage_after_it_to_adopt() {
         let repo = Repo::with(&[]);
@@ -3247,9 +3316,11 @@ Turns this askance clone into Verkstead.
         assert_eq!(
             repo.abandoned_with(&record)
                 .iter()
-                .map(|abandoned| abandoned.stage.label.as_str())
+                .map(|abandoned| (abandoned.stage.label.as_str(), abandoned.behind))
                 .collect::<Vec<_>>(),
-            ["02"],
+            [("02", true)],
+            "and this reading is behind: stage 01 is done by the record alone here, \
+             its tick and its work both being on the branch below",
         );
 
         assert_eq!(
@@ -3263,10 +3334,10 @@ Turns this askance clone into Verkstead.
                     roadmap.base.as_str(),
                 ))
                 .collect::<Vec<_>>(),
-            [("mvp", "02", "")],
-            "and the notice says the same stage, off the default branch's tip: \
-             the branch holding the tick offers the one piece of work too, \
-             and the reading kept is the one needing no base fixed",
+            [("mvp", "02", "roadmaps/mvp/01-workbench")],
+            "so the notice draws stage 02 off the branch holding stage 01's work \
+             rather than off the default tip, which does not hold it: both bases \
+             offer the stage and only one of them can build on what it stands on",
         );
     }
 
