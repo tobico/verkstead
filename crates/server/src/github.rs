@@ -266,7 +266,15 @@ pub(crate) enum Trouble {
     /// repository it is.
     NoRemote,
 
-    /// GitHub has no pull request for this branch.
+    /// GitHub has nothing under what it was asked about: no pull request on the
+    /// branch, or none under the number.
+    ///
+    /// Two sentences out of `gh` and one reason, because the selector is the
+    /// caller's and not GitHub's: asked with a branch it says there are no pull
+    /// requests found, and asked with a number it says it could not resolve one.
+    /// Every caller already knows which it asked with — see [`Self::why`], which
+    /// words it for the branch, and [`crate::conversations::resolve`], which
+    /// words it for the number.
     NoPullRequest,
 
     /// Something else, in `gh`'s own words.
@@ -283,7 +291,16 @@ impl Trouble {
     fn read(stderr: &str) -> Trouble {
         let said = stderr.to_lowercase();
 
-        if said.contains("no pull requests found") || said.contains("no open pull requests") {
+        // The first two are what a branch selector gets and the third is what a
+        // number gets — `gh pr view 4040` answers *GraphQL: Could not resolve to
+        // a PullRequest with the number of 4040* — and all three are GitHub
+        // having nothing under what it was asked about. Matched on the shape of
+        // the sentence rather than the whole of it, the number and the field
+        // GitHub blames being in the middle of it.
+        if said.contains("no pull requests found")
+            || said.contains("no open pull requests")
+            || said.contains("could not resolve to a pullrequest")
+        {
             return Trouble::NoPullRequest;
         }
 
@@ -745,10 +762,12 @@ pub(crate) struct Numbered {
 /// what decides which GitHub repository a directory speaks for, an SSH alias and
 /// a GitHub Enterprise host being remotes a URL match would get wrong.
 ///
-/// A number GitHub has nothing under at all comes back as [`Trouble`], which is
-/// `gh`'s own way of saying so; a number it has something closed or merged
-/// under comes back with [`Numbered::open`] false. The two are one refusal to
-/// the human and are told apart here because only one of them is an error.
+/// A number GitHub has nothing under at all comes back as
+/// [`Trouble::NoPullRequest`], that being what `gh` says about one — *could not
+/// resolve to a PullRequest with the number of …*; a number it has something
+/// closed or merged under comes back with [`Numbered::open`] false. The two are
+/// one refusal to the human and are told apart here because only one of them is
+/// an error.
 pub(crate) fn pull_request_numbered(
     gh: &Gh,
     repo: &Path,
@@ -1597,6 +1616,28 @@ mod tests {
 
         assert_eq!(
             pull_request(&gh, dir.path(), "rate-limiting"),
+            Err(Trouble::NoPullRequest),
+        );
+    }
+
+    /// And the same answer asked the other way: a *number* GitHub has nothing
+    /// under, which it says in a different sentence entirely.
+    ///
+    /// The reason is the same and the words are not, so both have to be read:
+    /// what a Review does about *GitHub has nothing under that* is name the
+    /// number back to the human, and anything else is read as GitHub having been
+    /// unreachable — which sends them to look at their machine over a number they
+    /// typed wrong.
+    #[test]
+    fn a_number_with_no_pull_request_is_that_same_answer() {
+        let (dir, gh) = stub(
+            "",
+            "GraphQL: Could not resolve to a PullRequest with the number of 4040. \
+             (repository.pullRequest)",
+        );
+
+        assert_eq!(
+            pull_request_numbered(&gh, dir.path(), 4040),
             Err(Trouble::NoPullRequest),
         );
     }

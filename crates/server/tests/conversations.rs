@@ -9564,6 +9564,12 @@ async fn taking_up_is_refused_by_name_when_the_fetch_fails() {
 /// named a branch — see `opened_on`, which is what refuses a branch somebody else
 /// is already wrapping up.
 ///
+/// **And it says what `gh` says, one sentence per selector**, because those words
+/// are what Verkstead reads the reason off: `gh` answers a branch it has nothing
+/// on with *no pull requests found for branch* and a number with *could not
+/// resolve to a PullRequest with the number of*, and a stub that said the branch
+/// sentence to both would be a stub written to the parser rather than to `gh`.
+///
 /// A stand-in for a program is a program, which is what keeps this off Windows;
 /// the `pull_requests` suite is off it for the same reason. `sh -c` gives `$0`
 /// the script's own name, so what Verkstead passes lands in `$1` onwards and the
@@ -9574,7 +9580,14 @@ fn gh_answering() -> Gh {
         "/bin/sh".to_owned(),
         "-c".to_owned(),
         r#"if [ -f "./pr-$3.json" ]; then cat "./pr-$3.json"; exit 0; fi
-           echo 'no pull requests found' >&2
+           case "$3" in
+           ''|*[!0-9]*)
+               printf 'no pull requests found for branch "%s"\n' "$3" >&2
+               ;;
+           *)
+               printf 'GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n' "$3" >&2
+               ;;
+           esac
            exit 1"#
             .to_owned(),
         "gh".to_owned(),
