@@ -53,6 +53,9 @@ mod commits;
 mod continuing;
 
 mod conversations;
+/// What a roadmap's stage line declares: the stages it stands on, and the
+/// platform it wants.
+mod declarations;
 mod deferrals;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;

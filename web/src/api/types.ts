@@ -4788,6 +4788,27 @@ number: string, title: string,
  */
 done: boolean, 
 /**
+ * What the stage stands on, by the labels its line names — `["01", "03"]`
+ * of `after 01, 03` — or `null` where its line declares nothing, which is
+ * every line of every roadmap written before any of this.
+ *
+ * Empty is the root: `no dependencies`, the human's own wording. An `after`
+ * naming nobody is the same empty list, and is a roadmap the judging
+ * refuses rather than a shape the pane has to draw differently.
+ */
+stands_on: Array<string> | null, 
+/**
+ * The platform its line names, as the line names it — `windows` of `on
+ * windows` — or `null` where it names none.
+ *
+ * Shown beside what the stage stands on and acted on by nothing: placing a
+ * stage on a device that matches is a follow-up once cluster mode has
+ * landed. Independent of the line above it — a line whose whole tail is a
+ * platform is undeclared with a platform, because a forgotten declaration
+ * hiding behind one is what the all-or-nothing rule is for.
+ */
+platform: string | null, 
+/**
  * The brief rendered and sanitized, or `null` where there is nothing to
  * render. Unlike a task's, that is not the ordinary end of a stage's life
  * but a roadmap pointing at a file nobody wrote — which the pane says in

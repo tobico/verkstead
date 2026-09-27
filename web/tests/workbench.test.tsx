@@ -15590,11 +15590,32 @@ const ROADMAP_PANE: RoadmapPane = {
     number: stage.number,
     title: stage.title,
     done: stage.done,
+    // A roadmap written before there was anything to declare, which is what
+    // makes this the pane as it has always looked.
+    stands_on: null,
+    platform: null,
     html:
       stage.number === "04"
         ? null
         : `<h1>${stage.number}. ${stage.title}</h1>\n<h2>What to build</h2>\n` +
           `<p>The ${stage.title.toLowerCase()} of it.</p>`,
+  })),
+};
+
+/// And the same roadmap with every line declaring, which is what one written
+/// since ADR-0021 looks like: a root, two stages standing on others, and a
+/// platform on the last of them. The empty list is `no dependencies` on the
+/// line.
+const DECLARING: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    ...[
+      { stands_on: [], platform: null },
+      { stands_on: ["01"], platform: null },
+      { stands_on: ["01", "02"], platform: null },
+      { stands_on: ["03"], platform: "windows" },
+    ][at]!,
   })),
 };
 
@@ -15668,6 +15689,92 @@ describe("the stage list opened", () => {
         .filter((_, at) => ROADMAP.stages[at]!.done)
         .every((section) => section.querySelector(`.${documents.document}`) !== null),
     ).toBe(true);
+  });
+
+  /// What each stage's line declared, said on the stage's own section: what it
+  /// stands on, and the platform it wants where it names one.
+  ///
+  /// Under the heading and above the box, because the box is the brief and this
+  /// came off the roadmap's own line.
+  it("says what each stage stands on and names its platform", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(DECLARING)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.declares}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      // `no dependencies` on the line, which arrives as the empty list.
+      "Stands on nothing",
+      "Stands on 01",
+      "Stands on 01, 02",
+      "Stands on 03 · on windows",
+    ]);
+
+    // Between the heading and the brief, and outside the box the brief is in.
+    const said = sections[1]!.querySelector(`.${documents.declares}`)!;
+
+    expect(said.previousElementSibling!.tagName).toBe("H2");
+    expect(said.closest(`.${documents.document}`)).toBeNull();
+  });
+
+  /// And a roadmap whose lines declare nothing — which is every roadmap written
+  /// before there was anything to declare — reads exactly as it did.
+  it("says nothing of the kind where the roadmap declares nothing", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    expect(
+      container.querySelectorAll(`.${shell.detailsPane} .${documents.declares}`),
+    ).toHaveLength(0);
+  });
+
+  /// A platform on its own does not declare anything, so the line reads as
+  /// undeclared — and the platform is still shown, that being what is on the
+  /// record.
+  it("names a platform on a line that declares nothing else", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({
+          ...ROADMAP_PANE,
+          stages: ROADMAP_PANE.stages.map((stage) => ({
+            ...stage,
+            platform: "macos",
+          })),
+        } satisfies RoadmapPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${documents.declares}`,
+    );
+
+    expect(said.textContent).toBe("on macos");
   });
 
   /// The one thing a stage has no document for is a roadmap pointing at a brief

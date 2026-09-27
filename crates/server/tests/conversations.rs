@@ -7190,6 +7190,55 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     // says in words rather than drawing a gap.
     assert_eq!(pane.stages[1].html, None);
     assert_eq!(pane.stages[3].html, None);
+
+    // And nothing on any of them about what it stands on, this being a roadmap
+    // whose lines declare nothing — which is every roadmap written before there
+    // was anything to declare, and is a roadmap run in order.
+    assert!(
+        pane.stages
+            .iter()
+            .all(|stage| stage.stands_on.is_none() && stage.platform.is_none()),
+        "an undeclared roadmap reads exactly as it did: {:?}",
+        pane.stages,
+    );
+}
+
+/// And a roadmap that declares hands the pane what each stage stands on and the
+/// platform it wants, read off the line rather than out of the brief.
+///
+/// Every line of it declares, because a roadmap declaring on some lines and not
+/// others is one nothing will run — and stage 03's line declares beside the
+/// annotation saying whose it is, the two sharing one tail.
+#[tokio::test]
+async fn a_declaring_roadmap_says_what_each_stage_stands_on() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(&worktree, "mvp", DECLARING, &[]);
+
+    let pane = roadmap_pane(&app, id, "mvp").await;
+
+    assert_eq!(
+        pane.stages
+            .iter()
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.stands_on.clone(),
+                stage.platform.as_deref(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            // `no dependencies`: the root, which comes over as the empty list.
+            ("01", Some(Vec::new()), None),
+            ("02", Some(vec!["01".to_owned()]), None),
+            // Beside the annotation, which neither reading trips on.
+            ("03", Some(vec!["01".to_owned(), "02".to_owned()]), None),
+            ("04", Some(vec!["03".to_owned()]), Some("windows")),
+        ],
+        "the labels as the roadmap writes them, and the platform as it named it",
+    );
 }
 
 /// The ways there is nothing to open, refused the same way: what the human would
@@ -7304,6 +7353,24 @@ Turns this askance clone into Verkstead.
 - [x] 02: Grilling — [brief](02-grilling.md)
 - [ ] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// The same roadmap with every line declaring, which is what one written since
+/// ADR-0021 looks like: what each stage stands on, a platform where it wants
+/// one, and one line whose tail carries a declaration and the in-flight
+/// annotation at once.
+const DECLARING: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 01, 02 \
+*(in progress: `roadmaps/mvp/03-implementation`)*
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 03 — on windows
 ";
 
 /// And with that stage ticked off, which is what the stage after it leaves.

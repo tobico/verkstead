@@ -35,6 +35,38 @@ function anchor(stage: StageDocument): string {
   return `stage-${stage.number}`;
 }
 
+/// What the stage's own line in `ROADMAP.md` declared, in words: what it stands
+/// on, and the platform it wants where it names one.
+///
+/// Nothing at all where the line declared neither, which is every line of every
+/// roadmap written before there was anything to declare — so such a roadmap's
+/// pane reads exactly as it always did. A platform on its own is drawn on its
+/// own: the line is undeclared, and saying so is the refusal's business rather
+/// than this pane's.
+function declares(stage: StageDocument): string | undefined {
+  const said: string[] = [];
+
+  if (stage.stands_on) {
+    // The empty list is the root — `no dependencies` on the line — and an
+    // `after` naming nobody arrives as the same thing, that being a roadmap
+    // nothing will run rather than a shape to draw differently.
+    said.push(
+      stage.stands_on.length > 0
+        ? `Stands on ${stage.stands_on.join(", ")}`
+        : "Stands on nothing",
+    );
+  }
+
+  // As the line named it, whatever word that was: the three there are is what
+  // the refusal knows, and a pane that quietly dropped a fourth would be hiding
+  // the thing the human has to fix.
+  if (stage.platform) {
+    said.push(`on ${stage.platform}`);
+  }
+
+  return said.length > 0 ? said.join(" · ") : undefined;
+}
+
 export function Roadmap(props: {
   conversation: ConversationView;
 
@@ -71,6 +103,9 @@ export function Roadmap(props: {
       // stage still has its brief — see `Backlog.tsx`, which says it the same
       // way for the same reason.
       mark: stage.done ? "done" : "to do",
+      // What the roadmap's own line said about it, which is the one thing here
+      // that comes off the list rather than out of the brief.
+      declares: declares(stage),
     })),
   );
 

@@ -58,6 +58,7 @@ use verkstead_render::{
 };
 
 use crate::checklist;
+use crate::declarations;
 use crate::repos::git;
 use crate::{store, worktrees};
 
@@ -649,19 +650,36 @@ fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
     let stages: Vec<StageSource> = list
         .lines()
         .filter_map(checklist::entry)
-        .map(|entry| StageSource {
-            number: entry.label.to_owned(),
-            title: entry.title.to_owned(),
-            // The box, and nothing else — see the module docs. A stage's brief
-            // stays where it is for ever, so a done stage has a document like
-            // any other and the section says so on its heading.
-            done: entry.checked,
-            // Absent only where the roadmap names a brief nobody wrote, or one
-            // that will not be read. Both are the same nothing to draw, and the
-            // pane says so in words.
-            markdown: files
-                .get(&entry.number)
-                .and_then(|file| std::fs::read_to_string(directory.join(file)).ok()),
+        .map(|entry| {
+            // What its line declares, read off the same tail the in-flight
+            // annotation lives in: the two share it in either order and neither
+            // reading trips on the other.
+            let declared = declarations::read(entry.after);
+
+            StageSource {
+                number: entry.label.to_owned(),
+                title: entry.title.to_owned(),
+                // The box, and nothing else — see the module docs. A stage's
+                // brief stays where it is for ever, so a done stage has a
+                // document like any other and the section says so on its
+                // heading.
+                done: entry.checked,
+                // The root comes over as the empty list, which is what the pane
+                // draws it as: *stands on nothing*.
+                stands_on: declared.stands_on.map(|stands_on| match stands_on {
+                    declarations::StandsOn::Nothing => Vec::new(),
+                    declarations::StandsOn::Stages(stages) => {
+                        stages.into_iter().map(str::to_owned).collect()
+                    }
+                }),
+                platform: declared.platform.map(str::to_owned),
+                // Absent only where the roadmap names a brief nobody wrote, or
+                // one that will not be read. Both are the same nothing to draw,
+                // and the pane says so in words.
+                markdown: files
+                    .get(&entry.number)
+                    .and_then(|file| std::fs::read_to_string(directory.join(file)).ok()),
+            }
         })
         .collect();
 
@@ -1857,6 +1875,58 @@ Turns this askance clone into Verkstead.
         // about whose it is, not about whether it is done.
         let Next::Stage(stage) = repo.next("mvp", "some-other-branch") else {
             panic!("stage 02 is still unchecked");
+        };
+
+        assert_eq!(stage.label, "02");
+    }
+
+    /// And a declaration on the line does not hide it, whichever way round the
+    /// two were written. They share one tail: the annotation is matched by the
+    /// branch in backticks and a declaration holds none, which is what keeps the
+    /// stage in flight findable beside one.
+    #[test]
+    fn a_declaration_on_the_line_does_not_hide_the_stage_in_flight() {
+        for tail in [
+            "— after 01 *(in progress: `grilling`)*",
+            "*(in progress: `grilling`)* — after 01",
+        ] {
+            let repo = Repo::with(&[]);
+            repo.write(
+                "mvp",
+                &format!(
+                    "# MVP roadmap\n\n\
+                     - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+                     - [ ] 02: Grilling — [brief](02-grilling.md) {tail}\n\
+                     - [ ] 03: Implementation — [brief](03-implementation.md) — after 02\n"
+                ),
+            );
+            repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+            repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+            let Next::Stage(stage) = repo.next("mvp", "grilling") else {
+                panic!("the stage after this Conversation's own is the one to start: {tail:?}");
+            };
+
+            assert_eq!(stage.label, "03", "{tail:?}");
+        }
+    }
+
+    /// And a declaration is not mistaken for an annotation: a roadmap every line
+    /// of which declares is still a roadmap with no stage in flight, so the
+    /// lowest unticked box is the one to start.
+    #[test]
+    fn a_declaration_is_nobodys_stage_in_flight() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on windows\n",
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let Next::Stage(stage) = repo.next("mvp", "grilling") else {
+            panic!("stage 02 is unticked and nobody's");
         };
 
         assert_eq!(stage.label, "02");

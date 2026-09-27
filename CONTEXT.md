@@ -2215,6 +2215,18 @@ first moment, because the grilling that would have settled the work wrote the
 brief. Its branch stacks on the unmerged predecessor where the target
 repository records how, and comes off the default branch where it does not.
 
+**Its line in `ROADMAP.md` declares what it stands on**, after the link to the
+brief: `after 01, 03` names other stages of the same roadmap by their labels as
+the roadmap writes them, and `no dependencies` is a root. The line may name a
+**platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
+details pane says what each stage stands on and names its platform where it has
+one. **Nothing acts on any of it yet**: every roadmap still runs in order, and
+placing a stage on a device that matches its platform is a follow-up once
+cluster mode has landed. Every line of a declaring roadmap carries a
+declaration, a bare line there being a root and a forgotten declaration at once
+— and **a roadmap declaring nothing at all is one run in order**, which is every
+roadmap written before this and is read exactly as it was. See ADR-0021.
+
 **Its branch is named for where the stage lives**: `roadmaps/`, then the
 roadmap's own directory name, then the stage brief's filename —
 `docs/roadmaps/mvp/04-wrap-up.md` is worked on `roadmaps/mvp/04-wrap-up`. Under
