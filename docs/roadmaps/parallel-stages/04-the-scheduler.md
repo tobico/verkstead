@@ -69,6 +69,11 @@ for both.
 
 - Stages 01 and 03 landed — and 02 through 03. Without the join, stages
   started side by side have no safe finish, and this stage must not land.
+- **Check this roadmap's own lines still declare.** The stages before this one
+  were planned on a server whose `next-stage` wrote its annotation over the tail
+  of a line, so a declaration may have gone with it. Restore any that did before
+  scheduling by them, or this roadmap is the mixed one this stage starts nothing
+  from.
 - `carry_on` in `continuing.rs` is still called from the settle loop in
   `settling.rs`, once, for the Conversation that settled.
 - The global checkout lock in `lib.rs` still serialises only make-then-record,

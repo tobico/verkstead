@@ -28,6 +28,12 @@ the installed one rather than this branch, and to it what follows a link is
 text it keeps and does not read. Once 04 has landed and been released, whatever
 is left runs by its declarations.
 
+Which means the lines below lose their own declarations as they are worked: the
+installed `next-stage` annotates a stage in progress by writing over the tail of
+its line, so every stage planned before 01 lands takes its declaration with it.
+Put it back on that line as each stage is planned — a roadmap declaring on
+some lines and not others is one 01 refuses and 04 starts nothing from.
+
 ## Stages
 
 - [ ] 01: Dependencies on the record — [brief](01-dependencies-on-the-record.md) — no dependencies
