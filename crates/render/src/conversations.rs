@@ -4532,7 +4532,7 @@ pub enum Adopted {
     /// plans nothing.
     NoRoadmap,
 
-    /// Every stage of it is ticked. The roadmap finished — between the notice
+    /// Every stage of it is done. The roadmap finished — between the notice
     /// being drawn and the button being pressed, if it had a stage a moment
     /// ago.
     RoadmapComplete,
@@ -4542,8 +4542,9 @@ pub enum Adopted {
     /// Verkstead deciding to skip work.
     NoBrief,
 
-    /// The next stage is annotated with a branch that still exists, so somebody
-    /// or something is already on it.
+    /// Somebody or something is already on the next stage: Verkstead's own record
+    /// says so, or — where it says nothing about that stage — the roadmap
+    /// annotates it with a branch that still exists.
     StageInFlight,
 
     /// The stage's own slug branch is already there. Verkstead did not make it

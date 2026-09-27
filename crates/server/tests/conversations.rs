@@ -21,8 +21,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    AbandonedRepo, Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved,
+    CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
@@ -7373,6 +7373,22 @@ Turns this askance clone into Verkstead.
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 03 — on windows
 ";
 
+/// And the same roadmap with nothing ticked at all, which is what a repository
+/// holds while the stage that would tick the first box is still on its own branch.
+///
+/// Verkstead's own record is the only thing that can say a stage of this one is
+/// done, which is what makes it the roadmap the record is read for.
+const NONE_TICKED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+";
+
 /// And with that stage ticked off, which is what the stage after it leaves.
 const OPEN_AT_FOUR: &str = "\
 # MVP roadmap
@@ -7665,6 +7681,28 @@ async fn ready_to_adopt(app: &Router, elsewhere: &Path, repo_id: i64, name: &str
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
     choose(app, id, "review", review).await;
+
+    id
+}
+
+/// The same for a second adoption on the same workbench: a Profile's name is
+/// taken once it is saved, so this one chooses the three that are already there.
+async fn ready_to_adopt_again(app: &Router, repo_id: i64, name: &str) -> i64 {
+    let id = adopting(app, repo_id, name).await;
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+
+    let saved = |wanted: &str| {
+        profiles
+            .iter()
+            .find(|profile| profile.name.as_deref() == Some(wanted))
+            .expect("the Profiles of the first adoption are still saved")
+            .id
+    };
+
+    choose(app, id, "grilling", saved("fable")).await;
+    choose(app, id, "implementation", saved("opus")).await;
+    choose(app, id, "review", saved("haiku")).await;
 
     id
 }
@@ -9148,6 +9186,124 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
     );
 
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// Which stage of a roadmap the adoption offers comes off Verkstead's own record
+/// where it has one, and off the boxes where it has none — the same rule the
+/// carry-on joins the two readings by, asked here of a Repo nothing is checked out
+/// of, and read by all three places at once.
+///
+/// Nothing in this roadmap is ticked and nothing in it is annotated, which is what
+/// a repository holds while the stage that would tick the first box is still on
+/// its own branch: a stage ticks its own box in its own finish commit, and that
+/// commit rides on the stage's branch until its pull request merges.
+///
+/// So off the boxes alone the reading finds stage 01 open, finds its branch — cut
+/// by the adoption below — and refuses the whole roadmap: the effort that most
+/// needs carrying on is the one that offers nothing. Which is exactly what the
+/// record is here to fix.
+#[tokio::test]
+async fn the_record_is_what_says_which_stage_a_roadmap_has_left_to_adopt() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    // Stage 01 is adopted, which is what puts its label on the record: a branch of
+    // its own in the Repo, and a Conversation implementing that stage.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench",
+    );
+
+    // In flight, and refused as in flight by the record itself — the roadmap on
+    // the default branch says nothing at all about stage 01, no tick and no
+    // annotation, so the branch was the only thing that ever knew.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert!(
+        waiting(&app).await.is_empty(),
+        "and the Repo is holding nothing to adopt while somebody is on it",
+    );
+    assert_eq!(press_adopt(&app, second).await, Adopted::StageInFlight);
+
+    // And settled, which is the human's own say: a Conversation in Done is a stage
+    // whose work is finished, whether or not anybody has merged its branch.
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+
+    // The notice, the page and the press, all three off the one rule and all three
+    // naming stage 02 — with stage 01's box still unticked on the branch every one
+    // of them is reading.
+    assert_eq!(
+        waiting(&app)
+            .await
+            .iter()
+            .flat_map(|repo| repo.roadmaps.iter())
+            .map(|roadmap| (roadmap.name.as_str(), roadmap.stage.as_str()))
+            .collect::<Vec<_>>(),
+        [("mvp", "02")],
+    );
+    assert_eq!(adopted_stage(&app, second).await.as_deref(), Some("02"));
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, second).await.branch,
+        "roadmaps/mvp/02-grilling",
+        "which is the stage the press started",
+    );
+
+    assert_eq!(
+        git(&repo, &["show", "main:docs/roadmaps/mvp/ROADMAP.md"]),
+        NONE_TICKED,
+        "and the boxes on the default branch never said any of it",
+    );
+}
+
+/// And a stage whose Conversation was closed before it ever wrapped up did not
+/// settle: it is on the record as abandoned, which says nothing about whether the
+/// stage is done, and what refuses it is the branch it left behind — exactly as it
+/// did before there was a record. Reopening abandoned work is nobody's business
+/// here, and the branch is the human's to look at.
+#[tokio::test]
+async fn a_stage_abandoned_part_way_through_is_refused_by_its_branch() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert_eq!(
+        press_adopt(&app, second).await,
+        Adopted::BranchExists,
+        "stage 01 is still what is next, and `roadmaps/mvp/01-workbench` is still there",
+    );
+}
+
+/// What stage an adopting Conversation's page names, where it names one.
+async fn adopted_stage(app: &Router, id: i64) -> Option<String> {
+    opened(app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting a roadmap")
+        .stage
+        .map(|stage| stage.label)
+}
+
+/// And the notice under the new-conversation box: the registered Repos holding
+/// roadmaps nothing is driving.
+async fn waiting(app: &Router) -> Vec<AbandonedRepo> {
+    get(app, "/api/ui/abandoned-roadmaps").await
 }
 
 /// A branch that was there when the human picked it can be gone by the time the

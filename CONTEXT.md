@@ -2415,17 +2415,29 @@ _Avoid_: import, attach, resume, take over, migrate, improve
 **Abandoned**:
 What a roadmap in a registered Repo is when it has a Stage startable right now
 and nothing driving it — the one state Adopt is offered for. Four things
-together, read at the Repo's default branch tip: an unchecked box, a readable
-brief for the lowest of them, no in-progress annotation naming a branch that
-still exists, and the Stage's own branch not taken. A roadmap that is
-finished, one already in flight and one whose next brief is missing are each not
-abandoned and each draw nothing, because what the human can do something about
-is the only thing worth saying. Read from the repositories every time it is
-drawn and never stored, like the pinned stage lists — and drawn where work is
-composed rather than anywhere waiting on the human, since taking one up is
-something to do rather than something to answer. With nothing to dismiss one by,
-a roadmap's score being the repository's to keep: an unwanted row is silenced in
-the repository, by ticking the box or annotating the stage.
+together: a Stage that is not done, a readable brief for the lowest of those,
+nobody on it, and the Stage's own branch not taken. A roadmap that is finished,
+one already in flight and one whose next brief is missing are each not abandoned
+and each draw nothing, because what the human can do something about is the only
+thing worth saying.
+
+**Done** and **nobody on it** are Verkstead's own record where it has a row for
+that Stage, and the repository's where it has none — the same rule the Stage that
+starts when one settles is chosen by, so what a roadmap has left is one answer
+whichever of the two readings asks. A Stage that settled is done however its box
+reads on the branch being read, which is what puts the roadmap whose first Stage
+finished on an unmerged branch back in the notice; a Stage the record says is in
+flight is refused as in flight, by the record rather than by an annotation that
+rides on the Stage's own branch; and a Stage the record knows nothing about — one
+worked by hand or by the old tools — is its box, its annotation and its branches,
+exactly as it always was.
+
+The repository's half is read from the repositories every time it is drawn and
+never stored, like the pinned stage lists — and drawn where work is composed
+rather than anywhere waiting on the human, since taking one up is something to do
+rather than something to answer. With nothing to dismiss one by, a roadmap's
+score being the repository's to keep: an unwanted row is silenced in the
+repository, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
 **Stopped**:

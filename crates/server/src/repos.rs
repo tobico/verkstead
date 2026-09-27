@@ -484,11 +484,16 @@ async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
 
     let work = store::work_on_repo(pool, id).await?;
 
+    // What Verkstead knows about this Repo's roadmap stages, which is half of what
+    // says a stage is done — the boxes being the other half. Read here rather than
+    // inside the reading below, which asks nothing of the database.
+    let record = store::stage_standings(pool, id).await?;
+
     let read = repo.clone();
     let (branches, roadmaps) = tokio::task::spawn_blocking(move || {
         (
             crate::worktrees::branches(&read.path),
-            crate::stages::waiting(&read),
+            crate::stages::waiting(&read, &record),
         )
     })
     .await?;

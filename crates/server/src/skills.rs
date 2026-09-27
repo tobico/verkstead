@@ -2367,9 +2367,11 @@ mod tests {
     /// And where the backlog was a stage's, the finish is what ticks the stage
     /// off. The roadmap keeps the score of the whole effort and this is the
     /// moment the stage finished, so the box moves here rather than a step
-    /// later — [`crate::stages::startable`] refuses to adopt a roadmap whose
-    /// lowest unchecked stage is annotated with a branch that still exists, and
-    /// [`crate::continuing`] has to tell a finished stage from one in flight.
+    /// later — the box is what says a stage is done wherever Verkstead's own
+    /// record says nothing about it, which is every stage worked by hand or by the
+    /// old tools; see [`crate::stages::done`], which is that rule, and
+    /// [`crate::continuing`], which has to tell a finished stage from one in
+    /// flight.
     #[test]
     fn the_next_task_fork_ticks_the_roadmap_stage_it_finished() {
         let next_task = skill("next-task/SKILL.md");

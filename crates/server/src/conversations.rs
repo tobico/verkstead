@@ -2242,6 +2242,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 
     let repo = conversation.repo.path.clone();
 
+    // And what Verkstead's record says about this Repo's stages, which is half of
+    // what says a stage is done — the boxes being the other half, and the two
+    // together being what the notice and the page were drawn by. Read out here
+    // because the reading below asks nothing of the database.
+    let record = store::stage_standings(pool, conversation.repo.id).await?;
+
     // The reading, off the runtime's threads: fetching, resolving a commit and
     // reading a roadmap out of a git directory are all blocking calls.
     let read = tokio::task::spawn_blocking({
@@ -2280,7 +2286,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // taken from either, because a roadmap is a document anybody may
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
-            match crate::stages::startable(&repo, &commit, &roadmap) {
+            match crate::stages::startable(&repo, &commit, &roadmap, &record) {
                 Startable::Stage(abandoned) => {
                     let stacks_on = predecessor(&repo, &commit, &named, &default);
 

@@ -1029,7 +1029,7 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    Json(crate::stages::abandoned(repos).await).into_response()
+    Json(crate::stages::abandoned(&state.pool, repos).await).into_response()
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
@@ -1558,6 +1558,7 @@ pub(crate) async fn conversation_view(
     let adopting = match conversation.adopting.clone() {
         Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
+                &state.pool,
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
                 roadmap,

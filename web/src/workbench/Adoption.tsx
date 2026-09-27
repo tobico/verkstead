@@ -58,11 +58,11 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:
-    "Every stage of that roadmap is ticked off, so there is nothing left to start.",
+    "Every stage of that roadmap is done, so there is nothing left to start.",
   NoBrief:
     "The next stage names a brief that is not there at the base commit, which is the roadmap's own to fix.",
   StageInFlight:
-    "The next stage is marked as in progress on a branch that still exists, so somebody is already on it.",
+    "Somebody is already on the next stage: Verkstead's record says so, or it is marked in progress on a branch that still exists.",
   BranchExists:
     "The stage's own branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",

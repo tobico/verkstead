@@ -55,10 +55,17 @@
 //! it. The entries, the stage and the branch-naming rule are the same ones;
 //! only the way the bytes are fetched differs — `ls-tree` and `show` against
 //! the Repo's own git directory rather than files off a checkout.
+//!
+//! And the record is the same record: what is done there is [`done`] too, one
+//! Repo's rows read once and handed to a reading that never asks the database.
+//! Which is what stops the two disagreeing — a stage settled on a branch nobody
+//! has merged is unticked at the default branch's tip, and what the boxes alone
+//! say there is *start stage 01 again*.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use sqlx::SqlitePool;
 use verkstead_render::{
     AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, RoadmapPane, StageEntry,
     StageListEvent, StageSource,
@@ -523,35 +530,22 @@ pub(crate) fn next_stage(
     }))
 }
 
-/// Whether one entry of a roadmap is a stage still to start: the rule that joins
-/// Verkstead's record to the boxes the repository keeps.
+/// Whether one entry of a roadmap is a stage still to start, as the Conversation
+/// that has just settled asks it.
 ///
-/// **The record decides where it says something about the stage, and the box
-/// decides where it does not** — see
-/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), which is where that
-/// was settled, and `store::stage_standings`, which is where the record is read.
+/// [`done`] is the rule that joins the record to the boxes, and this is that rule
+/// with the two things only this reading knows in front of it:
 ///
-/// - **Settled** is done, whatever the box on this branch says. This is the whole
-///   point of the record: with stages worked side by side each Worktree holds a
-///   `ROADMAP.md` of its own, so the boxes stop being one fact — the stage that
-///   settled ticked its own box in its own finish commit, on its own branch, and
-///   the branch being read here may well never have seen it.
-/// - **In flight** is neither done nor a stage to start. Newly load-bearing, and
-///   load-bearing in the other direction from the box: a stage ticks its own box
-///   at its finish, before its pull request has even opened, so a ticked box
-///   already means *its tasks are done* rather than *it settled*.
-/// - **Abandoned**, and **no row at all**, leave the box to speak. Nothing here
-///   starts an abandoned stage again on the strength of the record: what it left
-///   behind is a branch, and a branch by the stage's name is what refuses it
-///   wherever a stage is started from. A stage with no row is one worked by hand
-///   or by the old tools, and its box is all there is to go on.
-///
-/// And the annotation stays as the fallback in front of all of it. The
-/// Conversation whose settling brought the reading about has a row of its own
-/// saying so — but every stage started between ADR-0017 landing and the label
-/// being written down has a row holding a roadmap and no label, and for one of
-/// those the annotation naming its branch is the only thing that keeps it from
-/// being offered its own stage back.
+/// - **A stage in flight is no stage to start either.** Which is the one place the
+///   two readings part company: the adoption refuses a stage in flight by name,
+///   there being a human at the press waiting to be told why, and this one passes
+///   over it and looks at what comes after.
+/// - **And the annotation stays as the fallback in front of all of it.** The
+///   Conversation whose settling brought the reading about has a row of its own
+///   saying so — but every stage started between ADR-0017 landing and the label
+///   being written down has a row holding a roadmap and no label, and for one of
+///   those the annotation naming its branch is the only thing that keeps it from
+///   being offered its own stage back.
 fn left(
     entry: &checklist::Entry<'_>,
     standing: Option<store::StageStanding>,
@@ -561,9 +555,46 @@ fn left(
         return false;
     }
 
+    if standing == Some(store::StageStanding::InFlight) {
+        return false;
+    }
+
+    !done(entry, standing)
+}
+
+/// Whether one stage of a roadmap is **done**: the rule that joins Verkstead's
+/// record to the boxes the repository keeps.
+///
+/// **The record decides where it says something about the stage, and the box
+/// decides where it does not** — see
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), which is where that
+/// was settled, and `store::stage_standings`, which is where the record is read.
+///
+/// One rule in one function, because both readings of a roadmap have to agree
+/// about what is done: [`left`], which is the carry-on's and reads a Worktree as
+/// it stands, and [`startable`], which is the adoption's and reads a Repo at a
+/// commit. A stage that is done to one of them and open to the other is a notice
+/// offering work somebody has finished, or a roadmap that stops advancing.
+///
+/// - **Settled** is done, whatever the box on the branch being read says. This is
+///   the whole point of the record: with stages worked side by side each Worktree
+///   holds a `ROADMAP.md` of its own, so the boxes stop being one fact — the stage
+///   that settled ticked its own box in its own finish commit, on its own branch,
+///   and the branch being read here may well never have seen it.
+/// - **In flight** is not done. Newly load-bearing, and load-bearing in the other
+///   direction from the box: a stage ticks its own box at its finish, before its
+///   pull request has even opened, so a ticked box already means *its tasks are
+///   done* rather than *it settled*.
+/// - **Abandoned**, and **no row at all**, leave the box to speak. Nothing starts
+///   an abandoned stage again on the strength of the record: what it left behind
+///   is a branch, and a branch by the stage's name is what refuses it wherever a
+///   stage is started from. A stage with no row is one worked by hand or by the
+///   old tools, and its box is all there is to go on.
+fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) -> bool {
     match standing {
-        Some(store::StageStanding::Settled | store::StageStanding::InFlight) => false,
-        Some(store::StageStanding::Abandoned) | None => !entry.checked,
+        Some(store::StageStanding::Settled) => true,
+        Some(store::StageStanding::InFlight) => false,
+        Some(store::StageStanding::Abandoned) | None => entry.checked,
     }
 }
 
@@ -835,8 +866,8 @@ pub(crate) struct Abandoned {
     /// none.
     pub(crate) title: String,
 
-    /// The stage adopting it would start — the lowest-numbered unchecked one,
-    /// its brief already read.
+    /// The stage adopting it would start — the lowest-numbered one that is not
+    /// done, its brief already read.
     pub(crate) stage: Stage,
 }
 
@@ -858,12 +889,13 @@ pub(crate) enum Startable {
     /// plans nothing — which is a directory rather than a roadmap.
     NoRoadmap,
 
-    /// Every box is ticked. The roadmap finished, and its directory stays where
-    /// it is as the record of what it was.
+    /// Every stage of it is done. The roadmap finished, and its directory stays
+    /// where it is as the record of what it was.
     Complete,
 
-    /// The next stage's annotation names a branch that is still there, so
-    /// somebody or something is on it.
+    /// Somebody — or some unattended run — is on the next stage: the record says
+    /// so, or, where it says nothing about that stage, its annotation names a
+    /// branch that is still there.
     InFlight,
 
     /// The next stage names a brief that cannot be read at this commit — or
@@ -912,10 +944,36 @@ impl Startable {
 /// one apiece. There are as many Repos as the human registered by hand and each
 /// is a handful of short git reads against a local directory, so what this costs
 /// is one borrowed thread.
-pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
-    let read =
-        tokio::task::spawn_blocking(move || repos.iter().filter_map(notice).collect::<Vec<_>>())
-            .await;
+///
+/// What Verkstead's record says about each of them is read here, in front of that
+/// task: one read per Repo rather than one per roadmap inside it, and what the
+/// readings take is the value — see [`done`], which is the rule they spend it on.
+/// A Repo whose rows will not come back says nothing at all rather than falling
+/// back to its boxes, because the boxes alone are what offer a stage that has
+/// already settled.
+pub(crate) async fn abandoned(pool: &SqlitePool, repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
+    let mut reading = Vec::with_capacity(repos.len());
+
+    for repo in repos {
+        let repo_id = repo.id;
+
+        match store::stage_standings(pool, repo_id).await {
+            Ok(record) => reading.push((repo, record)),
+            Err(error) => tracing::error!(
+                error = ?error,
+                repo_id,
+                "reading what a Repo's roadmap stages have got to failed",
+            ),
+        }
+    }
+
+    let read = tokio::task::spawn_blocking(move || {
+        reading
+            .iter()
+            .filter_map(|(repo, record)| notice(repo, record))
+            .collect::<Vec<_>>()
+    })
+    .await;
 
     read.unwrap_or_else(|error| {
         tracing::error!(error = ?error, "reading the registered Repos' roadmaps failed");
@@ -928,8 +986,8 @@ pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
 /// The reading is [`waiting`] below; what this adds is the notice's own rule,
 /// which is that a Repo with nothing to adopt has no notice at all rather than
 /// an empty one.
-fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
-    let roadmaps = waiting(repo);
+fn notice(repo: &store::Repo, record: &store::StageStandings) -> Option<AbandonedRepo> {
+    let roadmaps = waiting(repo, record);
 
     (!roadmaps.is_empty()).then(|| AbandonedRepo {
         repo_id: repo.id,
@@ -982,9 +1040,14 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
 /// what is waiting in a Repo is asked for whether or not there is any — empty
 /// included, which is the ordinary answer.
 ///
+/// `record` is what Verkstead knows about the stages of this Repo's roadmaps,
+/// read once by whoever calls in: every roadmap here is judged against the same
+/// value, which is what makes it one read per Repo rather than one per roadmap —
+/// and this stays a reading, nothing in it asking the database.
+///
 /// Blocking, like everything else here: short git reads against a local
 /// directory, and whoever calls it is on a borrowed thread already.
-pub(crate) fn waiting(repo: &store::Repo) -> Vec<AbandonedRoadmap> {
+pub(crate) fn waiting(repo: &store::Repo, record: &store::StageStandings) -> Vec<AbandonedRoadmap> {
     let named = worktrees::default_ref(&repo.path, &repo.default_branch);
     let Some(commit) = worktrees::resolve(&repo.path, &named) else {
         return Vec::new();
@@ -999,7 +1062,7 @@ pub(crate) fn waiting(repo: &store::Repo) -> Vec<AbandonedRoadmap> {
 
     bases
         .flat_map(|(base, commit)| {
-            abandoned_at(&repo.path, &commit)
+            abandoned_at(&repo.path, &commit, record)
                 .into_iter()
                 .map(move |abandoned| (base.clone(), abandoned))
         })
@@ -1063,10 +1126,10 @@ fn unmerged(repo: &Path, default: &str) -> Vec<(String, String)> {
 /// The whole of the abandoned rule, applied to every roadmap there: a
 /// repository keeps the finished ones and may well be mid-flight on another, so
 /// most of what is here on any given day comes back as nothing.
-fn abandoned_at(repo: &Path, commit: &str) -> Vec<Abandoned> {
+fn abandoned_at(repo: &Path, commit: &str, record: &store::StageStandings) -> Vec<Abandoned> {
     names(repo, commit)
         .into_iter()
-        .filter_map(|name| startable(repo, commit, &name).stage())
+        .filter_map(|name| startable(repo, commit, &name, record).stage())
         .collect()
 }
 
@@ -1122,9 +1185,9 @@ fn indexed(path: &str) -> Option<&str> {
 /// What the roadmap `name` at `commit` has to start, or which of the ways it
 /// has nothing.
 ///
-/// The four clauses of the abandoned rule, cheapest first: what the index says,
-/// then who the annotation names, then whether the brief is there, then what git
-/// has for branches.
+/// The four clauses of the abandoned rule, cheapest first: what the index and the
+/// record say between them, then who is on it, then whether the brief is there,
+/// then what git has for branches.
 ///
 /// Asked at the default branch's tip for the notice, and at a Conversation's
 /// base commit for the page that adopts and for the press itself — the same
@@ -1133,17 +1196,27 @@ fn indexed(path: &str) -> Option<&str> {
 /// clause refused it, because the press is the one of the three with a human
 /// waiting on an answer.
 ///
-/// Which stage is never in question. It is the lowest-numbered unchecked one:
-/// the roadmap's order is the roadmap's own and its stages are strictly
-/// sequential. And there is no Conversation of this reading's own to skip, so
-/// the branch-skipping [`ours`] does for the settling path has no part in it —
-/// a roadmap read here belongs to nobody yet.
+/// Which stage it is, is [`done`]'s question: the lowest-numbered one that is not
+/// done, by the record where it has a row for the stage and by the box where it
+/// has none. The roadmap's order is the roadmap's own and its stages are strictly
+/// sequential, so there is nothing else to decide — and there is no Conversation
+/// of this reading's own to skip either, so the branch-skipping [`ours`] does for
+/// the settling path has no part in it: a roadmap read here belongs to nobody yet.
+///
+/// `record` is what Verkstead knows about the stages of this Repo's roadmaps. A
+/// value rather than a lookup, so this stays a reading — the rows are read once
+/// per Repo by whoever calls in, and nothing in here asks the database.
 ///
 /// Every branch reading is the fail-safe [`worktrees::branch_taken`] rather
 /// than [`worktrees::branch_exists`]: what each of them stands in front of is
 /// making a branch and letting an agent loose on it, so git failing to answer
 /// is answered as *taken*.
-pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
+pub(crate) fn startable(
+    repo: &Path,
+    commit: &str,
+    name: &str,
+    record: &store::StageStandings,
+) -> Startable {
     let Some(index) = at(repo, commit, &format!("{ROADMAPS}/{name}/{INDEX}")) else {
         return Startable::NoRoadmap;
     };
@@ -1156,17 +1229,37 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
         return Startable::NoRoadmap;
     }
 
-    // Clause 1: a stage left to do. Every box ticked is a roadmap that
-    // finished, and its directory stays where it is as the record of what it
-    // was.
-    let Some(entry) = entries.find(|entry| !entry.checked) else {
+    // Clause 1: a stage left to do — the record's answer where it has a row for
+    // the stage and the box's where it has none, which is what keeps this reading
+    // and the carry-on's saying the same thing about one roadmap. Every stage done
+    // is a roadmap that finished, and its directory stays where it is as the
+    // record of what it was.
+    //
+    // The standing comes out beside the entry rather than being asked for again
+    // below: the two clauses that turn on it are the same lookup.
+    let found = entries
+        .map(|entry| (record.of(name, entry.label), entry))
+        .find(|(standing, entry)| !done(entry, *standing));
+
+    let Some((standing, entry)) = found else {
         return Startable::Complete;
     };
 
-    // Clause 3: nobody on it. The annotation is prose a human may have
-    // rewritten, so the branch inside the backticks is the fact — and one whose
-    // branch is gone is a note about an attempt that was abandoned too.
-    if annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)) {
+    // Clause 3: nobody on it. Wherever the record has a row for the stage the
+    // record is what says so — in flight is neither done nor a stage to take, and
+    // abandoned is nobody's, what refuses that one being the branch it left behind
+    // under clause 4 below.
+    //
+    // And where the record has no row the annotation is the fallback it always
+    // was: prose a human may have rewritten, so the branch inside the backticks is
+    // the fact — and one whose branch is gone is a note about an attempt that was
+    // abandoned too.
+    let on_it = match standing {
+        Some(standing) => standing == store::StageStanding::InFlight,
+        None => annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)),
+    };
+
+    if on_it {
         return Startable::InFlight;
     }
 
@@ -1253,6 +1346,7 @@ const FETCHING: std::time::Duration = std::time::Duration::from_secs(10);
 /// Conversation — so past the deadline git is stopped and the page is drawn off
 /// what was last fetched, exactly as it is for a fetch git itself refused.
 pub(crate) async fn adopting(
+    pool: &SqlitePool,
     repo: store::Repo,
     base: Option<String>,
     roadmap: String,
@@ -1260,6 +1354,28 @@ pub(crate) async fn adopting(
     // The roadmap is the one thing here that was never the repository's to say,
     // so it is what the page is drawn with whatever the reading comes back as.
     let named = roadmap.clone();
+
+    // And what Verkstead's record says about this Repo's stages, which is half of
+    // what says a stage is done — see [`done`]. Read here rather than inside the
+    // reading, so that the reading stays a reading; and rows that will not come
+    // back leave the page naming no stage, for the reason the notice says nothing
+    // for such a Repo: what the boxes alone would offer is a stage that settled.
+    let record = match store::stage_standings(pool, repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                repo_id = repo.id,
+                "reading what a Repo's roadmap stages have got to failed",
+            );
+
+            return AdoptionView {
+                roadmap: named,
+                title: String::new(),
+                stage: None,
+            };
+        }
+    };
 
     let read = tokio::task::spawn_blocking(move || {
         let commit = match base {
@@ -1295,7 +1411,7 @@ pub(crate) async fn adopting(
         };
 
         let found = worktrees::resolve(&repo.path, &commit)
-            .and_then(|commit| startable(&repo.path, &commit, &roadmap).stage());
+            .and_then(|commit| startable(&repo.path, &commit, &roadmap, &record).stage());
 
         let Some(abandoned) = found else {
             return AdoptionView {
@@ -1479,16 +1595,32 @@ Turns this askance clone into Verkstead.
             run(self.path(), &["rev-parse", "main"]).trim().to_owned()
         }
 
-        /// The abandoned roadmaps this repository holds there.
+        /// The abandoned roadmaps this repository holds there, with a record
+        /// holding nothing — which is every roadmap worked before Verkstead kept
+        /// one, so what these answer with is the boxes, the annotation and the
+        /// branches alone.
         fn abandoned(&self) -> Vec<Abandoned> {
-            abandoned_at(self.path(), &self.tip())
+            self.abandoned_with(&store::StageStandings::default())
+        }
+
+        /// And the same reading with a record behind it: what Verkstead knows
+        /// about the stages of this Repo's roadmaps, which is what says a stage is
+        /// done wherever it says anything at all.
+        fn abandoned_with(&self, record: &store::StageStandings) -> Vec<Abandoned> {
+            abandoned_at(self.path(), &self.tip(), record)
         }
 
         /// And what one roadmap of it comes back as, which is the same reading
         /// with its refusals kept: what a notice throws away, the press says
         /// out loud.
         fn startable(&self, name: &str) -> Startable {
-            startable(self.path(), &self.tip(), name)
+            self.startable_with(name, &store::StageStandings::default())
+        }
+
+        /// With a record behind it, which is the half of the answer the
+        /// repository does not hold.
+        fn startable_with(&self, name: &str, record: &store::StageStandings) -> Startable {
+            startable(self.path(), &self.tip(), name, record)
         }
 
         /// A branch of its own and nothing on it — which is what a stage in
@@ -1509,6 +1641,13 @@ Turns this askance clone into Verkstead.
             run(self.path(), &["add", "-A"]);
             run(self.path(), &["commit", "-m", message]);
             run(self.path(), &["checkout", "-q", "main"]);
+        }
+
+        /// Everything this Repo is holding that nothing is driving — at the
+        /// default branch's tip and on every branch the default has not swallowed
+        /// — with a record holding nothing, for [`Repo::abandoned`]'s reason.
+        fn waiting(&self) -> Vec<AbandonedRoadmap> {
+            waiting(&self.registered(), &store::StageStandings::default())
         }
 
         /// This repository as a registered Repo, which is what the adoption
@@ -1538,6 +1677,25 @@ Turns this askance clone into Verkstead.
         let directory = worktree.join(ROADMAPS).join(name);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join(INDEX), index).unwrap();
+    }
+
+    /// One Repo's notice, with a record holding nothing — [`Repo::abandoned`]'s
+    /// reason, one level up.
+    fn notice_of(repo: &store::Repo) -> Option<AbandonedRepo> {
+        notice(repo, &store::StageStandings::default())
+    }
+
+    /// A store of its own, with nothing whatever in it, for the two readings that
+    /// ask the record for themselves.
+    ///
+    /// An empty database is a Repo whose stages Verkstead has never recorded
+    /// anything about, which is what a roadmap worked by hand or by the old tools
+    /// answers to: the boxes, the annotation and the branches are the whole of the
+    /// answer, exactly as they were.
+    async fn empty_store(dir: &tempfile::TempDir) -> SqlitePool {
+        store::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .expect("a database in a fresh directory should open")
     }
 
     fn run(dir: &Path, args: &[&str]) -> String {
@@ -3042,6 +3200,165 @@ Turns this askance clone into Verkstead.
         assert_eq!(repo.abandoned().len(), 1);
     }
 
+    /// The whole of what changes visibly here. Stage 01 settled and nobody has
+    /// merged it, so the tick is on that branch and the default branch's tip has
+    /// nothing of it — and the branch holding it is the branch stage 01 was worked
+    /// on, which is still there.
+    ///
+    /// Off the boxes alone the reading finds stage 01 unticked, finds its branch in
+    /// the Repo and refuses: the roadmap that most needs carrying on is the one
+    /// that offers nothing. With the record it offers stage 02, and the notice and
+    /// the press name the same one.
+    #[test]
+    fn a_stage_settled_on_an_unmerged_branch_leaves_the_stage_after_it_to_adopt() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+
+        // Stage 01 is worked: a branch of its own, and its finish commit ticking
+        // its own box riding on that branch until the pull request merges.
+        repo.write(
+            "mvp",
+            &UNTICKED.replace("- [ ] 01: Workbench", "- [x] 01: Workbench"),
+        );
+        repo.commit_on("roadmaps/mvp/01-workbench", "chore: finish the workbench");
+
+        assert_eq!(
+            repo.startable("mvp"),
+            Startable::BranchTaken,
+            "off the boxes alone stage 01 is open and its branch is taken, \
+             so the roadmap offers nothing at all",
+        );
+
+        let record = record([("mvp", "01", store::StageStanding::Settled)]);
+
+        assert_eq!(
+            repo.startable_with("mvp", &record)
+                .stage()
+                .expect("stage 01 settled, so stage 02 is the one to adopt")
+                .stage
+                .label,
+            "02",
+            "which is what the press starts",
+        );
+
+        assert_eq!(
+            repo.abandoned_with(&record)
+                .iter()
+                .map(|abandoned| abandoned.stage.label.as_str())
+                .collect::<Vec<_>>(),
+            ["02"],
+        );
+
+        assert_eq!(
+            notice(&repo.registered(), &record)
+                .expect("the Repo is holding a roadmap with a stage to adopt")
+                .roadmaps
+                .iter()
+                .map(|roadmap| (
+                    roadmap.name.as_str(),
+                    roadmap.stage.as_str(),
+                    roadmap.base.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            [("mvp", "02", "")],
+            "and the notice says the same stage, off the default branch's tip: \
+             the branch holding the tick offers the one piece of work too, \
+             and the reading kept is the one needing no base fixed",
+        );
+    }
+
+    /// A stage the record says is in flight is refused as in flight — by the
+    /// record, rather than by an annotation naming a branch that still exists.
+    ///
+    /// Which is the refusal that was unreachable here before: a stage Verkstead
+    /// started is on a branch of its own from the moment it starts, and the
+    /// annotation saying whose it is rides on that branch with it, so at the
+    /// default branch's tip the only thing that knew was clause 4. The press told
+    /// the human their branch was taken where what was true is that somebody is on
+    /// the stage.
+    #[test]
+    fn a_stage_the_record_says_is_in_flight_is_refused_as_in_flight() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+
+        let on_it = record([("mvp", "01", store::StageStanding::InFlight)]);
+
+        assert_eq!(
+            repo.startable_with("mvp", &on_it),
+            Startable::InFlight,
+            "somebody is on stage 01, and the press says so by name",
+        );
+        assert_eq!(
+            notice(&repo.registered(), &on_it),
+            None,
+            "so the Repo is holding nothing to adopt",
+        );
+
+        // And the annotation is still the fallback for a stage the record says
+        // nothing about, a record holding rows for other stages included: every
+        // stage started between ADR-0017 and the label being written down is one of
+        // those, and the annotation naming its branch is all there is to go on.
+        repo.write(
+            "mvp",
+            &UNTICKED.replace(
+                "- [ ] 02: Grilling — [brief](02-grilling.md)",
+                "- [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `somebody-elses`)*",
+            ),
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+        repo.branch("somebody-elses");
+
+        assert_eq!(
+            repo.startable_with(
+                "mvp",
+                &record([("mvp", "01", store::StageStanding::Settled)])
+            ),
+            Startable::InFlight,
+            "stage 01 settled, and stage 02 is annotated on a branch that is there",
+        );
+    }
+
+    /// A stage whose Conversation was closed before it ever wrapped up did not
+    /// settle, and what it left behind is a branch: that branch is what refuses it,
+    /// exactly as it did before there was a record. Reopening abandoned work is
+    /// nobody's business here.
+    #[test]
+    fn an_abandoned_stage_is_still_refused_by_the_branch_it_left_behind() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+        repo.branch("roadmaps/mvp/01-workbench");
+
+        let record = record([("mvp", "01", store::StageStanding::Abandoned)]);
+
+        assert_eq!(
+            repo.startable_with("mvp", &record),
+            Startable::BranchTaken,
+            "the record says it did not settle, and its branch is still there",
+        );
+
+        // And with that branch gone there is nothing to refuse it: an abandoned
+        // stage is left to whatever its box says, which is exactly how the boxes
+        // alone answered for it.
+        run(repo.path(), &["branch", "-D", "roadmaps/mvp/01-workbench"]);
+
+        assert_eq!(
+            repo.startable_with("mvp", &record)
+                .stage()
+                .expect("nothing is on stage 01 any more")
+                .stage
+                .label,
+            "01",
+        );
+    }
+
     /// One notice per Repo, with its roadmaps inside — and none at all for a
     /// Repo with nothing to adopt.
     #[test]
@@ -3062,7 +3379,7 @@ Turns this askance clone into Verkstead.
         repo.brief("finished", "01-done.md", "# 01. Done\n");
         repo.commit();
 
-        let notice = notice(&store::Repo {
+        let notice = notice_of(&store::Repo {
             id: 7,
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
@@ -3115,7 +3432,7 @@ Turns this askance clone into Verkstead.
             "docs: stage the missing-roles roadmap",
         );
 
-        let waiting = waiting(&repo.registered());
+        let waiting = repo.waiting();
 
         assert_eq!(
             waiting
@@ -3148,7 +3465,7 @@ Turns this askance clone into Verkstead.
         // The same commits, on a branch of its own as well as on the default.
         repo.branch("tobi/missing-roles");
 
-        let waiting = waiting(&repo.registered());
+        let waiting = repo.waiting();
 
         assert_eq!(waiting.len(), 1, "one roadmap, drawn once: {waiting:?}");
         assert_eq!(waiting[0].name, "missing-roles");
@@ -3176,7 +3493,7 @@ Turns this askance clone into Verkstead.
         std::fs::write(repo.path().join("elsewhere.md"), "# something else\n").unwrap();
         repo.commit_on("somebody/else", "chore: something else entirely");
 
-        let waiting = waiting(&repo.registered());
+        let waiting = repo.waiting();
 
         assert_eq!(waiting.len(), 1, "one stage, one row: {waiting:?}");
         assert_eq!(
@@ -3193,7 +3510,7 @@ Turns this askance clone into Verkstead.
         )]);
 
         assert_eq!(
-            notice(&store::Repo {
+            notice_of(&store::Repo {
                 id: 1,
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
@@ -3249,7 +3566,7 @@ Turns this askance clone into Verkstead.
         );
         run(repo.path(), &["fetch", "--quiet", "origin"]);
 
-        let notice = notice(&store::Repo {
+        let notice = notice_of(&store::Repo {
             id: 1,
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
@@ -3276,7 +3593,7 @@ Turns this askance clone into Verkstead.
         repo.commit();
 
         assert_eq!(
-            notice(&store::Repo {
+            notice_of(&store::Repo {
                 id: 1,
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
@@ -3326,7 +3643,10 @@ Turns this askance clone into Verkstead.
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
 
-        let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
+        let store = tempfile::tempdir().unwrap();
+        let pool = empty_store(&store).await;
+
+        let view = adopting(&pool, repo.registered(), None, "mvp".to_owned()).await;
 
         assert_eq!(view.roadmap, "mvp");
         assert_eq!(view.title, "MVP roadmap");
@@ -3367,14 +3687,17 @@ Turns this askance clone into Verkstead.
         );
         repo.commit();
 
-        let at_tip = adopting(repo.registered(), None, "mvp".to_owned()).await;
+        let store = tempfile::tempdir().unwrap();
+        let pool = empty_store(&store).await;
+
+        let at_tip = adopting(&pool, repo.registered(), None, "mvp".to_owned()).await;
         assert_eq!(
             at_tip.stage.expect("that stage is startable").label,
             "04",
             "with no override, the default branch's tip is what is read",
         );
 
-        let earlier = adopting(repo.registered(), Some(before), "mvp".to_owned()).await;
+        let earlier = adopting(&pool, repo.registered(), Some(before), "mvp".to_owned()).await;
         assert_eq!(
             earlier.stage.expect("that stage is startable").label,
             "03",
@@ -3391,6 +3714,9 @@ Turns this askance clone into Verkstead.
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
 
+        let store = tempfile::tempdir().unwrap();
+        let pool = empty_store(&store).await;
+
         for (base, why) in [
             (
                 Some("no-such-thing".to_owned()),
@@ -3403,7 +3729,7 @@ Turns this askance clone into Verkstead.
                 None => "public-release",
             };
 
-            let view = adopting(repo.registered(), base, roadmap.to_owned()).await;
+            let view = adopting(&pool, repo.registered(), base, roadmap.to_owned()).await;
 
             assert_eq!(view.roadmap, roadmap, "{why}");
             assert_eq!(view.title, "", "{why}");
@@ -3421,7 +3747,10 @@ Turns this askance clone into Verkstead.
         repo.commit();
         repo.branch("roadmaps/mvp/03-implementation");
 
-        let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
+        let store = tempfile::tempdir().unwrap();
+        let pool = empty_store(&store).await;
+
+        let view = adopting(&pool, repo.registered(), None, "mvp".to_owned()).await;
 
         assert_eq!(view.roadmap, "mvp");
         assert_eq!(view.stage, None);
