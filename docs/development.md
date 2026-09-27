@@ -593,7 +593,6 @@ $ blender -b tools/hammer/verkstead-hammer.blend \
     --python tools/hammer/render.py   # the artwork, from the blend file it is modelled in
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the menu bar template, the icns and the ico
-$ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
 ```
 
 The last is the Windows desktop artifact a release ships — the Linux and macOS

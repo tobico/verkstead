@@ -484,3 +484,367 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # **Temporary, and for this branch alone: `release.yml`'s `desktop-windows`
+  # leg, run end to end on Windows.** Drop this job before the branch merges.
+  #
+  # That workflow cannot be rehearsed from a branch. It is dispatch-only, and its
+  # `prepare` job checks out `main` whatever ref started the run and pushes a
+  # version commit to it, so a dispatch from here would build main's tree and run
+  # main's leg. What is left is to run the leg's own steps somewhere Windows will
+  # have them, which is here — and the one thing that cannot come along is the
+  # `build` matrix the leg downloads its sidecar from, so the CLI is compiled on
+  # this runner instead. Every step after the pack is the leg's, word for word:
+  # what is being asked is whether the assertions hold against an msi this
+  # configuration packed and Windows really installed.
+  #
+  # `windows-2025` as the leg is. Stage 06's temporary dmg job was the same shape
+  # and went the same way once it had done its job.
+  the-windows-msi-leg:
+    name: The msi leg (temporary)
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    env:
+      MSI: target/electron/out/Verkstead-x86_64.msi
+    steps:
+      # No `core.autocrlf` line in front of it, unlike the `Windows` job above:
+      # that one is about a suite whose fixtures are text, and this is the leg's
+      # own checkout, which the leg takes as it comes.
+      - uses: actions/checkout@v7.0.1
+
+      # The viewer, which the release's own leg never fetches: it is embedded
+      # into the CLI at compile time, and in a Release that binary arrives
+      # already carrying it. Here it is compiled, so it has to be built first.
+      - name: Set up the viewer
+        uses: ./.github/actions/setup-pnpm-project
+
+      - name: Build the viewer
+        working-directory: web
+        run: pnpm build
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      # A key of its own, as every job that compiles has: this is the release
+      # profile of one package, and a cache shared with the `Windows` job's
+      # `--all-targets` debug workspace would have the two evicting each other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-msi-leg
+
+      # What the `build` matrix hands the leg, built here instead — the same
+      # `--no-default-features` headless binary its `verkstead-windows-x64.exe`
+      # row ships.
+      - name: Build the CLI this app carries
+        run: |
+          cargo build --release --locked --no-default-features \
+            --package verkstead-cli
+          ls -l target/release/verkstead.exe
+
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # The leg's own pack, against the binary cargo just wrote rather than one
+      # out of an artifact.
+      - name: Pack the app
+        working-directory: desktop
+        env:
+          VERKSTEAD_CLI: ${{ github.workspace }}/target/release/verkstead.exe
+        run: |
+          pnpm run pack
+          ls -l ../target/electron/out
+
+      - name: The msi installs
+        run: |
+          msi=$(cygpath -w "$MSI")
+          log=$(cygpath -w msiexec.log)
+          code=0
+          powershell -NoProfile -Command \
+            "exit (Start-Process msiexec -ArgumentList '/i',\"$msi\",'/qn','/norestart','/l*v',\"$log\" -Wait -PassThru).ExitCode" ||
+            code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::Windows Installer refused the msi (exit $code)."
+            if [ -f msiexec.log ]; then
+              tr -d '\000' < msiexec.log | tail -n 200
+            else
+              echo "It wrote no log either."
+            fi
+            exit 1
+          fi
+
+      - name: It installed into this user's profile, and nowhere else
+        run: |
+          install="$(cygpath -u "$LOCALAPPDATA")/Programs/Verkstead"
+          for file in "$install/Verkstead.exe" "$install/resources/cli/verkstead.exe"; do
+            if [ -z "$(find "$(dirname "$file")" -maxdepth 1 \
+              -name "$(basename "$file")" 2> /dev/null)" ]; then
+              echo "::error::$file is not there, under that spelling or at all."
+              find "$install" -maxdepth 2 2> /dev/null ||
+                echo "There is no $install at all."
+              exit 1
+            fi
+          done
+          ls -l "$install" "$install/resources/cli"
+
+          registration=$(powershell -NoProfile -Command "
+            \$user = @(Get-ChildItem 'HKCU:\Software\Microsoft\Installer\Products' -EA SilentlyContinue |
+              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
+            \$machine = @(Get-ChildItem 'HKLM:\SOFTWARE\Classes\Installer\Products' -EA SilentlyContinue |
+              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
+            \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead')
+            'user=' + \$user.Count
+            'machine=' + \$machine.Count
+            'arp=' + ((\$arp | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') }) -join '; ')
+          " | tr -d '\r')
+          echo "$registration"
+
+          user=$(printf '%s\n' "$registration" | sed -n 's/^user=//p')
+          machine=$(printf '%s\n' "$registration" | sed -n 's/^machine=//p')
+          entry=$(printf '%s\n' "$registration" | sed -n 's/^arp=//p')
+
+          if [ "$user" != 1 ] || [ "$machine" != 0 ]; then
+            echo "::error::Verkstead is registered $user time(s) to this user and $machine to the machine, and a per-user install is 1 and 0."
+            echo "What the install said about its scope:"
+            if [ -f msiexec.log ]; then
+              scope=$(tr -d '\000' < msiexec.log |
+                grep -aiE "ALLUSERS|MSIINSTALLPERUSER|Assignment=" |
+                head -n 40 || true)
+              if [ -n "$scope" ]; then
+                printf '%s\n' "$scope"
+              else
+                echo "The log says nothing about any of them."
+              fi
+            else
+              echo "There is no msiexec.log to read."
+            fi
+            exit 1
+          fi
+
+          if [ -z "$entry" ]; then
+            echo "::error::Verkstead registered per-user, and nothing in Installed apps can see it."
+            exit 1
+          fi
+          echo "Installed apps says: Verkstead $entry"
+
+          echo "INSTALL=$install" >> "$GITHUB_ENV"
+
+      - name: The Start-menu entry opens the app, and opens no console with it
+        run: |
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          lnk="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Verkstead.lnk"
+          if [ ! -f "$lnk" ]; then
+            echo "::error::The install left no Start-menu entry at $lnk."
+            exit 1
+          fi
+
+          launcher="$INSTALL/Verkstead.exe"
+          target=$(powershell -NoProfile -Command \
+            "(New-Object -ComObject WScript.Shell).CreateShortcut('$(cygpath -w "$lnk")').TargetPath" |
+            tr -d '\r')
+          echo "The entry opens $target."
+          if [ "$(lower "$(cygpath -u "$target")")" != "$(lower "$launcher")" ]; then
+            echo "::error::The Start-menu entry does not open $launcher."
+            exit 1
+          fi
+
+          subsystem=$(powershell -NoProfile -Command \
+            "\$bytes = [IO.File]::ReadAllBytes('$(cygpath -w "$launcher")'); [BitConverter]::ToUInt16(\$bytes, [BitConverter]::ToInt32(\$bytes, 0x3c) + 92)" |
+            tr -d '\r')
+          echo "Its subsystem is $subsystem."
+          if [ "$subsystem" != "2" ]; then
+            echo "::error::$launcher is a console program, so the entry would open a window in front of the app."
+            exit 1
+          fi
+
+      - name: verkstead guide answers in a fresh terminal, and the install root does not
+        run: |
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          windows=$(powershell -NoProfile -Command \
+            "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" |
+            tr -d '\r')
+          fresh=$(cygpath -up "$windows")
+
+          root=$(lower "$INSTALL")
+          IFS=: read -r -a entries <<< "$fresh"
+          for entry in "${entries[@]}"; do
+            if [ "$(lower "${entry%/}")" = "$root" ]; then
+              echo "::error::$INSTALL is on this user's PATH, and the verkstead there is the app rather than the CLI."
+              printf '%s\n' "$fresh"
+              exit 1
+            fi
+          done
+          echo "The install root is not on this user's PATH."
+
+          cli=$(lower "$INSTALL/resources/cli")
+          found=$( PATH="$fresh"; command -v verkstead || true )
+          found=$(printf '%s' "$found" | tr -s '/')
+          echo "A fresh terminal finds ${found:-nothing}."
+          case "$(lower "$found")" in
+            "$cli"/verkstead | "$cli"/verkstead.exe) ;;
+            *)
+              echo "::error::A terminal opened after the install does not find $INSTALL/resources/cli/verkstead.exe."
+              exit 1
+              ;;
+          esac
+
+          guide=$( PATH="$fresh"; verkstead guide )
+          printf '%s\n' "$guide" | head -n 5
+          case "$guide" in
+            *"Asking the human"*) ;;
+            *)
+              echo "::error::The installed binary printed no Guide."
+              exit 1
+              ;;
+          esac
+
+      - name: The window comes up, the icon goes into the tray, and the viewer is inside
+        timeout-minutes: 5
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}\state
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}\data
+        run: |
+          log="$(cygpath -u "$LOCALAPPDATA")/Verkstead/verkstead.log"
+
+          key=the-key-this-leg-states
+          data="$(cygpath -u "$VERKSTEAD_DATA_DIR")"
+          mkdir -p "$data"
+          printf '%s\n' "$key" > "$data/workbench.key"
+
+          "$INSTALL/Verkstead.exe" > app.log 2>&1 &
+          app=$!
+          document=$(curl --fail --silent --show-error \
+            --retry 20 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
+            http://127.0.0.1:8422/)
+
+          for _ in $(seq 100); do
+            if grep -q "the window is opening on" "$log" 2> /dev/null &&
+              grep -q "the icon is in the tray" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
+          kill -9 "$app" 2> /dev/null || true
+          cat app.log
+
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The installed app served a document with no bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+          for said in "the window is opening on" "the icon is in the tray"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              cat "$log" 2> /dev/null || echo "There is no log at $log."
+              exit 1
+            fi
+          done
+          cat "$log"
+
+      # The one step of the leg that reaches outside this runner. `github.token`
+      # here is what `release.yml` hands it, and this workflow's `permissions`
+      # block above is the same `contents: read` that leg's token carries.
+      - name: The msi upgrades over itself, and over the last Release's
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          installer() {
+            slug=$1
+            verb=$2
+            package=$3
+            said=$4
+            log="$PWD/msiexec-$slug.log"
+            code=0
+            powershell -NoProfile -Command \
+              "exit (Start-Process msiexec -ArgumentList '$verb',\"$(cygpath -w "$package")\",'/qn','/norestart','/l*v',\"$(cygpath -w "$log")\" -Wait -PassThru).ExitCode" ||
+              code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::Windows Installer refused $said (exit $code)."
+              if [ -f "$log" ]; then
+                tr -d '\000' < "$log" | tail -n 200
+              else
+                echo "It wrote no log either."
+              fi
+              exit 1
+            fi
+            echo "Installer: $said — done."
+          }
+
+          counts() {
+            powershell -NoProfile -Command "
+              \$menus = @(
+                (Join-Path \$env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+                (Join-Path \$env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+              ) | Where-Object { Test-Path \$_ }
+              \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+                Where-Object DisplayName -eq 'Verkstead')
+              \$path = @([Environment]::GetEnvironmentVariable('Path','User') -split ';' |
+                Where-Object { \$_ -like '*Verkstead*' })
+              \$menu = @(\$menus | ForEach-Object { Get-ChildItem \$_ -Recurse -Filter 'Verkstead*.lnk' -EA SilentlyContinue })
+              'arp=' + \$arp.Count
+              'path=' + \$path.Count
+              'menu=' + \$menu.Count
+              'says=Installed apps: ' + ((\$arp | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') }) -join '; ')
+              'says=PATH: ' + (\$path -join '; ')
+              'says=Start menu: ' + ((\$menu | ForEach-Object { \$_.FullName }) -join '; ')
+            " | tr -d '\r'
+          }
+
+          one() {
+            said=$1
+            report=$(counts)
+            echo "After $said, the machine holds:"
+            printf '%s\n' "$report" | sed -n 's/^says=/  /p'
+            for pair in "arp=rows in Installed apps" "path=PATH entries" \
+              "menu=Start-menu entries"; do
+              got=$(printf '%s\n' "$report" | sed -n "s/^${pair%%=*}=//p")
+              if [ "$got" != 1 ]; then
+                echo "::error::After $said there are $got ${pair#*=} for Verkstead, and an upgrade leaves one."
+                printf '%s\n' "$report"
+                exit 1
+              fi
+            done
+            echo "One row in Installed apps, one PATH entry, one Start-menu entry."
+          }
+
+          installer over-itself /i "$PWD/$MSI" \
+            "this msi over the copy already installed"
+          one "installing it over itself"
+
+          tag=$(gh release view --json tagName --jq .tagName 2> release.err) || tag=
+          if [ -z "$tag" ]; then
+            echo "::warning::There is no Release to fetch an msi from, so the upgrade over the package before this one went unchecked."
+            cat release.err
+            exit 0
+          fi
+          echo "The last Release is $tag."
+
+          if [ -z "$(gh release view "$tag" --json assets \
+            --jq '.assets[].name | select(. == "Verkstead-x86_64.msi")')" ]; then
+            echo "::warning::The last Release, $tag, carries no Verkstead-x86_64.msi, so the upgrade over the package before this one went unchecked."
+            exit 0
+          fi
+
+          gh release download "$tag" --pattern Verkstead-x86_64.msi --dir previous
+          ls -l previous
+
+          installer uninstall /x "$PWD/$MSI" \
+            "the uninstall that makes room for $tag's package"
+          installer previous /i "$PWD/previous/Verkstead-x86_64.msi" \
+            "$tag's msi, the package a machine is upgrading from"
+          installer over-previous /i "$PWD/$MSI" "this msi over $tag's"
+          one "installing it over $tag's msi"

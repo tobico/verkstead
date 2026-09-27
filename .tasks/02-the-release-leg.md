@@ -127,3 +127,47 @@ describing what the msi *is* is task 05's to rewrite.
       `Cargo.toml`, and `publish` is untouched: `desktop-windows` arrives
       carrying `Verkstead-x86_64.msi` and the count of bare CLI binaries is still
       five.
+
+## What was checked here, and what the runner has to check
+
+**Nothing in this task was installed on the machine it was written on, and
+deliberately** — for the reason task 01 records at length: this package carries
+the live Verkstead's `UpgradeCode` by decision, and the Verkstead running the
+session is an install of that same product, so `msiexec /i` here is a major
+upgrade of the orchestrator doing the testing rather than a test of the package.
+The upgrade assertion this task adds is the same act three more times over, and
+its second half uninstalls first. So the whole of it belongs on a runner.
+
+What stands in for it here is what the task said would: `actionlint` over both
+workflows, which is green, and `shellcheck` over every `run:` script in them,
+which reports nothing on any script this change wrote. The three findings it does
+report are the ones `main` already had — two `ls | grep` in the dmg leg and an
+`ls` in `publish` — and the four `tr 'A-Z' 'a-z'` infos it used to report in this
+leg are gone with the lines they were on, the new comparisons using
+`[:upper:]`/`[:lower:]`.
+
+**The two were run separately rather than as one command, and not by choice.**
+`actionlint -shellcheck` deadlocks on this machine for any `run:` script over
+about four kilobytes — reproduced against a synthetic workflow whose only script
+is a hundred `echo` lines, and against `main`'s own `release.yml` with one long
+step appended, so it is nothing about what is written here. actionlint's own
+checks pass with the integration off, and `shellcheck` was run over each script
+extracted from the block scalars instead, which is the same analysis in two
+commands.
+
+The counting the upgrade assertion rests on, and the `PATH` comparison the guide
+assertion rests on, were each exercised here against made-up inputs: one row,
+two rows, none; the CLI's directory found, the root on `PATH`, nothing found, and
+some other `verkstead` found first. Each says which claim failed and why. And
+`prepare`'s bump was run against a copy of `desktop/package.json` with
+`VERSION=0.1.3-rc.2`, which leaves that file one line different and reads `0.1.3`
+back out of it.
+
+**What the temporary `the-windows-msi-leg` job in `ci.yml` is there to answer**,
+and what nothing read off this branch can: that the leg's steps pack an msi
+Windows really installs, that each assertion holds against the install it left,
+and that each fails naming what went wrong when broken on purpose. It builds the
+headless CLI on the runner in place of downloading it from the matrix, because a
+`build` job is the one thing that cannot come along to a pull request; every step
+after the pack is the leg's word for word. It goes before the branch merges, the
+way stage 06's temporary dmg job did.
