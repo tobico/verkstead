@@ -2263,10 +2263,17 @@ former `mvp/04-wrap-up` shape too, permanently: one already worked is on a
 branch of that shape until somebody deletes it, and its tick may never have
 reached the default branch.
 
-Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
-and is kept one Stage behind: the tick rides in the plan commit of the Stage
-after it, so a Stage whose work has settled is still the box that says *in
-progress* on this branch.
+**Done when Verkstead's record says it settled**, and where the record says
+nothing about that Stage, when its box in `ROADMAP.md` is ticked. A Stage ticks
+its own box in its own finish commit, on its own branch, so with Stages worked
+side by side the boxes stop being one fact: the branch being read may never have
+seen the tick of a Stage that finished beside it. The record is what carries the
+answer across them, and the boxes are the score people read — and all there is
+to go on for a Stage worked by hand or by the old tools. Settled rather than
+merged: a Stage whose pull request is open and whose wrap-up reached **Done** is
+done, and a ticked box on its own says *its tasks are done* rather than *it
+settled*, the tick landing before that pull request has even opened. See
+ADR-0021.
 
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
 the only roadmap its wrap-up ever reads. A Worktree may hold any number of

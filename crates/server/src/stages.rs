@@ -1287,7 +1287,7 @@ pub(crate) fn startable(
 
     // Clause 4: its branch is free. Which is also what keeps a stage already
     // in flight under Verkstead out of the list — its branch is in this git
-    // directory from the moment the stage started, long before the plan commit
+    // directory from the moment the stage started, long before the finish commit
     // that ticks its box reaches the default branch.
     //
     // Both names, because a stage started before the scheme changed is on the
@@ -1633,9 +1633,9 @@ Turns this askance clone into Verkstead.
         /// Commit what is written on a branch of its own, and leave the default
         /// branch where it was.
         ///
-        /// A stage's plan commit: the tick and the annotation ride on the
-        /// stage's own branch, and reach the default branch only when its pull
-        /// request merges.
+        /// A stage's own commits: the annotation its plan commit writes and the
+        /// tick its finish commit writes both ride on the stage's own branch, and
+        /// reach the default branch only when its pull request merges.
         fn commit_on(&self, branch: &str, message: &str) {
             run(self.path(), &["checkout", "-q", "-b", branch]);
             run(self.path(), &["add", "-A"]);

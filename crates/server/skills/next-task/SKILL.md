@@ -149,9 +149,11 @@ declaration declares on some lines and not others, which is refused. A line
 that declares nothing had none to keep.
 
 Nothing else in the file changes: no renumbering, no reordering, no rewording,
-and no touching another stage's box. Verkstead reads those boxes to decide what
-to start next, and a stage ticked here is what lets the stage after it begin
-without anybody being asked.
+and no touching another stage's box — every stage ticks its own here, at its own
+finish, and another stage's may be a sibling somebody is still working. This box
+is the score a person reading `ROADMAP.md` goes by, and what Verkstead itself
+goes by is its own record of a stage settling, with the boxes behind it where it
+has no record of one.
 
 Where there is no `Roadmap stage:` line, this backlog was an ordinary feature's
 and there is no roadmap to tick. Skip it.

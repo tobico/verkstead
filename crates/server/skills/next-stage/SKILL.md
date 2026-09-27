@@ -130,30 +130,35 @@ schema, a type shape), inline the decision-rich parts.
 The `Roadmap stage:` line is what says this backlog is a stage's rather than a
 feature's, and finishing the feature reads it back to tick the stage off.
 
-## 6. Bring the roadmap's own score up to date
+## 6. Say on the roadmap that this stage is being worked
 
-`ROADMAP.md` keeps the score of the whole effort, and it is one step behind by
-the time you are reading it. Two edits, both in the plan commit below:
+`ROADMAP.md` keeps the score of the whole effort, and one line of it is out of
+date: this stage's, which says nothing about being under way. One edit, in the
+plan commit below.
 
-- **Tick every stage above this one that is still annotated as in progress.**
-  Their work is finished — a stage is only started once the one before it has
-  settled, which is why this session is running at all. Change `- [ ]` to
-  `- [x]` and drop the `*(in progress: …)*` annotation, and nothing else on
-  the line.
-- **Annotate this stage as in progress**, with the branch you are on, after its
-  link and after whatever that line already said:
+**Annotate this stage as in progress**, with the branch you are on, after its
+link and after whatever that line already said:
 
-      - [ ] NN: <title> — [brief](NN-<slug>.md) — after 01 *(in progress: `<branch>`)*
+    - [ ] NN: <title> — [brief](NN-<slug>.md) — after 01 *(in progress: `<branch>`)*
 
-  **Leave the line's declaration where it is.** What a stage stands on and the
-  platform it wants — `after 01`, `no dependencies`, `on windows` — is written
-  after the link too, and Verkstead reads it off the line: the annotation goes
-  beside it rather than over it. A roadmap that has lost one line's declaration
-  declares on some lines and not others, which is refused. A line that declares
-  nothing had none to keep, and gains none here.
+**Leave the line's declaration where it is.** What a stage stands on and the
+platform it wants — `after 01`, `no dependencies`, `on windows` — is written
+after the link too, and Verkstead reads it off the line: the annotation goes
+beside it rather than over it. A roadmap that has lost one line's declaration
+declares on some lines and not others, which is refused. A line that declares
+nothing had none to keep, and gains none here.
 
-  Leave the box unticked: the stage is under way rather than done, and the
-  session that starts the stage after this one is what ticks it.
+**Leave this stage's box unticked**, the stage being under way rather than done.
+Its own finish commit is what ticks it, once its tasks are worked — the way
+every stage's box is ticked.
+
+**And leave every other stage's line alone.** No other box is ticked here and no
+other annotation comes off, however finished the stage before this one looks:
+each stage ticks its own box at its own finish, and a stage annotated in
+progress beside this one may be a sibling somebody is working right now. What
+says a stage is done to Verkstead is its own record of that stage settling, with
+the boxes behind it where there is no record — so a box left unticked here holds
+nothing up.
 
 Do not renumber, reorder or reword anything else in the file.
 
@@ -166,8 +171,8 @@ the commit is how it gets written down.
     git add -A
     git commit -m "chore: plan <stage-name> tasks"
 
-The roadmap edits from step 6 ride in that commit: the score moves on the branch
-that earned it.
+The roadmap edit from step 6 rides in that commit: the annotation goes on the
+branch that is doing the work.
 
 If the re-grounding turned up changes to `CONTEXT.md`, the ADRs under
 `docs/adr/`, or other project documentation, include them too — they belong on

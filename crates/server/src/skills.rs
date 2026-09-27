@@ -2195,12 +2195,17 @@ mod tests {
         );
     }
 
-    /// The roadmap keeps its own score, and the plan commit is what moves it:
-    /// the stage before this one ticked, and this one annotated with the branch
-    /// it is being worked on — which is also what stops Verkstead starting this
-    /// stage twice.
+    /// The roadmap keeps its own score, and the plan commit moves one line of
+    /// it: this stage's, annotated with the branch it is being worked on — which
+    /// is also what stops Verkstead starting this stage twice.
+    ///
+    /// **And no other line**, box included. Every stage ticks its own box in its
+    /// own finish commit, and with stages worked side by side a stage annotated
+    /// in progress beside this one may be a sibling still going; what says a
+    /// stage is done here is [`crate::stages::done`], which reads the record
+    /// first and the boxes behind it.
     #[test]
-    fn the_next_stage_fork_moves_the_roadmaps_own_score() {
+    fn the_next_stage_fork_annotates_its_own_line_and_no_other() {
         let next_stage = skill("next-stage/SKILL.md");
 
         assert!(
@@ -2213,8 +2218,9 @@ mod tests {
              rather than the prose: {next_stage}"
         );
         assert!(
-            next_stage.contains("`- [x]`"),
-            "the stage before it is ticked, its work having settled: {next_stage}"
+            !next_stage.contains("[x]"),
+            "and nothing here ticks a box, this stage's or a stage above it: \
+             {next_stage}"
         );
 
         let said = flowed(NEXT_STAGE);
@@ -2224,6 +2230,10 @@ mod tests {
             "what the line already declared shares that tail, and the annotation goes \
              beside it rather than over it: {said}"
         );
+        assert!(
+            said.contains("leave every other stage's line alone"),
+            "the stage before this one is not this session's to tick off: {said}"
+        );
 
         let lines = stage_lines(&next_stage);
         let [annotated] = lines.as_slice() else {
@@ -2231,6 +2241,11 @@ mod tests {
         };
         let annotated = crate::checklist::entry(annotated).expect("the example is a stage line");
 
+        assert!(
+            !annotated.checked,
+            "the one line it writes is this stage's, under way rather than done: {}",
+            annotated.after
+        );
         assert!(
             annotated.after.contains("in progress:")
                 && crate::declarations::read(annotated.after)

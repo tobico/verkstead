@@ -20,4 +20,4 @@ Roadmap stage: [02: The server's record of a stage](docs/roadmaps/parallel-stage
 - [x] 01: Which stage, written down — [details](01-which-stage-written-down.md)
 - [x] 02: Done by the record — [details](02-done-by-the-record.md)
 - [x] 03: The adoption agrees — [details](03-the-adoption-agrees.md)
-- [ ] 04: A stage ticks itself, and the words — [details](04-a-stage-ticks-itself.md)
+- [x] 04: A stage ticks itself, and the words — [details](04-a-stage-ticks-itself.md)
