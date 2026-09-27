@@ -600,6 +600,96 @@ async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
     said
 }
 
+/// An open page, listening on this device's own Nudge stream — which is what a
+/// browser is, and the one reader that cannot poll.
+///
+/// Every other assertion here reads the sidebar until it says what it is waiting
+/// for, which is the right shape for a list that arrives over a link. It is also
+/// exactly what a browser does not do: a page reads the list back when it is
+/// told to and at no other time. So one test reads the stream instead — see
+/// [`the_sidebar_is_told_again_once_a_members_list_has_landed`].
+struct Listening {
+    body: Body,
+    buffered: String,
+}
+
+impl Listening {
+    async fn open(app: &Router) -> Listening {
+        let answered = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/nudges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(answered.status(), StatusCode::OK);
+
+        Listening {
+            body: answered.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next whole frame off the stream, whatever kind it is.
+    async fn frame(&mut self) -> String {
+        loop {
+            if let Some(end) = self.buffered.find("\n\n") {
+                return self.buffered.drain(..end + 2).collect();
+            }
+
+            let chunk = self
+                .body
+                .frame()
+                .await
+                .expect("the stream ended")
+                .unwrap()
+                .into_data()
+                .expect("the stream carries data frames");
+
+            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
+
+    /// The next Nudge this device announced about its **own** world: one naming a
+    /// device is a member's news said again, and a page hearing that has nothing
+    /// new of this device's to read yet.
+    async fn own_nudge(&mut self) -> serde_json::Value {
+        let waited_for = tokio::time::timeout(WAITING, async {
+            loop {
+                let frame = self.frame().await;
+
+                if !frame.starts_with("event: nudge") {
+                    continue;
+                }
+
+                let said = said(&frame);
+
+                if said.get("device").is_none_or(serde_json::Value::is_null) {
+                    return said;
+                }
+            }
+        });
+
+        waited_for.await.expect("waited for a Nudge in vain")
+    }
+}
+
+/// What one frame of that stream said: the JSON of its `data` line, read as the
+/// page reads it.
+fn said(frame: &str) -> serde_json::Value {
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .unwrap_or_else(|| panic!("a Nudge frame carries a data line, not {frame:?}"));
+
+    serde_json::from_str(data)
+        .unwrap_or_else(|why| panic!("a Nudge should be readable as one: {data:?} — {why}"))
+}
+
 /// One row of the merged list as a drag names one: the device and the id.
 fn named(row: (Option<&str>, i64)) -> serde_json::Value {
     serde_json::json!({ "device": row.0, "id": row.1 })
@@ -678,6 +768,51 @@ async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
     assert_eq!(theirs.name, B_MACHINE, "and the member's own machine");
     assert_eq!(theirs.os, B_OS, "and the member's own OS word");
     assert!(theirs.reachable);
+}
+
+/// And the page is told again once B's list has actually landed, which is the
+/// only moment there is anything new for it to read.
+///
+/// **The test above polls and a browser does not.** What sets A's read of B's
+/// list going is B's own Nudge, said again on A's channel under B's Device Id —
+/// which every open sidebar hears at the same instant and re-reads the merge on.
+/// That read is a local call and A's read of B's list is a dial across the room,
+/// so the page draws the merge as it stood a moment before. What puts it right is
+/// A announcing on its own account once it has kept what B said: the one Nudge
+/// here with no device on it, and the one a page can read the new row back on.
+#[tokio::test]
+async fn the_sidebar_is_told_again_once_a_members_list_has_landed() {
+    let (a, b) = linked_up().await;
+    let _holding = a.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    a.starts(here, "the-merged-list").await;
+    a.sidebar_saying(|rows| rows.len() == 1).await;
+
+    // An open page on A, listening from before anything happens on B.
+    let mut page = Listening::open(&a.workbench).await;
+
+    b.starts(there, "the-cross-device-drag").await;
+
+    // The Nudge A announces about its own world, past the one it said under B:
+    // that one is B's news relayed, and a page that read the list on it alone
+    // would have read it before A had B's rows.
+    let told = page.own_nudge().await;
+
+    assert_eq!(
+        told.get("kind").and_then(serde_json::Value::as_str),
+        Some("conversations"),
+        "the sidebar's own list is what moved: {told}",
+    );
+
+    // Read once, the way a page reads once — no waiting and no second look.
+    assert_eq!(
+        branches(&a.sidebar().await),
+        ["the-cross-device-drag", "the-merged-list"],
+        "the list a page reads back on that Nudge holds the member's row",
+    );
 }
 
 /// Two Conversations the two devices each numbered 1 are two rows, and what

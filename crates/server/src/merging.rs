@@ -25,6 +25,16 @@
 //! refresh a member's list here. A member printing a line of transcript is not
 //! one of them, and it is the kind that arrives twice a second.
 //!
+//! **And the pages are told once a list has landed**, which is the only moment
+//! there is anything new for them to read. What sets a read going is the
+//! member's own Nudge, said again here under that device — so every open sidebar
+//! re-reads the merge as that arrives, and that is a local call where the read
+//! it set going is a round trip across the room. What the sidebar draws then is
+//! the merge as it stood; what says otherwise is the announcement
+//! [`read_member`] makes once it has kept what the member said. The same step
+//! [`crate::ranking`] takes after it puts a rank it has just written onto a held
+//! list, and for the same reason.
+//!
 //! **A member that answers nothing holds whatever it last said.** A read that
 //! could not be made leaves the held list exactly as it is — the rows stay on
 //! the merged list, drawn dimmed by the flag the row carries — and a member
@@ -378,6 +388,12 @@ async fn read_every_member(state: &AppState) {
 /// nothing, which is the same rule seen from its other end. Both halves go that
 /// way together — a member that answered its list and then stopped answering has
 /// said nothing whole, and half an answer is worse than the last one.
+///
+/// **And a list that landed is announced**, because the Nudge that set this read
+/// going reached every open sidebar a round trip ago — see the comment at the
+/// foot of this function. A read that could not be made announces nothing: what
+/// this device holds has not changed, so there is nothing for a page to read
+/// again.
 async fn read_member(state: &AppState, device: &str) {
     let Some(devices) = state.devices.as_ref() else {
         return;
@@ -440,6 +456,18 @@ async fn read_member(state: &AppState, device: &str) {
     };
 
     state.merged.keep(device, Held { rows, any_archived });
+
+    // And the pages are told, this being the moment there is something new for
+    // them to read. The Nudge that set this read going was the member's own,
+    // announced here under that device — so every open sidebar re-read the merge
+    // as it arrived, which is a local call where this was a dial across the room,
+    // and what it drew was the merge as it stood before any of this landed. Said
+    // the way [`crate::ranking`] says it after writing a rank onto a held list.
+    //
+    // Naming no device, which is what keeps it out of the loop above: a Nudge
+    // with no device on it is a Nudge about no member's list, so this cannot set
+    // itself going again.
+    state.nudges.announce(Nudge::Conversations);
 }
 
 /// One of those two reads, up to the bound: what `device` said, or nothing and a
