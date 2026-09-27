@@ -36,7 +36,7 @@ some lines and not others is one 01 refuses and 04 starts nothing from.
 
 ## Stages
 
-- [ ] 01: Dependencies on the record — [brief](01-dependencies-on-the-record.md) — no dependencies *(in progress: `roadmaps/parallel-stages/01-dependencies-on-the-record`)*
+- [x] 01: Dependencies on the record — [brief](01-dependencies-on-the-record.md) — no dependencies
 - [ ] 02: The server's record of a stage — [brief](02-the-servers-record-of-a-stage.md) — no dependencies
 - [ ] 03: Joining the chain — [brief](03-joining-the-chain.md) — after 02
 - [ ] 04: The scheduler — [brief](04-the-scheduler.md) — after 01, 03
