@@ -31,7 +31,7 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 - [x] 03: Discovery — [brief](03-discovery.md)
 - [x] 04: The relay — [brief](04-the-relay.md)
 - [x] 05: Ranks — [brief](05-ranks.md)
-- [ ] 06: The merged list — [brief](06-the-merged-list.md)
+- [ ] 06: The merged list — [brief](06-the-merged-list.md) *(in progress: `roadmaps/cluster-mode/06-the-merged-list`)*
 - [ ] 07: Drafting on a device — [brief](07-drafting-on-a-device.md)
 - [ ] 08: Shared Profiles — [brief](08-shared-profiles.md)
 - [ ] 09: Transfer — [brief](09-transfer.md)
