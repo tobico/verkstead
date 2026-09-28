@@ -197,6 +197,11 @@ toml = "0.8"
 # process whose output is read as it arrives, and neither the spawning nor the
 # reading can block the runtime the server is answering requests on.
 tokio = { workspace = true, features = [
+    # And `fs` is the one file this server reads back out over HTTP: an
+    # attachment, asked for by the compose page when a draft moves to another
+    # device — see `src/ui.rs`. Read as it is written rather than into memory,
+    # a file here being as much as thirty-two megabytes.
+    "fs",
     "io-util",
     # Not a socket here: `net` is what carries `AsyncFd`, which is how the
     # terminal is read without a thread parked on it.
@@ -218,6 +223,10 @@ tokio-rustls = { version = "0.26", default-features = false, features = [
 # The Nudge stream is a broadcast channel turned into a `Stream` for axum's SSE
 # response, which is the `sync` feature and nothing else here uses.
 tokio-stream = { version = "0.1", features = ["sync"] }
+# And an open file turned into one, which is how an attachment is handed back:
+# `io` and nothing else, and the crate is in the tree already — the relay's
+# `stream` feature on reqwest put it there (see the note over `reqwest` above).
+tokio-util = { version = "0.7", features = ["io"] }
 # The events only; where they go is the starting binary's call, so the
 # subscriber is the CLI's dependency rather than this crate's — see
 # `crates/cli/src/serve.rs`.

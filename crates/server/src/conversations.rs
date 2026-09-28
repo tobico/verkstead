@@ -43,8 +43,9 @@ use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    GrillingStarted, PairingView, PickedView, Process, ProcessPicked, RepoPairingsView,
-    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Worktree,
+    ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
+    RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp,
+    TargetRecorded, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -849,6 +850,81 @@ pub(crate) async fn detach(
     store::detach(&state.pool, id, attachment).await?;
 
     Ok(AttachmentRemoved::Removed)
+}
+
+/// One attached file, for reading it back: the name it is stored under and
+/// where it stands on disk.
+///
+/// **The one read of an attachment there is.** Everything else about them is
+/// written and taken away — the row and the bytes go up together and come off
+/// together — and what wants a file back is the compose page moving a saved
+/// draft onto another device (ADR-0020, *Drafting on a device*): a file on the
+/// old device's Data Directory is read off it and put on the new Conversation
+/// through the route a paperclip uses.
+///
+/// Refused by nothing but the pair naming no row. The Brief's freeze is what
+/// stops a file being *changed*, and a Conversation past drafting is one whose
+/// files are worth reading like any other — a Share's row of pills names them,
+/// and a session in the worktree reads them off the disk.
+///
+/// The path is not opened here: what a reader does with it is hand it to the
+/// browser as it arrives — see `read_attachment` in [`crate::ui`] — so a file
+/// the row names and the directory no longer holds is that reader's to refuse.
+pub(crate) async fn attached_file(
+    state: &AppState,
+    id: i64,
+    attachment: i64,
+) -> Result<Option<(String, PathBuf)>> {
+    let Some(found) = store::attachment(&state.pool, id, attachment).await? else {
+        return Ok(None);
+    };
+
+    let path = Attachments::under(&state.data_dir).file(id, &found.name);
+
+    Ok(Some((found.name, path)))
+}
+
+/// The draft's work has moved to another device: say so on its Timeline, and
+/// close it.
+///
+/// **Two acts in one request because they are one act.** A move is the compose
+/// page's replay run against a Conversation that already exists — the Brief, the
+/// branch and the files replayed onto a Conversation made on the other device —
+/// and the last thing it does is finish with the draft here. A close alone would
+/// leave a Closed draft that says nothing about where its work went, which is
+/// exactly what the human coming back to it weeks later needs to read; a notice
+/// alone would leave two drafts of one piece of work.
+///
+/// **The notice first, so that it is on the record whatever the close does.**
+/// Closing walks a session, a worktree per checkout and a directory, and the
+/// words are what this request is here for — a notice written after a close that
+/// failed would be a move nothing recorded. Nothing between them can be lost the
+/// other way round: a Closed Conversation takes a notice like any other.
+///
+/// **Named by the machine rather than by its id**, which is what the browser
+/// sends along — see [`ConversationMove`]. The device the work
+/// went to is a member of *the browser's* device rather than necessarily of this
+/// one: a laptop moves a draft from the desktop to the WSL beside it, and the
+/// desktop may never have been linked to the WSL. So the name comes with the id
+/// from the one machine that knows both, and the id is written beside it for
+/// whoever reads this back against a cluster whose names have moved.
+pub(crate) async fn moved(
+    state: &AppState,
+    id: i64,
+    to: &ConversationMove,
+) -> Result<ConversationClosed> {
+    let said = format!(
+        "This draft's work moved to **{}** — it is Conversation {} there. \
+         Nothing was left to do here, so this one is closed.\n\n\
+         The device is `{}`.",
+        to.name, to.conversation, to.device,
+    );
+
+    if !store::note(&state.pool, id, &said).await? {
+        return Ok(ConversationClosed::NoSuchConversation);
+    }
+
+    close(state, id).await
 }
 
 /// The Brief's files, in the shape the workbench draws them.

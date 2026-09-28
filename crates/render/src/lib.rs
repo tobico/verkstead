@@ -46,7 +46,7 @@ pub use conversations::{
     CheckRollup, Checked, Comment, CommitEvent, CommitPane, CommitRecord, CompanionAdded,
     CompanionAddition, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionUpgrade,
-    CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
+    CompanionView, ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, DroppedRow,
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, MergedRow, Merging, MovedEvent,
     NewAdoption, NewCompanion, NewConversation, NewRank, NoticeEvent, Parked, PendingSteerView,

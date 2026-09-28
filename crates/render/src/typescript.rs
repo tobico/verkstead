@@ -21,22 +21,22 @@ use crate::{
     AttachmentRemoved, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion, NewConversation, NewJoin,
-    NewRank, OnboardingView, PendingJoin, PrefillView, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
-    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Created,
+    Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
+    GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, PrefillView, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -189,6 +189,11 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationClosed::export_all(&config).unwrap();
+
+    // And the close a draft's work moving to another device ends with, which is
+    // the one close that carries a request shape: where the work went, for the
+    // words left on the Timeline here — see [`crate::ConversationMove`].
+    ConversationMove::export_all(&config).unwrap();
 
     // And the press that puts a closed one away, which takes no request shape
     // either: which Conversation it is is the whole of what it says.

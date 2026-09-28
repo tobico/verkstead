@@ -247,6 +247,18 @@ impl Attachments {
         }
     }
 
+    /// Where one of a Conversation's files stands, for reading it back.
+    ///
+    /// The path rather than the bytes, because the one caller that reads one
+    /// hands it to the browser as it arrives rather than into memory — see
+    /// `read_attachment` in [`crate::ui`]. `name` is what the record says the
+    /// file was stored under, which is the name [`Self::keep`] answered with:
+    /// the counted-up one where the directory already had that name, so the row
+    /// and the file agree by construction and nothing here has to look.
+    pub(crate) fn file(&self, conversation_id: i64, name: &str) -> PathBuf {
+        self.directory(conversation_id).join(name)
+    }
+
     /// Take one file back out again.
     ///
     /// A file that is not there is nothing to remove: the row and the file are
@@ -254,7 +266,7 @@ impl Attachments {
     /// that follows a directory somebody tidied by hand — has nothing left to
     /// do and no reason to say so.
     pub(crate) fn drop_file(&self, conversation_id: i64, name: &str) -> Result<()> {
-        let path = self.directory(conversation_id).join(name);
+        let path = self.file(conversation_id, name);
 
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),

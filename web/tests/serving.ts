@@ -146,6 +146,27 @@ export function json(body: unknown, status = 200): () => Promise<Response> {
     );
 }
 
+/// One file, as the one route that answers with a file hands it over: the bytes,
+/// and the name the record says they were stored under.
+///
+/// Not JSON, which is what makes it worth a helper of its own — see
+/// `readAttachment` in `src/api/client.ts`, which reads the body as a blob and
+/// is the only caller in the app that does.
+export function bytes(
+  body: string,
+  name: string,
+): () => Promise<Response> {
+  return () =>
+    Promise.resolve(
+      new Response(body, {
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-disposition": `attachment; filename="${name}"`,
+        },
+      }),
+    );
+}
+
 /// The Set inside a fixture of `/api/ui/sets/{id}`.
 ///
 /// That endpoint says first which of the two kinds of reading it is holding —

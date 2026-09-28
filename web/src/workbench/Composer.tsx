@@ -276,7 +276,7 @@ export function Composer(props: {
             {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
           </Show>
 
-          <Setup conversation={props.conversation} />
+          <Setup conversation={props.conversation} brief={props.brief} />
         </div>
 
         {/* What the setup has to say that is not a control, under the box

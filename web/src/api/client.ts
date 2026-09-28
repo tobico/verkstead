@@ -38,6 +38,7 @@ import type {
   ConversationArchived,
   ConversationClosed,
   ConversationEntry,
+  ConversationMove,
   ConversationSteered,
   ConversationStopped,
   ConversationUnarchived,
@@ -1109,6 +1110,36 @@ export async function attachFile(
   return taken<Attached>(at, response);
 }
 
+/// And read one back, by the row's own id — the one read of an attachment there
+/// is.
+///
+/// What it is for is moving a saved draft onto another device: a file on a draft
+/// is bytes under that device's Data Directory, and the move reads each off the
+/// device it is on and puts it on the new Conversation through the upload above.
+/// Which is why it comes back as a `File` — that is what the upload takes, and
+/// what a paperclip would have handed over.
+///
+/// Named by what the record says it was stored under rather than by what the
+/// server's `Content-Disposition` says, the two being the same name: the caller
+/// has the row in its hand, and a name parsed back out of a header would be the
+/// one fact here read twice.
+export async function readAttachment(
+  device: Device,
+  id: number,
+  attachment: number,
+  name: string,
+): Promise<File> {
+  const at = on(
+    device,
+    `/api/ui/conversations/${id}/attachments/${attachment}/bytes`,
+  );
+
+  const response = await fetch(at, { headers: { accept: "*/*" } });
+  await refused(at, response);
+
+  return new File([await response.blob()], name);
+}
+
 /// And take one off again, by the row's own id: two files on one Conversation
 /// may share a name, and neither of them is a key.
 export function removeAttachment(
@@ -1422,6 +1453,27 @@ export function closeConversation(
 ): Promise<ConversationClosed> {
   return post<ConversationClosed>(
     on(device, `/api/ui/conversations/${id}/close`), {},
+  );
+}
+
+/// And the close a draft's work moving to another device ends with: the
+/// Timeline is told where the work went, and then the draft is closed.
+///
+/// The last request of a move, made once the new Conversation is real and
+/// holding everything the far end would take — so a refusal anywhere on the way
+/// leaves this unmade, and the draft it would have closed open. One request
+/// rather than a note
+/// and a close, for the reason the close-and-archive beside it is one: a
+/// connection dropped between them would leave a Closed draft saying nothing
+/// about where its work went, which is the one thing it is worth opening for.
+export function draftMovedTo(
+  device: Device,
+  id: number,
+  moved: ConversationMove,
+): Promise<ConversationClosed> {
+  return post<ConversationClosed>(
+    on(device, `/api/ui/conversations/${id}/moved`),
+    moved,
   );
 }
 

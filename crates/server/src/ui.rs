@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 use axum::Extension;
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
@@ -31,27 +32,29 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{delete, get, post, put};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached, AttachmentRemoved,
     Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
     CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, DevicesView, DroppedRow, FileDeleted, FileDeleting,
-    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
-    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
-    McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
-    NewRank, PairingView, Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConversationEntry, ConversationMove, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, DroppedRow,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
+    GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked,
+    McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
+    NewCompanion, NewConversation, NewJoin, NewRank, PairingView, Parked, PendingSteerView,
+    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -360,6 +363,21 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/attachments/{name}",
             post(attach).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
         )
+        // And reading one back, by the row's own id: the one read of an
+        // attachment there is, and the compose page's when a saved draft moves to
+        // another device — the file is read off the device it is on and put on
+        // the new Conversation through the route above.
+        //
+        // Under the row and named for what it hands over, the way the removal
+        // beside it is named for what it does: the upload above stands at the
+        // *name* the file is being given, so the id could not simply take its
+        // place. The bytes, named by what the record says they were stored
+        // under — which is the other half of what an attachment is, in the
+        // words `crate::attachments` uses for the two.
+        .route(
+            "/api/ui/conversations/{id}/attachments/{attachment}/bytes",
+            get(read_attachment),
+        )
         // And taking one off, by the row's own id rather than by its name: two
         // files on one Conversation may share a name, and neither of them is a
         // key. Named in the path rather than in the verb, as a companion's
@@ -440,6 +458,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And the close a draft's work moving to another device ends with, which
+        // carries the words that say where it went: the close above with a
+        // notice over it rather than a second way of closing — see
+        // [`crate::conversations::moved`], where the two are one act.
+        .route("/api/ui/conversations/{id}/moved", post(draft_moved))
         // And the two of those joined, which is one row of the menu rather than
         // two pressed in turn: the close and the archive are one intention often
         // enough to be worth a press of their own.
@@ -3884,6 +3907,136 @@ async fn attach(
     }
 }
 
+/// `GET /api/ui/conversations/{id}/attachments/{attachment}/bytes` — read one
+/// back.
+///
+/// **The one read of an attachment there is**, and what it is for is the compose
+/// page moving a saved draft onto another device: the files on a draft are bytes
+/// under this device's Data Directory, and a move reads each back off here and
+/// puts it on the new Conversation over there through the paperclip's own route
+/// (ADR-0020, *Drafting on a device*).
+///
+/// **Streamed rather than read into memory**, a file here being as much as
+/// thirty-two megabytes: the browser is written to as the disk is read, and a
+/// member's file relayed through the device the browser opened is carried through
+/// the same way — see [`crate::relaying`], which hands a member's answer back as
+/// its stream rather than its bytes.
+///
+/// **Named by what it was stored under**, which is the name on the row rather
+/// than the name it was sent as: a name already taken is counted up when the file
+/// lands, so `notes-2.md` is what this is called and what a move puts on the far
+/// end. In a `Content-Disposition`, so that the same address a browser is pointed
+/// at downloads under that name — see [`disposition`], which writes a name that
+/// is the human's rather than the server's.
+///
+/// A pair naming no row is a 404 — and so is a row whose file has gone from the
+/// directory, which is nothing a human did: the two are one thing to say, there
+/// being no file to read either way.
+async fn read_attachment(
+    State(state): State<AppState>,
+    Path((id, attachment)): Path<(String, String)>,
+) -> HttpResponse {
+    let (Ok(id), Ok(attachment)) = (id.parse::<i64>(), attachment.parse::<i64>()) else {
+        return no_such_attachment();
+    };
+
+    let found = match crate::conversations::attached_file(&state, id, attachment).await {
+        Ok(found) => found,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, attachment, "reading an attached file failed");
+            return unavailable("the file could not be read");
+        }
+    };
+
+    let Some((name, path)) = found else {
+        return no_such_attachment();
+    };
+
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return no_such_attachment(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, attachment, path = %path.display(), "opening an attached file failed");
+            return unavailable("the file could not be read");
+        }
+    };
+
+    (
+        [
+            // The bytes as they were written and nothing said about what is in
+            // them: what the record keeps is a name and a size, and a type
+            // guessed from the name here would be a guess the upload never made.
+            (CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (CONTENT_DISPOSITION, disposition(&name)),
+        ],
+        Body::from_stream(ReaderStream::new(file)),
+    )
+        .into_response()
+}
+
+/// How an attached file's name is written into its `Content-Disposition`.
+///
+/// **Two spellings of the one name, which is what RFC 6266 asks for**: a quoted
+/// `filename` for anything that reads only the old form, and a `filename*`
+/// carrying the name as it really is. An attachment keeps the human's own base
+/// name — see [`crate::attachments::plain`], which refuses a separator, a
+/// leading dot and a control character and nothing else — so a name may hold a
+/// quote or be written in any script at all. Pasted straight in, the first would
+/// end the quoted string early and the second would not be a header value this
+/// server could build, which is a 500 over a file that is perfectly fine.
+///
+/// So the quoted half is ASCII with the two characters that cannot be in one
+/// stood in for, and the starred half is the name's own bytes percent-encoded
+/// down to the set RFC 8187 allows unescaped. A reader that understands the
+/// second prefers it, which every browser of the last decade does.
+fn disposition(name: &str) -> String {
+    let plain: String = name
+        .chars()
+        .map(|char| match char {
+            '"' | '\\' => '_',
+            other if other.is_ascii_graphic() || other == ' ' => other,
+            _ => '_',
+        })
+        .collect();
+
+    let mut encoded = String::new();
+    for byte in name.bytes() {
+        // The attr-char set: the unreserved characters, and the punctuation RFC
+        // 8187 lists beside them. Everything else goes over as its bytes.
+        if byte.is_ascii_alphanumeric() || b"!#$&+-.^_`|~".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+
+    format!("attachment; filename=\"{plain}\"; filename*=UTF-8''{encoded}")
+}
+
+/// `POST /api/ui/conversations/{id}/moved` — a draft's work has moved to another
+/// device, so say where it went and close it.
+///
+/// The last request of a move, made once the new Conversation is real and holding
+/// everything the far end would take — see [`crate::conversations::moved`], where
+/// the notice and the close are one act and in that order.
+async fn draft_moved(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(to): Json<ConversationMove>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationClosed::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::moved(&state, id, &to).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "recording where a draft moved to failed");
+            unavailable("the move could not be recorded")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/attachments/{attachment}/remove` — and take
 /// one off again, file and row together.
 async fn detach(
@@ -6438,6 +6591,17 @@ fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Transcript on that Conversation"),
+    )
+}
+
+/// And no such attached file — the pair names no row, or the row names a file
+/// the directory no longer holds. Worded without either id for the Capture's
+/// reason, and without telling the two apart because there is nothing different
+/// for a reader to do about them.
+fn no_such_attachment() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such file on that Conversation"),
     )
 }
 

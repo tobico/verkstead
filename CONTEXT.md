@@ -1902,6 +1902,32 @@ that device's URL for what it made — `/devices/{device}/conversations/{id}`, w
 a member's Conversation already stands — and the row appears in the merged sidebar
 under the machine that is doing the work.
 
+**And a saved draft's composer carries the same select, where a pick moves the
+draft.** A draft started on the wrong machine is worth moving rather than worth
+making again, so a pick asks which of that device's **Repos** the work is in —
+the same dropdown with the same two rows behind it, so a target with no such
+repository yet is not a dead end — and the press replays the draft onto it: the
+Conversation started there, the **Brief** and the branch name written onto it, and
+every attached file read back off the device the draft is on and put on it through
+the route a paperclip uses. That read is the one read of an attachment there is.
+What cannot travel says so by being asked again: the base goes back to the target
+repository's default-branch rule, the companions are ids in the old device's
+registry and are left behind, and the **Pairings** are Profile ids on the old
+machine, so the new draft arrives showing the target's own prefill — which is
+exactly what a draft created there would have arrived showing. **The old draft is
+then closed, with a Timeline saying where its work went** — the machine and the
+Conversation it became there — because the human who comes back to a closed draft
+weeks later is the one who needs to read it. Nothing is undone by a refusal: the
+new Conversation is real from its first request, a field the target would not take
+leaves the rest of the work on it and is said on its composer, and a move that
+left anything behind closes nothing, so both ends are there to be looked at. A
+start the target would not make leaves both drafts exactly where they were. The
+select reads settled wherever the **Repo** picker beside it does, that being the
+same question one level up — *which machine* is what *which repository* is a fact
+about: a branch that has been cut settles it for good, a later round being a
+checkout and a record of the work in it, and so do the two kinds of draft that
+adopt, their lists being this device's own.
+
 **And where there is nothing to list, that page is the whole of Verkstead.** The
 sidebar's list *as filtered* being empty — no unarchived Conversation, and the
 archived ones either absent or hidden — is the **zero state**: `/` goes to the

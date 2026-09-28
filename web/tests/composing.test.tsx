@@ -26,6 +26,7 @@ import type {
   AbandonedRepo,
   Adopted,
   ConversationEntry,
+  ConversationView,
   Created,
   DevicesView,
   DirectoryListing,
@@ -97,12 +98,13 @@ import {
   rows,
   showing,
 } from "./pickers";
-import { askedFor, hangs, json, serving, whenever } from "./serving";
+import { askedFor, bytes, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import linked from "./fixtures/devices-linked.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
+import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
@@ -112,6 +114,11 @@ const ABANDONED = abandoned as AbandonedRepo[];
 /// that answered the last dial and one a WSL that did not. Which is the reading
 /// the device select is drawn off — see the `describe` below.
 const LINKED = linked as DevicesView;
+
+/// And a draft whose Brief is a roadmap stage's, for the one thing the device
+/// select is settled by that is not a cut branch: the stage is in the repository
+/// the roadmap is written in, which is one device's registry.
+const ADOPTING = adopting as ConversationView;
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -2653,6 +2660,368 @@ describe("starting the work on the picked device", () => {
       expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
     );
     expect(writes(fetching, at("/conversations"))).toBe(0);
+  });
+});
+
+/// Moving a saved draft onto another device of the cluster, which is this
+/// stage's last shape: the compose page's replay run against a Conversation
+/// that already exists.
+///
+/// Asked here rather than beside the draft's other setup controls because that
+/// is what it is — the replay, with the Brief and the branch read off the record
+/// instead of out of what this device is holding — and because the cluster this
+/// file stands up is the one it needs. The half that is *drawing* a draft's
+/// setup row is `workbench.test.tsx`'s, as it always was.
+describe("moving a saved draft to another device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, []);
+  });
+
+  /// The Conversation the move makes over there, which is a number on that
+  /// machine: every Verkstead issues a Conversation 1, so a number of its own
+  /// here is what says which end of the move an assertion is about.
+  const MOVED = 9;
+
+  /// And the record the page lands on once it is made, which is the member's own
+  /// read through the Relay's prefix.
+  const ARRIVED: ConversationView = { ...OPEN, id: MOVED };
+
+  /// The Brief the draft is carrying, off the round the composer is drawing —
+  /// which is the newest on the Timeline, and the fixture's only one.
+  const BRIEF = OPEN.timeline
+    .flatMap((event) => ("Brief" in event ? [event.Brief] : []))
+    .at(-1)!.markdown;
+
+  /// Where the draft's own files are read back off this device — the one read of
+  /// an attachment there is, by the row's id.
+  const readable = (attachment: number) =>
+    `/api/ui/conversations/${OPEN.id}/attachments/${attachment}/bytes`;
+
+  /// And where the close that ends a move is made.
+  const moved = `/api/ui/conversations/${OPEN.id}/moved`;
+
+  /// Every endpoint a whole move walks, all answering yes — with whatever the
+  /// test is about handed in last, an answer named twice being the later of the
+  /// two.
+  function moving(...answers: Parameters<typeof serving>) {
+    return theCluster(
+      whenever(at("/conversations"), json({ Started: { id: MOVED } }), "POST"),
+      whenever(at(`/conversations/${MOVED}/brief`), json("Saved"), "POST"),
+      whenever(at(`/conversations/${MOVED}/branch`), json("Renamed"), "POST"),
+      ...OPEN.attachments.map((attachment) =>
+        whenever(
+          readable(attachment.id),
+          bytes(`the ${attachment.name} bytes`, attachment.name),
+        ),
+      ),
+      ...OPEN.attachments.map((attachment, index) =>
+        whenever(
+          at(`/conversations/${MOVED}/attachments/${attachment.name}`),
+          attached(index + 1, attachment.name),
+          "POST",
+        ),
+      ),
+      whenever(moved, json("Closed"), "POST"),
+      whenever(at(`/conversations/${MOVED}`), json(ARRIVED)),
+      ...answers,
+    );
+  }
+
+  /// The draft's composer, drawn and waited for — the box being what says the
+  /// pane is up.
+  async function draft(at = `/conversations/${OPEN.id}`) {
+    const mounted = mount(at);
+    await drawn(mounted.container, `.${composer.box} textarea`);
+    return mounted;
+  }
+
+  /// Pick the member out of the select, which is what opens the card.
+  async function moveTo(container: ParentNode): Promise<void> {
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+    pick("Device", MEMBER.name);
+    await screen.findByText(`Move this draft to ${MEMBER.name}?`);
+  }
+
+  /// And answer the card: which of that device's Repos, and the press.
+  async function move(repo: RepoEntry): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    pick("Repo", repo.name);
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+  }
+
+  /// With nothing linked the row is the row it has always been, which is the
+  /// rule the whole control is drawn under.
+  it("draws no select at all where there is no other device", async () => {
+    theWorkbench();
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.options}`);
+
+    expect(container.querySelector(`.${setup.deviceSelect}`)).toBeNull();
+    expect(screen.queryByLabelText("Device")).toBeNull();
+  });
+
+  /// And with one it stands where it stands on the compose page: at the head of
+  /// the row, because the repository under it is one of the named device's.
+  it("stands at the head of the row, showing the device the draft is on", async () => {
+    theCluster();
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    const options = container.querySelector(`.${setup.options}`)!;
+    expect(options.firstElementChild!.className).toContain(setup.deviceSelect!);
+  });
+
+  /// A pick asks rather than acts: the work cannot arrive over there until
+  /// somebody has said which of that device's repositories it is in, and the
+  /// move is not a thing to undo.
+  it("asks which repo over there, with the two rows behind it", async () => {
+    moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+
+    await waitFor(() => expect(rows("Repo")).toEqual(THEIRS.map((r) => r.name)));
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+  });
+
+  /// And nothing at all happens until the press on it — which is what makes the
+  /// select safe to be corrected by something other than a hand.
+  it("writes nothing until the press, and nothing at all on the way back", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    pick("Repo", THEIRS[0]!.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep it here" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText(`Move this draft to ${MEMBER.name}?`)).toBeNull(),
+    );
+
+    expect(writes(fetching, at("/conversations"))).toBe(0);
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// The whole of a move in one: the Conversation started over there against the
+  /// Repo that was picked, the Brief and the branch name written onto it, and
+  /// every file read off this device and put on it.
+  it("carries the brief, the branch name and every attached file", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, at("/conversations"))).toEqual({
+        repo_id: THEIRS[1]!.id,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${MOVED}/brief`))).toEqual({
+        markdown: BRIEF,
+      }),
+    );
+    expect(sent(fetching, at(`/conversations/${MOVED}/branch`))).toEqual({
+      branch: OPEN.branch,
+    });
+
+    // Each file read off the device the draft is on and put on the new
+    // Conversation: there is no hop between two members, so the bytes come here
+    // and go back out.
+    for (const attachment of OPEN.attachments) {
+      await waitFor(() =>
+        expect(askedFor(fetching, readable(attachment.id))).toBe(1),
+      );
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/attachments/${attachment.name}`)),
+      ).toBe(1);
+    }
+  });
+
+  /// And what a Repo id, a companion's Repo id and a Pairing's Profile id are
+  /// each one Verkstead's own means for the move: none of the three travels.
+  it("carries no base, no companions and no pairings", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+
+    for (const path of ["base", "companions", "grilling", "implementation", "review"]) {
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/${path}`)),
+        `nothing was written to ${path}`,
+      ).toBe(0);
+    }
+  });
+
+  /// The draft here is closed once the new one is made, with the words that say
+  /// where its work went — and the page lands on the Conversation it became.
+  it("closes the old draft saying where it went, and lands on the new one", async () => {
+    const fetching = moving();
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, moved)).toEqual({
+        device: MEMBER.device,
+        name: MEMBER.name,
+        conversation: MOVED,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/devices/${MEMBER.device}/conversations/${MOVED}`),
+    );
+  });
+
+  /// A refusal on the way leaves the new draft holding whatever the target took,
+  /// says so on its composer, and leaves the old draft exactly where it was.
+  it("leaves the old draft open where something was refused, and says so", async () => {
+    const fetching = moving(
+      whenever(at(`/conversations/${MOVED}/branch`), json("NotABranchName"), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    // The page still lands on what was made: the Conversation is real from its
+    // first request, and the refusal is about it.
+    await waitFor(() =>
+      expect(history.get()).toBe(`/devices/${MEMBER.device}/conversations/${MOVED}`),
+    );
+
+    await screen.findByText(
+      `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+    );
+
+    // And nothing closed the draft it came off.
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// And a file the far end would not take is one more refusal to carry rather
+  /// than a move undone.
+  it("carries a refused file as a refusal, and closes nothing", async () => {
+    const refused = OPEN.attachments[1]!;
+    const fetching = moving(
+      whenever(
+        at(`/conversations/${MOVED}/attachments/${refused.name}`),
+        json("TooLarge"),
+        "POST",
+      ),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `${refused.name} could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// A Repo picked out of a list read a moment ago and gone by the time the
+  /// press landed: nothing was made, and both drafts stay where they were.
+  /// And a close that could not be made at all is the last refusal to carry: the
+  /// Conversation over there is real by then, so a press answering *the move
+  /// failed* would be one the human could press again and have two of the work.
+  it("lands on the new draft where the close itself failed, and says so", async () => {
+    const fetching = moving(
+      whenever(moved, json({ error: "the server fell over" }, 500), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/devices/${MEMBER.device}/conversations/${MOVED}`,
+      ),
+    );
+
+    await screen.findByText(/the draft it came off could not be closed/i);
+    expect(writes(fetching, moved)).toBe(1);
+  });
+
+  /// Settled wherever the Repo picker beside it is, that being the same question
+  /// one level up: a branch that has been cut is a checkout and a record of the
+  /// work in it, and a draft that is adopting is in the repository the roadmap
+  /// is written in.
+  it.each([
+    ["a branch that has been cut", { worktree: "/srv/work/rate-limiting" }],
+    ["a roadmap being adopted", { adopting: ADOPTING.adopting }],
+  ])("reads settled on %s", async (_what, settled) => {
+    theCluster(
+      whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...settled })),
+    );
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Device") as HTMLButtonElement).disabled,
+      ).toBe(true),
+    );
+  });
+
+  /// What this select is showing on a saved draft is where the Conversation is,
+  /// which is nothing this browser decided — so the correction the compose
+  /// page's own pick gets is not made here. A member unlinked while the page is
+  /// up would otherwise open the card over it, asking for a move nobody made.
+  it("opens no card for a draft on a device the cluster has lost", async () => {
+    const gone = "deadbeefdeadbeefdeadbeefdeadbeef";
+
+    theCluster(
+      whenever(`/api/ui/members/${gone}/conversations/${OPEN.id}`, json(OPEN)),
+    );
+    const { container } = await draft(
+      `/devices/${gone}/conversations/${OPEN.id}`,
+    );
+
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    // Nothing to show, the membership holding no such row — which is the
+    // uncorrected reading, and the whole of what the lost device costs here.
+    await waitFor(() => expect(showing("Device")).toBe("Not chosen"));
+
+    expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+    expect(
+      screen.queryByText(`Move this draft to ${LINKED.this.name}?`),
+    ).toBeNull();
+  });
+
+  it("says a repo that has gone is gone, and moves nothing", async () => {
+    const fetching = moving(
+      whenever(at("/conversations"), json("NoSuchRepo"), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      new RegExp(`not registered on ${MEMBER.name} any more`),
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
+    expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true);
   });
 });
 

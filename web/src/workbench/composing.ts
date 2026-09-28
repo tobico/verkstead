@@ -52,18 +52,27 @@
 //! **And the Target field is filled from the box as it is typed** — see
 //! [`written`], which is the rule the server keeps for a saved Brief kept here,
 //! this page having no record to keep it for.
+//!
+//! **And the replay is run once more against a draft that already exists**, which
+//! is a saved draft being moved onto another device — see [`moveTo`]. The Brief,
+//! the branch name and the files are read off the draft rather than out of what
+//! this page is holding, and the draft they came off is closed at the end of it;
+//! everything between is the same sequence through the same endpoints, because a
+//! move is this page's press made about work that was already composed.
 
 import { createSignal } from "solid-js";
 
 import {
   addCompanion,
   adoptRoadmap,
-  attachServer,
+    attachServer, attachFile,
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
+  draftMovedTo,
   nameTarget,
   pickProcess,
+  readAttachment,
   renameBranch,
   renameCompanionBranch,
   saveBrief,
@@ -75,7 +84,13 @@ import {
   startGrilling,
   takeUpPullRequest,
 } from "../api/client";
-import type { CompanionMode, Process, Started } from "../api/types";
+import type {
+  AttachmentView,
+  CompanionMode,
+  ConversationView,
+  Process,
+  Started,
+} from "../api/types";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
 import { rowKey, type Device } from "../reaching";
@@ -95,6 +110,7 @@ import {
   RULE,
   TARGET_REFUSAL,
 } from "./Setup";
+import { chosen } from "./naming";
 import { takeUpRefusal } from "./TakeUp";
 import { pullRequestIn } from "./targets";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
@@ -708,6 +724,180 @@ async function put(
     said(
       outcome === "Renamed",
       `A companion repo's branch could not be named: ${COMPANION_BRANCH_REFUSAL[outcome]}`,
+    );
+  }
+}
+
+/// The device a draft is moving onto, said the two ways a move needs it.
+///
+/// **Both, because they are different facts.** How this browser *reaches* a
+/// device is `null` for the one it opened and the Device Id for every other
+/// (see [`Device`] in `src/reaching.ts`), which is what every call in the app is
+/// addressed by; what the device *is* is an id and a name, which is what the
+/// words left on the old draft's Timeline say. A move to this device has both —
+/// `null` to reach it by and an id like anybody else's — so one field could not
+/// have carried the pair.
+export type Target = {
+  /// How the calls of the move are addressed: `null` for the device this
+  /// browser opened.
+  reaching: Device;
+
+  /// And what the device is, off the membership this browser read — see
+  /// `deviceShown` in `src/devices.ts`.
+  identity: { device: string; name: string };
+};
+
+/// Move a saved draft onto another device: the same replay, run against a
+/// Conversation that already exists.
+///
+/// **The human chose a move over a select that reads settled** (ADR-0020,
+/// *Drafting on a device*): a draft started on the wrong machine is worth moving
+/// rather than worth making again. So the Brief, the branch name and the files
+/// are read off the draft here and written onto a new Conversation over there,
+/// through the endpoints [`create`] uses and in the order it uses them — there
+/// is no second way of putting a Brief on a Conversation, and no second set of
+/// refusals to word.
+///
+/// **What cannot travel says nothing, because it was never the human's to say.**
+/// A Repo id, a companion's Repo id and a Pairing's Profile id are each one
+/// Verkstead's own — the rule [`elsewhere`] is written under, one Conversation
+/// along. So:
+///
+/// - the **Repo** is picked as part of the move, by the caller, out of the
+///   target's own registry;
+/// - the **base** goes back to that repository's default-branch rule, which is
+///   what a Repo switch does with it anyway;
+/// - the **companions** are ids in the old device's registry and are left
+///   behind;
+/// - and the **Pairings** are Profile ids on the old machine, so the new draft
+///   arrives showing the target's own remembered pairings — its prefill, which
+///   is exactly what a draft created there would have arrived showing.
+///
+/// **The files travel**, because they are the human's own bytes: each is read
+/// back off the device the draft is on — see `readAttachment` in
+/// `src/api/client.ts`, the one read of an attachment there is — and put on the
+/// new Conversation through the route a paperclip uses. One the target will not
+/// take is one more refusal to carry, and so is one this device could not read.
+///
+/// **Nothing is undone by a refusal**, which is [`create`]'s rule again. The new
+/// Conversation is real from its first request, so a field the target would not
+/// take leaves the rest of the work on it — and the old draft is closed only
+/// where nothing was refused at all: a move that left something behind is one
+/// the human has to be able to look at both ends of. A start the target would
+/// not make leaves both drafts exactly where they were, and a close that could
+/// not be made is the last refusal to carry rather than a move to make again.
+export async function moveTo(
+  from: Device,
+  draft: ConversationView,
+  brief: string,
+  to: Target,
+  repo: number,
+): Promise<Created> {
+  const started = await startConversation(to.reaching, repo);
+  if (started === "NoSuchRepo") {
+    return started;
+  }
+
+  const id = started.Started.id;
+  const refused: string[] = [];
+
+  const said = (ok: boolean, sentence: string) => {
+    if (!ok) refused.push(sentence);
+    return ok;
+  };
+
+  if (brief.trim() !== "") {
+    const outcome = await saveBrief(to.reaching, id, brief);
+    said(
+      outcome === "Saved",
+      `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
+    );
+  }
+
+  // The name the human settled on rather than whatever the record is carrying:
+  // a branch nobody chose is Verkstead's own invention, and the new Conversation
+  // was started under an invention of the target's — see `chosen` in
+  // `naming.ts`, which is the one rule for which of the two is worth drawing.
+  const branch = chosen(draft);
+  if (branch !== "") {
+    const outcome = await renameBranch(to.reaching, id, branch);
+    said(
+      outcome === "Renamed",
+      `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+    );
+  }
+
+  for (const attachment of draft.attachments) {
+    await carry(from, draft.id, to.reaching, id, attachment, refused);
+  }
+
+  // And the draft this came off, closed with the words that say where its work
+  // went — last of all, and only where the whole of it landed: a move that left
+  // something behind is a move the human finishes by hand, and a draft closed
+  // under them would be the half that did not arrive with nowhere left to read
+  // it from.
+  //
+  // And a close that could not be made at all is one more refusal to carry
+  // rather than a move to make again: the Conversation over there is real by
+  // now, so a press that answered with *the move failed* would be one the human
+  // could press a second time and have two of the work. What is said instead is
+  // said on the draft that arrived, which is where they are about to be looking.
+  if (refused.length === 0) {
+    try {
+      await draftMovedTo(from, draft.id, {
+        device: to.identity.device,
+        name: to.identity.name,
+        conversation: id,
+      });
+    } catch (error: unknown) {
+      refused.push(
+        `The work is here, but the draft it came off could not be closed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  return { conversation: id, refused };
+}
+
+/// One file carried from the draft to the Conversation it is becoming.
+///
+/// Two requests rather than one — the bytes off the old device, and the same
+/// bytes onto the new one — because there is no hop between two members: the
+/// browser is what both of them are reached through (ADR-0020, *The opened
+/// device relays*), so the file comes here and goes back out.
+///
+/// Either half can refuse, and the two are one sentence to the human: the file
+/// did not arrive. They are worded apart all the same, because what to go and do
+/// about them is different — a file the target refused is one the human can
+/// attach again by hand, and one that could not be read is a file on a machine
+/// that has stopped answering.
+async function carry(
+  from: Device,
+  draft: number,
+  to: Device,
+  conversation: number,
+  attachment: AttachmentView,
+  refused: string[],
+): Promise<void> {
+  let file: File;
+
+  try {
+    file = await readAttachment(from, draft, attachment.id, attachment.name);
+  } catch (error: unknown) {
+    refused.push(
+      `${attachment.name} could not be read off this conversation: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return;
+  }
+
+  const outcome = await attachFile(to, conversation, file);
+  if (typeof outcome === "string") {
+    refused.push(
+      `${attachment.name} could not be attached: ${ATTACH_REFUSAL[outcome]}`,
     );
   }
 }

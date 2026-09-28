@@ -1323,6 +1323,37 @@ rank: string,
 device: RowDevice | null, };
 
 /**
+ * Where a saved draft's work has gone: the device it was moved onto, and the
+ * Conversation it became there (ADR-0020, *Drafting on a device*).
+ *
+ * What the compose page sends to finish a move — the Brief, the branch and the
+ * files having been replayed onto that other device already — so that the draft
+ * left here is closed with the words on its Timeline saying where to look.
+ *
+ * **The name travels with the id.** A Device Id is what a record and a URL name
+ * a device by, and it is not what a human reads; and the machine that made the
+ * move is the only one that is certainly linked to both ends of it — a laptop
+ * moves a draft from the desktop to the WSL beside it, and the desktop need
+ * never have been linked to the WSL. So the name comes from the browser that
+ * knows it rather than being looked up at the end that cannot.
+ */
+export type ConversationMove = { 
+/**
+ * The Device Id of the machine the work went to.
+ */
+device: string, 
+/**
+ * And what that machine is shown as, for the sentence on the Timeline.
+ */
+name: string, 
+/**
+ * The Conversation the work became there, which is a number on that
+ * machine: every Verkstead issues a Conversation 1, so this is read with
+ * the device beside it and never alone.
+ */
+conversation: number, };
+
+/**
  * What became of submitting one.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and nothing here is about

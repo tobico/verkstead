@@ -103,6 +103,7 @@ import type {
   CompanionModeChosen,
   CompanionRemoved,
   CompanionView,
+  BriefEvent,
   ConversationView,
   DeviceIdentity,
   PairingView,
@@ -118,6 +119,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
+import { Moving } from "./Moving";
 import { BROKEN } from "../profiles/ProfileList";
 import { keyOf, useDevice } from "../reaching";
 import type { Device } from "../reaching";
@@ -252,9 +254,22 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
 
 export function Setup(props: {
   conversation: ConversationView;
+
+  /// The round's Brief, for the one control in this row that is about where the
+  /// work will be *done* rather than about the work: moving the draft onto
+  /// another device replays the Brief onto it — see [`Moving`].
+  brief: BriefEvent;
 }): JSX.Element {
   return (
     <section class={styles.options} aria-label="Setup">
+      {/* Which device will do the work, ahead of the repository because the
+          repository is one of that device's: a Repo id is one Verkstead's own,
+          so the question above the Repo is *whose registry*. Not drawn at all
+          where there is no cluster, which leaves the row exactly as it has
+          always been — see [`DeviceSelect`], and `Moving.tsx` for what a pick
+          does on a draft that already exists. */}
+      <Moving conversation={props.conversation} brief={props.brief} />
+
       {/* The repository first, because it is what everything after it is a fact
           about — and one dropdown for the whole of it: the branch, the branch
           it comes off, and the repos the work runs alongside are all answers to
@@ -487,12 +502,19 @@ export function RepoOptions(props: {
 /// words. Unlinking is the Remote access pane's, where an unreachable row is
 /// dimmed and says so.
 ///
-/// **A device the membership no longer holds reads as this one.** The pick is
-/// remembered in the browser rather than on the server (see `draftingOn` in
-/// `../remembered.ts`), so it outlives the cluster it was made in: the correction
-/// goes up to whoever owns the pick, which drops what named the machine along
-/// with it. Drawn or not — a cluster that has shrunk to nothing takes the select
-/// away, and the page must not be left pointed at a machine that has gone.
+/// **A device the membership no longer holds reads as this one**, where what it
+/// is showing is a pick. That pick is remembered in the browser rather than on
+/// the server (see `draftingOn` in `../remembered.ts`), so it outlives the
+/// cluster it was made in: the correction goes up to whoever owns the pick, which
+/// drops what named the machine along with it. Drawn or not — a cluster that has
+/// shrunk to nothing takes the select away, and the page must not be left pointed
+/// at a machine that has gone.
+///
+/// **And nothing is corrected where it is showing a fact** — see
+/// [`Self.remembered`]. A saved draft is *on* a device, which is the record's own
+/// account of itself rather than anything this browser decided; there is nothing
+/// there to put right, and a correction sent up would be this control asking for
+/// a move nobody made.
 ///
 /// One control, and what a pick *does* is the page's own, exactly as it is for
 /// every other control in this row: the compose page moves what it is composing,
@@ -502,6 +524,16 @@ export function DeviceSelect(props: {
   /// has never picked reads as.
   chosen: Device;
   disabled?: boolean;
+
+  /// Whether what is chosen is a pick this browser is holding, which is what
+  /// makes it worth correcting when the device it names leaves the cluster.
+  ///
+  /// The compose page's is, and says nothing: a draft nobody has created is on
+  /// whichever machine this browser last pointed at. A saved draft's composer
+  /// passes `false` — the device is where the Conversation *is*, and the only
+  /// thing that moves it is a move.
+  remembered?: boolean;
+
   pick: (device: Device) => void;
 }): JSX.Element {
   // This device's own, whichever machine the page is about: the membership is
@@ -533,9 +565,14 @@ export function DeviceSelect(props: {
   // pointed at a machine nothing can reach, and taking the select away — which
   // is what the last member being unlinked does — would leave it pointed there
   // for good.
+  //
+  // A pick and nothing else. What a saved draft's composer shows here is where
+  // the Conversation is, which is not this browser's to put right — see
+  // `remembered` above.
   createEffect(() => {
     const view = devices.data;
     if (
+      props.remembered !== false &&
       view !== undefined &&
       props.chosen !== null &&
       deviceShown(view, props.chosen) === null
