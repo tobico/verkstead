@@ -51,7 +51,7 @@ use verkstead_render::{
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
-use verkstead_server::store::{Account, AgentType, ProfileFacts};
+use verkstead_server::store::{Account, AgentType, Mirror, ProfileFacts};
 use verkstead_server::{open_database, router_onboarding_asking_github, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
@@ -303,6 +303,36 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> i64 {
     .expect("nothing else is called that");
 
     profile.id
+}
+
+/// And a **mirror** of a member's Profile, written down the way the refresher
+/// writes one: the same row, marked with the device it is at home on and the id
+/// it has there (ADR-0020, *Shared Profiles*).
+///
+/// Its account's paths are the home machine's and belong to no filesystem here,
+/// which is the whole of what a mirror is — nothing on this box is at them, and
+/// what a session away from home is given is fetched from that device before the
+/// launch.
+async fn a_mirror(pool: &SqlitePool) -> i64 {
+    store::record_mirror(
+        pool,
+        &Mirror {
+            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
+            id: 4,
+            login: true,
+        },
+        &ProfileFacts {
+            name: Some("Theirs".to_owned()),
+            account: Account::Claude {
+                claude_dir: PathBuf::from("/home/someone-else/.claude"),
+                config_file: PathBuf::from("/home/someone-else/.claude.json"),
+            },
+            models: vec!["sonnet".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
 }
 
 /// And a git author in `config.yaml`, which is the whole of what the git step
@@ -593,6 +623,37 @@ async fn each_of_the_three_holds_the_mode_on_by_itself() {
     assert!(
         !without_an_author.steps.git,
         "a session that committed as nobody is a session git would refuse"
+    );
+}
+
+/// **A device whose only Profiles are a member's has an account to run under.**
+/// A mirror's login and configuration are fetched from the device they are at
+/// home on before every launch (ADR-0020, *Shared Profiles*), so a machine
+/// holding nothing but mirrors runs sessions perfectly well.
+///
+/// And the objective is what Onboarding Mode is decided off, so this is not a
+/// tick: a rule that wanted a Profile of this device's own would hold a working
+/// machine at `/setup` from the next start — which is exactly the machine a
+/// cluster makes, the human having removed the account it no longer needs of its
+/// own.
+#[tokio::test]
+async fn a_mirror_of_a_members_profile_is_an_account_to_run_under() {
+    let (dir, pool) = ready().await;
+
+    a_mirror(&pool).await;
+    an_author(dir.path());
+
+    let app = served(dir.path(), &pool, EVERYTHING);
+    let reading = reading(&app).await;
+
+    assert!(
+        reading.steps.accounts,
+        "a Profile whose account is on another device of the cluster is still an \
+         account a session here is launched under",
+    );
+    assert!(
+        !reading.mode,
+        "so the wizard is over rather than standing open over a machine that works",
     );
 }
 

@@ -1649,7 +1649,9 @@ _Avoid_: the cluster list, the global sidebar, syncing
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.
 What it is about is the **objective** — a sandbox, `git` and at least one of the
-four harnesses present; at least one **Agent Profile**; a git author. Present
+four harnesses present; at least one **Agent Profile**, a **mirror** of a
+member's counting as one, its account being fetched from the device it is at
+home on before every launch; a git author. Present
 means a session would find it, so every probe resolves on the `PATH` inside the
 **Sandbox** rather than the server's own: a harness on the server's `PATH` and
 nowhere a session looks is a row that ticks and a session that cannot start. The

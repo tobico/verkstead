@@ -5838,7 +5838,11 @@ export type StepsView = {
  */
 dependencies: boolean, 
 /**
- * At least one Agent Profile, however it was made.
+ * At least one Agent Profile, however it was made — a **mirror** of a
+ * member's among them, whose account is fetched from the device it is at
+ * home on before every launch (ADR-0020, *Shared Profiles*). What the step
+ * asks is whether there is an account for a session to run under, and one
+ * of those is.
  */
 accounts: boolean, 
 /**
