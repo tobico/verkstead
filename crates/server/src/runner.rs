@@ -682,13 +682,23 @@ async fn backlog_again(
     // reached it by itself or a Resume took it up — see [`crate::joins`]. The
     // registration is held across the wait for the loop's reason, and it is held
     // here already: it is handed on to [`work`] below.
-    if step == Step::Finish {
-        crate::joins::hold(&state, conversation_id).await;
-    }
+    //
+    // And what it is let in *to* is read the moment it is let in, which is the
+    // other half of the join: the chain is Verkstead's to say and the rebase is
+    // the session's to do, so the branches this one goes on top of are carried
+    // in the prompt — see [`crate::joins::joining`].
+    let joining = match step == Step::Finish {
+        true => {
+            crate::joins::hold(&state, conversation_id).await;
+            crate::joins::joining(&state, conversation_id).await
+        }
+        false => Vec::new(),
+    };
 
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
-    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
+    else {
         return;
     };
 
@@ -1112,13 +1122,24 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // inside it, so a held stage is one no session has been started in; and
         // inside the loop, which holds the registration, so a stage waiting here
         // is still a Conversation being driven.
-        if step == Step::Finish {
-            crate::joins::hold(&state, conversation_id).await;
-        }
+        //
+        // Then the chain itself, read the moment the stage is let in and carried
+        // in the finish session's prompt: the rebase onto the top of it comes
+        // before anything is pushed, and it is the session's to run — see
+        // [`crate::joins::joining`].
+        let joining = match step == Step::Finish {
+            true => {
+                crate::joins::hold(&state, conversation_id).await;
+                crate::joins::joining(&state, conversation_id).await
+            }
+            false => Vec::new(),
+        };
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+        let Some(started) =
+            launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
+        else {
             return;
         };
 
@@ -3874,7 +3895,18 @@ enum Prompt {
 
     /// Its fork of next-task, which every session of a backlog runs — the task
     /// sessions and the finish one alike.
-    NextTask,
+    ///
+    /// `joining` is the chain a stage's branch goes on top of, bottom to top,
+    /// and it is the one thing a finish session is told that a task session is
+    /// not: the finish is where a stage joins its roadmap's chain, and the
+    /// rebase comes before the push. Empty on every task session, and on the
+    /// finish of anything that is not a stage with a chain under it — see
+    /// [`crate::joins::joining`], which reads it, and [`skills::joining`], which
+    /// is what it is said in.
+    NextTask {
+        /// Every branch this one is joining above, bottom to top.
+        joining: Vec<skills::Link>,
+    },
 
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
@@ -4124,7 +4156,12 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::next_stage(skills, &brief, stacked_on.as_deref())
                 }
                 Prompt::Staging => skills::staging(skills, &brief),
-                Prompt::NextTask => skills::next_task(skills, &brief, handoff),
+                // And the chain under it, on the finish of a stage: the section
+                // is the finish's alone, and a task session carries an empty
+                // chain and reads the prompt it always read.
+                Prompt::NextTask { joining } => {
+                    skills::joining(&skills::next_task(skills, &brief, handoff), joining)
+                }
                 Prompt::Implementing => skills::implementing(skills, &brief, handoff),
                 Prompt::Submitting { against } => {
                     skills::submitting(skills, &brief, handoff, against.as_deref())

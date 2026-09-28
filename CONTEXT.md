@@ -2290,6 +2290,23 @@ each waiting on the one in front of it joining *and* settling. In a roadmap run
 in order the Stage below has always settled first, so nothing is ever held. See
 ADR-0021, *The chain*, and **Waiting to join**.
 
+**And what it joins is carried in the finish session's prompt.** The chain is
+Verkstead's to say — it recorded which Stages joined and in what order, and no
+agent could read that off a branch — and the rebase is the session's to run,
+`gh stack` being a session's and never the server's. So the moment the hold lets
+a Stage in, the branches it goes on top of are read off the record, bottom to
+top, and said in a section of the finish prompt that no task session carries:
+the branch the Stage was cut from at the foot, every Stage that has joined above
+it, and the one instruction the list is for — **rebase onto the top before
+anything is pushed**, and open the pull request against it. How that is done is
+the target repository's own `docs/agents/git-workflow.md`; where it records no
+stacking mechanism the rebase happens all the same, and the pull request opens
+the way the unrecorded case opens one. A branch the default branch already holds
+is out of the chain, which is the reading a Stage's base is chosen by — so a
+roadmap whose Stages have all merged is a finish told no chain at all, and a
+Stage cut from what is still the top is told a chain ending exactly there, where
+the rebase moves no commit.
+
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
 the only roadmap its wrap-up ever reads. A Worktree may hold any number of
 roadmaps and a branch touches a second one for ordinary reasons — a deferral

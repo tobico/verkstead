@@ -22162,6 +22162,176 @@ async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
     }
 }
 
+/// The same stage run, with the **finish** session's whole prompt written down
+/// beside the planning ones.
+///
+/// What a finish is told about the chain it is joining is the one thing a task
+/// session is not told, and the only place to read it is the prompt itself: the
+/// rebase is the session's to run, so nothing about it reaches the record. One
+/// block per finish, headed by the branch it was the finish of — a roadmap run
+/// through two stages writes two, and which of them is which is the whole of
+/// what the test is about.
+fn a_stage_finished_saying_what_it_was_told(
+    planning: &Path,
+    finishing: &Path,
+    annotating: &str,
+) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    printf 'planned=%s\n' "$branch" >> {planning}
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    stage=$(basename "$branch")
+{annotating}
+    git add -A
+    git commit --quiet -m "chore: plan the $branch stage"
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    if [ -n "$number" ]; then
+        printf 'working the task\n'
+        printf 'a counter\n' >> counter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+        : > /tmp/verkstead/done
+    else
+        printf 'finishing=%s\n%s\n' "$(git rev-parse --abbrev-ref HEAD)" "$2" >> {finishing}
+        printf 'finishing\n'
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish the stage'
+        : > /tmp/verkstead/done
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        finishing = quoted(finishing),
+    )
+}
+
+/// What one finish session was told, out of the file every one of them wrote to.
+fn told_at_the_finish(finishing: &Path, branch: &str) -> String {
+    let said = std::fs::read_to_string(finishing).unwrap_or_default();
+
+    said.split("finishing=")
+        .find(|block| block.starts_with(&format!("{branch}\n")))
+        .unwrap_or_else(|| panic!("no finish session ran on {branch}. The file says: {said}"))
+        .to_owned()
+}
+
+/// A stage's finish session is told **what the chain is**, bottom to top, and
+/// that the rebase onto the top of it comes before anything is pushed.
+///
+/// The other half of the join. Task by task the runner holds the stage until the
+/// chain below it has settled; this is what it hands over when it lets it in.
+/// The chain is Verkstead's to say — it recorded which stages joined and in what
+/// order, and no agent could read that off a branch — and the rebase is the
+/// session's to do, `gh stack` being a session's to run and never the server's.
+///
+/// Two stages, because one proves neither half. The first comes off an adopted
+/// roadmap and stands on nothing, so there is no chain and nothing is said: a
+/// heading over an empty one would tell a session there was something to join.
+/// The second was cut from the first, which by then has joined — so it is told
+/// that branch, and told to rebase onto it before it pushes.
+///
+/// Which is also the case that has to change nothing anybody can see: the top of
+/// the chain is exactly what the branch was cut from, so the rebase moves no
+/// commit and the pull request opens where it always opened.
+#[tokio::test]
+async fn the_finish_of_a_stage_is_told_the_chain_it_joins_before_it_pushes() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let finishing = spill.path().join("finish-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_finished_saying_what_it_was_told(&planning, &finishing, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01, planned, worked, finished and settled — which is what puts it in
+    // the chain, and what starts the stage after it.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let below = fixture.view().await.branch;
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    let first = told_at_the_finish(&finishing, &below);
+
+    assert!(
+        !first.contains("# The chain this stage joins"),
+        "the first stage of an adopted roadmap stands on nothing, so it joins no \
+         chain and is told none: {first}",
+    );
+
+    let second = told_at_the_finish(&finishing, &settled.branch);
+    let chain = second
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the second stage was told no chain at all: {second}"))
+        .1;
+
+    assert!(
+        chain.contains(&format!("`{below}`")),
+        "the chain is the stage below, named by its branch: {chain}",
+    );
+    assert!(
+        chain.contains(&format!(
+            "**rebase this branch onto `{below}` before anything is pushed**"
+        )),
+        "and the rebase onto it comes before the push: {chain}",
+    );
+    assert!(
+        chain.contains(&format!("open the pull request against `{below}`")),
+        "which is what the pull request is opened against too: {chain}",
+    );
+    assert!(
+        chain.contains("docs/agents/git-workflow.md"),
+        "how it is done is the target repository's own block: {chain}",
+    );
+    assert!(
+        !chain.contains(&format!("`{}`", settled.branch)),
+        "and a branch is never told to rebase onto itself: {chain}",
+    );
+}
+
 /// Two stages whose tasks are all done are let into the chain **one at a time,
 /// in the order their tasks finished** — and the one in front *joining* does not
 /// release the one behind it. Its settling does.

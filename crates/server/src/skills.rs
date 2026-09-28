@@ -919,6 +919,100 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
     )
 }
 
+/// One branch of the **chain** a stage joins at its finish: the branch itself,
+/// and which stage of the roadmap it belongs to.
+///
+/// `stage` is the label the roadmap's own line gives it — `02`, with the
+/// roadmap's zero-padding kept. `None` is the **foot** of the chain, which is
+/// the branch the stage was cut from rather than a stage of the roadmap: the
+/// Conversation that wrote the roadmap, while its pull request is unmerged. See
+/// [`joining`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Link {
+    /// Which stage of the roadmap this branch is, or `None` for the branch at
+    /// the foot.
+    pub(crate) stage: Option<String>,
+
+    /// The branch, as Verkstead's own record names it.
+    pub(crate) branch: String,
+}
+
+/// The same prompt again, with the chain this stage joins listed under it —
+/// bottom to top — and the one instruction the chain is told for: the rebase
+/// comes before the push.
+///
+/// **Only the finish of a stage carries this.** A roadmap is one chain of
+/// branches in the order its stages finish, and a stage joins it at its finish:
+/// the branch is rebased onto the top of the chain, and only then pushed, opened
+/// and wrapped up. So the session that runs the finish is the one session that
+/// has to know what the chain is, and the session that runs a task is told
+/// nothing — the two are one skill and two steps, and the runner is what tells
+/// them apart.
+///
+/// **The chain is Verkstead's to say and the rebase is the session's to do.**
+/// The server recorded which stages joined and in what order, and no agent could
+/// work that out from a branch; `gh stack` is a session's to run and never the
+/// server's, and how a branch joins a stack is the target repository's
+/// `docs/agents/git-workflow.md`. So this says what the chain is and that the
+/// rebase comes first, and hands the how to the block.
+///
+/// **And where the repository records no stacking mechanism the rebase still
+/// happens.** It is Verkstead's rather than the block's: the work is built on
+/// the branch below it and a pull request opened anywhere else would be read
+/// against the wrong base. What the unrecorded case opens is an ordinary pull
+/// request carrying the stage below it until that one merges, which is the
+/// sentence already written where a stage's base is decided — see
+/// [`crate::continuing::Stands`].
+///
+/// **A stage cut from what is still the top rebases nothing**, which is every
+/// stage of every roadmap run in order: the top of the chain is what the branch
+/// was cut from, and the rebase finds it there and moves no commit. The section
+/// is written the same way either way — a session told the chain only when it
+/// had moved would have to be told that too.
+///
+/// A stage with nothing under it is the prompt unchanged: an empty heading would
+/// tell a session there was a chain to join.
+pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
+    let Some((top, under)) = chain.split_last() else {
+        return prompt.to_owned();
+    };
+
+    let listed: Vec<String> = chain
+        .iter()
+        .map(|link| match &link.stage {
+            Some(stage) => format!("- `{}` — stage {stage}.", link.branch),
+            None => format!(
+                "- `{}` — the branch this stage was cut from, which the chain starts at.",
+                link.branch
+            ),
+        })
+        .collect();
+
+    let top = &top.branch;
+
+    let bottom = match under.is_empty() {
+        true => "one branch".to_owned(),
+        false => format!("{} branches, bottom to top", chain.len()),
+    };
+
+    format!(
+        "{}\n\n# The chain this stage joins\n\nThis stage's roadmap is one chain of branches, in \
+         the order its stages finished, and this branch joins it at this finish. The chain is \
+         {bottom}:\n\n{listed}\n\nSo **rebase this branch onto `{top}` before anything is \
+         pushed**, and open the pull request against `{top}`. Do the rebase the way this \
+         repository's own `docs/agents/git-workflow.md` says a stage joins a chain, where it says \
+         anything; where it records no stacking mechanism, rebase onto `{top}` all the same and \
+         open an ordinary pull request against it, which carries the stage below this one until \
+         that one merges.\n\nA branch already sitting on top of `{top}` is a rebase that moves \
+         nothing, which is the ordinary case rather than a sign anything is wrong. Rebase **once**, \
+         before the pull request exists: nothing in the chain below moves because this stage \
+         joined above it — no branch of it is rebased, and no pull request of it changes base — \
+         and this branch is never force-pushed once its own pull request is open.\n",
+        prompt.trim_end(),
+        listed = listed.join("\n"),
+    )
+}
+
 /// The same prompt again, with the files the human attached to the Conversation
 /// listed under it.
 ///
@@ -4879,5 +4973,117 @@ mod tests {
             "a withdrawn skill is still installed: {}",
             stale.display()
         );
+    }
+
+    /// One branch of a chain, as the runner reads it off the record.
+    fn link(stage: Option<&str>, branch: &str) -> Link {
+        Link {
+            stage: stage.map(str::to_owned),
+            branch: branch.to_owned(),
+        }
+    }
+
+    /// The finish of a stage is told what the chain is, bottom to top, and the
+    /// one thing the chain is told for: the rebase comes before the push.
+    ///
+    /// The chain is the server's to say — it recorded which stages joined and in
+    /// what order, and no agent could read that off a branch — and the rebase is
+    /// the session's to do, `gh stack` being a session's to run and never the
+    /// server's.
+    #[test]
+    fn the_finish_of_a_stage_is_told_the_chain_it_joins_bottom_to_top() {
+        let prompt = joining(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                link(None, "rate-limiting"),
+                link(Some("01"), "roadmaps/rate-limiting/01-the-counter"),
+                link(Some("02"), "roadmaps/rate-limiting/02-the-window"),
+            ],
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+
+        let chain = prompt
+            .split_once("# The chain this stage joins")
+            .expect("the chain is a section of its own")
+            .1;
+
+        let counter = chain
+            .find("`roadmaps/rate-limiting/01-the-counter`")
+            .expect("the stage below is named");
+        let window = chain
+            .find("`roadmaps/rate-limiting/02-the-window`")
+            .expect("and so is the one above it");
+
+        assert!(
+            chain.find("`rate-limiting`").expect("and the foot") < counter && counter < window,
+            "bottom to top, which is the order it is rebased through: {chain:?}"
+        );
+        assert!(
+            chain.contains("stage 01") && chain.contains("stage 02"),
+            "each named as the stage of the roadmap it is: {chain:?}"
+        );
+        assert!(
+            chain.contains("cut from"),
+            "and the foot as the branch this one came off: {chain:?}"
+        );
+    }
+
+    /// The rebase comes before the push, it is onto the top of the chain, and
+    /// the pull request opens against the same branch.
+    ///
+    /// Which is the whole instruction. How it is done is the target
+    /// repository's own block, and where that records no stacking mechanism the
+    /// rebase happens all the same — it is Verkstead's rather than the block's.
+    #[test]
+    fn the_finish_is_told_the_rebase_comes_before_the_push() {
+        let prompt = joining(
+            &next_task(&mounted(), "# Rate limiting\n", None),
+            &[link(Some("01"), "roadmaps/rate-limiting/01-the-counter")],
+        );
+
+        assert!(
+            prompt.contains(
+                "**rebase this branch onto `roadmaps/rate-limiting/01-the-counter` before \
+                 anything is pushed**"
+            ),
+            "the rebase is before the push, and onto the top: {prompt:?}"
+        );
+        assert!(
+            prompt
+                .contains("open the pull request against `roadmaps/rate-limiting/01-the-counter`"),
+            "and the stage below it in the chain is what it opens against: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("docs/agents/git-workflow.md"),
+            "how it is done is the target repository's own: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("records no stacking mechanism"),
+            "and one that records nothing gets the rebase anyway: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("never force-pushed once its own pull request is open"),
+            "rebased once, before anybody is reading one: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("is a rebase that moves nothing"),
+            "and a branch already on the top is the ordinary case: {prompt:?}"
+        );
+    }
+
+    /// A task session carries none of it, and neither does the finish of
+    /// anything that joins no chain.
+    ///
+    /// The one thing the finish of a stage is told that a task session is not.
+    /// A heading over an empty chain would tell a session there was one to join.
+    #[test]
+    fn a_session_with_no_chain_to_join_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(joining(&prompt, &[]), prompt);
     }
 }

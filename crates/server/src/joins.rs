@@ -52,13 +52,16 @@
 //! resume that takes the stage up again is what finds it held a second time.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::skills;
 use crate::store;
+use crate::worktrees;
 
 /// How often a held stage looks at whether it may join yet.
 ///
@@ -226,6 +229,197 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
     }
 }
 
+/// What the finish session is told the chain is: every branch this stage's own
+/// goes on top of, bottom to top, with the branch it joins above last.
+///
+/// Asked the moment [`hold`] lets the stage in, and handed to the finish session
+/// as a section of its prompt — see [`crate::skills::joining`], where the words
+/// are. The chain is Verkstead's to say because Verkstead recorded it: which
+/// stages joined and in what order is a fact about a pipeline rather than
+/// anything a branch could be read for. What is done with it is the session's:
+/// `gh stack` is a session's to run and never the server's.
+///
+/// Two readings put together, and the second is only ever reached at the bottom:
+///
+/// - **the stages that have joined**, in the order they joined — `store::stage_chain`;
+/// - and **the branch this stage stands on**, where that is not one of them,
+///   which is the **foot** of the chain — `store::stacks_on`. A roadmap's chain
+///   starts at the roadmap's own branch while its pull request is unmerged, and
+///   that branch is no stage, so nothing above reads it back out of the chain.
+///
+/// **A branch already in the default branch is out of it.** A stage that merged
+/// is work the default branch holds, and a branch rebased onto a merged tip
+/// would be moved back behind the merge that carried it in. The reading is git's
+/// and it is the one [`crate::continuing`] makes where a stage's base is chosen,
+/// down to what an unresolvable branch means: there is nothing there to stand on.
+/// Which is what keeps a roadmap run in order finishing exactly as it does
+/// today — a stage whose predecessors have all merged is told no chain at all,
+/// and opens the ordinary pull request it always opened.
+///
+/// An empty answer is a finish told nothing, and there are three ways to it: a
+/// Conversation that is not a stage, a chain with nothing unmerged in it, and a
+/// record that would not be read. The last of them is [`hold`]'s reasoning
+/// again — a database that will not answer is not a database saying there is a
+/// chain — and it costs the rebase rather than the finish, which is the safe way
+/// round: the branch is where it was cut from, and that is where it was going to
+/// be rebased to.
+pub(crate) async fn joining(state: &AppState, conversation_id: i64) -> Vec<skills::Link> {
+    let Some(of) = stage(state, conversation_id).await else {
+        return Vec::new();
+    };
+
+    let chain = match store::stage_chain(&state.pool, of.repo_id, &of.roadmap).await {
+        Ok(chain) => chain,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading the chain a stage is joining failed",
+            );
+            return Vec::new();
+        }
+    };
+
+    // Two layers of `Option` and both mean nothing to add here: the outer is a
+    // Conversation with no stage branch written down, the inner is a branch cut
+    // off the default branch, which is a chain with no foot under it.
+    let stands_on = match store::stacks_on(&state.pool, conversation_id).await {
+        Ok(stands_on) => stands_on.flatten(),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading what a joining stage's branch stands on failed",
+            );
+            None
+        }
+    };
+
+    let named = chain
+        .iter()
+        .map(|link| link.branch.clone())
+        .chain(stands_on.clone())
+        .collect();
+
+    below(
+        conversation_id,
+        &chain,
+        stands_on.as_deref(),
+        &landed(&of, named).await,
+    )
+}
+
+/// Which of these branches the default branch already holds — and which of them
+/// are not there at all, which comes to the same thing for what is about to be
+/// rebased onto them.
+///
+/// Git's reading rather than the record's. A pull request recorded merged is
+/// written by the sweep that runs after a Conversation reaches Done, so a stage
+/// merged since the last sweep is one the record still calls open; git is asked
+/// about the branch itself, and it is asked at exactly the moment the answer is
+/// acted on.
+///
+/// **Fetched first**, for the reason [`crate::continuing`]'s own reading is: what
+/// the default branch holds is what origin is holding rather than wherever this
+/// checkout's copy of it was last left, and a machine that has not pulled for a
+/// week would read a stage merged a week ago as still in the chain. A fetch that
+/// fails is said in the log and the reading goes on off what is here — telling a
+/// session no chain at all because the network was down would cost it the rebase
+/// it came for.
+///
+/// Blocking git, on a thread of its own: a fetch has no deadline to answer
+/// within, and this one is a step in front of a session launch rather than a
+/// page being drawn.
+async fn landed(of: &Stage, branches: Vec<String>) -> HashSet<String> {
+    let repo = of.repo.clone();
+    let default = of.default_branch.clone();
+
+    let read = tokio::task::spawn_blocking(move || {
+        if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            tracing::error!(
+                said,
+                repo = %repo.display(),
+                "fetching a Repo's remotes failed, so a joining stage's chain is being \
+                 read off what this checkout holds",
+            );
+        }
+
+        let default = worktrees::default_ref(&repo, &default);
+
+        branches
+            .into_iter()
+            .filter(|branch| match worktrees::resolve(&repo, branch) {
+                Some(tip) => worktrees::merged(&repo, &tip, &default) == Some(true),
+                None => true,
+            })
+            .collect()
+    })
+    .await;
+
+    read.unwrap_or_else(|error| {
+        tracing::error!(
+            error = ?error,
+            "reading which of a chain's branches have merged failed",
+        );
+
+        HashSet::new()
+    })
+}
+
+/// The chain itself, over values rather than over a database and a checkout —
+/// for [`ahead`]'s reason: what this takes is three readings, so what a test
+/// hands it is three.
+///
+/// **This stage's own branch is never in it.** A stage at its finish has no pull
+/// request yet and so is not in the chain, but one whose ending stopped after
+/// the push and was taken up again is — and a branch cannot be rebased onto
+/// itself.
+///
+/// **The foot goes under everything**, where it is not already one of the links
+/// above it. It is the branch the stage was cut from, so every commit of it is
+/// in this branch already: whatever else the chain holds, this is below it.
+///
+/// One link per branch. A stage attempted twice is two Conversations answering
+/// to one label and two branches in the chain, which is two links and right;
+/// one branch named twice is one link.
+fn below(
+    conversation_id: i64,
+    chain: &[store::Joined],
+    stands_on: Option<&str>,
+    landed: &HashSet<String>,
+) -> Vec<skills::Link> {
+    let mut links: Vec<skills::Link> = Vec::new();
+
+    for link in chain {
+        if link.conversation_id == conversation_id || landed.contains(&link.branch) {
+            continue;
+        }
+
+        if links.iter().any(|had| had.branch == link.branch) {
+            continue;
+        }
+
+        links.push(skills::Link {
+            stage: Some(link.stage.clone()),
+            branch: link.branch.clone(),
+        });
+    }
+
+    if let Some(stands_on) = stands_on {
+        if !landed.contains(stands_on) && !links.iter().any(|link| link.branch == stands_on) {
+            links.insert(
+                0,
+                skills::Link {
+                    stage: None,
+                    branch: stands_on.to_owned(),
+                },
+            );
+        }
+    }
+
+    links
+}
+
 /// Which stage of which roadmap this Conversation is, where it is a stage with
 /// a label at all.
 ///
@@ -245,8 +439,8 @@ async fn stage(state: &AppState, conversation_id: i64) -> Option<Stage> {
 
     let label = of.stage?;
 
-    let repo_id = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.repo.id,
+    let repo = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.repo,
         Ok(None) => return None,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Repo of a stage failed");
@@ -255,7 +449,9 @@ async fn stage(state: &AppState, conversation_id: i64) -> Option<Stage> {
     };
 
     Some(Stage {
-        repo_id,
+        repo_id: repo.id,
+        repo: repo.path,
+        default_branch: repo.default_branch,
         roadmap: of.roadmap,
         label,
     })
@@ -264,8 +460,22 @@ async fn stage(state: &AppState, conversation_id: i64) -> Option<Stage> {
 /// The stage doing the waiting: which Repo's roadmap, which roadmap, and which
 /// stage of it.
 struct Stage {
+    /// The registered Repo, which is what the record is asked about.
     repo_id: i64,
+
+    /// And where it is on disk, which is what git is asked about: the chain a
+    /// joining stage is told is read off the branches as well as off the
+    /// record — see [`landed`].
+    repo: PathBuf,
+
+    /// The Repo's default branch, as the registry names it — what a branch
+    /// having merged has merged *into*.
+    default_branch: String,
+
+    /// The roadmap's directory name under `docs/roadmaps/`.
     roadmap: String,
+
+    /// And which stage of it, as the roadmap's own line labels it.
     label: String,
 }
 
@@ -559,9 +769,15 @@ mod tests {
     const REPO: i64 = 1;
 
     /// The stage doing the waiting, by the label the roadmap gives it.
+    ///
+    /// The Repo's path and default branch stand for nothing here: what the rules
+    /// below are about is three readings of the record, and the one reading that
+    /// asks git is handed its answer — see [`below`].
     fn asking(label: &str) -> Stage {
         Stage {
             repo_id: REPO,
+            repo: PathBuf::from("/home/tobi/src/verkstead"),
+            default_branch: "main".to_owned(),
             roadmap: ROADMAP.to_owned(),
             label: label.to_owned(),
         }
@@ -775,5 +991,133 @@ mod tests {
             }),
             "stage 02 finished its tasks before this one and has not joined yet",
         );
+    }
+
+    /// The branch of a stage of this roadmap, named the way [`joined`] names
+    /// one: what the chain is a list of.
+    fn branch(stage: &str) -> String {
+        format!("roadmaps/{ROADMAP}/{stage}")
+    }
+
+    /// And the branches git says the default branch already holds.
+    fn merged<'a>(branches: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
+        branches.into_iter().map(str::to_owned).collect()
+    }
+
+    /// The chain a joining stage is told, in the order it is rebased through:
+    /// the branch it was cut from at the foot, and every stage that has joined
+    /// above it.
+    ///
+    /// The foot is the roadmap's own branch here, which is where stage 01 of
+    /// every roadmap comes off while the roadmap's pull request is unmerged —
+    /// and it is no stage, so nothing above ever reads it back out of the chain.
+    #[test]
+    fn the_chain_runs_from_the_branch_the_stage_was_cut_from_up() {
+        let chain = [joined(1, "01"), joined(2, "02")];
+
+        assert_eq!(
+            below(3, &chain, Some("rate-limiting"), &merged([])),
+            vec![
+                skills::Link {
+                    stage: None,
+                    branch: "rate-limiting".to_owned(),
+                },
+                skills::Link {
+                    stage: Some("01".to_owned()),
+                    branch: branch("01"),
+                },
+                skills::Link {
+                    stage: Some("02".to_owned()),
+                    branch: branch("02"),
+                },
+            ],
+        );
+    }
+
+    /// A stage cut from what is still the top is told a chain ending exactly
+    /// there, which is the rebase that moves nothing.
+    ///
+    /// Every stage of every roadmap run in order. The branch it stands on is
+    /// already a link of the chain, so it is named once and as the stage it is
+    /// rather than twice.
+    #[test]
+    fn a_stage_cut_from_the_top_is_told_a_chain_that_ends_at_it() {
+        let chain = [joined(1, "01"), joined(2, "02")];
+
+        assert_eq!(
+            below(3, &chain, Some(&branch("02")), &merged([])),
+            vec![
+                skills::Link {
+                    stage: Some("01".to_owned()),
+                    branch: branch("01"),
+                },
+                skills::Link {
+                    stage: Some("02".to_owned()),
+                    branch: branch("02"),
+                },
+            ],
+            "the foot is one of the links above it, so it is not named twice",
+        );
+    }
+
+    /// A branch the default branch already holds is out of the chain, whether it
+    /// is a stage of it or the branch this one was cut from.
+    ///
+    /// Which is what keeps a roadmap run in order finishing as it does today: a
+    /// stage whose predecessors have all merged comes off the default branch,
+    /// and a chain of merged branches would rebase it back behind the merge that
+    /// carried them in.
+    #[test]
+    fn a_branch_the_default_branch_holds_is_out_of_the_chain() {
+        let chain = [joined(1, "01"), joined(2, "02")];
+
+        assert_eq!(
+            below(3, &chain, None, &merged([branch("01").as_str()])),
+            vec![skills::Link {
+                stage: Some("02".to_owned()),
+                branch: branch("02"),
+            }],
+            "the stage below is still there, and the one under it has merged",
+        );
+
+        assert_eq!(
+            below(
+                3,
+                &chain,
+                Some("rate-limiting"),
+                &merged([
+                    "rate-limiting",
+                    branch("01").as_str(),
+                    branch("02").as_str(),
+                ])
+            ),
+            Vec::new(),
+            "and a roadmap merged to the top is a stage told no chain at all",
+        );
+    }
+
+    /// A stage is never in the chain it is joining.
+    ///
+    /// A stage at its finish has no pull request yet, so it is usually not in
+    /// the chain at all — but one whose ending stopped after the push and was
+    /// taken up again is, and a branch cannot be rebased onto itself.
+    #[test]
+    fn a_stage_is_never_told_to_rebase_onto_its_own_branch() {
+        let chain = [joined(1, "01"), joined(2, "02")];
+
+        assert_eq!(
+            below(2, &chain, Some(&branch("01")), &merged([])),
+            vec![skills::Link {
+                stage: Some("01".to_owned()),
+                branch: branch("01"),
+            }],
+        );
+    }
+
+    /// And a stage that stands on nothing with nothing in the chain is told
+    /// nothing, which is the ordinary unstacked start.
+    #[test]
+    fn a_stage_standing_on_nothing_joins_no_chain() {
+        assert_eq!(below(1, &[], None, &merged([])), Vec::new());
     }
 }
