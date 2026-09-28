@@ -389,12 +389,17 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
 /// What clicking a roadmap in the notice does. The stage is not sent: which one
 /// is next is the roadmap's own answer at whatever commit the Conversation ends
 /// up branching from, and the page reads it back there.
+///
+/// On the device the work is being drafted onto, like the two starts below it: a
+/// Conversation is made where it will be done, and the Repo it is made against
+/// is one registered there.
 export function startAdoption(
+  device: Device,
   repoId: number,
   roadmap: string,
   base: string,
 ): Promise<Started> {
-  return post<Started>("/api/ui/adoptions", {
+  return post<Started>(on(device, "/api/ui/adoptions"), {
     repo_id: repoId,
     roadmap,
     // The branch the roadmap was found on, so the new Conversation starts
@@ -1053,8 +1058,17 @@ export function loadPullRequest(
 ///
 /// The branch name is not sent: it is prefilled by the server, because the
 /// record is the server's from the moment it exists.
-export function startConversation(repoId: number): Promise<Started> {
-  return post<Started>("/api/ui/conversations", { repo_id: repoId });
+///
+/// On the device the compose page is drafting onto, which is where the work will
+/// be done: the Repo id is one that device's own, and every request the replay
+/// makes after this one is addressed the same way.
+export function startConversation(
+  device: Device,
+  repoId: number,
+): Promise<Started> {
+  return post<Started>(on(device, "/api/ui/conversations"), {
+    repo_id: repoId,
+  });
 }
 
 /// Put a file on a Conversation for its sessions to read.
@@ -1116,22 +1130,30 @@ export function removeAttachment(
 /// reaches the server to be refused rather than turning the request into a path
 /// that matches no route.
 export function attachServer(
+  device: Device,
   id: number,
   name: string,
 ): Promise<ServerAttached> {
   return post<ServerAttached>(
-    `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}`,
+    on(
+      device,
+      `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}`,
+    ),
   );
 }
 
 /// And take one off again, by that same name: the name is what the Conversation
 /// holds, and there is no row of the record for it to be by.
 export function removeServer(
+  device: Device,
   id: number,
   name: string,
 ): Promise<ServerRemoved> {
   return post<ServerRemoved>(
-    `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}/remove`,
+    on(
+      device,
+      `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}/remove`,
+    ),
   );
 }
 

@@ -175,6 +175,12 @@ export function Composer(props: {
   /// frame in the first place.
   back: { to: string; go: () => void };
 }): JSX.Element {
+  // Which device this Conversation is on, for the one thing on this pane that is
+  // about the record's identity rather than about a call: what the create that
+  // made it could not do is left against the Conversation *and* its device, ids
+  // colliding by construction — see `refusedOnCreate` in `composing.ts`.
+  const device = useDevice();
+
   // The files on this Conversation: the record's own and the ones this device
   // is still sending, and the requests either of them makes.
   const sending = sendingOn({
@@ -283,7 +289,7 @@ export function Composer(props: {
             refused is: the field is drawn holding what the server kept, and
             this is why it is not holding what was composed. See
             `composing.ts`. */}
-        <For each={refusedOnCreate(props.conversation.id)}>
+        <For each={refusedOnCreate(device(), props.conversation.id)}>
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
@@ -745,6 +751,11 @@ function serversOn(what: {
 }): Servers {
   const queries = useQueryClient();
 
+  // The device the Conversation is on, the way every other call on this
+  // pane is addressed: a server goes onto a row that may live on another
+  // Verkstead.
+  const device = useDevice();
+
   const [refused, setRefused] = createSignal<string | null>(null);
 
   // Which names have a press in flight, either way: the one thing a row of the
@@ -790,11 +801,19 @@ function serversOn(what: {
 
   const attach = (name: string) => {
     setRefused(null);
-    press(name, attachServer(what.conversation().id, name), "could not be attached");
+    press(
+      name,
+      attachServer(device(), what.conversation().id, name),
+      "could not be attached",
+    );
   };
 
   const forget = (name: string) =>
-    press(name, removeServer(what.conversation().id, name), "could not be removed");
+    press(
+      name,
+      removeServer(device(), what.conversation().id, name),
+      "could not be removed",
+    );
 
   const chips = (): Array<Chip> =>
     what.conversation().mcp_servers.map((server) => ({

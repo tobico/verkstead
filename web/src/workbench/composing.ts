@@ -15,6 +15,14 @@
 //! refuses a branch name here is what refuses it on the composer, said in the
 //! same words.
 //!
+//! **And replayed onto whichever device of the cluster will do the work**, which
+//! is [`Composed.device`]: a Conversation is made where it is going to be run, so
+//! the start and every request after it are addressed to that device and go
+//! through the Relay untouched (`src/reaching.ts`, and `relaying.rs` at the other
+//! end). Nothing about the replay is different for it — the same endpoints in the
+//! same order, and every refusal the far end's own in the words the composer says
+//! them in.
+//!
 //! Which is also why a refusal does not undo anything. The Conversation is real
 //! from the first request, so a field the server would not take leaves a draft
 //! with the rest of the work in it — and the refusals travel to that draft
@@ -47,12 +55,6 @@
 
 import { createSignal } from "solid-js";
 
-// Every call here names no device, so the replay creates on this device and
-// configures what it created — see `reaching.ts`, where a device is what a path
-// and a cache key are composed from. The compose page's own select now reads a
-// member for everything it *offers*; carrying that through to the replay is the
-// next thing this module is owed.
-
 import {
   addCompanion,
   adoptRoadmap,
@@ -76,7 +78,8 @@ import {
 import type { CompanionMode, Process, Started } from "../api/types";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
-import { forget, read, write } from "../remembered";
+import { rowKey, type Device } from "../reaching";
+import { draftingOn, forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL, SERVER_REFUSAL } from "./Composer";
 import { PROCESS, targeted } from "./processes";
@@ -151,6 +154,24 @@ export type Adopting = {
 /// other. The repo is `null` for the same reason and one more — nothing at all
 /// can be created without one.
 export type Composed = {
+  /// Which device of the cluster the work will be done on — `null` for this one,
+  /// which is what every Verkstead outside a cluster is and what a browser that
+  /// has picked nothing reads as.
+  ///
+  /// Held here rather than beside what is held, because the three ids under it
+  /// are only ids *on this device*: a Repo id, a companion's Repo id and a
+  /// Pairing's Profile id are each one Verkstead's own, so what says which
+  /// machine they name is part of the same record. A draft read back with the
+  /// device left off it would be a draft whose repository is a number on no
+  /// particular machine.
+  ///
+  /// The pick itself is remembered apart from this, in the browser — see
+  /// `draftingOn` in `src/remembered.ts`: the draft is dropped the moment a
+  /// Conversation is made out of it, and a draft of nothing is never written
+  /// down at all, so a pick kept only in here would be forgotten by the very
+  /// press it was made for.
+  device: Device;
+
   repo: number | null;
   brief: string;
   /// The branch the work will be done on, empty being the name the server
@@ -236,10 +257,16 @@ export function written(state: Composed, brief: string): Composed {
 
   return { ...state, brief, target: named, filled: named };
 }
-
-/// A compose page nobody has touched.
+/// A compose page nobody has touched — on the device this browser last drafted
+/// onto, which is this one until it has picked another.
+///
+/// The one field of it that is not simply empty, and for the reason the pick is
+/// kept in the browser at all: the laptop that drives the desktop picks once and
+/// goes on drafting there, so the page a create leaves behind is a fresh page for
+/// that same machine rather than one pointed back here.
 export function blank(): Composed {
   return {
+    device: draftingOn(),
     repo: null,
     brief: "",
     branch: "",
@@ -255,7 +282,9 @@ export function blank(): Composed {
   };
 }
 
-/// What is left of a compose page when the work moves to another device.
+/// What is left of a compose page when the work moves to another device — which
+/// is the device it is now for, and everything that would have named the one it
+/// came off taken away.
 ///
 /// **Everything that named the machine it came off goes.** A Repo id, a
 /// companion's Repo id and a Pairing's Profile id are each one Verkstead's own
@@ -274,9 +303,10 @@ export function blank(): Composed {
 /// one is this device's own, so what loading it does is put the work *back* on
 /// this device — which is this move, in the other direction, made by the caller
 /// that loads it.
-export function elsewhere(state: Composed): Composed {
+export function elsewhere(state: Composed, device: Device): Composed {
   return {
     ...state,
+    device,
     repo: null,
     base: null,
     companions: [],
@@ -299,6 +329,10 @@ export function on(state: Composed): number | null {
 /// Whether there is nothing in it worth coming back to. An untouched page is
 /// not worth storing, and whitespace is no more a brief here than it is at the
 /// moment work is started.
+///
+/// The device is not one of the answers. A page holding a pick and nothing else
+/// is a page holding nothing — the pick is the browser's and is kept there, so
+/// the next visit comes back to that machine with or without a draft under it.
 export function empty(state: Composed): boolean {
   return (
     state.repo === null &&
@@ -395,6 +429,12 @@ export type Created =
 /// is left to put on is the companions and the pairings. What the press does at
 /// the end of it is adopt rather than grill, which is the same act — the work
 /// beginning — under the other name.
+///
+/// **And the whole of it is addressed to [`Composed.device`]** — the start, every
+/// field, every file and the kickoff — because a Conversation is made on the
+/// machine that will do its work. Which is one argument on each call rather than
+/// a second path: the endpoints are the endpoints, and a member's are reached
+/// through the Relay by a prefix the client writes (see `src/api/client.ts`).
 export async function create(
   state: Composed,
   work: boolean,
@@ -406,7 +446,12 @@ export async function create(
     return "NoSuchRepo";
   }
 
-  const started = await opened(state, held);
+  // The device the whole replay is put to, read once: it is the device the page
+  // was drafting onto, and what it names has to be the same machine from the
+  // start to the kickoff.
+  const to = state.device;
+
+  const started = await opened(to, state, held);
   if (started === "NoSuchRepo") {
     return started;
   }
@@ -426,7 +471,7 @@ export async function create(
   // stage is worked on its own slug, and the base went out with the start.
   if (held === null) {
     if (state.brief.trim() !== "") {
-      const outcome = await saveBrief(null, id, state.brief);
+      const outcome = await saveBrief(to, id, state.brief);
       said(
         outcome === "Saved",
         `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
@@ -439,7 +484,7 @@ export async function create(
   // pointed at nothing — adopting is not one of the Processes that take a target.
   if (held === null) {
     if (state.branch !== "") {
-      const outcome = await renameBranch(null, id, state.branch);
+      const outcome = await renameBranch(to, id, state.branch);
       said(
         outcome === "Renamed",
         `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
@@ -458,7 +503,7 @@ export async function create(
     }
 
     if (state.base !== null) {
-      const outcome = await setBaseBranch(null, id, state.base);
+      const outcome = await setBaseBranch(to, id, state.base);
       said(
         outcome === "Recorded",
         `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
@@ -467,7 +512,7 @@ export async function create(
   }
 
   for (const alongside of state.companions) {
-    await put(id, alongside, said);
+    await put(to, id, alongside, said);
   }
 
   // What kind of work it is, and only where the human touched the picker: a
@@ -484,7 +529,7 @@ export async function create(
 
   if (state.grilling !== null) {
     const outcome = await chooseGrillingPairing(
-      null,
+      to,
       id,
       pairing.choice(state.grilling),
     );
@@ -496,7 +541,7 @@ export async function create(
 
   if (state.implementation !== null) {
     const outcome = await chooseImplementationPairing(
-      null,
+      to,
       id,
       pairing.choice(state.implementation),
     );
@@ -508,7 +553,7 @@ export async function create(
 
   if (state.review !== null) {
     const outcome = await chooseReviewPairing(
-      null,
+      to,
       id,
       pairing.role(state.review),
     );
@@ -534,7 +579,7 @@ export async function create(
     // settings. A name nothing is declared by any more is refused here rather
     // than dropped, the human having picked it on purpose.
     for (const name of servers) {
-      const outcome = await attachServer(id, name);
+      const outcome = await attachServer(to, id, name);
       if (outcome !== "Attached") {
         refused.push(
           `${name} could not be attached: ${SERVER_REFUSAL[outcome]}`,
@@ -542,7 +587,7 @@ export async function create(
       }
     }
 
-    for (const rejected of await files.flush(id)) {
+    for (const rejected of await files.flush(to, id)) {
       refused.push(
         `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
       );
@@ -551,7 +596,7 @@ export async function create(
 
   if (work && refused.length === 0) {
     if (held !== null) {
-      const outcome = await adoptRoadmap(null, id);
+      const outcome = await adoptRoadmap(to, id);
       said(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
@@ -565,13 +610,13 @@ export async function create(
       // and a **Fix Merge Issues** are both pointed at work that is already
       // somewhere else, and both reach it by this one endpoint. Nothing picked
       // is the Develop every draft defaults to, which is pointed at nothing.
-      const outcome = await takeUpPullRequest(null, id);
+      const outcome = await takeUpPullRequest(to, id);
       said(
         outcome === "TakenUp",
         `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
       );
     } else {
-      const outcome = await startGrilling(null, id);
+      const outcome = await startGrilling(to, id);
       said(
         outcome === "Started",
         `The work could not be started: ${grillRefusal(outcome)}`,
@@ -588,26 +633,32 @@ export async function create(
 /// other field here goes through the endpoint that already existed: what a
 /// Conversation is started *over* is a different question in each case — a Repo,
 /// or a roadmap in one — and each of them is refused for its own reasons.
+///
+/// Both on the device the page is drafting onto: the Repo and the roadmap are
+/// each read off that device's registry, so that is where the Conversation over
+/// them is made.
 async function opened(
+  device: Device,
   state: Composed,
   held: Adopting | null,
 ): Promise<Started> {
   if (held !== null) {
-    return startAdoption(held.repo_id, held.roadmap, held.base);
+    return startAdoption(device, held.repo_id, held.roadmap, held.base);
   }
 
-  return startConversation(state.repo!);
+  return startConversation(device, state.repo!);
 }
 
 /// One companion, put on the Conversation and then configured: the add first,
 /// because everything after it is about the row the add makes, and nothing after
 /// it where the add was refused.
 async function put(
+  device: Device,
   id: number,
   alongside: Alongside,
   said: (ok: boolean, sentence: string) => boolean,
 ): Promise<void> {
-  const added = await addCompanion(null, id, alongside.repo_id);
+  const added = await addCompanion(device, id, alongside.repo_id);
   if (
     !said(
       added === "Added",
@@ -621,7 +672,7 @@ async function put(
   // leaves, so only what the human moved is sent.
   if (alongside.mode !== "ReadOnly") {
     const outcome = await setCompanionMode(
-      null,
+      device,
       id,
       alongside.repo_id,
       alongside.mode,
@@ -634,7 +685,7 @@ async function put(
 
   if (alongside.base !== RULE) {
     const outcome = await setCompanionBase(
-      null,
+      device,
       id,
       alongside.repo_id,
       alongside.base,
@@ -649,7 +700,7 @@ async function put(
   // is checked out detached, so there is no branch of its own to name.
   if (alongside.mode === "ReadWrite" && alongside.branch !== "") {
     const outcome = await renameCompanionBranch(
-      null,
+      device,
       id,
       alongside.repo_id,
       alongside.branch,
@@ -669,23 +720,37 @@ async function put(
 /// the composer picks it up: one create's worth, because the next create
 /// replaces it and a refusal about a Conversation nobody is looking at is a
 /// refusal about work already done.
+///
+/// **Against the Conversation *and* its device**, which is how a row of the
+/// merged sidebar is named and for the same reason: ids collide by construction,
+/// every Verkstead issuing a Conversation 1, so refusals left against a bare
+/// number would be drawn on the composer of an unrelated draft the moment two
+/// devices are in play. See `rowKey` in `src/reaching.ts`.
 const [replayed, setReplayed] = createSignal<{
-  conversation: number;
+  row: string;
   refused: string[];
 } | null>(null);
 
 /// What the create that made this Conversation could not do, in the words its
 /// own pane would have used — and nothing at all for every other Conversation,
 /// which is all of them but the one just made.
-export function refusedOnCreate(id: number): string[] {
+export function refusedOnCreate(device: Device, id: number): string[] {
   const left = replayed();
-  return left !== null && left.conversation === id ? left.refused : [];
+  return left !== null && left.row === rowKey(device, id) ? left.refused : [];
 }
 
 /// Leave them for that Conversation's composer, or take away what was left for
 /// the one before it.
-export function leaveRefusals(conversation: number, refused: string[]): void {
-  setReplayed(refused.length === 0 ? null : { conversation, refused });
+export function leaveRefusals(
+  device: Device,
+  conversation: number,
+  refused: string[],
+): void {
+  setReplayed(
+    refused.length === 0
+      ? null
+      : { row: rowKey(device, conversation), refused },
+  );
 }
 
 /// A compose page out of its stored body, checked field by field.
@@ -707,6 +772,7 @@ function parsed(body: string): Composed | null {
   const held = payload as Partial<Composed>;
 
   if (
+    !onDevice(held.device) ||
     !whole(held.repo) ||
     typeof held.brief !== "string" ||
     typeof held.branch !== "string" ||
@@ -748,6 +814,12 @@ function parsed(body: string): Composed | null {
   }
 
   return {
+    // A body from a build before there was a cluster names no device at all,
+    // which reads as whatever this browser is drafting onto rather than as this
+    // machine: a draft mid-sentence keeps the pick it was being written under,
+    // that pick having been kept in the browser all along. A body that says
+    // `null` *has* said — this device — and is read as what it says.
+    device: held.device === undefined ? draftingOn() : held.device,
     repo: held.repo,
     brief: held.brief,
     branch: held.branch,
@@ -804,6 +876,12 @@ function kind(value: unknown): value is Process | null | undefined {
     value === undefined ||
     (typeof value === "string" && Object.hasOwn(PROCESS, value))
   );
+}
+
+/// Whether this is a Device Id, this device, or a body that never said — the
+/// last being a draft written before there was a device to say.
+function onDevice(value: unknown): value is Device | undefined {
+  return value === null || value === undefined || typeof value === "string";
 }
 
 /// Whether this is a repo id or the absence of one.

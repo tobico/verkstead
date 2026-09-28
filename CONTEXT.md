@@ -1885,9 +1885,22 @@ companions and the three Pairings go, and the Brief, the branch name and the
 files being held stay where they are. **The pick is remembered in the browser**
 the way the pane widths are — this device until something is picked, which is
 what the laptop that drives the desktop needs — and a device the cluster has lost
-reads as this device again. It reads disabled while a roadmap or a pull request
-is loaded, both of those lists being this device's own, and loading either puts
-the work back here.
+reads as this device again, taking a draft's Repo id with it. It reads disabled
+while a roadmap or a pull request is loaded, both of those lists being this
+device's own, and loading either puts the work back here.
+
+**And the press goes to the named device too.** The Conversation is started
+against its Repo *there* and every request of the replay after it is addressed the
+same way — each field, each held file, and the kickoff, which is the grilling, the
+adoption or the take-up as ever — all of it through the **Relay** unchanged, so
+there is no batched create and no second set of rules, and every refusal is the
+far end's own in the words the composer says them in. What the replay could not do
+is left against the Conversation *and* its device, the way a row of the merged
+sidebar is named: ids collide by construction, so refusals keyed by the number
+alone would be drawn on the composer of an unrelated draft. The page then lands on
+that device's URL for what it made — `/devices/{device}/conversations/{id}`, where
+a member's Conversation already stands — and the row appears in the merged sidebar
+under the machine that is doing the work.
 
 **And where there is nothing to list, that page is the whole of Verkstead.** The
 sidebar's list *as filtered* being empty — no unarchived Conversation, and the

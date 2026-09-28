@@ -110,6 +110,14 @@
 //! stage, and *Save as draft* creates it and leaves the stage to be adopted on
 //! its own page.
 //!
+//! **And the press goes there too.** The Conversation is started on the named
+//! device and every request of the replay after it is addressed the same way —
+//! the fields, the files and the kickoff — so what lands is a Conversation on the
+//! machine that will do its work, and the page lands on that machine's URL for it:
+//! `/devices/{device}/conversations/{id}`, which is where a member's Conversation
+//! already stands. Nothing about the replay is composed anew for it; see
+//! [`create`](./composing.ts), which is one argument wider.
+//!
 //! What it does *not* do is decide anything the composer decides. Every control
 //! here is the composer's own component drawn over the compose state instead of
 //! over a Conversation — see `Setup.tsx`, where they live — so the two pages
@@ -135,7 +143,7 @@ import {
 import type { Process, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Reaching, keyOf, type Device } from "../reaching";
-import { draftingOn, setDraftingOn } from "../remembered";
+import { setDraftingOn } from "../remembered";
 import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
@@ -273,17 +281,12 @@ function Compose(props: {
   // draft somebody left is that draft rather than a blank one.
   const [state, setState] = createSignal<Composed>(stored());
 
-  // And which device of the cluster it is being composed *for*, off this browser
-  // to begin with: the device it last drafted onto, and this one until it has
-  // picked. Its own signal rather than a field of the draft above, for the reason
-  // it is its own key in the browser — see `draftingOn` in `src/remembered.ts`.
-  //
-  // Nothing about the press below has changed with it: the reads under the row
-  // go to the picked device and the replay still creates on this one, so a press
-  // made with a member picked would put a Repo id of that member's on a
-  // Conversation here. Moving the replay is the task after this one, and until it
-  // lands the press is the one thing on this page the select does not reach.
-  const [device, setDevice] = createSignal<Device>(draftingOn());
+  // And which device of the cluster it is being composed *for*, which is a field
+  // of that draft: the repo, the companions and the pairings under it are ids on
+  // one machine, so what says which machine is held with them (see `Composed` in
+  // `composing.ts`). The pick is remembered in the browser besides, which is what
+  // brings a page back to it once a create has dropped the draft.
+  const device = (): Device => state().device;
 
   /// Moving what is being composed onto another device of the cluster, which is
   /// the one move that takes the whole of *which code* and *whose account* with
@@ -295,9 +298,8 @@ function Compose(props: {
   const onDevice = (picked: Device) => {
     if (picked === device()) return;
 
-    setDevice(picked);
     setDraftingOn(picked);
-    setState(elsewhere);
+    setState((was) => elsewhere(was, picked));
   };
 
   // The files picked here, which are not part of what is written back: a
@@ -495,20 +497,26 @@ function Compose(props: {
   const make = useMutation(() => ({
     mutationFn: (work: boolean) => create(state(), work, files, servers()),
     onSuccess: (outcome) => {
+      // Which device the whole of that replay was put to, read before the page
+      // is put back to a blank one: it is what the Conversation was made on, so
+      // it is what the URL it landed at and the refusals left for it are about.
+      const to = device();
+
       if (outcome === "NoSuchRepo") {
         // Picked out of a list this page read a moment ago: the Repo was there
         // and is not now, and nothing was created. Reading it again is both the
         // correction and the explanation, and what was composed stays where it
         // is.
         setGone(true);
-        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: keyOf(to, "repos") });
         return;
       }
 
       // The Conversation exists, so this device has nothing left to hold: it
       // would only ever offer to make the same one again. What the replay could
       // not do goes with the navigation instead, to be said on the draft it is
-      // about.
+      // about — against that draft's device as well as its number, ids colliding
+      // by construction.
       setGone(false);
       clear();
       setState(blank());
@@ -517,10 +525,13 @@ function Compose(props: {
       // left here would be one this device offered to attach to whatever it
       // composed next.
       setServers([]);
-      leaveRefusals(outcome.conversation, outcome.refused);
+      leaveRefusals(to, outcome.conversation, outcome.refused);
 
+      // The sidebar is one list merged from the whole cluster and read off this
+      // device whoever owns the rows in it, so the key is this device's own
+      // however far away the work was made.
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(pathOf(outcome.conversation));
+      navigate(pathOf(outcome.conversation, to));
     },
   }));
 
