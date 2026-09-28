@@ -2217,8 +2217,14 @@ review unit, one pull request. Started by the Stage before it settling rather
 than by anybody pressing anything — against the same Repo, under the same
 Pairings, primed with the stage brief as its Brief, and Implementing from the
 first moment, because the grilling that would have settled the work wrote the
-brief. Its branch stacks on the unmerged predecessor where the target
-repository records how, and comes off the default branch where it does not.
+brief. Its branch is **cut from the highest settled Stage of its roadmap's
+chain** — the roadmap's own branch where no Stage of it has settled yet, and
+the default branch where that already holds everything the roadmap has
+finished, there being nothing unmerged left to stand on. What the branch ends
+up **stacked on** is a second fact and a later one, settled at the Stage's
+finish when it joins the chain; where the target repository records no way to
+stack a Stage for review the base is the same, and the pull request carries the
+branch below it until that one merges.
 
 **Its line in `ROADMAP.md` declares what it stands on**, after the link to the
 brief: `after 01, 03` names other stages of the same roadmap by their labels as
@@ -2329,6 +2335,38 @@ Verkstead's own record rather than something worked out from the branch. A
 roadmap that runs out is the roadmap complete, whatever else is in the Worktree
 with work left in it; taking up another one is **Adopt**. See ADR-0017.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
+
+**Chain**:
+The one line of branches a roadmap's Stages are reviewed on, in the order they
+finished — one chain per roadmap, and Verkstead's own record of which Stage
+joined when rather than anything read back off git. Its bottom is the roadmap's
+own branch while that is unmerged, the Conversation that wrote the roadmap
+being what stage 01 is cut from because the default branch does not hold the
+roadmap the Stage is started from; and it is the default branch once nothing
+unmerged is left to stand on. Everything above that is a Stage that has joined,
+each on top of the one before it. A branch the default branch already holds is
+out of the chain, so a roadmap whose Stages have all merged is a chain of
+nothing.
+
+**A Stage joins at its finish**, one at a time, and not until every Stage
+already in it has settled — see **Waiting to join** for what a Stage does while
+it is not yet its turn. Joining is the rebase onto the top and the pull request
+opened against it, which is why the pull request recorded against a Stage is
+what says it has joined. So a Stage is rebased once, before it has a pull
+request anybody has started reading, and **a Stage that has joined is never
+rebased by a later one**: what moves it afterwards is the sync any stacked
+branch gets when the default branch moves or a pull request below it merges.
+
+**The joins are the one thing a roadmap does in single file**, and that is what
+the rest of it costs: a Stage whose wrap-up cannot finish holds up every later
+Stage's join, dependent on it or not. Only the join — the waiting Stages' own
+work, their checks and their reviews wait on nobody. A roadmap run in order
+builds the chain it always built, each Stage cut from what turns out to be the
+top and its rebase moving no commit. See ADR-0021, *The chain*.
+_Avoid_: stack (that is `gh stack`'s word for how a target repository reviews
+one, and the chain is the record the rebase is read off), dependency order
+(the order is the order Stages finished, and what a Stage stands on is declared
+separately), queue (that is the waiting, not the chain)
 
 **Adopt**:
 Take work the Repo already holds — written by the old tools, by hand, by

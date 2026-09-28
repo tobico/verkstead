@@ -425,7 +425,22 @@ flowchart LR
   no block is recorded the pull request carries the stage before it until that
   one merges, and the timeline says so — still no convention invented on the
   repo's behalf, because the one thing Verkstead decides here is the one thing
-  it always decided.
+  it always decided. *Refined 2026-09-29, building
+  parallel-stages/03-joining-the-chain*: the predecessor stops being what a
+  stage stands on. A roadmap is **one chain of branches in the order its stages
+  finish** — its bottom the roadmap's own branch while that is unmerged — and a
+  stage is **cut from the highest settled stage in that chain**, so it is built
+  on everything the roadmap has finished rather than on the one stage in front
+  of it. **The join is at the finish**: a stage whose tasks are all done waits
+  until every stage already in the chain has settled, rebases onto the top of
+  it, and only then pushes and opens its pull request. So no pull request
+  anybody has started reading is ever rewritten — a stage is rebased once,
+  before it has one — and what it costs is that the joins are the one thing a
+  roadmap does in single file. Where the branch starts and what it ends up
+  stacked on are two facts now, settled a stage apart; the block still decides
+  what the session does about the pull request, and the rebase happens block or
+  no block. In a roadmap run in order the top of the chain is what the stage was
+  cut from, the rebase moves nothing, and nobody sees a difference.
 - **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,
