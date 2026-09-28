@@ -1440,6 +1440,39 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage roadmaps table")?;
 
+    // And the order the stages of a roadmap finished their tasks in, which is
+    // the order they are let into its chain. One row per stage, written the
+    // first time it reaches its finish step and never again — see
+    // [`queue_to_join`] and [`join_queue`], and the server's `joins` module,
+    // where the queue is what decides who goes next.
+    //
+    // A stage **joins** the chain at its finish, and the joins are the one thing
+    // a roadmap does in single file: a second stage whose boxes are all ticked
+    // waits on the first one joining *and* settling. So which of the two goes
+    // first has to be a fact that outlives the process which noticed it — a wait
+    // may be long, and a server that came back holding a queue of its own making
+    // could let them in the other way round.
+    //
+    // The place is the row's own id rather than a clock, because what is wanted
+    // is an order rather than a time: two stages whose last box was ticked in the
+    // same millisecond still finished one after the other, and a total order has
+    // no tie to break. Nothing is stored beside it — when a stage *joined* is
+    // already recorded by the pull request the join opened, and when its tasks
+    // finished is of no interest here except as a place in this queue.
+    //
+    // A table of its own rather than a column on [`stage_roadmaps`], unlike the
+    // stage label beside it: what holds the order is an `AUTOINCREMENT` id, so
+    // the row is keyed on the place rather than on the Conversation.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_joinings (
+             place           INTEGER PRIMARY KEY AUTOINCREMENT,
+             conversation_id INTEGER NOT NULL UNIQUE REFERENCES conversations(id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the stage joinings table")?;
+
     // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone —
@@ -5990,6 +6023,90 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
             conversation_id,
             stage,
             branch,
+        })
+        .collect())
+}
+
+/// One stage **queued to join** its roadmap's chain: the Conversation it is, and
+/// which stage of the roadmap.
+///
+/// See [`join_queue`], which is where the order they are in comes from, and
+/// [`queue_to_join`], which is what puts one in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Queued {
+    /// The stage's Conversation, which is what [`StageStandings`] answers about
+    /// it under the label below and what [`stage_chain`] names where it has
+    /// joined already.
+    pub conversation_id: i64,
+
+    /// Which stage of the roadmap, as the roadmap's own line labels it — `05`,
+    /// with the roadmap's zero-padding kept.
+    pub stage: String,
+}
+
+/// Write down that this stage has finished its tasks, and so take its place in
+/// the queue to join its roadmap's chain.
+///
+/// Called where a stage's every box is ticked and its finish is the next step,
+/// which is once per stage — and written **once**: a stage taken up again after a
+/// restart, or after a run that stopped mid-wait, keeps the place its first read
+/// of the backlog gave it. The joins are the one thing a roadmap does in single
+/// file, and the order they happen in is the order the tasks finished rather than
+/// the order a resume happened to reach the stages in.
+///
+/// Nothing checks that the Conversation is a stage. What makes a row mean
+/// anything is the `stage_roadmaps` row [`join_queue`] joins it to, so a queued
+/// Conversation that is a stage of nothing is read back by nobody.
+pub async fn queue_to_join(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query("INSERT OR IGNORE INTO stage_joinings (conversation_id) VALUES (?)")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("queueing Conversation {conversation_id} to join its chain"))?;
+
+    Ok(())
+}
+
+/// One roadmap's **queue** to join: the stages of it whose tasks have finished,
+/// in the order they finished them.
+///
+/// What [`stage_chain`] is to the stages that have joined, this is to the stages
+/// that are on their way in — including the ones already in the chain, which
+/// stay in the order they queued in. A stage waits on every stage in front of it
+/// here, and one that has joined is waited on until it *settles*: a stage that
+/// has just joined is a branch still moving, and nothing rebases onto one. See
+/// the server's `joins` module, which is where the two readings are put
+/// together.
+///
+/// Only the rows that hold a label, exactly as [`stage_standings`] is: the queue
+/// says which stage of the roadmap is in front, and a row with no label stands
+/// for no stage.
+///
+/// One Repo's and one roadmap's, for [`stage_chain`]'s reason: two Repos may
+/// hold roadmaps of the same name, and a stage of `mvp` over there is nobody's
+/// turn here.
+pub async fn join_queue(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Result<Vec<Queued>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT j.conversation_id, r.stage
+         FROM stage_joinings j
+         JOIN stage_roadmaps r ON r.conversation_id = j.conversation_id
+         JOIN conversations c ON c.id = j.conversation_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
+         ORDER BY j.place",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading the queue to join the {roadmap} roadmap's chain in Repo {repo_id}")
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(conversation_id, stage)| Queued {
+            conversation_id,
+            stage,
         })
         .collect())
 }

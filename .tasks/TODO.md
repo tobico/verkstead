@@ -21,7 +21,7 @@ Roadmap stage: [03: Joining the chain](docs/roadmaps/parallel-stages/03-joining-
 ## Tasks
 
 - [x] 01: Waiting to join — [details](01-waiting-to-join.md)
-- [ ] 02: One at a time — [details](02-one-at-a-time.md)
+- [x] 02: One at a time — [details](02-one-at-a-time.md)
 - [ ] 03: This repository's own block — [details](03-this-repositorys-own-block.md)
 - [ ] 04: The join — [details](04-the-join.md)
 - [ ] 05: A conflict on the way in — [details](05-a-conflict-on-the-way-in.md)

@@ -6,16 +6,16 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Joined, Lifecycle,
-    ProfileFacts, PullRequest, Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged,
-    Steer, Switched, Unarchiving, add_companion, adopted_pull_request, adopting, any_archived,
-    archive_conversation, archived, close_conversation, conversation_branch, conversations,
-    create_profile, follow_branch, hold_pull_request, load_conversation, open_database,
-    record_another_pull_request, record_pull_request, register_repo, reinvent_branch,
-    rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
-    settle_naming, show_archived, showing_archived, stacks_on, stage_chain, stage_roadmap,
-    stage_standings, start_adoption, start_conversation, start_grilling, start_stage,
-    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, target,
-    timeline, unarchive_conversation,
+    ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState, StageOf, StageStanding,
+    Staged, Steer, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
+    any_archived, archive_conversation, archived, close_conversation, conversation_branch,
+    conversations, create_profile, follow_branch, hold_pull_request, join_queue, load_conversation,
+    open_database, queue_to_join, record_another_pull_request, record_pull_request, record_roadmap,
+    register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
+    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
+    stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
+    start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
+    steer_conversation, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -2221,5 +2221,126 @@ async fn a_chain_holds_no_other_repos_stages_and_no_other_roadmaps() {
             .collect::<Vec<_>>(),
         vec![mine],
         "one roadmap of one Repo, and neither of the other two",
+    );
+}
+
+/// The queue to join is the stages whose tasks have finished, in the order they
+/// finished them — which is the order they take their places in.
+///
+/// One stage at a time joins a roadmap's chain, and which of two whose boxes were
+/// both ticked goes first cannot be the order a server happened to notice them
+/// in. So the place is a row, and it is the row's own order that answers.
+///
+/// The numbers the roadmap gives the stages say nothing about it: stage 03
+/// finishing its tasks first is stage 03 joining first.
+#[tokio::test]
+async fn a_roadmaps_queue_to_join_is_the_order_the_stages_tasks_finished_in() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "03").await;
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    // And one still working its backlog, which has taken no place at all.
+    stage(&pool, repo_id, "mvp", "02").await;
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp").await.unwrap(),
+        Vec::new(),
+        "a roadmap none of whose stages has finished its tasks has nobody queued",
+    );
+
+    queue_to_join(&pool, first).await.unwrap();
+    queue_to_join(&pool, second).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp").await.unwrap(),
+        vec![
+            Queued {
+                conversation_id: first,
+                stage: "03".to_owned(),
+            },
+            Queued {
+                conversation_id: second,
+                stage: "01".to_owned(),
+            },
+        ],
+        "the order their tasks finished in, whatever the roadmap numbers them",
+    );
+}
+
+/// And a stage taken up again keeps the place it already had.
+///
+/// The wait may be long, and a restart takes every stage left mid-run up from
+/// where it stands — so a stage held before its finish is asked the same question
+/// a second time and a third. A place written afresh each time would be a queue a
+/// restart reordered, which is the whole reason it is a stored fact.
+#[tokio::test]
+async fn a_stage_taken_up_again_keeps_the_place_the_queue_gave_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    let second = stage(&pool, repo_id, "mvp", "02").await;
+
+    queue_to_join(&pool, first).await.unwrap();
+    queue_to_join(&pool, second).await.unwrap();
+
+    // Which is what a restart does: the stage in front is taken up again, looks
+    // at the queue again, and asks for a place it already has.
+    queue_to_join(&pool, first).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![first, second],
+        "the same order it would have been without the restart",
+    );
+}
+
+/// The queue is one Repo's and one roadmap's, and holds only the rows that say
+/// which stage they are.
+///
+/// [`stage_chain`]'s reasons, and [`stage_standings`]'s: two Repos may hold
+/// roadmaps of the same name, one Repo holds every roadmap it has ever run, and a
+/// row with no label stands for no stage — the Conversation that *wrote* a
+/// roadmap has one, and it joins nothing.
+#[tokio::test]
+async fn a_queue_holds_no_other_repos_stages_no_other_roadmaps_and_no_unlabelled_row() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let mine = stage(&pool, ours, "mvp", "01").await;
+    queue_to_join(&pool, mine).await.unwrap();
+
+    let beside = stage(&pool, ours, "processes", "01").await;
+    queue_to_join(&pool, beside).await.unwrap();
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    queue_to_join(&pool, elsewhere).await.unwrap();
+
+    // The Conversation that wrote the roadmap: a `stage_roadmaps` row with the
+    // roadmap and no label.
+    let wrote = start_conversation(&pool, ours, "roadmaps/mvp")
+        .await
+        .unwrap()
+        .unwrap();
+    record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
+    queue_to_join(&pool, wrote).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![mine],
+        "one roadmap of one Repo, and no row that is not a stage of it",
     );
 }

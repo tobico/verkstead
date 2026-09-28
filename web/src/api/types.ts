@@ -1673,7 +1673,8 @@ waiting_on_checks: boolean,
  *
  * A flag rather than the stages it is waiting on, because those are on the
  * Timeline where the hold wrote them: the label says that the finish is
- * waiting, and the line beneath it says which stage of the roadmap on.
+ * waiting, and the line beneath it says which stage of the roadmap it is
+ * waiting on.
  *
  * `false` in every state but Implementing, which is where a backlog is
  * worked and the only place the condition can hold.

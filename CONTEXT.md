@@ -2284,8 +2284,10 @@ a Stage in the chain which has not *settled* is **held before its finish**: no
 session is launched, the Timeline says which Stage it is waiting on, and it is
 released the moment that one settles. Nothing rebases onto a branch that is
 still moving, which is what buys the rest of it — a Stage is rebased once,
-before it has a pull request anybody has started reading. In a roadmap run in
-order the Stage below has always settled first, so nothing is ever held. See
+before it has a pull request anybody has started reading. Two Stages finishing
+close together are let in **one at a time, in the order their tasks finished**,
+each waiting on the one in front of it joining *and* settling. In a roadmap run
+in order the Stage below has always settled first, so nothing is ever held. See
 ADR-0021, *The chain*, and **Waiting to join**.
 
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
@@ -2895,19 +2897,30 @@ _Avoid_: blocked on you (that is about the human, this is about GitHub), CI
 (the word here is checks), pending, green, state
 
 **Waiting to join**:
-What a **Stage** whose every task is done is doing while a Stage already in its
-roadmap's chain has not *settled*. No finish session is launched: a
-**Notice** says so on the Timeline and names the Stage or Stages it is waiting
-on, the status button reads the words where its status word goes, and the
-sidebar row reads them in place of the state word, Implementing being what has
-come down to this.
+What a **Stage** whose every task is done is doing while it is not yet its turn
+to join its roadmap's chain. No finish session is launched: a **Notice** says so
+on the Timeline and names the Stage or Stages it is waiting on and why, the
+status button reads the words where its status word goes, and the sidebar row
+reads them in place of the state word, Implementing being what has come down to
+this.
+
+Two things are waited on, and the second is what makes a queue of Stages read as
+a queue rather than as two stalls. A Stage **already in the chain that has not
+settled** is a branch still moving, and nothing rebases onto one. A Stage **whose
+tasks finished before this one's and which has not joined yet** has the next
+turn — and this one goes on waiting through its join, by the rule above, until it
+settles. So two Stages finishing close together are let in one at a time, in the
+order their tasks finished, and the first one *joining* releases nobody.
 
 A condition of Implementing rather than a state, drawn exactly as *Waiting on
 checks* is drawn one state later: the Lifecycle is untouched, nothing is pushed
 to any device, and the run holds its registration across the whole wait, so a
-held Stage is one being driven rather than one standing still. Nothing at all is
-stored for it — the hold is a task of the running server, so a restart is
-holding nothing and the resume that takes the Stage up finds it held again.
+held Stage is one being driven rather than one standing still. The hold itself is
+stored nowhere — it is a task of the running server, so a restart is holding
+nothing and the resume that takes the Stage up finds it held again. The **place
+in the queue** is stored, and written once, which is the one thing here that has
+to outlive the process: the wait may be long, and a restart that made the order
+afresh could let two Stages in the other way round.
 
 Only a Stage: an ordinary feature's backlog belongs to no roadmap and joins no
 chain. And only the join — a waiting Stage's own work, its checks and its review
@@ -2915,9 +2928,10 @@ wait on nobody. **The joins are the one thing a roadmap does in single file**,
 so a Stage whose wrap-up cannot finish holds up every later Stage's join,
 dependent on it or not. That is the price of never rebasing a branch anybody is
 reading. See ADR-0021, *The chain*.
-_Avoid_: blocked, queued, stalled (nothing has gone wrong and nothing is
-waiting on the human), stacking or rebasing (that is how the branch gets in,
-and it is the repository's business), state
+_Avoid_: blocked, stalled (nothing has gone wrong and nothing is waiting on the
+human), queued (the order is the server's own bookkeeping; what the human is
+shown is which Stage is being waited on and why), stacking or rebasing (that is
+how the branch gets in, and it is the repository's business), state
 
 **Check rollup**:
 How a pull request's checks are getting on, taken all together and said in one

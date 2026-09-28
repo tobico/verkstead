@@ -15,6 +15,18 @@
 //! what makes the join safe to do once: a stage is rebased before it has a pull
 //! request at all, and never after somebody has started reading one.
 //!
+//! **And one at a time, in the order the tasks finished.** Two stages whose
+//! boxes are all ticked would both be released by one settle below them, and
+//! both would rebase onto the same top and push. So each takes a place in a
+//! queue as it arrives — `store::join_queue`, a stored fact because the wait may
+//! be long and a restart must not reorder it — and waits on every stage in front
+//! of it *joining and settling*, the join putting it under the rule above. The
+//! joins are the one thing a roadmap does in single file, which is the price of
+//! never rebasing a branch anybody is reading: a stage whose wrap-up cannot
+//! finish holds up every later stage's join, dependent on it or not. Only the
+//! join. A waiting stage's own work, its checks, its comments and its review
+//! wait on nobody.
+//!
 //! **The hold is the server's judgement rather than the session's.** It stands
 //! in front of the launch rather than inside the finish skill, so a held stage
 //! is one where no session has been started: there is no agent sitting in a
@@ -48,11 +60,11 @@ use verkstead_schema::Nudge;
 use crate::AppState;
 use crate::store;
 
-/// How often a held stage looks at whether the chain below it has settled.
+/// How often a held stage looks at whether it may join yet.
 ///
-/// Two reads of the database and nothing else, so this is not a cost: what it
-/// decides is how long after the stage below settles the one behind it gets
-/// going, and ten seconds is shorter than the launch that follows it.
+/// Three reads of the database and nothing else, so this is not a cost: what it
+/// decides is how long after the stage in front of it settles the one behind it
+/// gets going, and ten seconds is shorter than the launch that follows it.
 pub(crate) const LOOKED_AT_EVERY: Duration = Duration::from_secs(10);
 
 /// Which Conversations are stages held before their finish, waiting for the
@@ -156,20 +168,33 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
         return;
     };
 
+    // This stage's place in the queue, taken before anything is looked at and
+    // taken once: a stage whose tasks finished first joins first, whether or not
+    // there is anything to wait for now and whichever of the two launch sites
+    // got here — and a restart, or a run that stopped mid-wait, finds the place
+    // where it was rather than making a new one. See `store::queue_to_join`.
+    if let Err(error) = store::queue_to_join(&state.pool, conversation_id).await {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "taking a stage's place in the queue to join failed",
+        );
+    }
+
     // The hold itself, taken the first time there is something to wait for and
     // let go as this returns — so a roadmap run in order is never marked at all.
     let mut waiting: Option<Waiting> = None;
 
     // And what was last said out loud, so that the line is written once per
-    // answer rather than once per look: a second stage joining the chain below
-    // while this one waits changes what it is waiting on, and that is worth a
+    // answer rather than once per look: a stage below joining the chain while
+    // this one waits changes what it is waiting on and why, and that is worth a
     // line of its own.
-    let mut said: Vec<String> = Vec::new();
+    let mut said: Vec<Ahead> = Vec::new();
 
     loop {
-        let unsettled = unsettled(state, &of, conversation_id).await;
+        let ahead = ahead_of(state, &of, conversation_id).await;
 
-        if unsettled.is_empty() {
+        if ahead.is_empty() {
             return;
         }
 
@@ -185,16 +210,16 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
             waiting = Some(state.joins.hold(conversation_id));
         }
 
-        if unsettled != said {
+        if ahead != said {
             tracing::info!(
                 conversation_id,
                 roadmap = of.roadmap,
-                waiting_on = ?unsettled,
+                waiting_on = ?ahead,
                 "every task is done and the chain below has not settled, so the finish is held",
             );
 
-            say(state, conversation_id, &of.roadmap, &unsettled).await;
-            said = unsettled;
+            say(state, conversation_id, &of.roadmap, &ahead).await;
+            said = ahead;
         }
 
         tokio::time::sleep(state.sessions.pace().joins).await;
@@ -244,24 +269,37 @@ struct Stage {
     label: String,
 }
 
-/// The stages already in this roadmap's chain that have not settled, bottom to
-/// top, by the labels the roadmap gives them.
+/// One stage this one is waiting on, and which of the two reasons it is waiting
+/// on it for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Ahead {
+    /// Which stage of the roadmap, by the label the roadmap's own line gives it.
+    stage: String,
+
+    /// Whether it is in the chain already.
+    ///
+    /// A stage that has **joined** is waited on until it settles: it is a branch
+    /// that may yet be pushed again. One that has not is a stage whose tasks
+    /// finished before this one's and whose turn to join therefore comes first —
+    /// and it is waited on until it has joined *and* settled, which is the first
+    /// case arriving underneath the second.
+    joined: bool,
+}
+
+/// What this stage is waiting on before it may join, in the order it is waiting
+/// on them.
 ///
-/// Two reads of the record and no reading of any branch: `store::stage_chain`
-/// says which stages are in the chain and in what order, and
+/// Three reads of the record and no reading of any branch. `store::stage_chain`
+/// says which stages are in the chain and in what order, `store::join_queue`
+/// says which of them finished their tasks before this one did, and
 /// `store::stage_standings` says what became of each — one rule for *settled*,
 /// shared with both of Verkstead's readings of a roadmap, rather than a second
 /// one here that could come to disagree with them.
 ///
-/// **This stage's own Conversation is never waited on.** A stage at its finish
-/// has no pull request yet and so is not in the chain, but one whose ending
-/// stopped after the push and was taken up again is — and a stage waiting for
-/// itself to settle would never finish.
-///
-/// One label at most per stage, so a stage attempted twice is named once: what
-/// is in the chain is a branch, and what the line says is which stage of the
-/// roadmap is holding this one up.
-async fn unsettled(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<String> {
+/// A record that cannot be read is not a record saying a stage is unsettled, so
+/// a failed read is an empty answer and the stage goes on — see [`hold`], where
+/// the reason is.
+async fn ahead_of(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<Ahead> {
     let chain = match store::stage_chain(&state.pool, of.repo_id, &of.roadmap).await {
         Ok(chain) => chain,
         Err(error) => {
@@ -270,9 +308,13 @@ async fn unsettled(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<St
         }
     };
 
-    if chain.is_empty() {
-        return Vec::new();
-    }
+    let queue = match store::join_queue(&state.pool, of.repo_id, &of.roadmap).await {
+        Ok(queue) => queue,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading a roadmap's queue to join failed");
+            return Vec::new();
+        }
+    };
 
     let standings = match store::stage_standings(&state.pool, of.repo_id).await {
         Ok(standings) => standings,
@@ -282,8 +324,57 @@ async fn unsettled(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<St
         }
     };
 
-    let mut unsettled: Vec<String> = Vec::new();
+    ahead(conversation_id, of, &chain, &standings, &queue)
+}
 
+/// The reading itself, over values rather than over a database — for
+/// `store::StageStandings::from_rows`'s reason: what this takes is three
+/// readings of the record, so what a test hands it is three.
+///
+/// Two rules, and the second is what makes the joins single file:
+///
+/// - **A stage in the chain that has not settled** is a branch still moving, and
+///   nothing rebases onto one.
+/// - **A stage whose tasks finished before this one's and which has not joined**
+///   has the next turn. It is let in first, and this one goes on waiting through
+///   its join — by the rule above, which the join puts it under — until it
+///   settles.
+///
+/// **This stage's own Conversation is never waited on**, in either rule. A stage
+/// at its finish has no pull request yet and so is not in the chain, but one
+/// whose ending stopped after the push and was taken up again is — and it is in
+/// the queue from its first look at the backlog either way.
+///
+/// One label at most per stage, so a stage attempted twice is named once: what
+/// is in the chain is a branch, and what the line says is which stage of the
+/// roadmap is holding this one up. And never this stage's own label, where a
+/// second Conversation answers to it: that is the abandoned attempt at this very
+/// stage, and a stage cannot be what is holding itself up.
+///
+/// A stage ahead in the queue that **settled** or was **abandoned** is waited on
+/// by nobody. Settled is nothing left to wait for, and abandoned is a stage that
+/// will never join at all — a queue that went on waiting for one would be a
+/// roadmap no later stage could ever finish.
+fn ahead(
+    conversation_id: i64,
+    of: &Stage,
+    chain: &[store::Joined],
+    standings: &store::StageStandings,
+    queue: &[store::Queued],
+) -> Vec<Ahead> {
+    let mut ahead: Vec<Ahead> = Vec::new();
+
+    let mut put = |stage: &String, joined: bool| {
+        if stage != &of.label && !ahead.iter().any(|held| &held.stage == stage) {
+            ahead.push(Ahead {
+                stage: stage.clone(),
+                joined,
+            });
+        }
+    };
+
+    // The chain first, bottom to top, which is the order a stage would be
+    // rebased through them.
     for link in chain {
         if link.conversation_id == conversation_id {
             continue;
@@ -293,17 +384,36 @@ async fn unsettled(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<St
             continue;
         }
 
-        if !unsettled.contains(&link.stage) {
-            unsettled.push(link.stage);
-        }
+        put(&link.stage, true);
     }
 
-    // And the stage's own label where two Conversations answer to it: the other
-    // one is the abandoned attempt at this very stage, and a stage cannot be
-    // what is holding itself up.
-    unsettled.retain(|label| label != &of.label);
+    // Then the queue, as far as this stage's own place in it: the stages whose
+    // tasks finished first and which have not joined yet. A stage the record
+    // holds no place for is a stage this cannot order itself against, and it
+    // waits on the chain alone rather than on everybody.
+    let Some(mine) = queue
+        .iter()
+        .position(|queued| queued.conversation_id == conversation_id)
+    else {
+        return ahead;
+    };
 
-    unsettled
+    for queued in &queue[..mine] {
+        if chain
+            .iter()
+            .any(|link| link.conversation_id == queued.conversation_id)
+        {
+            continue;
+        }
+
+        if standings.of(&of.roadmap, &queued.stage) != Some(store::StageStanding::InFlight) {
+            continue;
+        }
+
+        put(&queued.stage, false);
+    }
+
+    ahead
 }
 
 /// Say on the Timeline that the stage is waiting to join, and which stage or
@@ -312,21 +422,18 @@ async fn unsettled(state: &AppState, of: &Stage, conversation_id: i64) -> Vec<St
 /// The one thing a held stage says. No device push: the chain below is being
 /// got on with by whoever is on it, and there is nothing here for the human to
 /// do — see this module's own documentation, where the condition is.
-async fn say(state: &AppState, conversation_id: i64, roadmap: &str, unsettled: &[String]) {
-    let (which, have) = match unsettled {
-        [one] => (format!("stage {one}"), "has"),
-        many => (format!("stages {}", listed(many)), "have"),
-    };
-
+///
+/// And it says *why* of each of them, because the two reasons read as different
+/// waits to whoever is looking at a queue of stages: one is a branch below still
+/// moving, and the other is a stage whose turn simply comes first.
+async fn say(state: &AppState, conversation_id: i64, roadmap: &str, ahead: &[Ahead]) {
     let markdown = format!(
-        "**Waiting to join.** Every task is done, and {which} of the `{roadmap}` roadmap {have} \
-         joined the chain below this one and {have} not settled — so the finish is held until \
-         {have_they}. Nothing rebases onto a branch that is still moving, and this branch is \
-         rebased once, before it has a pull request anybody has started reading.",
-        have_they = match unsettled {
-            [_] => "it does",
-            _ => "they do",
-        },
+        "**Waiting to join.** Every task is done, and the finish is held until the `{roadmap}` \
+         roadmap's chain has settled below this stage: {which}. Nothing rebases onto a branch \
+         that is still moving, and this branch is rebased once, before it has a pull request \
+         anybody has started reading — so the joins are the one thing a roadmap does in single \
+         file, in the order the stages' tasks finished.",
+        which = listed(&ahead.iter().map(why).collect::<Vec<_>>()),
     );
 
     match store::note(&state.pool, conversation_id, &markdown).await {
@@ -343,7 +450,18 @@ async fn say(state: &AppState, conversation_id: i64, roadmap: &str, unsettled: &
     }
 }
 
-/// A few labels in a row, said the way a sentence says them.
+/// One stage being waited on, and what it is being waited on for.
+fn why(ahead: &Ahead) -> String {
+    let stage = &ahead.stage;
+
+    if ahead.joined {
+        format!("stage {stage} has joined the chain and has not settled")
+    } else {
+        format!("stage {stage} finished its tasks before this one and has not joined yet")
+    }
+}
+
+/// A few of them in a row, said the way a sentence says them.
 fn listed(labels: &[String]) -> String {
     match labels.split_last() {
         None => String::new(),
@@ -432,6 +550,230 @@ mod tests {
         assert_eq!(
             listed(&["02".to_owned(), "03".to_owned(), "04".to_owned()]),
             "02, 03 and 04",
+        );
+    }
+
+    /// The roadmap these are all stages of, and the Repo it is in. One of each,
+    /// because what the rule is about is the order inside one roadmap.
+    const ROADMAP: &str = "rate-limiting";
+    const REPO: i64 = 1;
+
+    /// The stage doing the waiting, by the label the roadmap gives it.
+    fn asking(label: &str) -> Stage {
+        Stage {
+            repo_id: REPO,
+            roadmap: ROADMAP.to_owned(),
+            label: label.to_owned(),
+        }
+    }
+
+    /// One link of the chain: a stage that has opened a pull request.
+    fn joined(conversation_id: i64, stage: &str) -> store::Joined {
+        store::Joined {
+            conversation_id,
+            stage: stage.to_owned(),
+            branch: format!("roadmaps/{ROADMAP}/{stage}"),
+        }
+    }
+
+    /// And one place in the queue: a stage whose tasks have finished.
+    fn queued(conversation_id: i64, stage: &str) -> store::Queued {
+        store::Queued {
+            conversation_id,
+            stage: stage.to_owned(),
+        }
+    }
+
+    /// What the record says became of each stage of the roadmap.
+    fn standings<'a>(
+        rows: impl IntoIterator<Item = (&'a str, store::StageStanding)>,
+    ) -> store::StageStandings {
+        store::StageStandings::from_rows(
+            rows.into_iter()
+                .map(|(label, standing)| (ROADMAP, label, standing)),
+        )
+    }
+
+    /// Two stages whose boxes are all ticked at once are let in one at a time,
+    /// and the one whose tasks finished first goes first.
+    ///
+    /// Which is the whole of the queue. The chain below them is settled, so the
+    /// rule about a branch still moving has nothing to say and both would push —
+    /// onto the same top, one of them over the other. The place each took as it
+    /// arrived is what tells them apart.
+    #[test]
+    fn two_stages_at_their_finish_are_let_in_in_the_order_their_tasks_finished() {
+        let chain = [joined(1, "01")];
+        let queue = [queued(1, "01"), queued(2, "02"), queued(3, "03")];
+        let standings = standings([
+            ("01", store::StageStanding::Settled),
+            ("02", store::StageStanding::InFlight),
+            ("03", store::StageStanding::InFlight),
+        ]);
+
+        assert_eq!(
+            ahead(2, &asking("02"), &chain, &standings, &queue),
+            Vec::new(),
+            "the first of the two waits on nobody: the chain below it has settled",
+        );
+
+        assert_eq!(
+            ahead(3, &asking("03"), &chain, &standings, &queue),
+            vec![Ahead {
+                stage: "02".to_owned(),
+                joined: false,
+            }],
+            "and the second waits on the first, which has not joined yet",
+        );
+    }
+
+    /// The first of them **joining** does not release the second. Its settling
+    /// does.
+    ///
+    /// A stage that has just joined is a branch still moving — its wrap-up is
+    /// where a finding gets fixed and a check goes green — so the queue hands it
+    /// straight over to the rule the chain is under, and what the second stage is
+    /// waiting on changes from *has not joined* to *has not settled* without
+    /// letting go.
+    #[test]
+    fn the_stage_in_front_joining_does_not_release_the_one_behind_it() {
+        let queue = [queued(2, "02"), queued(3, "03")];
+        let chain = [joined(2, "02")];
+
+        assert_eq!(
+            ahead(
+                3,
+                &asking("03"),
+                &chain,
+                &standings([
+                    ("02", store::StageStanding::InFlight),
+                    ("03", store::StageStanding::InFlight),
+                ]),
+                &queue,
+            ),
+            vec![Ahead {
+                stage: "02".to_owned(),
+                joined: true,
+            }],
+            "it has joined and is wrapping up, so it is still what is being waited on",
+        );
+
+        assert_eq!(
+            ahead(
+                3,
+                &asking("03"),
+                &chain,
+                &standings([
+                    ("02", store::StageStanding::Settled),
+                    ("03", store::StageStanding::InFlight),
+                ]),
+                &queue,
+            ),
+            Vec::new(),
+            "and its settling is what lets the next one in",
+        );
+    }
+
+    /// A stage in front that will never join holds up nobody.
+    ///
+    /// Abandoned is a branch nothing is on any more, and settled without a pull
+    /// request is a stage that got where it was going another way. Either would
+    /// otherwise be a roadmap no later stage could ever finish — and the price
+    /// the single file charges is a wrap-up that cannot finish, not a stage
+    /// nobody is working.
+    #[test]
+    fn a_stage_in_front_that_will_never_join_is_waited_on_by_nobody() {
+        let queue = [queued(2, "02"), queued(3, "03")];
+
+        for standing in [
+            store::StageStanding::Abandoned,
+            store::StageStanding::Settled,
+        ] {
+            assert_eq!(
+                ahead(
+                    3,
+                    &asking("03"),
+                    &[],
+                    &standings([("02", standing), ("03", store::StageStanding::InFlight)]),
+                    &queue,
+                ),
+                Vec::new(),
+                "a stage that is {standing:?} is nobody's turn to wait for",
+            );
+        }
+    }
+
+    /// A stage the queue holds no place for waits on the chain alone.
+    ///
+    /// Which is the record failing to answer rather than a case of the rule: a
+    /// stage takes its place before it looks at anything, so a stage with none
+    /// is one whose write did not land. There is nothing to order it against, and
+    /// holding it for ever against a queue it is not in would be a stage nothing
+    /// could move.
+    #[test]
+    fn a_stage_with_no_place_in_the_queue_waits_on_the_chain_alone() {
+        assert_eq!(
+            ahead(
+                3,
+                &asking("03"),
+                &[joined(1, "01")],
+                &standings([
+                    ("01", store::StageStanding::InFlight),
+                    ("02", store::StageStanding::InFlight),
+                ]),
+                &[queued(2, "02")],
+            ),
+            vec![Ahead {
+                stage: "01".to_owned(),
+                joined: true,
+            }],
+            "the chain below it, and not the stage ahead of it in a queue it is not in",
+        );
+    }
+
+    /// And a stage never waits on itself, in the queue any more than in the
+    /// chain.
+    ///
+    /// Two Conversations answer to one label where a stage was attempted twice,
+    /// and the earlier one took a place in the queue before it was abandoned. A
+    /// stage cannot be what is holding itself up, and its own label on the
+    /// Timeline would read as one.
+    #[test]
+    fn a_stage_waits_on_neither_itself_nor_an_earlier_attempt_at_itself() {
+        let queue = [queued(2, "03"), queued(3, "03")];
+        let standings = standings([("03", store::StageStanding::InFlight)]);
+
+        assert_eq!(
+            ahead(3, &asking("03"), &[], &standings, &queue),
+            Vec::new(),
+            "the abandoned attempt at this very stage is not what it is waiting on",
+        );
+
+        assert_eq!(
+            ahead(3, &asking("03"), &[joined(3, "03")], &standings, &queue),
+            Vec::new(),
+            "and neither is its own pull request, where its ending was taken up again",
+        );
+    }
+
+    /// The two reasons read as two different waits, because to whoever is looking
+    /// at a queue of stages they are: one is a branch below still moving, and the
+    /// other is a stage whose turn simply comes first.
+    #[test]
+    fn a_line_says_which_of_the_two_reasons_each_stage_is_waited_on_for() {
+        assert_eq!(
+            why(&Ahead {
+                stage: "02".to_owned(),
+                joined: true,
+            }),
+            "stage 02 has joined the chain and has not settled",
+        );
+        assert_eq!(
+            why(&Ahead {
+                stage: "02".to_owned(),
+                joined: false,
+            }),
+            "stage 02 finished its tasks before this one and has not joined yet",
         );
     }
 }

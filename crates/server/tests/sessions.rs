@@ -21828,20 +21828,18 @@ esac
     )
 }
 
-/// Put another stage of the same roadmap into the record by hand, already in
-/// the chain and not settled: started as a stage, with a pull request recorded
-/// against it and nothing since.
+/// Put another stage of the same roadmap into the record by hand: started as a
+/// stage, and nothing else.
 ///
 /// By hand because nothing starts two stages of one roadmap yet — the stage
 /// after this one starts when this one *settles*, which is the ordering the
 /// roadmap this work belongs to is taking apart. What the hold reads is the
-/// record, and this is the record a second stage in flight leaves: a
-/// `stage_roadmaps` row saying which stage it is, and a pull request saying it
-/// has joined.
+/// record, and this is the record a second stage leaves: a `stage_roadmaps` row
+/// saying which stage of which roadmap it is.
 ///
 /// No worktree on disk and no session: nothing here reads either. What it is
-/// standing in for is a branch somebody else's stage is still pushing to.
-async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, number: i64) -> i64 {
+/// standing in for is a branch somebody else's stage is still working.
+async fn a_stage_of_the_roadmap(fixture: &Grilling, repo_id: i64, label: &str) -> i64 {
     let pool = open_database(&fixture.database).await.unwrap();
     let branch = format!("roadmaps/rate-limiting/{label}-by-hand");
 
@@ -21865,6 +21863,19 @@ async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, num
     .await
     .unwrap();
 
+    id
+}
+
+/// And what puts it in the chain, which is the whole of what a join is: a pull
+/// request recorded against it on its own branch.
+async fn joins_the_chain(fixture: &Grilling, repo_id: i64, id: i64, label: &str, number: i64) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    let branch = verkstead_store::conversation_branch(&pool, id)
+        .await
+        .unwrap()
+        .expect("a Conversation is on a branch from the moment it exists");
+
     verkstead_store::record_pull_request(
         &pool,
         id,
@@ -21880,6 +21891,30 @@ async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, num
     )
     .await
     .unwrap();
+}
+
+/// One already in the chain and not settled: a stage that has joined and is
+/// still wrapping up, which is a branch nothing may rebase onto.
+async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, number: i64) -> i64 {
+    let id = a_stage_of_the_roadmap(fixture, repo_id, label).await;
+
+    joins_the_chain(fixture, repo_id, id, label, number).await;
+
+    id
+}
+
+/// And one whose tasks finished before this fixture's stage did and which has
+/// **not** joined yet: a place in the queue and no pull request.
+///
+/// Which is the case the queue is for. Both stages have every box ticked and the
+/// chain below them is settled, so the rule about a branch still moving has
+/// nothing to say about either — and one of them still has to go first.
+async fn a_stage_queued_to_join(fixture: &Grilling, repo_id: i64, label: &str) -> i64 {
+    let id = a_stage_of_the_roadmap(fixture, repo_id, label).await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::queue_to_join(&pool, id).await.unwrap();
 
     id
 }
@@ -22125,6 +22160,125 @@ async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
         );
         assert!(!view.waiting_to_join, "and wears no label for it either",);
     }
+}
+
+/// Two stages whose tasks are all done are let into the chain **one at a time,
+/// in the order their tasks finished** — and the one in front *joining* does not
+/// release the one behind it. Its settling does.
+///
+/// The other half of the hold, and the one nothing about the chain can answer by
+/// itself: both stages have every box ticked, the chain below them is settled, so
+/// the rule about a branch still moving has nothing to say about either — and
+/// both would rebase onto the same top and push, one of them over the other. What
+/// tells them apart is the place each took as its tasks finished, which is a
+/// stored fact for exactly this reason.
+///
+/// Three things in a row here, which are one claim: the stage whose tasks
+/// finished second is held while the first has not joined, is *still* held once
+/// it has, and goes the moment it settles. A stage that has just joined is a
+/// branch still moving — its wrap-up is where a finding gets fixed and a check
+/// goes green — so the queue hands it over to the chain's own rule rather than
+/// letting go of it.
+///
+/// And a restart in the middle, because the queue is what a restart must not
+/// reorder: the wait may be long, and the take-up a second server makes reads the
+/// same places out of the record rather than making new ones in the order it
+/// happened to reach the stages.
+#[tokio::test]
+async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+    let stub = a_stage_worked_to_its_finish(&worked, &gate);
+
+    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    // The task session is sitting at the gate, so this stage has a box left to
+    // tick and has taken no place in the queue yet. Which is the window the stage
+    // that finished first takes its place in.
+    until_written_saying(&worked, "worked=01").await;
+
+    let first = a_stage_queued_to_join(&fixture, repo_id, "02").await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    // The box is ticked, and what the run does next is wait — on a stage that is
+    // in no chain at all, and whose only claim on it is that its tasks finished
+    // first.
+    let said = said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02 finished its tasks before this one and has not joined yet"),
+        "the Timeline says which stage is in front of it, and why: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and no finish session was launched: the turn is not this stage's",
+    );
+    assert!(
+        fixture.view().await.waiting_to_join,
+        "which the card says as a label beside the state",
+    );
+
+    // A second server over the same database, which is what a restart is. The
+    // queue is where it was, so the stage is taken up and held again rather than
+    // let in ahead of the one whose tasks finished first.
+    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&restarted, &format!("/api/ui/conversations/{}", fixture.id)).await;
+
+        if view.waiting_to_join {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server let it in out of turn. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Then the stage in front joins — and that is not what releases this one. It
+    // has a pull request now, so it is a link of the chain, and a link that has
+    // not settled is a branch still moving.
+    joins_the_chain(&fixture, repo_id, first, "02", 77).await;
+
+    let said = said_on(
+        &fixture,
+        fixture.id,
+        "stage 02 has joined the chain and has not settled",
+    )
+    .await;
+
+    assert!(
+        said.contains("finished its tasks before this one"),
+        "and the line it said before it joined is still on the Timeline, \
+         so a queue of two reads as a queue: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "still no finish session: joining is not settling",
+    );
+
+    // And its settling is what lets this one in, whereupon the finish runs
+    // exactly as it does today.
+    settles(&fixture, first).await;
+
+    until_written_saying(&worked, "finished=yes").await;
 }
 
 /// The wrap-up over a pull request Verkstead never opened is the wrap-up: its

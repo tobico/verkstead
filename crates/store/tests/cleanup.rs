@@ -865,6 +865,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .await
     .unwrap();
 
+    // And its place in the queue to join its roadmap's chain, taken when its
+    // tasks finished.
+    sqlx::query("INSERT INTO stage_joinings (conversation_id) VALUES (?)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, 'missing-roles')")
         .bind(id)
         .execute(pool)
