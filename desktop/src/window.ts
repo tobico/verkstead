@@ -402,7 +402,7 @@ function bound(window: BrowserWindow, origin: string, by: Opening | undefined): 
 ///
 /// Not awaited: what starts is somebody else's program, and a browser that
 /// takes ten seconds to come up is not something the app should be waiting on —
-/// the same reading `crates/desktop/src/opener.rs` made of it.
+/// the same reading the Rust tray app made of it.
 function away(url: string, origin: string, by: Opening | undefined): void {
   if (where(url, origin) !== "browser") {
     say(`the window was asked to open ${url}, which is nothing a browser is for, so it does not`);

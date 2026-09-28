@@ -225,15 +225,17 @@ pub fn default_data_dir(platform: Platform, env: &Environment) -> Option<PathBuf
 /// The Log Directory this machine gives Verkstead, or `None` where it names
 /// nowhere to put one.
 ///
-/// The read of the process environment for the second of the two directories,
-/// and the whole of what a binary outside this crate calls. **Nothing here
-/// writes to it and nothing creates it**: the answer is where a log file would
-/// go, and the binary that opens one is the binary that makes the directory,
+/// The read of the process environment for the second of the two directories.
+/// **Nothing here writes to it and nothing creates it**: the answer is where a
+/// log file would go, and whatever opens one is what makes the directory,
 /// exactly as the Build Cache makes its own where it uses it. The server keeps
 /// logging to stdout whatever this says, so nowhere to resolve to answers
-/// nothing rather than refusing anything — and the desktop binary that asks
-/// takes that for a log it has lost rather than a startup it should refuse,
-/// which is the opposite of what [`data_dir`] does with the same misfortune.
+/// nothing rather than refusing anything — and the desktop app, which is what
+/// keeps a file there, takes that for a log it has lost rather than a startup
+/// it should refuse, which is the opposite of what [`data_dir`] does with the
+/// same misfortune. That app is not Rust and calls none of this: it resolves
+/// the same three arms itself, in `desktop/src/platform.ts`, and its own suite
+/// is what holds the two readings together.
 pub fn log_dir() -> Option<PathBuf> {
     default_log_dir(Platform::HERE, &Environment::of_the_process())
 }

@@ -8,8 +8,8 @@
 //! the packer put beside the code once there is a packed app — the same shape,
 //! and for the same reason, as [`cli.ts`](./cli.js) beside it.
 //!
-//! **A panel gets the 192px one of the generated set**, which is what
-//! `crates/desktop/src/tray.rs` drew and for its reason: the panel picks the
+//! **A panel gets the 192px one of the generated set**, which is what the Rust
+//! tray app drew and for its reason: the panel picks the
 //! height — around 22 points on most, twice that on a HiDPI one — and scales
 //! what it is given to it, and an icon scaled *up* is the one that looks wrong.
 //!

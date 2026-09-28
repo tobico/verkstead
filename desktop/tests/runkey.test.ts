@@ -1,14 +1,14 @@
 //! **The tray app's Run value, taken over once**: what is found under the Run
 //! key, what becomes of it, and the launches that leave it alone.
 //!
-//! `crates/desktop/src/startup/run_key.rs`'s own reading, which is the whole of
+//! The Rust tray app's own reading, which is the whole of
 //! what that arm ever asked of a value: it is there and Verkstead started at
 //! sign-in, or it is not and Verkstead did not. So this suite is `launchd.test.ts`
 //! without the two keys a plist can be turned off with, and with one arm that
 //! file has no need of — the value this app writes not being the value this reads.
 //!
 //! **The failure this is here to catch is a sign-in start left behind.** After an
-//! upgrade that value still starts a binary this roadmap deletes at every sign-in,
+//! upgrade that value still starts a binary that is gone at every sign-in,
 //! while the box on the Desktop page reads off — a Verkstead that says it does not
 //! start with the session and a sign-in that keeps trying to start one. So the
 //! value has to arrive in the new registration, it has to go, and the machines
@@ -106,7 +106,7 @@ describe("where the tray app's value is", () => {
   });
 
   /// And it is that app's own and says so in its name, which is the app id —
-  /// `crates/desktop/src/startup/run_key.rs` names it for `crate::APP_ID`.
+  /// the Rust tray app named its value for the same string.
   it("is the app id's own value", () => {
     expect(APP_ID).toBe("net.tobico.Verkstead");
   });

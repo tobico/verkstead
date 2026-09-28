@@ -524,7 +524,7 @@ impl Grilling {
     /// And the desktop app's own log file, which the tray's **View Logs** opens
     /// and which nothing in a description names either.
     ///
-    /// In the human's local application data, where the desktop binary's Log
+    /// In the human's local application data, where the desktop app's Log
     /// Directory resolves to on this platform — see
     /// `verkstead_server::platform::default_log_dir`.
     fn desktop_log(&self) -> PathBuf {

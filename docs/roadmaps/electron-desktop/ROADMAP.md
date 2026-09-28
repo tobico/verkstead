@@ -12,7 +12,7 @@ only the app draws. The decisions and their why are in
 [ADR-0020](../../adr/0020-electron-desktop.md), which supersedes
 [ADR-0012](../../adr/0012-desktop-tray-binary.md); the terms are in
 [CONTEXT.md](../../../CONTEXT.md), which each stage updates as its piece
-lands, as does [development.md](../../development.md) — a fifth of which is
+lands, as does [development.md](../../development.md) — a fifth of which was
 about the crate this roadmap retires, and which goes wrong at stage 02 rather
 than at the end.
 
@@ -21,9 +21,9 @@ the briefs are provisional — re-grounded against the codebase when the stage
 starts.
 
 Sequential from 01 to 05, then a fork: 06 and 07 each need 05 and run in
-either order, and 08 needs both. The trunk stays releasable throughout — the
-Rust tray app keeps shipping on each platform until the stage for that
-platform takes its release leg, and 08 retires it only once none is left.
+either order, and 08 needs both. The trunk stayed releasable throughout — the
+Rust tray app went on shipping on each platform until the stage for that
+platform took its release leg, and 08 retired it once none was left.
 
 ## Stages
 

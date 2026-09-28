@@ -38,7 +38,7 @@
 //! Verkstead with nowhere to keep its database has nothing to serve, while one
 //! with nowhere to keep a log file has only lost the log.
 //!
-//! All of it is `crates/desktop/src/logs.rs` kept as it was: the same file
+//! All of it is the Rust tray app's log file kept as it was: the same file
 //! names, the same bound, the same mark, so that a machine which has run both
 //! apps has one log rather than two conventions.
 

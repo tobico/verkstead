@@ -168,20 +168,6 @@ plus this build directory, which breaks the next time either moves — so the
 whole path is written and under vitest, and the writing is what is refused. Its
 account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 
-**No release carries the Rust tray app any longer**, Windows having been the
-last platform whose release leg went over to the packed Electron app: nothing
-the packaging section below builds is that app. `crates/desktop` is still here
-all the same — its tray half behind the CLI's default-on `desktop` feature, a
-build that says nothing getting both halves, and `--no-default-features` the
-headless build the musl CLI, the nix package and every desktop artifact's
-sidecar take — and it is the one crate here that links a system toolkit, GTK
-on Linux, which is why the workspace builds in the dev shell and nowhere else
-here. Taking it away is the last stage of
-[the Electron roadmap](roadmaps/electron-desktop/ROADMAP.md); its account until
-then is [ADR 0012](adr/0012-desktop-tray-binary.md) and CONTEXT.md's **Startup
-Registration**, which is where **Launch on Startup** is written down; nothing
-in this section starts it.
-
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
 `--build-cache-dir` says otherwise. Every session gets it writable, with
@@ -594,7 +580,7 @@ $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 $ blender -b tools/hammer/verkstead-hammer.blend \
     --python tools/hammer/render.py   # the artwork, from the blend file it is modelled in
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
-$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the menu bar template, the icns and the ico
+$ tools/generate-packaging.sh # the launcher icons, the menu bar template, the icns and the ico
 ```
 
 None of the three desktop artifacts a release ships is a script here. All
@@ -609,7 +595,7 @@ sidecar, and which binary that is is the one thing
 so `pnpm run pack` is told, either as its first argument or in `VERKSTEAD_CLI`:
 
 ```console
-$ cargo build --release -p verkstead-cli --no-default-features
+$ cargo build --release -p verkstead-cli
 $ cd desktop && pnpm run pack ../target/release/verkstead
 ```
 
@@ -630,9 +616,9 @@ electron-builder builds either half. Both halves come from that Mac's own
 toolchain, the second Apple target a `rustup target add` away.
 
 ```console
-$ cargo build --release -p verkstead-cli --no-default-features \
+$ cargo build --release -p verkstead-cli \
     --target aarch64-apple-darwin
-$ cargo build --release -p verkstead-cli --no-default-features \
+$ cargo build --release -p verkstead-cli \
     --target x86_64-apple-darwin
 $ cd desktop && pnpm run pack \
     ../target/aarch64-apple-darwin/release/verkstead \
@@ -668,7 +654,7 @@ ways in are a Start-menu entry and a directory on the user's `PATH` has to be
 put somewhere before either of them exists.
 
 ```console
-$ cargo build --release -p verkstead-cli --no-default-features
+$ cargo build --release -p verkstead-cli
 $ cd desktop && pnpm run pack ../target/release/verkstead.exe
 ```
 
@@ -933,16 +919,16 @@ why the virtual display the addon suggests is not an option in a Sandbox.
 `packaging/` is the second tree of generated assets, and it sits outside
 `assets/` deliberately. Everything under that directory is `publicDir` — served
 at the web root and, because the viewer is embedded, carried inside every binary
-including the headless CLI — and a desktop entry and a launcher's icons are
-neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
-gets a directory of its own: the hicolor icon tree that
+including the headless CLI — and a launcher's icons are neither the viewer's to
+serve nor the CLI's to hold. So the desktop packaging gets a directory of its
+own: the hicolor icon tree that
 [`desktop/scripts/pack.mjs`](../desktop/scripts/pack.mjs) stages as the flat
 `<size>x<size>.png` set electron-builder reads an icon directory as — a rename
 rather than a second set of pixels, so a panel, a menu and the packed image's
-own `.DirIcon` are all drawn from the same hammer — and beside it
-`net.tobico.Verkstead.desktop`, which the packed app's entry takes its *fields*
-from rather than being installed itself, electron-builder writing that entry
-with an `Exec` of its own that no configuration replaces. Then
+own `.DirIcon` are all drawn from the same hammer. No desktop entry: the packed
+app's is electron-builder's to write, with an `Exec` of its own that no
+configuration replaces, and the fields it puts in one are in
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml). Then
 `menubarTemplate.png` and the `@2x` beside it, which are the one thing in the
 tree that is not a downscale of the drawing: a Mac's menu bar lays a status item
 out at the size of the image it is handed rather than scaling it to the bar, and

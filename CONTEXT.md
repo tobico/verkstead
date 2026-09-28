@@ -713,41 +713,30 @@ notification that never arrives, and there is nothing about anybody's work in
 an icon. The **Share Viewer** needs no exemption, being a file at GitHub that
 reads nothing of this server.
 **Where it is handed out is the install's own first-visit path**: the daemon's
-startup line carries `workbench=`, and on the desktop app the browser opened at
-startup and the tray's **Open** both go to the link, built afresh at each press
-so a browser that forgot the cookie is let in again.
+startup line carries `workbench=`, and the desktop app opens its own window on
+the link, built afresh at each opening so a window that forgot the cookie is let
+in again.
 **And the line carries the key only on the install that hands it over that
-way.** The daemon's does: a machine started from a unit file has no tray to
-press, and what somebody reading the journal pastes is the whole link. The
-desktop app's does not, naming the address alone: it has handed the link over
-already, and its log is the file the tray's **View Logs** opens on somebody's
-desk — a key written there is a login for anybody reading over their shoulder.
-**Unless there turned out to be no tray**, which is a machine over SSH, in a
-container, or one whose desktop would not give Verkstead an icon: the app's
-handing over is the browser and **Open**, so a run with neither says the link
-itself rather than serving a workbench nobody can get into. And a browser that
-would not open is reported by the address, at startup and at a press alike — a
-line about a failure is that file on that desk, and is nobody's only way in.
-**And the sidecar's line redacts for the same reason, on the flag's word.**
-`verkstead serve --desktop` is the server the desktop app starts beside itself
-(ADR-0020), and the flag is the whole of what it knows about who started it: the
-app reads the key out of the **Data Directory** before there is a server to ask
-one of and opens its own window on the link, so the line names the address alone
-and the log file the app's own **View Logs** opens carries no login. Three
-installs, therefore, and two answers: the daemon's line hands the link over
-because nobody is at the machine, and both installs with somebody at it have
-handed it over already. Nothing about the key itself changes under the flag —
+way, which is the flag's word.** `verkstead serve --desktop` is the server the
+desktop app starts beside itself (ADR-0020), and the flag is the whole of what
+it knows about who started it: the app reads the key out of the **Data
+Directory** before there is a server to ask one of and opens its own window on
+the link, so the line names the address alone and the log file the app's own
+**View Logs** opens carries no login — a key written there is a login for
+anybody reading over their shoulder. The daemon's line hands it over instead: a
+machine started from a unit file has nobody at it to have opened a window, and
+what somebody reading the journal pastes is the whole link. Two installs,
+therefore, and two answers. Nothing about the key itself changes under the flag —
 `workbench.key` in the Data Directory at the mode it always had, which is the one
 place the app reads it from and where a human who started that sidecar by hand
 reads it too. A `serve` with no flag on it is the daemon's line whatever else is
 true of the machine: the flag is said rather than guessed, because a display is
 not who started this.
-**And the sidecar with no display says the link after all**, which is the same
-fallback the app makes where no tray came up: the app that flag speaks for could
-not have started — nothing draws a window where there is nowhere to put one — so
-a `--desktop` run over SSH or in a container is a caller that handed the link to
-nobody, and the address alone would leave it serving a workbench whose only way
-in is a file nobody has been told to read. The daemon's line exactly where the
+**And the sidecar with no display says the link after all**: the app that flag
+speaks for could not have started — nothing draws a window where there is
+nowhere to put one — so a `--desktop` run over SSH or in a container is a caller
+that handed the link to nobody, and the address alone would leave it serving a
+workbench whose only way in is a file nobody has been told to read. The daemon's line exactly where the
 sidecar has become the daemon, and the case it fires in is the one case where
 the app is not there to have a log file for the secret to sit in.
 A session cannot read the file whatever is in it, the log living in the human's
@@ -800,9 +789,9 @@ privilege to raise, so a refused press hands back `sudo tailscale set
 --operator=<user>` for this machine's own user and the next press is the
 re-try. The desktop app has somebody at the machine to ask and a daemon has
 not, so where the app started the server that press goes through the platform's
-own password dialog first — the app in-process, and the sidecar
-`verkstead serve --desktop` starts as on its own word, which is the only thing
-either of them is told about who is at the machine. **And only where there is
+own password dialog first — on the word of the `--desktop` the sidecar is
+started with, which is the only thing the server is told about who is at the
+machine. **And only where there is
 somewhere to draw one**: a run over SSH or in a container is the app with no
 display, and a dialog nobody can see is a press waiting on a dismissal that
 cannot arrive, so there the line is shown as a daemon's is. A `serve` with no

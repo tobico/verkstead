@@ -1,7 +1,7 @@
 //! **Launch on Startup**: where the registration goes, what it says, and what
 //! reading it back comes to.
 //!
-//! `crates/desktop/src/startup/xdg.rs`'s own suite, arm for arm, because the
+//! The Rust tray app's own suite, arm for arm, because the
 //! entry this app writes is the entry that app wrote — the same file under the
 //! same name, which is how the old registration is taken over rather than
 //! doubled (ADR-0020). So the directory resolution, the quoting and the two

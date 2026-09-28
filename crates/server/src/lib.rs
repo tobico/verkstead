@@ -63,9 +63,11 @@ mod diffs;
 /// held as. That is the word this crate and CONTEXT.md's glossary already spend
 /// on the other sense, so this one is a display.
 ///
-/// Public because what asks it is whatever started this server and means to draw
-/// on that display: the tray app's icon and its dialogs, and the graphical grant
-/// below, which is installed only where the answer is yes.
+/// Public for the reason [`platform`] is — whether there is anybody at this
+/// machine to draw for is a fact about the machine rather than an endpoint's
+/// business. It is asked once as a server starts, for the two things that turn
+/// on it: [`StartedBy::escalation`], which is installed only where the answer
+/// is yes, and [`StartedBy::hands_over_the_link`].
 pub mod display;
 mod done;
 mod drivers;
@@ -73,10 +75,10 @@ mod drivers;
 /// dialog, put in front of the one command Verkstead ever asks for a privilege
 /// for.
 ///
-/// Public for the reason [`display`] is — it is what a starting binary hands the
-/// server as it starts it, and the three arms are spawned commands with no
-/// toolkit behind them, so they live with the server rather than with the tray
-/// app that was the first to hand one over.
+/// Public for the reason [`display`] is — how this desktop is asked for a
+/// privilege is the product's own answer rather than an endpoint's, and the
+/// three arms are spawned commands with no toolkit behind them, so the asking
+/// lives with the server rather than with the app that has the screen.
 pub mod elevate;
 mod exchanges;
 /// The Worktrees Code reads: the roots its tree stands on, and one folder of
@@ -251,10 +253,10 @@ mod ui;
 /// Running a program without putting a window on the human's screen, which is
 /// Windows' question and nobody else's.
 ///
-/// Public because the tray app spawns too, and it is the tray app that has no
-/// console for a child to inherit — see [`crate::remote::Elevate`], whose one
-/// graphical implementation is [`crate::elevate`] and runs the platform's own
-/// asking.
+/// Public for the reason [`platform`] is — what starting a program does to the
+/// human's screen is a fact about the machine rather than an endpoint's
+/// business. Every spawn in this crate says it, because a server started as the
+/// desktop app's sidecar has no console for a child to inherit.
 pub mod unseen;
 mod updates;
 mod viewer;

@@ -4,8 +4,8 @@
 //!
 //! Two things are ever handed over, and to this app they are one act: the log
 //! file, which goes to whatever reads text here, and a link that leaves the
-//! workbench, which goes to a browser. `crates/desktop/src/opener.rs` was one
-//! module for the same pair and for the same reason — what the desktop starts
+//! workbench, which goes to a browser. The Rust tray app had one module for
+//! the same pair and for the same reason — what the desktop starts
 //! is the desktop's business rather than Verkstead's.
 //!
 //! **Linux is the arm with anything in it, and `xdg-open` is why.**

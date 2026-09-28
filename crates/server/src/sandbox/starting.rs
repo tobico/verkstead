@@ -367,9 +367,10 @@ fn over_pipes(rendering: &Rendering, logon: &Logon, typed: &[u8]) -> io::Result<
 /// a person to read — the Compile Server, a probe whose output is read back off
 /// a pipe, a session's launcher, whose console is the pseudoconsole it makes
 /// for itself and not this one. Without it each one puts an empty black window
-/// on the screen and leaves it there for as long as it runs, and the tray app
-/// has no console of its own to hand down instead — see
-/// `verkstead-desktop.exe`, which is the same thing said one level up.
+/// on the screen and leaves it there for as long as it runs, and the server
+/// has no console of its own to hand down instead — see [`crate::unseen`],
+/// which is the same thing said of the ordinary spawns, and of the app that
+/// starts the server without one.
 ///
 /// `also` is whatever creation flags the caller wants beside the environment's:
 /// `CREATE_SUSPENDED` for a process that is to be in a Job before it has run an

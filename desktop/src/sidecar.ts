@@ -196,6 +196,17 @@ export function start(
     // stderr and that is the half most worth having in the file.
     stdio: ["ignore", "pipe", "pipe"],
     env,
+    // And no console window, which is Windows' question and nobody else's:
+    // this app is a windowed program with no console of its own, and a console
+    // program started by one is given a console — an empty black rectangle in
+    // front of whatever the human was looking at, for as long as the server
+    // runs. `windowsHide` is Node's name for `CREATE_NO_WINDOW`, and it is off
+    // unless it is said. Said unconditionally rather than worked out: the other
+    // two platforms have no such notion, and a run from a terminal hands the
+    // child the console that is already there, where there was never a window
+    // to suppress. `crates/server/src/unseen.rs` is the same sentence one level
+    // down, for every program the server itself runs.
+    windowsHide: true,
   });
 
   read(child.stdout, said);

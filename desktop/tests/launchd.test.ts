@@ -1,14 +1,14 @@
 //! **The tray app's launch agent, taken over once**: what is read out of the
 //! plist, what becomes of it, and the launches that leave it alone.
 //!
-//! `crates/desktop/src/startup/launchd.rs`'s own suite for the reading half,
-//! arm for arm, because the file being read is the file that app wrote: the
+//! The Rust tray app's own suite for the reading half, arm for arm, because
+//! the file being read is the file that app wrote: the
 //! directory under the home, the name the app id gives it, and the two keys
 //! `says_on` turns an agent off by.
 //!
 //! **The failure this is here to catch is a launch agent left behind.** After
-//! an upgrade that plist still starts a binary this roadmap deletes at every
-//! login, while the box on the Desktop page reads off — a Verkstead that says
+//! an upgrade that plist still starts a binary that is gone at every login,
+//! while the box on the Desktop page reads off — a Verkstead that says
 //! it does not start with the session and a login that keeps trying to start
 //! one. So what the agent said has to arrive in the new registration, the file
 //! has to go, and the machines that never had it — and the runs that have no
@@ -52,8 +52,8 @@ const packed = (home: string, over: Partial<Registering> = {}): Registering => (
 });
 
 /// The agent as the Rust tray app wrote it, for a Verkstead at `exe` — the
-/// text `crates/desktop/src/startup/launchd.rs` writes, which is what a machine
-/// being upgraded actually has on it.
+/// text that app wrote, which is what a machine being upgraded actually has on
+/// it.
 const wrote = (exe = "/usr/local/bin/verkstead"): string =>
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
   '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ' +

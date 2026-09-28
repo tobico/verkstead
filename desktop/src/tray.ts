@@ -132,8 +132,8 @@ export function raise(trayed: Trayed): void {
 /// Called as the app goes, and first of the things it does then: the icon is
 /// the one piece of this app that is on somebody else's window, stopping the
 /// sidecar can take a moment, and an icon still sitting there after Quit was
-/// picked is an app that looks stuck. `crates/desktop/src/tray.rs` let go of
-/// its own for the same reason.
+/// picked is an app that looks stuck. The Rust tray app let go of its own for
+/// the same reason.
 export function lower(): void {
   icon?.destroy();
   icon = undefined;

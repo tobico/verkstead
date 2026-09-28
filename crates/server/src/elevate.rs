@@ -9,12 +9,11 @@
 //! app answering that press with the platform's own password dialog instead.
 //!
 //! **The seam is [`crate::remote::Elevate`], and this is its one
-//! implementation.** What crosses it is a handle handed in as the server starts,
-//! so a server that was handed none — a daemon, with nobody at the machine to
-//! ask — shows the line as it always did. Whatever starts a server with somebody
-//! in front of it installs this: the Rust tray app hands it over in-process, and
-//! it is [`Graphical::here`](crate::elevate::Graphical::here) however it is
-//! reached.
+//! implementation.** What crosses it is a handle or nothing, settled as the
+//! server starts: a daemon has nobody at the machine to ask and shows the line
+//! as it always did, and a sidecar the desktop app started with somewhere to
+//! draw gets [`Graphical::here`](crate::elevate::Graphical::here). See
+//! [`crate::StartedBy::escalation`], which is where the two are told apart.
 //!
 //! **Three arms, and each of them a command.** `pkexec` on Linux, `osascript`
 //! running the command *with administrator privileges* on macOS, and a
@@ -22,8 +21,8 @@
 //! Windows. Nothing here is a dialog Verkstead draws: each of the three is the
 //! platform's own asking, put in front of a command by starting a program, so no
 //! toolkit is involved and neither is the thread one would hold — which is why
-//! this module is the server crate's rather than the tray app's, and why
-//! `verkstead_desktop::dialog`, the opposite case, is not.
+//! the asking can live here at all, in a crate that draws nothing, rather than
+//! with the app that has the screen.
 //!
 //! **Whether there is anybody to ask is a question of its own**, and it is asked
 //! before this is installed rather than here — see [`crate::display`], which is

@@ -5,7 +5,7 @@
 //! this stage, and a packed app, which is stage 05's. Both are a function of
 //! where the app is running from, so both are an ordinary unit test; and the
 //! one that exists is asked about the file as well as about the path, the way
-//! `crates/desktop/src/tray.rs` asked it of the artwork it had built in.
+//! the Rust tray app asked it of the artwork it had built in.
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";

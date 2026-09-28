@@ -870,7 +870,7 @@ fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
 /// says so nowhere, and a Windows runner is on a visible station like any other
 /// process. Nothing about the fallback is Linux's own — it is the same branch
 /// of the same function — so what the other two lose is the premise, not the
-/// coverage. See `verkstead_server::display`.
+/// coverage. See `crates/server/src/display.rs`.
 ///
 /// Said as empty rather than taken away, which is the same answer and one this
 /// suite can give whatever the machine running it has exported: a name exported

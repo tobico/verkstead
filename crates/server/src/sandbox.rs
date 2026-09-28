@@ -76,9 +76,9 @@
 // Built wherever the tests are rather than on its own platform alone: a
 // rendering is a description going in and a process coming out, so the arm this
 // machine will never run is still an arm its tests call — the same reason
-// `crates/desktop`'s startup registrations are all built here. Not on a Windows
-// build outside one: there is no namespace to unshare there, and the renderer a
-// Windows session gets is the third of them below.
+// `Platform` is a value rather than a `cfg`. Not on a Windows build outside
+// one: there is no namespace to unshare there, and the renderer a Windows
+// session gets is the third of them below.
 #[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
 mod bwrap;
 // The Apple rendering is built for its tests on a Unix and nowhere else: what

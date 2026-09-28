@@ -9,8 +9,8 @@
 //!
 //! **The order is the menu's meaning as much as the labels are.** A panel that
 //! reports no click of its own opens the menu instead, so the first item is
-//! what the icon means by default — which is why Open is first, exactly as
-//! `crates/desktop/src/tray.rs` had it and for the same reason. Quit is last
+//! what the icon means by default — which is why Open is first, exactly as the
+//! Rust tray app had it and for the same reason. Quit is last
 //! for the reverse of it, and View Logs is what is neither.
 //!
 //! The Rust app's menu had a fourth item between them, Launch on Startup, and

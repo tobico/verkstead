@@ -161,3 +161,13 @@ goes nowhere.
 - **Fronting an already-running server instead of erroring** — single-instance
   behaviour for free, rejected for conflating the desktop app's server with a
   daemon of a different version and data directory.
+
+**And the code this describes is gone.** `crates/desktop`, the default-on
+`desktop` cargo feature the amendment above folded it into and the
+`verkstead desktop` verb that feature carried were all deleted once the
+Electron app had taken every platform's release leg — the last stage of
+[the electron-desktop roadmap](../roadmaps/electron-desktop/ROADMAP.md). What
+outlives them is what a machine that ran this app still has on it: the launch
+agent on a Mac and the Run value on Windows that it registered itself with,
+which the packed app reads once and takes over. Everything else here is the
+record of what was built rather than a description of anything that stands.
