@@ -2895,7 +2895,7 @@ at home.
 by the path a session ran in wherever it is keyed by anything, and every one of
 those paths is a different string on every machine. So nothing crosses the link
 but the part of the store — the Repo's entry, the Worktree's, the sessions, the
-memory files, the data directory — and the files under it, and each device joins
+memory files, the data store — and the files under it, and each device joins
 that word onto a directory of its own. Which is the whole of the path rewrite,
 done twice rather than sent: the name is computed by the harness's own encoding
 on both ends, and a name computed any other way is a second entry rather than
@@ -2907,9 +2907,20 @@ rollouts it keeps for every directory it has ever run in, the ones whose session
 was working in a Worktree of this name — the Worktree being called the same
 thing on every machine of a cluster and at a different path on each. Grok
 Build's is the same, its session directories picked out by the ids Verkstead
-named them with, and not its index of the whole store. OpenCode's is its data
-directory whole, the database in it running in write-ahead-log mode and one
-carried a file at a time not opening at all.
+named them with, and not its index of the whole store. OpenCode's is the one
+database Verkstead pins every session it runs onto, with the two siblings SQLite
+keeps beside it — the store runs in write-ahead-log mode and one carried a file
+at a time will not open — and not the data directory around it, which also holds
+the login the **Account mirror** carries and whatever other channel of opencode
+the host installed.
+**And OpenCode is the one harness whose unit is not this Repo's.** It keeps a
+row per session in that one database rather than a directory per working
+directory, so what crosses carries the sessions of every repository the human
+has run it in, and the file is the smallest thing there is to carry. Going
+narrower means reading and writing rows of a schema that is opencode's own and
+moves between releases, which is the dependency the records reader deliberately
+does not take — it is allowed to stop reading where this would have to go on
+writing. So the bound on a store is what stands in front of a big one.
 **Which path each part is named off is two different answers.** The Repo's goes
 through the match across devices — see **Repo**, where origin then name is the
 rule — and **no match is an answer**: there is nothing of that Repo to pull, the

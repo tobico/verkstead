@@ -17,7 +17,7 @@
 //! one of those paths is a different string on every machine. So nothing here
 //! sends a path for the other end to write at: what crosses the link is the part
 //! of the store — the Repo's entry, the Worktree's, the sessions, the memory
-//! files, the data directory — and the files under it, and each device joins that
+//! files, the data store — and the files under it, and each device joins that
 //! word onto a directory of its own. Which is the whole of the path rewrite, done
 //! twice rather than sent: the name is computed by the harness's own encoding on
 //! both ends, and a name computed any other way is a second entry rather than the
@@ -71,9 +71,11 @@ use crate::store;
 /// Conversation's transcripts, an account's memory files — and small against the
 /// thing a bound is really in front of, which is the machine on the far end that
 /// answers and then writes without stopping. The one store carried whole is
-/// OpenCode's data directory, and a human whose has grown past this is one whose
-/// sessions away from home start on an empty one with a line saying why. The
-/// mirrors' own bound, for its reason — see [`super::MOST_THE_PROFILES_ARE`].
+/// OpenCode's database, which holds a row per session rather than a directory
+/// per working directory — so this is also what stands in front of a store that
+/// has grown past what is worth carrying, and a human whose has starts their
+/// sessions away from home on an empty one with a line saying why. The mirrors'
+/// own bound, for its reason — see [`super::MOST_THE_PROFILES_ARE`].
 pub(crate) const MOST_A_STORE_IS: usize = 64 * 1024 * 1024;
 
 /// How much of a rollout is read to say whose session wrote it.
@@ -596,6 +598,26 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                 &mut files,
                 &mut held,
             )?,
+
+            // The database and the two siblings SQLite keeps beside it, which
+            // have to travel together or it will not open on the machine they
+            // land on — and nothing else in that directory, the login there
+            // being the account mirror's to carry.
+            Whose::Database(name) => {
+                for beside in [
+                    name.to_string(),
+                    format!("{name}-wal"),
+                    format!("{name}-shm"),
+                ] {
+                    taken(
+                        &under,
+                        &under.join(beside),
+                        part.label,
+                        &mut files,
+                        &mut held,
+                    )?;
+                }
+            }
         }
     }
 
@@ -741,28 +763,57 @@ fn walked(
             continue;
         }
 
-        let Ok(inside) = path.strip_prefix(root) else {
-            continue;
-        };
-
-        let bytes = std::fs::read(&path)?;
-
-        *held += bytes.len();
-
-        if *held > MOST_A_STORE_IS {
-            return Err(io::Error::other(format!(
-                "the memory store under {} is larger than the {MOST_A_STORE_IS} bytes one may be \
-                 to cross a link",
-                root.display(),
-            )));
-        }
-
-        files.push(MemoryFile {
-            part: label.to_owned(),
-            inside: plainly(inside),
-            bytes: STANDARD.encode(&bytes),
-        });
+        taken(root, &path, label, files, held)?;
     }
+
+    Ok(())
+}
+
+/// One file of a part, read and put on the list under where it sits in it.
+///
+/// **Nothing at all where it is not there**, which is what lets a part name a
+/// file rather than only a directory: a database whose log has been folded back
+/// into it has no `-wal` beside it, and that is a store in order rather than a
+/// store to fail over.
+///
+/// Where the bound is applied, because this is where the bytes are held: a store
+/// is refused whole rather than carried in part — half of one is a database that
+/// will not open and a transcript that stops in the middle, and neither is
+/// better than starting new.
+///
+/// Blocking: one read.
+fn taken(
+    root: &Path,
+    path: &Path,
+    label: &'static str,
+    files: &mut Vec<MemoryFile>,
+    held: &mut usize,
+) -> io::Result<()> {
+    let Ok(inside) = path.strip_prefix(root) else {
+        return Ok(());
+    };
+
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(why) if why.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(why) => return Err(why),
+    };
+
+    *held += bytes.len();
+
+    if *held > MOST_A_STORE_IS {
+        return Err(io::Error::other(format!(
+            "the memory store under {} is larger than the {MOST_A_STORE_IS} bytes one may be \
+             to cross a link",
+            root.display(),
+        )));
+    }
+
+    files.push(MemoryFile {
+        part: label.to_owned(),
+        inside: plainly(inside),
+        bytes: STANDARD.encode(&bytes),
+    });
 
     Ok(())
 }
@@ -1054,16 +1105,25 @@ mod tests {
     }
 
     /// OpenCode keeps one database for every directory it has ever run in, in
-    /// write-ahead-log mode: there is no unit smaller than the data directory, and
-    /// a database carried without its siblings is one that will not open. So the
-    /// directory travels whole.
+    /// write-ahead-log mode: the file is the smallest unit there is, and one
+    /// carried without its siblings will not open. So the three travel together —
+    /// and nothing else in that directory does, the login being the account
+    /// mirror's to carry and another channel's store being another channel's.
     #[test]
-    fn an_opencode_store_carries_its_data_directory_whole() {
+    fn an_opencode_store_carries_the_database_verkstead_pinned_and_nothing_beside_it() {
         let account = store(&[
             (".local/share/opencode/opencode.db", b"the database"),
             (".local/share/opencode/opencode.db-wal", b"the log"),
             (".local/share/opencode/opencode.db-shm", b"the index"),
             (".local/share/opencode/auth.json", b"the login"),
+            (
+                ".local/share/opencode/opencode-beta.db",
+                b"another channel's",
+            ),
+            (
+                ".local/share/opencode/cache/thing",
+                b"whatever else is in there",
+            ),
             (".config/opencode/opencode.json", b"the configuration"),
         ]);
 
@@ -1078,7 +1138,6 @@ mod tests {
         assert_eq!(
             carrying(account.path(), &parts),
             [
-                "data/auth.json",
                 "data/opencode.db",
                 "data/opencode.db-shm",
                 "data/opencode.db-wal",
@@ -1087,7 +1146,7 @@ mod tests {
     }
 
     /// And a database carried that way **opens** on the machine it lands on, which
-    /// is the whole reason the directory travels whole: opencode keeps its store in
+    /// is the whole reason the three travel together: opencode keeps its store in
     /// write-ahead-log mode, and a file carried without its `-wal` and `-shm`
     /// siblings is a database that will not open.
     #[tokio::test]

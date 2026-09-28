@@ -589,7 +589,7 @@ pub struct MemoryWanted {
 ///
 /// **Under a label rather than under a path.** The part of the store it belongs
 /// to is named by a word both machines hold to — the Repo's entry, the
-/// Worktree's, the sessions, the memory files, the data directory — and each of
+/// Worktree's, the sessions, the memory files, the data store — and each of
 /// them joins that word onto a path of its own. `inside` is where the file sits
 /// under that part, which is the one piece of a path that is the same on both
 /// machines.

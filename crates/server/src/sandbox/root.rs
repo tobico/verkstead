@@ -880,9 +880,24 @@ impl Root {
     ///   under. Not `session_search.sqlite` at the top of it, which is the
     ///   human's index of the whole store: a copy of a mirror's partial one
     ///   written over it at home would be a search that had lost the rest.
-    /// - **OpenCode** — its data directory whole. The database in it runs in
-    ///   write-ahead-log mode and one carried a file at a time will not open, so
-    ///   the directory travels with its `-wal` and `-shm` siblings or not at all.
+    /// - **OpenCode** — the one database Verkstead pins every session it runs
+    ///   onto, and the two siblings SQLite keeps beside it: the store runs in
+    ///   write-ahead-log mode, and a database carried without its `-wal` and
+    ///   `-shm` will not open. Not the data directory whole, which also holds
+    ///   the login the account mirror carries and whatever other channel of
+    ///   opencode the host has installed — see [`super::OPENCODE_DB_FILE`].
+    ///
+    ///   **And this is the one harness whose unit is not this Repo's.** opencode
+    ///   keeps a row per session in that one database rather than a directory
+    ///   per working directory, so the sessions of every repository the human
+    ///   has run it in are inside the file, and the file is the smallest thing
+    ///   there is to carry. Narrowing further means reading and writing rows of
+    ///   a schema that is opencode's own and moves between releases — which is
+    ///   the dependency [`crate::records`] deliberately does not take, it being
+    ///   allowed to stop reading where this would have to keep writing. So what
+    ///   crosses is narrower than it was and is still the whole store, and the
+    ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
+    ///   in front of a big one.
     ///
     /// **Nothing at all where the memory switch is off**, which is the reading
     /// [`Root::joined_store`] makes of the same switch: a session away from home
@@ -936,7 +951,11 @@ impl Root {
                 ),
             ],
 
-            Harness::OpenCode => vec![part(DATA, PathBuf::from(OPENCODE_DATA), Whose::Everything)],
+            Harness::OpenCode => vec![part(
+                DATA,
+                PathBuf::from(OPENCODE_DATA),
+                Whose::Database(super::OPENCODE_DB_FILE),
+            )],
         }
     }
 }
@@ -997,6 +1016,21 @@ pub(crate) enum Whose {
     /// And the session directories called one of these, which is what the store
     /// that files a session under the id Verkstead gave it is asked by.
     Called(Vec<String>),
+
+    /// The database of this name directly under the part, and the two siblings
+    /// SQLite keeps beside it — `-wal` and `-shm` — and nothing else there.
+    ///
+    /// **The one store that is a file rather than a tree.** opencode keeps a
+    /// database per account, in write-ahead-log mode, and Verkstead pins the name
+    /// every session it runs writes into it under — see
+    /// [`super::OPENCODE_DB_FILE`]. So the three go together or the database will
+    /// not open on the machine they land on, and nothing else in that directory
+    /// goes at all: the login is the account mirror's to carry, and another
+    /// channel's store is another channel's.
+    ///
+    /// A sibling that is not there is nothing to carry rather than a failure,
+    /// which is a database whose log has been folded back into it.
+    Database(&'static str),
 }
 
 /// Where an account keeps its login, whatever else is true of it.
