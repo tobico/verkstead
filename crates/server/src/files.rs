@@ -2737,6 +2737,14 @@ mod tests {
     fn a_root_over_the_cap_is_cut_and_says_so() {
         let held = tempfile::tempdir().unwrap();
         let worktree = repository(&held.path().join("worktree"));
+
+        // A root under the cap is not cut, which is every ordinary checkout —
+        // asked of the checkout before it is filled rather than of the filled
+        // one emptied again. Ten thousand files just written are ten thousand
+        // the machine may still have open behind us, and a removal that lost
+        // that race would fail for something this has nothing to say about.
+        assert!(!list(&[root(&worktree)]).roots[0].cut);
+
         let many = worktree.join("many");
         std::fs::create_dir(&many).unwrap();
 
@@ -2750,12 +2758,6 @@ mod tests {
 
         assert_eq!(listed.roots[0].files.len(), MAX_LISTED);
         assert!(listed.roots[0].cut);
-
-        // And a root under it is not cut, which is every ordinary checkout.
-        std::fs::remove_dir_all(&many).unwrap();
-        let listed = list(&[root(&worktree)]);
-
-        assert!(!listed.roots[0].cut);
     }
 
     /// The marks of one root, as the paths they are drawn on paired with what
