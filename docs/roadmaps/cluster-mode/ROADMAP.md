@@ -33,7 +33,7 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 - [x] 05: Ranks — [brief](05-ranks.md)
 - [x] 06: The merged list — [brief](06-the-merged-list.md)
 - [x] 07: Drafting on a device — [brief](07-drafting-on-a-device.md)
-- [ ] 08: Shared Profiles — [brief](08-shared-profiles.md)
+- [ ] 08: Shared Profiles — [brief](08-shared-profiles.md) *(in progress: `roadmaps/cluster-mode/08-shared-profiles`)*
 - [ ] 09: Transfer — [brief](09-transfer.md)
 - [ ] 10: Resuming the harness — [brief](10-resuming-the-harness.md)
 - [ ] 11: The agent's call — [brief](11-the-agents-call.md)
