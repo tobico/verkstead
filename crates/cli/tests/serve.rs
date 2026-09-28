@@ -455,12 +455,18 @@ fn stdout(output: &Output) -> String {
 fn a_taken_address_is_refused_by_the_port_it_names_and_makes_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let data_dir = tmp.path().join("never-made");
-    let port = free_port();
 
     // Held for the whole of the run below, because a port let go of is a port
     // the server would take. All this test wants of it is the socket, so it is
     // a listener rather than a second Verkstead.
-    let _first = TcpListener::bind(format!("127.0.0.1:{port}")).unwrap();
+    //
+    // The port is read off this listener rather than picked by `free_port`,
+    // which lets go of what it found: in the window between that release and a
+    // bind here, a test running beside this one is handed the same port — the
+    // one just freed is the one the kernel hands out next — and this bind is
+    // then the one that cannot have it.
+    let first = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = first.local_addr().unwrap().port();
 
     let refusal = refused_to_start(&[
         "--listen",
