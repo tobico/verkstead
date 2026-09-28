@@ -1360,10 +1360,14 @@ describe("the device the compose page is drafting onto", () => {
     // repository on this machine, so moving the work off would be moving it
     // away from what it is continuing.
     await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
-    expect(draftingOn()).toBeNull();
     expect((screen.getByLabelText("Device") as HTMLButtonElement).disabled).toBe(
       true,
     );
+
+    // The page and not the browser's memory of it: this row is drawn at the
+    // start of every piece of work, and a stage looked at and cleared again is
+    // not somebody saying they have finished with the desktop.
+    expect(draftingOn()).toBe(MEMBER.device);
 
     // And a select again the moment it is cleared.
     fireEvent.click(await drawn(container, `.${composer.clear}`));
@@ -1372,6 +1376,8 @@ describe("the device the compose page is drafting onto", () => {
         (screen.getByLabelText("Device") as HTMLButtonElement).disabled,
       ).toBe(false),
     );
+
+    expect(draftingOn()).toBe(MEMBER.device);
   });
 });
 

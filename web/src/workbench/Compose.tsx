@@ -288,20 +288,6 @@ function Compose(props: {
   // brings a page back to it once a create has dropped the draft.
   const device = (): Device => state().device;
 
-  /// Moving what is being composed onto another device of the cluster, which is
-  /// the one move that takes the whole of *which code* and *whose account* with
-  /// it: those are each one Verkstead's ids — see [`elsewhere`], where the rule
-  /// is written.
-  ///
-  /// Remembered as it is made, so a reload comes back to the machine the human
-  /// was drafting onto rather than to this one.
-  const onDevice = (picked: Device) => {
-    if (picked === device()) return;
-
-    setDraftingOn(picked);
-    setState((was) => elsewhere(was, picked));
-  };
-
   // The files picked here, which are not part of what is written back: a
   // `File` cannot be stored and read again, so they live for as long as this
   // page does and the press is what sends them.
@@ -329,6 +315,35 @@ function Compose(props: {
   const change = (part: Partial<Composed>) =>
     setState((was) => ({ ...was, ...part }));
 
+  /// Moving what is being composed onto another device of the cluster, which is
+  /// the one move that takes the whole of *which code* and *whose account* with
+  /// it: those are each one Verkstead's ids — see [`elsewhere`], where the rule
+  /// is written.
+  ///
+  /// **The page alone**, which is the half of a move the two loading rows want:
+  /// what this browser is drafting onto is [`onDevice`]'s to write, and a stage
+  /// loaded to be looked at is not a human saying they have finished with the
+  /// desktop.
+  const composeOn = (picked: Device) => {
+    if (picked === device()) return;
+
+    setState((was) => elsewhere(was, picked));
+  };
+
+  /// And a pick, which is that move with the browser's own memory of it written
+  /// besides — so a reload, and the blank page a create leaves behind, come back
+  /// to the machine the human was drafting onto rather than to this one.
+  ///
+  /// Every pick goes through here, the select's own correction included: a device
+  /// that has left the cluster is one the memory should stop naming too.
+  const onDevice = (picked: Device) => {
+    if (picked === device()) return;
+
+    setDraftingOn(picked);
+    composeOn(picked);
+  };
+
+  /// A pull request loaded into what is being composed, which creates nothing
   // The registered Repos, for the name in the trigger and for the rows the
   // companions are drawn as: the compose state holds ids, and everything drawn
   // off one needs the repository it names. Read under the key every other
@@ -596,9 +611,15 @@ function Compose(props: {
   /// every one of those rows names a Repo *here* — so a stage loaded while the
   /// page was drafting onto a member is a stage that can only be adopted on this
   /// machine. That is a move like any other and takes the same things with it,
-  /// which is [`onDevice`] and nothing written twice.
+  /// which is [`composeOn`] and nothing written twice.
+  ///
+  /// The page and not the browser's memory of it, though. This row is drawn while
+  /// the box is empty, which is the start of every piece of work, so a stage
+  /// loaded to be looked at and cleared again would otherwise have cost this
+  /// browser the device it drafts onto for good — and that memory is the whole of
+  /// what the laptop driving the desktop needs.
   const load = (held: Adopting) => {
-    onDevice(null);
+    composeOn(null);
     setState((was) => ({
       ...was,
       adopting: held,

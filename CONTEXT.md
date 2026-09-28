@@ -1887,7 +1887,9 @@ the way the pane widths are — this device until something is picked, which is
 what the laptop that drives the desktop needs — and a device the cluster has lost
 reads as this device again, taking a draft's Repo id with it. It reads disabled
 while a roadmap or a pull request is loaded, both of those lists being this
-device's own, and loading either puts the work back here.
+device's own, and loading either puts the work back here — **the page and not the
+memory**, that row being drawn at the start of every piece of work: a stage looked
+at and cleared again is not somebody saying they have finished with the desktop.
 
 **And the press goes to the named device too.** The Conversation is started
 against its Repo *there* and every request of the replay after it is addressed the
