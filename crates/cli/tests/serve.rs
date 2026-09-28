@@ -440,6 +440,47 @@ fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).unwrap()
 }
 
+/// And a taken address is refused before anything has been made: whatever is on
+/// the socket is a Verkstead that got there first — a second copy, or the daemon
+/// a unit file already started — and the one that lost is the one that must not
+/// have written over the winner's Data Directory on its way out.
+///
+/// **The whole of what [`verkstead_server::run`] promises about its own
+/// ordering, and the only test of it.** The bind is the first thing that can
+/// fail, and everything the server makes comes after it: the directory, the
+/// Skills written into it, the Build Cache, the database. So what is asserted
+/// here is the refusal *and* the absence — a server that named the address and
+/// made the directory anyway would pass the first half alone.
+#[test]
+fn a_taken_address_is_refused_by_the_port_it_names_and_makes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("never-made");
+    let port = free_port();
+
+    // Held for the whole of the run below, because a port let go of is a port
+    // the server would take. All this test wants of it is the socket, so it is
+    // a listener rather than a second Verkstead.
+    let _first = TcpListener::bind(format!("127.0.0.1:{port}")).unwrap();
+
+    let refusal = refused_to_start(&[
+        "--listen",
+        &format!("127.0.0.1:{port}"),
+        "--data-dir",
+        data_dir.to_str().unwrap(),
+    ]);
+
+    assert!(
+        refusal.contains(&format!("127.0.0.1:{port}")),
+        "the refusal should name the address it could not take, got:\n{refusal}"
+    );
+
+    assert!(
+        !data_dir.exists(),
+        "nothing should have been made, and {} is there",
+        data_dir.display()
+    );
+}
+
 #[test]
 fn the_served_api_round_trips_an_ask() {
     let tmp = tempfile::tempdir().unwrap();
