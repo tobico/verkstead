@@ -104,10 +104,11 @@ pub(crate) struct OverTheLink;
 ///
 /// The state is [`crate::standing`]'s, made once and shared with the workbench's
 /// own router — see this module's own documentation, and [`crate::Routers`].
-/// And the two routes on this listener that are a member's own rather than the
+/// And the three routes on this listener that are a member's own rather than the
 /// viewer's: the news a member tells its members when it has something worth a
-/// phone — see [`super::news`] — and this device's Repos with their origins, see
-/// [`super::repos`].
+/// phone — see [`super::news`] — this device's Repos with their origins, see
+/// [`super::repos`], and the files of one of its accounts a session away from
+/// home is given, see [`super::account`].
 ///
 /// Built here because each answers out of this same state: what the news is shown
 /// to is the push subscriptions of *this* device's browsers, and the Repos are
@@ -119,6 +120,7 @@ pub(crate) fn served(state: AppState) -> Router {
     crate::ui::routes()
         .merge(super::news::route())
         .merge(super::repos::route())
+        .merge(super::account::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))
 }

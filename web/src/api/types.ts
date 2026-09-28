@@ -693,11 +693,13 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  *
- * And one of them is not about a path at all: a **mirror** names an account
- * that is on another machine, which is a thing to say about the row rather
- * than something to go and put right.
+ * **Nothing at all for a mirror.** A Profile at home on another device names
+ * paths on that machine and is judged against none of them here: what a session
+ * away from home is given is a mirror of the account, fetched from the home
+ * device before each launch, so the row is one to run under and there is nothing
+ * about this filesystem to say about it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NotOnThisDevice";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
 
 /**
  * The build cache as the human has just set it.

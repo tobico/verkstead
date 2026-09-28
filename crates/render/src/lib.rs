@@ -81,8 +81,9 @@ pub use onboarding::{
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
 };
 pub use profiles::{
-    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
+    AccountFile, AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView,
+    RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};

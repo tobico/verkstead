@@ -1853,7 +1853,14 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
+            .start(
+                pool,
+                &state.nudges,
+                state.devices.as_ref(),
+                &conversation,
+                &pairing,
+                &prompt,
+            )
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");

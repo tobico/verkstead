@@ -4149,7 +4149,14 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
 
     match state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
+        .start(
+            &state.pool,
+            &state.nudges,
+            state.devices.as_ref(),
+            &conversation,
+            &pairing,
+            &prompt,
+        )
         .await
     {
         Ok(session) => {

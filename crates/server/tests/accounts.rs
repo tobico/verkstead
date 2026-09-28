@@ -1,0 +1,916 @@
+//! **The account mirror**: a session on one device running under an Agent
+//! Profile whose account lives on another (ADR-0020, *Shared Profiles*).
+//!
+//! **Two Verksteads, a real dial and a real session.** `tests/mirroring.rs` is
+//! the row written down over the link; this is the account itself coming across
+//! it. So nothing here hands B a login by the back door: A's account is a real
+//! `.claude` on disk with a real login in it, B reads it over the Peer Listener
+//! behind the Member Gate, writes the mirror under its own Data Directory, and
+//! the session that runs is a real session in a real sandbox reading the root it
+//! was given.
+//!
+//! **What stands in for claude is a shell script**, for `tests/sessions.rs`'s
+//! reason: what is being asked is what a session away from home is *given*, and
+//! asking it of the real claude would be a test that needed an account, a network
+//! and a model's patience. What the stub does is print the files it finds in its
+//! root, which is the only thing this suite wants to know.
+//!
+//! **And the fetch itself is read directly** for the questions a whole session
+//! would only answer at one remove: which login a second launch gets, and what
+//! landed in the mirror. That is the reading a launch makes — see
+//! `mirroring::account::fetched` — asked where the device about to launch asks it.
+//!
+//! **On the machine this suite is about**: the sandbox is bwrap and the terminal
+//! is a real pseudo-terminal, which is the arrangement `tests/sessions.rs` is
+//! written for and the reason that file is Unix-only too.
+#![cfg(unix)]
+
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use sqlx::SqlitePool;
+use tower::ServiceExt;
+use verkstead_render::{Capture, ConversationView, ProfileEntry, Started, TimelineEvent};
+use verkstead_server::attachments::Attachments;
+use verkstead_server::build_cache::BuildCache;
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::handoffs::Handoffs;
+use verkstead_server::nudge::Nudges;
+use verkstead_server::peer::joining::Joins;
+use verkstead_server::peer::{self, Members};
+use verkstead_server::platform::{self, Platform};
+use verkstead_server::remote::Tailscale;
+use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
+use verkstead_server::settings::Settings;
+use verkstead_server::skills::Skills;
+use verkstead_server::{
+    Agents, Gh, Refusal, Routers, mirroring, open_database, routers_answering_devices_telling,
+    routers_running_sessions_answering_devices, store,
+};
+use verkstead_store::{Linking, record_member};
+
+/// The device the account is at home on.
+const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
+/// And the device the session runs on, which is where every assertion is made.
+const B: &str = "0011223344556677889900aabbccddee";
+
+/// What A is written down as on B: the name the human gave the machine, which is
+/// what a refusal names rather than sixteen bytes of hex.
+const A_MACHINE: &str = "the-workstation";
+const A_OS: &str = "macOS 15.1";
+
+/// The Profiles section and every pairing picker, which is where a mirror is read
+/// off.
+const PROFILES: &str = "/api/ui/profiles";
+
+/// The model every Profile here lists.
+const MODEL: &str = "claude-opus-5";
+
+/// What the account on A is signed in with, and what a session on B has to have
+/// in its root for this to have worked at all.
+const TOKEN: &str = "sk-ant-oat01-the-workstations-own";
+
+/// And what it is signed in with after a refresh at home.
+const REFRESHED: &str = "sk-ant-oat01-refreshed-at-home";
+
+/// The Brief every Conversation here is started from.
+const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
+
+/// What stands where claude goes: a session that prints the three files of its
+/// root and stops.
+///
+/// Read out of the root as the session finds it inside the sandbox, which is the
+/// whole question — a login joined in from the mirror is a session that is logged
+/// in, and a settings file with the account's own hooks in it would be a mirror
+/// carrying what a root never carries.
+const PRINTS_ITS_ROOT: &str = r#"
+printf 'login: %s\n' "$(cat "$HOME/.claude/.credentials.json" 2>&1)"
+printf 'settings: %s\n' "$(cat "$HOME/.claude/settings.json" 2>&1)"
+printf 'config: %s\n' "$(cat "$HOME/.claude.json" 2>&1)"
+"#;
+
+/// A `gh` that answers nothing: no finish step in this suite reaches GitHub, and
+/// the real one would need an account.
+const NO_GITHUB: &str = "exit 1";
+
+/// How long one address has to answer here, rather than the two seconds a running
+/// server gives one.
+const PATIENCE: Duration = Duration::from_millis(300);
+
+/// How long a test waits for something two hops away to have happened: a Nudge
+/// crossing a link, a list read back over one, a session starting in a real
+/// sandbox and printing.
+const WAITING: Duration = Duration::from_secs(30);
+
+/// And how often it looks while it waits.
+const LOOKING: Duration = Duration::from_millis(50);
+
+/// One Verkstead: its store, its identity, its Peer Listener up behind the Member
+/// Gate, and the router its own browser presses.
+struct Verkstead {
+    device: Device,
+    pool: SqlitePool,
+    nudges: Nudges,
+    cluster: Devices,
+    workbench: Router,
+    address: SocketAddr,
+
+    /// The Data Directory: the identity, the database, the mirrored accounts and
+    /// every session's own profile are in it.
+    dir: tempfile::TempDir,
+
+    /// What `~` is for a session on this device, which on Linux is the home the
+    /// sandbox makes empty over.
+    home: tempfile::TempDir,
+
+    /// Held for the length of the test: the accounts the Profiles here name live
+    /// in it, away from the Data Directory so that nothing confuses an account
+    /// with a mirror of one.
+    elsewhere: tempfile::TempDir,
+}
+
+impl Verkstead {
+    /// A Verkstead that runs no session: what the device an account is at home on
+    /// has to be for this suite, which is a device that answers.
+    async fn answering(id: &str) -> Verkstead {
+        Verkstead::standing(id, None).await
+    }
+
+    /// And one that runs its sessions on `stub`: the device the work happens on.
+    async fn running(id: &str, stub: &str) -> Verkstead {
+        Verkstead::standing(id, Some(stub)).await
+    }
+
+    /// Both of them, which differ in one thing: whether there is an agent to
+    /// launch.
+    async fn standing(id: &str, stub: Option<&str>) -> Verkstead {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+
+        // Who a session commits as, which every sandbox is configured out of.
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
+        )
+        .unwrap();
+
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let device = Device::stated(dir.path(), id).unwrap();
+        let members = Members::recorded(pool.clone());
+        let nudges = Nudges::new();
+
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
+            .expect("the loopback on a port the machine picked is free");
+        let address = listener.address();
+
+        let reading = Reading::advertising(
+            no_tailscale(),
+            Platform::Linux,
+            None,
+            vec![format!("127.0.0.1:{}", address.port())],
+        );
+
+        let cluster = Devices::of(
+            device.clone(),
+            reading.clone(),
+            members.clone(),
+            Joins::none(),
+        )
+        .waiting(PATIENCE);
+
+        let Routers {
+            workbench,
+            over_the_link,
+        } = match stub {
+            None => {
+                routers_answering_devices_telling(pool.clone(), cluster.clone(), nudges.clone())
+            }
+
+            Some(stub) => routers_running_sessions_answering_devices(
+                pool.clone(),
+                dir.path().to_owned(),
+                agents(stub, home.path(), dir.path()),
+                gh_stub(NO_GITHUB),
+                cluster.clone(),
+                nudges.clone(),
+            ),
+        };
+
+        tokio::spawn(listener.serving(peer::router(
+            device.clone(),
+            reading,
+            members,
+            Joins::none(),
+            nudges.clone(),
+            over_the_link,
+        )));
+
+        Verkstead {
+            device,
+            pool,
+            nudges,
+            cluster,
+            workbench,
+            address,
+            dir,
+            home,
+            elsewhere,
+        }
+    }
+
+    /// Hold a Nudge stream to every member of this device's cluster, which is
+    /// what a running server spawns at the start and what refreshes the mirrors.
+    fn holding(&self) -> Holding {
+        let cluster = self.cluster.clone();
+        let nudges = self.nudges.clone();
+
+        Holding(tokio::spawn(async move {
+            cluster.stay_fresh(nudges).await;
+        }))
+    }
+
+    /// The one address it advertises.
+    fn at(&self) -> String {
+        format!("127.0.0.1:{}", self.address.port())
+    }
+
+    /// Write `other` down as one of this device's members, at `addresses`.
+    async fn linked_to(&self, other: &Device, name: &str, os: &str, addresses: Vec<String>) {
+        record_member(
+            &self.pool,
+            &Linking {
+                device: other.id().to_owned(),
+                name: name.to_owned(),
+                os: os.to_owned(),
+                addresses,
+                fingerprint: other.fingerprint().to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// An account of this device's own, really on disk, with a Profile saved over
+    /// it the way the form saves one.
+    ///
+    /// **And the whole of an account around it**, not just the three files a root
+    /// is made of: the plugins the human installed, the hooks and the plugin list
+    /// in their settings, the MCP servers and the per-repository history in their
+    /// `.claude.json`, and another repository's transcripts under `projects/`.
+    /// What none of that does is travel — see
+    /// [`nothing_lands_in_the_mirror_but_the_files_a_root_is_made_of`].
+    async fn account(&self, name: &str) -> i64 {
+        let under = self.elsewhere.path().join(name);
+        let claude_dir = under.join(".claude");
+        let config_file = under.join(".claude.json");
+
+        std::fs::create_dir_all(claude_dir.join("plugins/repos/someone")).unwrap();
+        std::fs::write(claude_dir.join("plugins/repos/someone/thing.js"), "//\n").unwrap();
+        std::fs::create_dir_all(claude_dir.join("projects/-home-you-src-secrets")).unwrap();
+        std::fs::write(
+            claude_dir.join("projects/-home-you-src-secrets/one.jsonl"),
+            "{\"type\":\"user\"}\n",
+        )
+        .unwrap();
+        std::fs::write(claude_dir.join("CLAUDE.md"), "How I work.\n").unwrap();
+
+        self.logged_in(name, TOKEN);
+
+        std::fs::write(
+            claude_dir.join("settings.json"),
+            serde_json::json!({
+                "env": { "ANTHROPIC_BASE_URL": "https://models.example" },
+                "hooks": { "PreToolUse": [{ "command": "the-humans-own-hook" }] },
+                "enabledPlugins": ["someone/thing"],
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        std::fs::write(
+            &config_file,
+            serde_json::json!({
+                "oauthAccount": { "emailAddress": "you@example.com" },
+                "mcpServers": { "theirs": { "command": "the-humans-own-server" } },
+                "projects": {
+                    "/home/you/src/secrets": {
+                        "hasTrustDialogAccepted": true,
+                        "history": [{ "display": "what-they-asked-last" }],
+                    },
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": name,
+                    "account": {
+                        "agent_type": "Claude",
+                        "claude_dir": claude_dir,
+                        "config_file": config_file,
+                    },
+                    "models": [MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving {name}");
+
+        called(&self.profiles().await, name)
+            .expect("the Profile that was just saved is on the list")
+            .id
+    }
+
+    /// That account signed in, or signed in again with another token — which is
+    /// the whole of what a refresh at home does to the one file a session
+    /// changes.
+    fn logged_in(&self, name: &str, token: &str) {
+        std::fs::write(
+            self.login_of(name),
+            serde_json::json!({ "claudeAiOauth": { "accessToken": token } }).to_string(),
+        )
+        .unwrap();
+    }
+
+    /// And signed out, which is the file going.
+    fn signed_out(&self, name: &str) {
+        std::fs::remove_file(self.login_of(name)).unwrap();
+    }
+
+    /// Where that account keeps its login.
+    fn login_of(&self, name: &str) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(name)
+            .join(".claude/.credentials.json")
+    }
+
+    /// The Profiles as this device's own browser reads them.
+    async fn profiles(&self) -> Vec<ProfileEntry> {
+        reading(&self.workbench, PROFILES).await
+    }
+
+    /// The mirror of the member's Profile called `name`, once the refresher has
+    /// written it down.
+    async fn mirror_of(&self, name: &str) -> ProfileEntry {
+        let mut last = Vec::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = self.profiles().await;
+
+                if let Some(row) = called(&last, name) {
+                    return row.clone();
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("no mirror of {name} was ever written down: {last:#?}"))
+    }
+
+    /// The account of that row fetched from the device it is at home on, exactly
+    /// as a launch here fetches it — and the Profile the launch then reads,
+    /// naming this device's own mirror as its account.
+    async fn fetches(&self, row: &ProfileEntry) -> Result<store::Profile, Refusal> {
+        let profile = store::load_profile(&self.pool, row.id)
+            .await
+            .unwrap()
+            .expect("the mirror row is in this device's store");
+
+        mirroring::account::fetched(Some(&self.cluster), &self.homes(), &profile)
+            .await
+            .map(|fetched| fetched.expect("a mirror is a row whose account is fetched"))
+    }
+
+    /// The homes a session on this device is given, which is what says where a
+    /// mirror goes: under this Data Directory.
+    fn homes(&self) -> Homes {
+        Homes::on(Platform::HERE, self.home.path().to_owned(), self.dir.path())
+    }
+
+    /// Where this device keeps its mirror of the Profile with that local id.
+    fn mirror_directory(&self, profile: i64) -> PathBuf {
+        self.dir.path().join("accounts").join(profile.to_string())
+    }
+
+    /// A Conversation grilling under `profile`, started the way the composer and
+    /// the setup card start one: a real repository, all three Pairings on that
+    /// Profile, a Brief, and the press.
+    async fn grilling_under(&self, profile: i64) -> i64 {
+        let path = repository(self.elsewhere.path().join("verkstead"));
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(registered.contains("Added"), "registering the repository");
+
+        let repos: Vec<verkstead_render::RepoEntry> =
+            reading(&self.workbench, "/api/ui/repos").await;
+
+        let started = press(
+            &self.workbench,
+            "/api/ui/conversations",
+            Some(&serde_json::json!({ "repo_id": repos[0].id }).to_string()),
+        )
+        .await;
+
+        let Started::Started {
+            id: conversation, ..
+        } = serde_json::from_str(&started).unwrap()
+        else {
+            panic!("the Conversation was not started: {started}")
+        };
+
+        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL });
+        let role = serde_json::json!({ "pairing": pairing });
+
+        for (path, saying) in [
+            ("grilling-pairing", &pairing),
+            ("implementation-pairing", &pairing),
+            ("review-pairing", &role),
+        ] {
+            let said = press(
+                &self.workbench,
+                &format!("/api/ui/conversations/{conversation}/{path}"),
+                Some(&saying.to_string()),
+            )
+            .await;
+
+            assert_eq!(said, "\"Chosen\"", "picking {path}");
+        }
+
+        let saved = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/brief"),
+            Some(&serde_json::json!({ "markdown": BRIEF }).to_string()),
+        )
+        .await;
+
+        assert_eq!(saved, "\"Saved\"", "writing the Brief");
+
+        let grilling = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/grill"),
+            None,
+        )
+        .await;
+
+        assert_eq!(grilling, "\"Started\"", "starting the grilling");
+
+        conversation
+    }
+
+    /// What the session on that Conversation printed, once it has printed
+    /// `saying` — or a panic saying what it did print instead.
+    ///
+    /// Polled rather than waited on a signal: what is being waited for is a real
+    /// process starting in a real sandbox, which is the slow part of a launch.
+    async fn printed(&self, conversation: i64, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+        let mut said = String::new();
+
+        loop {
+            said = match self.capture(conversation).await {
+                Some(capture) => capture,
+                None => said,
+            };
+
+            if said.contains(saying) {
+                return said;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the session never printed {saying:?}. It printed: {said:?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// The whole of what the session on that Conversation has said, as the
+    /// details pane fetches it.
+    async fn capture(&self, conversation: i64) -> Option<String> {
+        let drawn: ConversationView = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await;
+
+        let event = drawn.timeline.iter().find_map(|event| match event {
+            TimelineEvent::AgentOutput(output) => Some(output.id),
+            _ => None,
+        })?;
+
+        let capture: Capture = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/capture/{event}"),
+        )
+        .await;
+
+        Some(capture.text)
+    }
+}
+
+/// The agent a session on this device runs, and everything else a launch is
+/// equipped out of.
+fn agents(stub: &str, home: &Path, data_dir: &Path) -> Agents {
+    Agents::running(
+        vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
+        Homes::on(Platform::HERE, home.to_owned(), data_dir),
+        Reachable::at(LISTENING),
+        SandboxConfig::default(),
+        // Nothing here builds anything: what runs where claude goes is a shell
+        // script.
+        BuildCache::none(),
+        Skills::installed(Platform::HERE, data_dir).expect("this binary carries skills"),
+        Executable::of_the_server(data_dir),
+        Handoffs::under(data_dir),
+        Attachments::under(data_dir),
+        Settings::in_data_dir(data_dir),
+    )
+}
+
+/// Where the server these sessions belong to would be listening. Nothing dials
+/// it: a router driven by `oneshot` has no socket, and what this is for is the
+/// `VERKSTEAD_SERVER` a session inside is told.
+const LISTENING: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8422);
+
+/// A `gh` that is a shell script, so nothing here reaches GitHub.
+fn gh_stub(script: &str) -> Gh {
+    Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        script.to_owned(),
+        "gh".to_owned(),
+    ])
+}
+
+/// The streams one device is holding, given back when the test drops it.
+struct Holding(tokio::task::JoinHandle<()>);
+
+impl Drop for Holding {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
+/// that is not there, which is what having none *is*.
+fn no_tailscale() -> Tailscale {
+    Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422)
+}
+
+/// A, holding the account, and B, running the session — linked both ways, with B
+/// holding the streams that refresh its mirrors.
+async fn linked_up() -> (Verkstead, Verkstead, Holding) {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::running(B, PRINTS_ITS_ROOT).await;
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let holding = b.holding();
+
+    (a, b, holding)
+}
+
+/// What a device says about the machine it is on, read the way the server reads
+/// it.
+fn this_machine() -> (String, String) {
+    (
+        platform::hostname(),
+        platform::os_word(Platform::Linux, None),
+    )
+}
+
+/// A git repository at `path`, with one commit on `main` so there is a branch to
+/// cut a worktree off.
+fn repository(path: PathBuf) -> PathBuf {
+    std::fs::create_dir_all(&path).unwrap();
+    git(&path, &["init", "--initial-branch", "main"]);
+    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Verkstead Test"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    git(&path, &["add", "README.md"]);
+    git(&path, &["commit", "-m", "first"]);
+
+    path
+}
+
+/// Run git in `dir`, and fail the test where it does not.
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// One row of a Profiles list, by the name on it.
+fn called<'a>(rows: &'a [ProfileEntry], name: &str) -> Option<&'a ProfileEntry> {
+    rows.iter().find(|row| row.name.as_deref() == Some(name))
+}
+
+/// A read of whatever `path` answers, made the way the browser makes one.
+async fn reading<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert_eq!(status, StatusCode::OK, "GET {path}: {said}");
+
+    serde_json::from_str(&said).unwrap_or_else(|why| panic!("GET {path} answered {said}: {why}"))
+}
+
+/// And a press on `path`, with a body where the endpoint takes one.
+async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
+    let asking = Request::builder().method("POST").uri(path);
+
+    let asking = match saying {
+        Some(body) => asking
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned())),
+        None => asking.body(Body::empty()),
+    };
+
+    let answered = app.clone().oneshot(asking.unwrap()).await.unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert!(status.is_success(), "POST {path}: {status} {said}");
+
+    said
+}
+
+/// What the account's login file holds, read off the mirror the way a session's
+/// root reads it.
+fn login_in(mirror: &Path) -> Option<String> {
+    std::fs::read_to_string(mirror.join(".claude/.credentials.json")).ok()
+}
+
+/// Every file under `dir`, said from `dir` and in order, for the assertion that
+/// nothing else landed there.
+fn walked(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut looking = vec![dir.to_owned()];
+
+    while let Some(at) = looking.pop() {
+        let Ok(entries) = std::fs::read_dir(&at) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            if path.is_dir() {
+                looking.push(path);
+            } else {
+                found.push(
+                    path.strip_prefix(dir)
+                        .expect("everything walked is under the directory")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+
+    found.sort();
+    found
+}
+
+/// A session on B under a Profile whose account is on A **runs, and is logged
+/// in**: the login A holds is in the root the session was given, and the
+/// configuration beside it is the allowlist's worth of A's and no more.
+#[tokio::test]
+async fn a_session_away_from_home_runs_under_the_account_at_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+
+    assert_eq!(
+        mirror.broken, None,
+        "a member's account is a row to run under: {mirror:?}",
+    );
+
+    let conversation = b.grilling_under(mirror.id).await;
+    let said = b.printed(conversation, "config: ").await;
+
+    assert!(
+        said.contains(TOKEN),
+        "the session is logged in as the account on {A_MACHINE}. It printed: {said:?}",
+    );
+    assert!(
+        said.contains("https://models.example"),
+        "and reaches the model the way that account does. It printed: {said:?}",
+    );
+    assert!(
+        said.contains("you@example.com"),
+        "and its `.claude.json` says whose account it is. It printed: {said:?}",
+    );
+
+    // And none of how the human on A works, which is what a root never carries
+    // and therefore what a mirror never holds.
+    for theirs in [
+        "the-humans-own-hook",
+        "someone/thing",
+        "the-humans-own-server",
+        "what-they-asked-last",
+    ] {
+        assert!(
+            !said.contains(theirs),
+            "{theirs} is how the human on {A_MACHINE} works and is no part of a \
+             session's root. It printed: {said:?}",
+        );
+    }
+
+    // And what it ran out of is this device's own mirror of that account, under
+    // its Data Directory — which is what makes the login a hard link can join in
+    // on Windows and what a session end has to write back.
+    assert_eq!(
+        login_in(&b.mirror_directory(mirror.id))
+            .as_deref()
+            .map(|login| login.contains(TOKEN)),
+        Some(true),
+        "the account the session ran as is the mirror under B's Data Directory",
+    );
+}
+
+/// A login refreshed at home between two launches is the one the second launch
+/// gets — and a sign-out at home takes the login off the mirror rather than
+/// leaving the last one it saw standing.
+#[tokio::test]
+async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let under = b.mirror_directory(mirror.id);
+
+    let fetched = b.fetches(&mirror).await.expect("A answered");
+
+    assert_eq!(
+        fetched.account,
+        verkstead_store::Account::Claude {
+            claude_dir: under.join(".claude"),
+            config_file: under.join(".claude.json"),
+        },
+        "the launch reads the mirror as the account, in the shape the harness \
+         keeps one",
+    );
+    assert!(
+        login_in(&under).is_some_and(|login| login.contains(TOKEN)),
+        "the login A holds",
+    );
+
+    a.logged_in("work", REFRESHED);
+    b.fetches(&mirror).await.expect("A answered again");
+
+    let login = login_in(&under).expect("the mirror holds a login");
+
+    assert!(
+        login.contains(REFRESHED) && !login.contains(TOKEN),
+        "and the one it holds now, fetched again before this launch: {login:?}",
+    );
+
+    a.signed_out("work");
+    b.fetches(&mirror).await.expect("A answered once more");
+
+    assert_eq!(
+        login_in(&under),
+        None,
+        "and a sign-out at home is a mirror with no login in it rather than one \
+         holding a login nobody can use",
+    );
+}
+
+/// Nothing lands in the mirror but the files a Built Root is made of, checked
+/// against an account with plugins, hooks and another repository's transcripts in
+/// it.
+#[tokio::test]
+async fn nothing_lands_in_the_mirror_but_the_files_a_root_is_made_of() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let under = b.mirror_directory(mirror.id);
+
+    b.fetches(&mirror).await.expect("A answered");
+
+    assert_eq!(
+        walked(&under),
+        vec![
+            ".claude.json".to_owned(),
+            ".claude/.credentials.json".to_owned(),
+            ".claude/settings.json".to_owned(),
+        ],
+        "the login and what the written configuration is composed from, and \
+         nothing else of an account that holds plenty else",
+    );
+}
+
+/// A home that is not answering is a launch refused **by name**: the account was
+/// never fetched, and a session started anyway would come up logged out.
+#[tokio::test]
+async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
+    let b = Verkstead::running(B, PRINTS_ITS_ROOT).await;
+
+    // A device that is a member and is not there: the identity is real, so the
+    // membership row is a real one, and nothing is listening at the address.
+    let away = tempfile::tempdir().unwrap();
+    let asleep = Device::stated(away.path(), A).unwrap();
+
+    b.linked_to(&asleep, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    // What it last gave, which on a running server is what the last refresh
+    // wrote down.
+    store::record_mirror(
+        &b.pool,
+        &verkstead_store::Mirror {
+            device: A.to_owned(),
+            id: 7,
+        },
+        &store::ProfileFacts {
+            name: Some("work".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
+                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
+            },
+            models: vec![MODEL.to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let mirror = b.mirror_of("work").await;
+
+    let why = b
+        .fetches(&mirror)
+        .await
+        .expect_err("the machine the account is on is not answering");
+
+    assert_eq!(why.status, StatusCode::BAD_GATEWAY);
+    assert!(
+        why.saying.contains(A_MACHINE),
+        "the sentence names the machine the human named: {}",
+        why.saying,
+    );
+
+    assert_eq!(
+        login_in(&b.mirror_directory(mirror.id)),
+        None,
+        "and nothing was written: a mirror half-fetched would be a session \
+         running as somebody nothing said was signed in",
+    );
+}

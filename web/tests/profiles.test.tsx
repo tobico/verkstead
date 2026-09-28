@@ -490,19 +490,19 @@ describe("a member's accounts", () => {
     ).toBeNull();
   });
 
-  /// It cannot be started under from here — nothing has fetched the account, so
-  /// a session launched under it would run logged out — and the card says which
-  /// machine to look on rather than naming a path to go and put right.
-  it("says its account is not on this device, and where it is", async () => {
+  /// And nothing is wrong with it: the paths on the row are that machine's and
+  /// are judged against nothing here — what a session on this device is given is
+  /// a mirror of the account, fetched from the machine it is on before the launch
+  /// (ADR-0020, *Shared Profiles*). So the card says which machine, and says no
+  /// trouble.
+  it("says no trouble about one, its account being fetched before a launch", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountCards();
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    expect(MIRROR.broken).toBe("NotOnThisDevice");
-    expect(theCard(reads(MIRROR)).textContent).toContain(
-      `Its account is on ${MACHINE.name}.`,
-    );
+    expect(MIRROR.broken).toBe(null);
+    expect(theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)).toBeNull();
   });
 
   /// And the pane over one of them is the same form, which saves: every device's

@@ -41,11 +41,12 @@
 //! somewhere is skipped here, and every mirror on this device is one hop from
 //! the machine its account is on.
 //!
-//! **And a mirror cannot be started under.** Nothing here fetches the account,
-//! so a session launched under one would run logged out: it reads
-//! [`verkstead_render::Broken::NotOnThisDevice`] on every row that draws it, and
-//! the press that starts the work refuses it by that reading exactly as it
-//! refuses a Profile whose directory has gone.
+//! **And a mirror is started under like any other row.** What a session needs of
+//! an account is the little a Built Root is made from, and that is fetched from
+//! the home device into a mirror of the account under this device's own Data
+//! Directory before each launch — see [`account`]. So the row is what it looks
+//! like: a Profile of this cluster's, with the machine its account sits on drawn
+//! beside it.
 //!
 //! **And an edit or a removal over a mirror is put to the device it is at home
 //! on.** Every device's Profiles section lists everyone's and the form over a
@@ -57,6 +58,8 @@
 //! redraws off the refreshed row rather than off what was typed. A removal is the
 //! same hop, and takes the Profile off its home device. See [`edited`] and
 //! [`removed`].
+
+pub mod account;
 
 use anyhow::Result;
 use sqlx::SqlitePool;

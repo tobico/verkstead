@@ -35,7 +35,7 @@
       "claude_dir": "/home/you/accounts/personal/.claude",
       "config_file": "/home/you/accounts/personal/.claude.json"
     },
-    "broken": "NotOnThisDevice",
+    "broken": null,
     "device": {
       "id": "0011223344556677889900aabbccddee",
       "name": "laptop",

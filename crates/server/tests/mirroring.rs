@@ -26,7 +26,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Broken, ConversationView, ProfileEntry};
+use verkstead_render::{ConversationView, ProfileEntry};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
@@ -548,9 +548,10 @@ async fn a_members_profiles_are_listed_here_beside_this_devices_own() {
     assert!(device.reachable, "and A is answering");
 
     assert_eq!(
-        mirror.broken,
-        Some(Broken::NotOnThisDevice),
-        "nothing here has fetched the account, so it cannot be run under yet",
+        mirror.broken, None,
+        "and nothing about this filesystem is said of it: the account is on A, \
+         and what a session here is given is a mirror of it fetched before the \
+         launch — see `tests/accounts.rs`",
     );
 
     assert_eq!(mirror.models, vec![MODEL.to_owned()], "what A said it runs");
@@ -640,10 +641,12 @@ async fn a_removal_at_home_takes_the_mirror_and_nulls_the_pairings_that_named_it
     );
 }
 
-/// Start under a mirror is refused: nothing has fetched the account, so a
-/// session launched under it would run logged out.
+/// And the work starts under a mirror like it starts under any other row: the
+/// account is on A, and what the launch does about that is fetch a mirror of it
+/// under this device's Data Directory — see `tests/accounts.rs`, which is where a
+/// session really runs under one.
 #[tokio::test]
-async fn start_under_a_mirror_is_refused() {
+async fn the_work_starts_under_a_mirror() {
     let (a, b, _holding) = linked_up().await;
 
     a.saves("work").await;
@@ -658,8 +661,9 @@ async fn start_under_a_mirror_is_refused() {
 
     assert_eq!(
         b.starts(conversation).await,
-        "\"ProfileBroken\"",
-        "the row says its account is not on this device, and the press says so too",
+        "\"EmptyBrief\"",
+        "the press is past the Pairings — a member's account is one to run the \
+         work under — and stops at the Brief this fixture never wrote",
     );
 }
 

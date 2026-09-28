@@ -2657,13 +2657,14 @@ device answers, so the mirror goes with it on the next refresh — nulled out of
 every Pairing that named it, exactly as a removal pressed here is. A device that
 has been unlinked takes its mirrors with it, the membership being what prunes
 those.
-**And a mirror cannot be started under.** Nothing has fetched the account, so a
-session launched under one would run logged out: it reads as broken on the row —
-*its account is on the-laptop* — and the press that starts the work is refused
-the way it is refused a Profile whose directory has gone.
-**But a mirror is edited and removed from wherever it is drawn**, and the press
-is relayed to the device the account is on: every device's Profiles section lists
-everyone's, and the form over a mirror saves. A save is put to the home device as
+**And a session runs under a mirror wherever it is drawn**, the account being
+fetched from the machine it is on before each launch — see **Account mirror**.
+Nothing about the home machine's paths is judged here: they belong to that
+filesystem, and what a session is given is the mirror.
+**And a mirror is edited and removed from wherever it is drawn too**, and the
+press is relayed to the device the account is on: every device's Profiles
+section lists everyone's, and the form over a mirror saves. A save is put to the
+home device as
 the ordinary edit of *its own* Profile, addressed by the id the row records for
 it there, and what comes back is that device's own answer rather than a second
 opinion composed here — a name already taken at home is a name already taken,
@@ -2769,6 +2770,45 @@ namespace, so on the host the account's directory is the only place that log is.
 What a Profile stores, and how the setup wizard finds an account, do not change:
 a Built Root is what a session is *given*.
 _Avoid_: account home, joined account, claude home, mounted account
+
+**Account mirror**:
+What a device holds of a **member's** account so that a session can run here
+under a Profile whose account is on that machine: the files a **Built Root** is
+made of, and nothing else of it (ADR-0020). The row travels and the account does
+not — so the login, and whatever the written configuration is composed from, are
+fetched from the home device into a directory of this device's own and the root is
+built out of that, exactly as it is built out of an account on this machine.
+Nothing downstream of the launch knows the difference: the four parts, the trust
+seeded into the copied `.claude.json`, the launch line and the model are what they
+already were.
+**Per Profile, under the Data Directory**, named by the **local** Profile id —
+which is what makes the Windows rule hold by construction: a session's profile is
+under that same directory, so the hard link that joins the login in never crosses
+a volume, and the refusal for an account on another volume cannot fire for a
+mirror.
+**Fetched before each launch**, never kept: a login refreshed at home since the
+last session is the one this session has to be given, and a mirror gone stale
+would sign a session out for no reason anybody could see. What the home device
+sends is written over what is there — beside and renamed, so a session already
+running keeps the file it started with — and every file of the allowlist it did
+*not* send is taken away, a sign-out at home being a mirror with no login in it.
+**Only the allowlist travels.** The login as the harness wrote it, and the
+configuration composed the way a root's is: Claude's `settings.json` filtered to
+what reaches a model, its `.claude.json` without the MCP servers *or* the
+`projects` entries — those being every repository the human has run claude in,
+their paths and their history — and each other harness's `config.toml` or
+`opencode.json` filtered the same way. No plugins, hooks, rules, skills, global
+instructions file, or any other repository's transcripts. The memory store is not
+on the list.
+**A member's own call rather than the viewer's**: the home device answers it at
+`/api/peer/v1/profiles/<id>/account` on the **Peer Listener** behind the **Member
+Gate**, by the id the mirror row records for it there, and only for a Profile of
+its own — a row that is itself a mirror is an account on a third machine.
+**A home that is not answering starts no session**, and says which machine: a
+session launched under an account nothing fetched is one that comes up logged out
+with nothing on the Timeline saying why, so the refusal goes in the session's
+Capture naming the machine.
+_Avoid_: account copy, cached account, synced login, borrowed account
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a

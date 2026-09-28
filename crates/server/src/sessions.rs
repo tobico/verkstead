@@ -262,6 +262,14 @@ impl Agents {
         &self.config
     }
 
+    /// And the homes it hands out, for the one thing that has to be settled
+    /// before a sandbox is built rather than while it is: where the mirror of a
+    /// member's account goes, which is under the Data Directory these are named
+    /// off — see [`crate::mirroring::account`].
+    pub(crate) fn homes(&self) -> &Homes {
+        &self.homes
+    }
+
     /// The Sandbox a Conversation's work runs in, under the account `profile`
     /// names, with `argv` as it will be run inside it.
     ///
@@ -2129,10 +2137,19 @@ impl Sessions {
     /// Event comes first and what a launch has to say goes into its Capture —
     /// the boundary being written, and the reason where a launch fails, which
     /// used to reach the log and nowhere else.
+    ///
+    /// **And where the Pairing's Profile is a member's, the account is mirrored
+    /// here first.** `devices` is the cluster handle a launch fetches it over —
+    /// `None` on a Verkstead that is linked to nothing, which has no mirror to
+    /// launch under either. An account that could not be fetched starts no
+    /// session, for the reason a sandbox that could not be built starts none: a
+    /// session under a Profile with no account is one that comes up logged out
+    /// with nothing saying why. See [`crate::mirroring::account`].
     pub(crate) async fn start(
         &self,
         pool: &SqlitePool,
         nudges: &Nudges,
+        devices: Option<&crate::device::Devices>,
         conversation: &store::Conversation,
         pairing: &store::Pairing,
         prompt: &str,
@@ -2317,6 +2334,63 @@ impl Sessions {
 
             return Ok(None);
         }
+
+        // And where the Profile is a member's, the account it names is on that
+        // machine: the login and the configuration a root is made from are
+        // fetched into this device's own mirror of that account before anything
+        // is built out of it, fresh at every launch so that a login refreshed at
+        // home reaches this session. One of this device's own rows is the
+        // ordinary case and answers nothing, the Pairing standing as it is.
+        //
+        // Refused rather than launched around, for the reason the desktop app
+        // above is: what a session under an account nothing fetched comes up as
+        // is logged out, with a Timeline row saying nothing whatever. See
+        // [`crate::mirroring::account`].
+        let mirrored = match crate::mirroring::account::fetched(
+            devices,
+            &agents.homes,
+            &pairing.profile,
+        )
+        .await
+        {
+            Ok(mirrored) => mirrored,
+
+            Err(why) => {
+                tracing::error!(
+                    conversation_id,
+                    profile = pairing.profile.id,
+                    "the account of the Profile this session runs under is on another device \
+                     and could not be fetched, so no session was started: {}",
+                    why.saying,
+                );
+
+                verkstead_says(
+                    pool,
+                    nudges,
+                    printing,
+                    &mut reading,
+                    &format!(
+                        "Verkstead did not start a session: this Profile's account is on \
+                         another device of the cluster, and the account could not be fetched \
+                         — {}.",
+                        why.saying,
+                    ),
+                )
+                .await;
+
+                return Ok(None);
+            }
+        };
+
+        // Which the rest of the launch reads in the Profile's place: the same row
+        // by the same local id, naming the mirror as its account. So the root,
+        // the Tail that follows the session's log and everything the ending
+        // writes back are what they are for an account on this machine.
+        let launching_under = mirrored.map(|profile| store::Pairing {
+            profile,
+            model: pairing.model.clone(),
+        });
+        let pairing = launching_under.as_ref().unwrap_or(pairing);
 
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on

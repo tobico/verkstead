@@ -83,9 +83,11 @@ pub enum ProfileAccount {
 /// was written down. This is what has become of its account since — the pair
 /// for a Claude Profile, and the one home for every type that keeps one.
 ///
-/// And one of them is not about a path at all: a **mirror** names an account
-/// that is on another machine, which is a thing to say about the row rather
-/// than something to go and put right.
+/// **Nothing at all for a mirror.** A Profile at home on another device names
+/// paths on that machine and is judged against none of them here: what a session
+/// away from home is given is a mirror of the account, fetched from the home
+/// device before each launch, so the row is one to run under and there is nothing
+/// about this filesystem to say about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Broken {
@@ -97,20 +99,6 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
-
-    /// The Profile is at home on another device, and nothing here has fetched
-    /// its account — so a session launched under it would run logged out.
-    ///
-    /// Read off the row rather than off the filesystem, and read *first*: the
-    /// paths on a mirror are the home machine's, and two machines set up alike
-    /// would have them resolving here to an account that is somebody else's.
-    ///
-    /// Said in the same field as the three above because it is the same
-    /// question at the moment it is asked — is this something a session can be
-    /// started under — and the pickers, the cards and the press that starts the
-    /// work all read that field. What lifts it is the stage that mirrors the
-    /// account itself.
-    NotOnThisDevice,
 }
 
 /// One row of the Profile list.
@@ -162,6 +150,41 @@ pub struct ProfileEntry {
     /// One list rather than a section per device: a Profile is a Profile, and
     /// which machine its account sits on is a fact on the row.
     pub device: Option<crate::RowDevice>,
+}
+
+/// One file of a Profile's account as a member across the link is handed it: a
+/// file a **Built Root** is made out of, and what is in it.
+///
+/// **The allowlist and nothing beside it.** A session away from home is given a
+/// root built out of a **mirror** of its account, so what travels is what a root
+/// is made from — the login, and what the written configuration is composed from
+/// — and nothing else of the account: no plugins, hooks, rules, skills, global
+/// instructions file, history, or any other repository's transcripts. The memory
+/// store travels on its own terms and is not on this list.
+///
+/// **Every path a mirror can hold is answered**, whether or not the account has
+/// that file: an account with no login says so with no text at all, which is what
+/// tells a mirror to take away the login it was holding rather than to leave a
+/// stale one standing.
+///
+/// **Text rather than bytes**, every file here being one a harness writes as JSON
+/// or as TOML. What a file no harness wrote holds is not a login, and it travels
+/// as nothing rather than as something a mirror would write in a login's place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountFile {
+    /// Where the file sits inside the home an account of this harness is kept
+    /// in, with forward slashes: `.claude/.credentials.json`,
+    /// `.codex/config.toml`, `.local/share/opencode/auth.json`.
+    ///
+    /// The harness's own shape rather than wherever the home device's Profile
+    /// points at: a mirror is a home the device that fetched it made, and what a
+    /// root is built out of there is the account as that harness keeps one.
+    pub inside: String,
+
+    /// What is in it, or nothing where the account has no such file — a Claude
+    /// login kept in the macOS Keychain, an account nothing has logged in to
+    /// yet.
+    pub text: Option<String>,
 }
 
 /// A Profile as the human has just written it, for saving or for rewriting.

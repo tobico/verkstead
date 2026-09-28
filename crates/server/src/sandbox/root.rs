@@ -824,6 +824,159 @@ impl Root {
     }
 }
 
+/// Every path a **mirror** of an account of `agent_type` holds, each said from
+/// the home an account of that harness is kept in.
+///
+/// **The allowlist a root is made of, and nothing else of an account.** A device
+/// launching under a Profile whose account is on another machine keeps a mirror
+/// of that account under its own Data Directory and builds the root out of it
+/// exactly as it builds one out of a local account — so what a mirror holds is
+/// what a root is made *from*: the login, and the file the written configuration
+/// is composed from. Everything this module leaves out of a root is left out of a
+/// mirror too, plugins and hooks and every other repository's transcripts with
+/// it; and the memory store is not here, being joined rather than composed and
+/// synced entry by entry on its own terms.
+///
+/// **The paths, whether or not the account has the file.** What is at each of
+/// them is [`mirrored`]'s answer; this is the list both ends hold to — the device
+/// that reads an account into one, and the device that writes one down and takes
+/// away whatever did not arrive.
+///
+/// Said from the home rather than from the account's own directory, because that
+/// is the shape a mirror is made in: a directory of this device's own with the
+/// harness's account inside it, which is what [`super::kept_in`] builds and what
+/// a root is then built out of.
+pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
+    match agent_type {
+        crate::store::AgentType::Claude => {
+            let claude = Path::new(super::CLAUDE_DIR_INSIDE_HOME);
+
+            vec![
+                claude.join(CREDENTIALS),
+                claude.join(SETTINGS),
+                PathBuf::from(super::CLAUDE_CONFIG_INSIDE_HOME),
+            ]
+        }
+
+        crate::store::AgentType::Codex => {
+            let codex = Path::new(super::CODEX_INSIDE_HOME);
+
+            vec![codex.join(AUTH), codex.join(CODEX_CONFIG)]
+        }
+
+        crate::store::AgentType::Grok => {
+            let grok = Path::new(super::GROK_INSIDE_HOME);
+
+            vec![grok.join(AUTH), grok.join(GROK_CONFIG)]
+        }
+
+        crate::store::AgentType::OpenCode => vec![
+            PathBuf::from(OPENCODE_AUTH),
+            Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0]),
+        ],
+    }
+}
+
+/// And what a mirror of `account` holds at each of them, read off the account as
+/// it is at this moment: each path of [`mirrored_of`], and the bytes to write
+/// there or nothing where the account has no such file.
+///
+/// **The login travels as it is.** It is the one file a session genuinely
+/// changes, and what the harness wrote is what the harness has to be given back
+/// — so nothing is read out of it, nothing is composed, and an account with no
+/// login file answers nothing rather than an empty one. That absence is the
+/// answer, and it is what takes a login off a mirror that was holding one.
+///
+/// **The configuration travels composed**, exactly as [`Root::written`] composes
+/// it: the account's own settings file carries how the human works — hooks,
+/// plugins, permissions, a status line — and none of that is a session's, so what
+/// crosses the link is the allowlist's worth of it and no more. Composing it
+/// twice changes nothing: the file a mirror holds is one this wrote, and reading
+/// the same keys out of it again answers the same file.
+///
+/// **And Claude's `.claude.json` travels without its `projects`**, along with the
+/// MCP servers a root's copy never carries either. Those entries are every
+/// repository the human has run claude in — their paths, their history and what
+/// they were last asked — and none of it is this session's; a root seeds the
+/// trust it needs for the Repo and the Worktree it is about to run in, on the
+/// device it is running on. What is left is what says the account is signed in.
+///
+/// Blocking: one read per path.
+pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    let read = |path: PathBuf| std::fs::read(path).ok();
+    let text = |path: PathBuf| std::fs::read_to_string(path).ok();
+
+    let composed = match account {
+        crate::store::Account::Claude {
+            claude_dir,
+            config_file,
+        } => vec![
+            read(claude_dir.join(CREDENTIALS)),
+            Some(settings(read(claude_dir.join(SETTINGS)).as_deref())),
+            Some(mirrored_config(read(config_file.clone()).as_deref())),
+        ],
+
+        crate::store::Account::Codex { home } => vec![
+            read(home.join(AUTH)),
+            Some(toml_carrying(
+                text(home.join(CODEX_CONFIG)).as_deref(),
+                &CODEX_CARRIED,
+                &[],
+                CODEX_HEADERS,
+            )),
+        ],
+
+        crate::store::Account::Grok { home } => vec![
+            read(home.join(AUTH)),
+            Some(toml_carrying(
+                text(home.join(GROK_CONFIG)).as_deref(),
+                &GROK_CARRIED,
+                &[],
+                HEADERS,
+            )),
+        ],
+
+        crate::store::Account::OpenCode { home } => vec![
+            read(home.join(OPENCODE_AUTH)),
+            Some(opencode_config(
+                OPENCODE_CONFIGS.map(|file| text(home.join(OPENCODE_CONFIG).join(file))),
+                &[],
+            )),
+        ],
+    };
+
+    mirrored_of(account.agent_type())
+        .into_iter()
+        .zip(composed)
+        .collect()
+}
+
+/// The `.claude.json` a mirror of an account holds: the account's own with its
+/// MCP servers and its `projects` entries taken out.
+///
+/// [`config`]'s counterpart for a file that is about to cross a link rather than
+/// go into a root: the servers come out for that one's reason — they are the
+/// human's own, and the same leak plugins would be — and the entries come out
+/// because they are every repository the human has run claude in. The trust a
+/// session needs is seeded into the root's copy afterwards, against the paths on
+/// the machine the session runs on, so nothing about the home device's
+/// directories is of any use to it.
+///
+/// An account whose file is not there, or does not read as a JSON object, is a
+/// mirror holding an empty one — which is what a root built from it would be
+/// given anyway.
+fn mirrored_config(account: Option<&[u8]>) -> Vec<u8> {
+    let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
+        Some(serde_json::Value::Object(own)) => own,
+        _ => Object::new(),
+    };
+
+    copy.remove(MCP_SERVERS);
+    copy.remove(PROJECTS_CONFIG);
+
+    written(&serde_json::Value::Object(copy))
+}
+
 /// The `opencode.json` an OpenCode root is given, out of the account's own
 /// `opencode.json` and `opencode.jsonc`, in that order, where there are any to
 /// read.
@@ -2741,5 +2894,169 @@ mod tests {
             read(&opencode_config([None, Some("[1, 2]".to_owned())], NONE)),
             empty
         );
+    }
+
+    /// What a **mirror** of a Claude account holds: the login as it is, the
+    /// settings the allowlist's worth of, and a `.claude.json` with nothing of
+    /// the human's own in it — and nothing else of an account that has plenty
+    /// else in it.
+    #[test]
+    fn a_mirror_of_an_account_holds_the_files_a_root_is_made_of_and_no_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join(".claude");
+        let config_file = dir.path().join(".claude.json");
+
+        std::fs::create_dir_all(claude_dir.join("plugins/repos/someone")).unwrap();
+        std::fs::create_dir_all(claude_dir.join("projects/-home-you-src-secrets")).unwrap();
+        std::fs::write(
+            claude_dir.join("projects/-home-you-src-secrets/one.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        std::fs::write(claude_dir.join("CLAUDE.md"), "How I work.\n").unwrap();
+        std::fs::write(claude_dir.join(CREDENTIALS), r#"{"token":"opus"}"#).unwrap();
+        std::fs::write(
+            claude_dir.join(SETTINGS),
+            serde_json::json!({
+                "env": { "ANTHROPIC_API_KEY": "sk-secret" },
+                "hooks": { "PreToolUse": [{ "command": "curl somewhere" }] },
+                "enabledPlugins": ["someone/thing"],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &config_file,
+            serde_json::json!({
+                "oauthAccount": { "emailAddress": "you@example.com" },
+                "mcpServers": { "theirs": { "command": "serve" } },
+                "projects": {
+                    "/home/you/src/secrets": {
+                        "hasTrustDialogAccepted": true,
+                        "history": [{ "display": "what they asked last" }],
+                    },
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let account = crate::store::Account::Claude {
+            claude_dir: claude_dir.clone(),
+            config_file,
+        };
+
+        let held = mirrored(&account);
+
+        assert_eq!(
+            held.iter().map(|(inside, _)| inside).collect::<Vec<_>>(),
+            vec![
+                &PathBuf::from(".claude/.credentials.json"),
+                &PathBuf::from(".claude/settings.json"),
+                &PathBuf::from(".claude.json"),
+            ],
+            "the allowlist and nothing else: no plugins, no global instructions \
+             file, and no other repository's transcripts",
+        );
+        assert_eq!(
+            held.iter()
+                .map(|(inside, _)| inside.clone())
+                .collect::<Vec<_>>(),
+            mirrored_of(crate::store::AgentType::Claude),
+            "the paths are the one list both ends hold to",
+        );
+
+        let (_, login) = &held[0];
+
+        assert_eq!(
+            login.as_deref(),
+            Some(br#"{"token":"opus"}"#.as_slice()),
+            "the login travels as the harness wrote it",
+        );
+
+        let (_, settings) = &held[1];
+        let settings = read(
+            settings
+                .as_deref()
+                .expect("a root is always given settings"),
+        );
+
+        assert_eq!(
+            settings["env"],
+            serde_json::json!({ "ANTHROPIC_API_KEY": "sk-secret" }),
+            "how the account reaches a model comes over",
+        );
+        assert_eq!(settings["skipDangerousModePermissionPrompt"], true);
+        assert!(
+            settings.get("hooks").is_none() && settings.get("enabledPlugins").is_none(),
+            "and how the human works does not: {settings}",
+        );
+
+        let (_, config) = &held[2];
+        let config = read(config.as_deref().expect("a root is always given a config"));
+
+        assert_eq!(
+            config["oauthAccount"],
+            serde_json::json!({ "emailAddress": "you@example.com" }),
+            "what says the account is signed in comes over",
+        );
+        assert!(
+            config.get("mcpServers").is_none() && config.get("projects").is_none(),
+            "and the human's own servers and every repository they have run \
+             claude in do not — the trust a session needs is seeded into the \
+             root's copy against the paths it is about to run in: {config}",
+        );
+    }
+
+    /// And an account with no login file at all says so, which is what takes a
+    /// login off a mirror that was holding one.
+    #[test]
+    fn an_account_with_no_login_mirrors_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let held = mirrored(&crate::store::Account::Codex { home });
+
+        assert_eq!(held[0].0, PathBuf::from(".codex/auth.json"));
+        assert_eq!(held[0].1, None, "there is no login to hand over");
+        assert!(
+            held[1].1.is_some(),
+            "and the configuration is composed either way, an account on the \
+             vendor's own provider needing nothing said",
+        );
+    }
+
+    /// And every harness's mirror is the list both ends hold to, path for path:
+    /// one this answered bytes for and the other did not would be a file a launch
+    /// never writes and the device that wrote it takes away again.
+    #[test]
+    fn every_harness_mirrors_exactly_the_paths_both_ends_hold_to() {
+        let home = Path::new("/home/you");
+
+        for agent_type in [
+            crate::store::AgentType::Claude,
+            crate::store::AgentType::Codex,
+            crate::store::AgentType::Grok,
+            crate::store::AgentType::OpenCode,
+        ] {
+            let held = mirrored(&crate::sandbox::kept_in(agent_type, home));
+
+            assert_eq!(
+                held.iter()
+                    .map(|(inside, _)| inside.clone())
+                    .collect::<Vec<_>>(),
+                mirrored_of(agent_type),
+                "{agent_type:?}",
+            );
+
+            // The login first and the configuration after it, which is the order
+            // the two halves of the list are read in.
+            assert!(
+                held.len() >= 2,
+                "{agent_type:?} mirrors its login and its \
+                 configuration: {held:?}"
+            );
+        }
     }
 }

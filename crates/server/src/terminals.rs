@@ -445,6 +445,40 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         return Ok(TerminalOpened::NoProfile);
     };
 
+    // And where that Profile is a member's, the account it names is on that
+    // machine: a mirror of it is fetched here before the shell is built out of
+    // it, exactly as a session's launch fetches one — see
+    // [`crate::mirroring::account`]. A terminal is the human working where the
+    // agent worked, so what it is given of the account is what the agent was
+    // given.
+    //
+    // A home that is not answering refuses the press, the way a sandbox that
+    // cannot be built does: a shell opened around the home machine's own paths
+    // would be one writing this account's store wherever those paths happen to
+    // land here.
+    let pairing = match crate::mirroring::account::fetched(
+        state.devices.as_ref(),
+        agents.homes(),
+        &pairing.profile,
+    )
+    .await
+    {
+        Ok(None) => pairing,
+        Ok(Some(profile)) => store::Pairing { profile, ..pairing },
+
+        Err(why) => {
+            tracing::error!(
+                conversation_id,
+                profile = pairing.profile.id,
+                "the account this terminal would run under is on another device and could not \
+                 be fetched, so none was opened: {}",
+                why.saying,
+            );
+
+            return Ok(TerminalOpened::Refused);
+        }
+    };
+
     let built = tokio::task::spawn_blocking({
         let agents = agents.clone();
         let conversation = conversation.clone();

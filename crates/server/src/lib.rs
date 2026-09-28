@@ -148,7 +148,12 @@ mod merging;
 /// One list of accounts for the cluster: a mirror row per member Agent Profile,
 /// fetched over the link and kept beside this device's own (ADR-0020, *Shared
 /// Profiles*).
-mod mirroring;
+///
+/// Public for the reason [`matching`] is: what a session away from home is given
+/// of an account is the product's own boundary rather than an implementation
+/// detail of a launch, and what proves it is a suite standing where the device
+/// about to launch stands — see [`mirroring::account::fetched`].
+pub mod mirroring;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
 /// Public for the one thing a Nudge is announced about from outside the
@@ -1116,6 +1121,51 @@ pub fn routers_answering_devices_telling(
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
+        &gate,
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
+}
+
+/// And both of them over a device that **runs sessions**, keeping what it makes
+/// in `data_dir` and reaching GitHub through `gh`.
+///
+/// What a served Verkstead in a cluster is, and what a suite asking whether a
+/// session away from home comes up logged in has to stand up: the mirrors are
+/// refreshed off the membership behind the state (see [`mirroring`]), the account
+/// of a member's Profile is fetched over the cluster handle as each session
+/// starts (see [`mirroring::account`]), and the agent that runs is `agents`'.
+/// Every other clustered constructor here runs no session at all, which is every
+/// question about a cluster but that one.
+pub fn routers_running_sessions_answering_devices(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+    gh: Gh,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+) -> Routers {
+    // Taken off the agents rather than asked for again, for
+    // [`router_running_sessions`]'s reason: the binds a session gets and the
+    // binds the settings page draws as the installation's are the one set.
+    let binds = agents.binds().clone();
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        gh,
         tailnet(),
         &gate,
         onboarding::Machine::here(),

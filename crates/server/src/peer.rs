@@ -74,6 +74,7 @@
 //! presented, the far end's checked against the fingerprint a member row holds,
 //! and every address that row carries tried in the order it was advertised.
 
+pub mod account;
 pub mod announcing;
 pub mod dialling;
 pub mod exchange;

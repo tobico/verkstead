@@ -14,9 +14,10 @@
 //! judged about against this filesystem: a **mirror** names an account on
 //! another machine, and its paths belong to no filesystem here — see
 //! [`crate::mirroring`]. So it is answered first and out of the row itself,
-//! reading as one whose account is not on this device, and the machine it is at
-//! home on rides out beside it for every list that draws several devices'
-//! accounts as one.
+//! reading as a row with nothing wrong with it — what a session here is given is
+//! a mirror of that account, fetched from the machine it is on before the launch,
+//! see [`crate::mirroring::account`] — and the machine it is at home on rides out
+//! beside it for every list that draws several devices' accounts as one.
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
@@ -315,12 +316,15 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// **A mirror is answered before any of that and without looking at anything.**
 /// Its paths are the home machine's, so resolving them here would be asking the
 /// wrong filesystem a question it may well answer *yes* to — two machines set up
-/// alike hold the same paths, and the account under them is somebody else's.
-/// Nothing has fetched the account, so a session launched under one would run
-/// logged out, and that is what the row says.
+/// alike hold the same paths, and the account under them is somebody else's. What
+/// a session away from home is given is not those paths either: the login and the
+/// configuration a Built Root is made from are fetched into a mirror of that
+/// account under this device's Data Directory before each launch, so a mirror is a
+/// row to run under and there is nothing here to go and put right. See
+/// [`crate::mirroring::account`].
 fn broken(profile: &store::Profile) -> Option<Broken> {
     if profile.mirror.is_some() {
-        return Some(Broken::NotOnThisDevice);
+        return None;
     }
 
     let paths: Vec<(PathBuf, Broken)> = match &profile.account {

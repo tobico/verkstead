@@ -181,26 +181,17 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   NoSuchProfile: "That profile is gone already.",
 };
 
-/// What is wrong with a profile whose pair is no longer where it was left — or,
-/// for the last of them, with one that was never here to begin with.
+/// What is wrong with a profile whose pair is no longer where it was left.
+///
+/// Every one of them is about a path on this machine. A profile of a member's is
+/// judged against none of them: its account is on that machine, and what a
+/// session here is given is a mirror of it fetched before the launch, so the row
+/// says which machine the account sits on and nothing is wrong with it.
 export const BROKEN: Record<Broken, string> = {
   DirMissing: "Its claude directory is gone.",
   ConfigMissing: "Its config file is gone.",
   HomeMissing: "The home it kept its account under is gone.",
-  NotOnThisDevice: "Its account is on another device.",
 };
-
-/// The same, with the machine named where the row knows which one it is.
-///
-/// A profile of a member's is on this list like any other and cannot be started
-/// under from here — nothing has fetched the account — so what the line says is
-/// which machine to look on. The words above stand where the membership has not
-/// landed, which is the one case the row carries no name.
-export function brokenly(broken: Broken, profile: ProfileEntry): string {
-  return broken === "NotOnThisDevice" && profile.device
-    ? `Its account is on ${profile.device.name}.`
-    : BROKEN[broken];
-}
 
 /// One path an account of some agent type is: the key it is held under, what the
 /// label over it says, an example to type into it, and whether the path it names
@@ -507,9 +498,7 @@ function ProfileCard(props: {
             of its pair since is the server's to report on every read. */}
         <Show when={props.profile.broken}>
           {(broken) => (
-            <ErrorLine class={styles.broken}>
-              {brokenly(broken(), props.profile)}
-            </ErrorLine>
+            <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>
           )}
         </Show>
       </CardButton>

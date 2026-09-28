@@ -149,7 +149,14 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 
     let started = state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
+        .start(
+            &state.pool,
+            &state.nudges,
+            state.devices.as_ref(),
+            &conversation,
+            &pairing,
+            &prompt,
+        )
         .await;
 
     match started {
