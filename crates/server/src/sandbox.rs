@@ -738,7 +738,7 @@ static SESSION_PATH: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Ve
 /// Read `session_path` out of `settings` and hold it for the run.
 ///
 /// Called once as the server comes up, before a router is built or a session is
-/// spawned — see [`crate::run_on_keyed`]. Everything that asks what a session's
+/// spawned — see [`crate::run`]. Everything that asks what a session's
 /// `PATH` is asks [`machine_path`], which reads what this held.
 pub fn hold_session_path(settings: &crate::settings::Settings) {
     let configured = kept_entries(

@@ -60,27 +60,6 @@ jobs:
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # What `crates/desktop` links: the toolkit the app's dialogs are drawn
-      # with (ADR-0012). This job builds the whole workspace, so the first push
-      # of that crate is the first build that needs it — installed by a step of
-      # its own rather than left to whatever the runner image happens to carry,
-      # which is a thing that can be taken away without anybody deciding to. It
-      # is what the AppImage carries and what the dev shell grew with the crate,
-      # and it is now the only one: the tray was drawn over an appindicator
-      # beside it and is spoken onto the session bus in Rust instead — see
-      # `crates/desktop/Cargo.toml`. The package index is the one the step above
-      # just updated.
-      #
-      # And `dbus-x11` for `dbus-run-session`, which nothing builds or links
-      # against: the tray's suite wants a session bus with no panel on it, and a
-      # runner has no session at all. Asked for under that name rather than
-      # `dbus-run-session`'s own package, because it depends on it under a name
-      # that has moved between releases and this one has not. See the tray step
-      # at the end of this job.
-      - name: Install the desktop app's toolkit
-        run: |
-          sudo apt-get install -y pkg-config libgtk-3-dev dbus-x11
-
       # For the dev-shell autodetection alone: it decides whether to wrap a
       # session's command in `nix develop` by evaluating a flake attribute, so
       # the test covering it needs a `nix` that answers. Pinned to the version
@@ -141,29 +120,6 @@ jobs:
             git diff
             exit 1
           fi
-
-      # The Linux tray, which the run above skipped and which nothing else in
-      # this project asks about. The icon is published onto the session bus and
-      # drawn by a panel, so the suite stands a watcher of its own on a bus of
-      # its own and waits for the app's icon to arrive at it — and then does it
-      # again with the watcher arriving second, which is what a desktop that
-      # launches Verkstead at login looks like. See
-      # `crates/desktop/tests/tray.rs`, which says why that is a test here and
-      # not a line in the release workflow.
-      #
-      # **A bus of its own**, which is what `dbus-run-session` is for: the name
-      # the suite takes is the one a panel holds, so a bus with a desktop on it
-      # is a bus where this cannot run. A runner has no session bus at all, and
-      # a suite that quietly passed for want of one would be no check.
-      #
-      # **`--ignored`**, because the tests are marked so for the reason above:
-      # they are skipped by the workspace run and asked for here by name.
-      # **`--test-threads=1`**, because they take turns at the one name a
-      # watcher has — see the file.
-      - name: The tray reaches a panel
-        run: |
-          dbus-run-session -- cargo test -p verkstead-desktop --test tray -- \
-            --ignored --test-threads=1
 
   # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
   # reach is one description said once, and `sandbox-exec` is the second
@@ -231,12 +187,6 @@ jobs:
   # link against, and a check that never links proves less than it looks like it
   # does. This job is the Windows machine this project has, and it is what will
   # say the port goes on holding.
-  #
-  # The desktop crate is in it, which is where the shim comes from: its tray,
-  # its dialogs and its Run key are Win32, and this is the machine that compiles
-  # them. The registry tests in `crates/desktop/src/startup/run_key.rs` run
-  # nowhere else, and neither does `crates/desktop/tests/shim.rs` — the app
-  # itself is `crates/cli/tests/desktop.rs`, which runs on every platform.
   #
   # **Two legs, each running half the suite**, because one was not enough to
   # come near the `Rust` job's ten minutes or so. Measured on the pull request
@@ -318,18 +268,8 @@ jobs:
 
       # No `web/dist` here either — the embed is `allow_missing`, so the crates
       # compile without the viewer.
-      #
-      # The desktop crate's build script compiles the icon and the version
-      # information into the shim with the SDK's `rc.exe`, which is the runner
-      # image's own — see `crates/desktop/build.rs`.
-      #
-      # **The `shim` feature is what builds that exe at all**, and this is the
-      # only job that passes it: Cargo has no way to say a `[[bin]]` is one
-      # platform's, so the feature says it instead and a workspace build
-      # anywhere else produces no `verkstead-desktop` — see
-      # `crates/desktop/Cargo.toml`.
       - name: Build
-        run: cargo build --workspace --all-targets --features verkstead-desktop/shim
+        run: cargo build --workspace --all-targets
 
       # **The session account, which no suite here can make for itself.** A
       # Windows session runs as a local account of Verkstead's own (ADR-0014,
@@ -373,8 +313,7 @@ jobs:
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
       # own file, so this is the whole of what a Windows Verkstead has to say
-      # for itself. The shim's own suite is in it under the same feature, which
-      # is what runs the exe the build above made.
+      # for itself.
       #
       # **And a session end to end is in it**, which is this machine's alone to
       # answer: `crates/server/tests/sessions_windows.rs` runs a real grilling
@@ -396,7 +335,7 @@ jobs:
       # matrix above lets a red leg's sibling finish.
       - name: Test
         run: >
-          cargo nextest run --workspace --features verkstead-desktop/shim
+          cargo nextest run --workspace
           --partition slice:${{ matrix.partition }}/2 --no-fail-fast
 
       # **And the doc-tests, which nextest does not run.** The workspace has
@@ -406,7 +345,7 @@ jobs:
       # first leg alone: they are not partitioned, so both would run all of them.
       - name: Doc-tests
         if: matrix.partition == 1
-        run: cargo test --doc --workspace --features verkstead-desktop/shim
+        run: cargo test --doc --workspace
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything

@@ -18,6 +18,6 @@ Roadmap stage: [08: Retiring the Rust tray](docs/roadmaps/electron-desktop/08-re
 
 ## Tasks
 
-- [ ] 01: The verb and the crate — [details](01-the-verb-and-the-crate.md)
+- [x] 01: The verb and the crate — [details](01-the-verb-and-the-crate.md)
 - [ ] 02: The flake, and what a slim binary must not link — [details](02-the-flake-and-the-closure-checks.md)
 - [ ] 03: The words — [details](03-the-words.md)

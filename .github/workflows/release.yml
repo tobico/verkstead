@@ -443,7 +443,7 @@ jobs:
           tree=$(cargo tree --package verkstead-cli --edges normal \
             --no-default-features --target ${{ matrix.target }})
           echo "$tree"
-          for crate in ts-rs verkstead-desktop gtk; do
+          for crate in ts-rs gtk; do
             if printf '%s\n' "$tree" | grep -q "$crate"; then
               echo "::error::$crate was linked into the release binary."
               exit 1

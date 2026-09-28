@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Write packaging/ — the desktop entry a launcher lists Verkstead under, and the
-# icons it draws beside it — from the one piece of artwork in tools/hammer.
+# Write packaging/ — the icons a launcher, a menu bar and an installer draw
+# Verkstead with — from the one piece of artwork in tools/hammer.
 #
 # The same rule as tools/generate-icons.sh, which does this for the viewer's
 # own: there is one piece of artwork and everything else is output, committed so
@@ -20,13 +20,14 @@
 # The macOS .icns and the Windows .ico are written here too, from the same
 # artwork and the same run.
 #
-# ImageMagick and desktop-file-utils come from the dev shell, so run this under
-# `nix develop` — or as `nix develop --command tools/generate-packaging.sh`.
+# ImageMagick comes from the dev shell, so run this under `nix develop` — or as
+# `nix develop --command tools/generate-packaging.sh`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# The app id, which is what the tray, the autostart registration and this entry
-# are all named for — see `APP_ID` in crates/desktop/src/lib.rs. One string,
+# The app id, which is what everything installed here is named for: the icon a
+# desktop looks up by name, and the .icns and .ico a pack stages — see
+# `appId` in desktop/electron-builder.yml, which is the same string. One string,
 # because a desktop told two would have two Verksteads.
 APP_ID="net.tobico.Verkstead"
 
@@ -35,37 +36,6 @@ OUT="packaging"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-
-# The desktop entry. It is the launcher's, rather than the autostart entry
-# `crates/desktop/src/startup/xdg.rs` writes at runtime: that one names the
-# executable it found itself running as and says `--no-open`, because nobody
-# wants a browser window at every login. This one is a menu item somebody
-# clicked, so it opens the viewer, which is the whole of what clicking Verkstead
-# is for.
-#
-# `Exec` is the bare name and then the verb: the tray app is `verkstead desktop`
-# rather than a binary of its own (ADR-0012, amended), and an entry naming the
-# path alone would start a Verkstead that printed the Guide. The name rather
-# than a path because inside an AppImage the file lives at a path made for that
-# one run, and what installs this entry — the desktop's own integration, or a
-# package's install step — is what knows where the binary ended up. `Icon` is
-# named rather than pointed at for the same reason, and it is the app id, which
-# is what the icons below are installed as.
-cat > "$OUT/$APP_ID.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Verkstead
-Comment=The workbench, in the system tray
-Exec=verkstead desktop
-Icon=$APP_ID
-Terminal=false
-Categories=Development;
-Keywords=agent;coding;sessions;workbench;
-EOF
-
-# Read back rather than trusted: an entry a desktop will not parse is one that
-# never appears in a menu, and nothing else here would notice.
-desktop-file-validate "$OUT/$APP_ID.desktop"
 
 # The sizes a launcher draws at, in the layout the icon theme specification
 # names them by — which is the layout they are installed into, so a packaging
@@ -171,9 +141,9 @@ while read -r type size _; do
   cat "$png" >> "$ICNS"
 done <<< "$ICNS_CHUNKS"
 
-# Read back, as the desktop entry is: a reader takes the header's length as the
-# file's own and stops there when it disagrees, so an icon that is a byte out is
-# an icon that never draws and nothing else here would notice.
+# Read back, as everything written here is: a reader takes the header's length as
+# the file's own and stops there when it disagrees, so an icon that is a byte out
+# is an icon that never draws and nothing else here would notice.
 if [ "$(wc -c < "$ICNS")" -ne "$total" ]; then
   printf '%s\n' "$ICNS is $(wc -c < "$ICNS") bytes and claims $total." >&2
   exit 1
@@ -231,11 +201,6 @@ done
 # names it as `ARPPRODUCTICON`, so the row in **Installed apps** is drawn with
 # it; and the Start-menu shortcut is advertised against it. See
 # `desktop/scripts/pack.mjs` and `desktop/electron-builder.yml`.
-#
-# `crates/desktop/build.rs` compiles it into the shim as a resource as well,
-# which is a Windows install this no longer describes: nothing a release ships
-# is that binary any more, and the last stage of the Electron roadmap takes the
-# crate.
 #
 # Written with `magick` rather than by hand, which is where this differs from
 # the .icns above: the tool that writes an .icns is a Mac's and the format had

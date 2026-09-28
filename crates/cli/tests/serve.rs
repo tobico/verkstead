@@ -991,26 +991,6 @@ fn the_help_says_the_desktop_flag_belongs_to_the_app() {
     }
 }
 
-/// And it is not the tray verb's: that one hands the link over in-process, so a
-/// flag saying the caller is the app would be a flag saying nothing.
-#[cfg(feature = "desktop")]
-#[test]
-fn the_desktop_verb_does_not_take_the_flag() {
-    let help = flowed(&stdout(&run(&["desktop", "--help"])));
-
-    assert!(
-        !help.contains("--desktop"),
-        "`verkstead desktop --help` should not name the flag at all, got:\n{help}"
-    );
-
-    let refusal = String::from_utf8(run(&["desktop", "--desktop"]).stderr).unwrap();
-
-    assert!(
-        refusal.contains("--desktop"),
-        "and passing it there should be refused by name, got:\n{refusal}"
-    );
-}
-
 /// `help` with every run of whitespace flattened to one space.
 ///
 /// clap wraps the help to a width, so a phrase a test is reading may have a

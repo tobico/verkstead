@@ -343,7 +343,7 @@ pub fn home_dir(platform: Platform, env: &Environment) -> Option<PathBuf> {
 }
 
 /// What names the home directory on `platform`, for the refusal a server that
-/// could not find one makes — see [`crate::run_on`], which is where that is
+/// could not find one makes — see [`crate::run`], which is where that is
 /// worded.
 pub fn home_variable(platform: Platform) -> &'static str {
     match platform {

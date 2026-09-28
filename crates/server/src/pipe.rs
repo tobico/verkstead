@@ -233,7 +233,7 @@ static GRANTING: std::sync::RwLock<Option<Regranting>> = std::sync::RwLock::new(
 /// Hold `regranting` for the rest of this run.
 ///
 /// Called once as the server comes up, with the pipe it just opened — see
-/// [`crate::run_on_keyed`].
+/// [`crate::run`].
 pub fn hold_the_grant(regranting: Regranting) {
     *GRANTING.write().unwrap_or_else(|held| held.into_inner()) = Some(regranting);
 }

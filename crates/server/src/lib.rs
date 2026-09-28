@@ -596,13 +596,13 @@ impl Config {
     /// The Workbench Key this configuration's Data Directory holds: whatever is
     /// in there, or a new one written where a first start finds nothing.
     ///
-    /// **The one call both halves of a start make.** `verkstead serve` reaches
-    /// it through [`run_on`] and the desktop app reaches it before it spawns
-    /// the server, because the browser it opens has to be opened on the link —
-    /// and a desktop that invented a key of its own would be locked out of the
-    /// Data Directory it restarts against. What comes back is a handle each of
-    /// them holds a clone of, so a key re-issued through one of them is the key
-    /// the other hands out — see [`key::WorkbenchKey`].
+    /// **The one call a start makes**, and it is [`run`]'s: the login link on
+    /// the startup line is built from the key, so it is read or written before
+    /// anything else that start does. The desktop app holds the same secret by
+    /// reading the same file out of the Data Directory it started the sidecar
+    /// against rather than through this, so what a key re-issued here changes is
+    /// what both of them hand out — see [`key::WorkbenchKey`], and
+    /// `desktop/src/key.ts`.
     pub fn workbench_key(&self) -> Result<key::WorkbenchKey> {
         let data_dir = self.data_directory()?;
 
@@ -1260,13 +1260,6 @@ impl StartedBy {
     /// go and read. So this is the daemon's line exactly where the sidecar has
     /// become the daemon, and the one case it fires in is the one case where
     /// there is no app log for the secret to sit in, the app not being there.
-    ///
-    /// The tray app reaches the same end from the other side, which is why it
-    /// says [`key::HandsOverTheLink::TheCaller`] whatever this machine has on
-    /// it: a tray that cannot be raised is not known about until it has been
-    /// tried, so what that install falls back to is a second line written after
-    /// this one rather than a different first line — see
-    /// `verkstead_desktop::Desktop::run`.
     pub fn hands_over_the_link(self, display: bool) -> key::HandsOverTheLink {
         match self {
             StartedBy::AnOperator => key::HandsOverTheLink::TheStartupLine,
@@ -1313,34 +1306,24 @@ impl StartedBy {
 /// and a second Verkstead is refused by the socket rather than after it has
 /// written over the first one's directory.
 ///
-/// [`run_on`] is the same thing on a socket the caller bound, which is where the
-/// desktop binary starts: a taken address is the one failure it draws a dialog
-/// for, and a dialog wants the failure before the side effects rather than after
-/// them.
-pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
-    let listener = std::net::TcpListener::bind(config.listen)
-        .with_context(|| format!("binding {}", config.listen))?;
-
-    run_on(listener, config, started_by).await
-}
-
-/// The same, on a socket that is already bound.
-///
-/// The listener is the standard library's rather than tokio's, because a caller
-/// that has one bound it before there was a runtime to bind it on — see [`run`]
-/// for why the address is settled first.
+/// **And it is the one way in.** There were three of these — this, the same on a
+/// socket the caller had already bound, and the same again with the Workbench
+/// Key and a way of escalating already in hand — because the tray app ran the
+/// server in-process and arrived holding both. Nothing does that any more: the
+/// desktop app of ADR-0020 starts this binary as a sidecar and comes in through
+/// `verkstead serve` like every other caller, so what those three said between
+/// them is said here once.
 ///
 /// A bare `verkstead serve` is configured by nobody and comes up all the same:
 /// there is nothing here that has to be said before the server can be reached,
 /// and everything that *was* said is resolved before it is served over.
-pub async fn run_on(
-    listener: std::net::TcpListener,
-    config: Config,
-    started_by: StartedBy,
-) -> Result<()> {
+pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
+    let listener = std::net::TcpListener::bind(config.listen)
+        .with_context(|| format!("binding {}", config.listen))?;
+
     // The Data Directory resolved and made, and the key in it read or written,
-    // before anything else this start does — see [`Config::workbench_key`], and
-    // [`run_on_keyed`] for the caller that arrives having already made this call.
+    // before anything else this start does — see [`Config::workbench_key`]. The
+    // browser is pointed at the login link, and the key is what makes one.
     let key = config.workbench_key()?;
 
     // Asked once, because both answers below turn on it: whether there is
@@ -1361,43 +1344,9 @@ pub async fn run_on(
     // sidecar has a display to draw one on, and hand the `sudo` line back where
     // a plain `serve` is the daemon it has always been — see
     // [`StartedBy::escalation`] and [`remote::Elevate`].
-    run_on_keyed(
-        listener,
-        config,
-        key,
-        started_by.escalation(display),
-        started_by.hands_over_the_link(display),
-    )
-    .await
-}
+    let escalation = started_by.escalation(display);
+    let hands_over = started_by.hands_over_the_link(display);
 
-/// The same again, with the Workbench Key already in hand — and with whatever
-/// way of escalating the caller has.
-///
-/// Which is the desktop app's way in. The browser it opens is opened on the
-/// login link, so it has to hold the key before there is a server to ask one of
-/// — and what it hands over here is therefore the key the workbench is gated on,
-/// by being the same handle rather than by being read a second time. See
-/// `verkstead_desktop::Desktop::run`.
-///
-/// `escalation` is the other thing only that caller has: the operator grant the
-/// Remote access pane asks for is a command run with a privilege this process
-/// has not got, and the desktop app can ask the platform for one where a daemon
-/// cannot. `None` is every other way in, and is what the pane behaved as before
-/// there was an app to hand one over — see [`remote::Elevate`].
-///
-/// And `hands_over` is what that same caller says about the login link: holding
-/// the key before there is a server to ask one of is the same thing as handing
-/// the link out itself, so the startup line names the address alone and the
-/// secret stays out of the file **View Logs** opens — see
-/// [`key::HandsOverTheLink`].
-pub async fn run_on_keyed(
-    listener: std::net::TcpListener,
-    config: Config,
-    key: key::WorkbenchKey,
-    escalation: Option<Arc<dyn remote::Elevate>>,
-    hands_over: key::HandsOverTheLink,
-) -> Result<()> {
     // Resolved at startup: a bind that names nothing, and a HOME the unit never
     // said, are misconfigurations to report now rather than sessions that fail
     // to start weeks later with nobody watching. The home is where a sandbox
