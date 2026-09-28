@@ -6684,3 +6684,52 @@ pub(crate) fn unavailable(message: &str) -> HttpResponse {
 pub(crate) fn refused(status: StatusCode, error: ApiError) -> HttpResponse {
     (status, Json(error)).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name a quoted ASCII string cannot hold goes over both ways: the two
+    /// characters stood in for in the old form, and the name itself in the other.
+    ///
+    /// Here rather than over a real attachment, because such a name is a file
+    /// that never lands on every platform this runs on: Windows reserves `"`
+    /// among nine others, so the upload refuses it there and the integration
+    /// test in `tests/attaching.rs` keeps to a name every filesystem can hold.
+    /// What the header does with one is this function's own business either way.
+    #[test]
+    fn a_name_a_quoted_string_cannot_hold_goes_over_both_ways() {
+        let said = disposition("résumé \"final\".pdf");
+
+        assert!(
+            said.contains(r#"filename="r_sum_ _final_.pdf""#),
+            "the ASCII fallback, with the quotes stood in for: {said}",
+        );
+        assert!(
+            said.contains("filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.pdf"),
+            "and the name as it really is: {said}",
+        );
+    }
+
+    /// And a backslash the same way, which is the other character a quoted
+    /// string gives a meaning of its own to.
+    #[test]
+    fn a_backslash_is_stood_in_for_too() {
+        let said = disposition(r"one\two.md");
+
+        assert!(said.contains(r#"filename="one_two.md""#), "{said}");
+        assert!(said.contains("filename*=UTF-8''one%5Ctwo.md"), "{said}");
+    }
+
+    /// A plain ASCII name is written once and percent-encoded the same, bar the
+    /// punctuation RFC 8187 does not let through unescaped.
+    #[test]
+    fn a_plain_name_reads_the_same_both_ways() {
+        let said = disposition("notes-2.md");
+
+        assert_eq!(
+            said,
+            "attachment; filename=\"notes-2.md\"; filename*=UTF-8''notes-2.md",
+        );
+    }
+}

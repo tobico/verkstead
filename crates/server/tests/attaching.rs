@@ -500,16 +500,21 @@ async fn one_attachment_reads_back_as_the_bytes_under_the_name_it_was_stored_as(
 /// given.
 ///
 /// What may be attached is the human's own base name — a separator, a leading dot
-/// and a control character are the whole of what is refused — so a quote or a
-/// name in any script at all is a file this has to hand over. Pasted straight
-/// into the header, the first would end the quoted string early and the second
-/// would not be a header value this server could build at all, which would be a
-/// 500 over a file that is perfectly fine.
+/// and a control character are the whole of what is refused — so a name in any
+/// script at all is a file this has to hand over. Pasted straight into the
+/// header, it would not be a header value this server could build at all, which
+/// would be a 500 over a file that is perfectly fine.
+///
+/// A name every filesystem this runs on can hold, which is what keeps this test
+/// about the header rather than about the disk: Windows reserves nine characters
+/// a name may not have, `"` among them, so a name carrying one is a file that
+/// never lands there to be read back. What the header does with those is
+/// `disposition`'s own test in `src/ui.rs`, where no file has to exist.
 #[tokio::test]
 async fn a_name_that_is_not_ascii_reads_back_under_its_own_name() {
     let (_elsewhere, _dir, app, _pool, id) = drafting().await;
 
-    let attachment = kept(attach(&app, id, "résumé \"final\".pdf", b"PDF bytes").await);
+    let attachment = kept(attach(&app, id, "résumé final.pdf", b"PDF bytes").await);
 
     let (status, headers, body) = download(&app, id, attachment.id).await;
 
@@ -521,14 +526,14 @@ async fn a_name_that_is_not_ascii_reads_back_under_its_own_name() {
         .and_then(|said| said.to_str().ok())
         .expect("the header is one this server could build");
 
-    // The old form with the two characters a quoted string cannot hold stood in
-    // for, and the name itself beside it.
+    // The old form with what a quoted ASCII string cannot hold stood in for, and
+    // the name itself beside it.
     assert!(
-        said.contains(r#"filename="r_sum_ _final_.pdf""#),
+        said.contains(r#"filename="r_sum_ final.pdf""#),
         "the ASCII fallback: {said}",
     );
     assert!(
-        said.contains("filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.pdf"),
+        said.contains("filename*=UTF-8''r%C3%A9sum%C3%A9%20final.pdf"),
         "and the name as it really is: {said}",
     );
 }

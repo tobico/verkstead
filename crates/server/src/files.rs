@@ -2758,6 +2758,39 @@ mod tests {
 
         assert_eq!(listed.roots[0].files.len(), MAX_LISTED);
         assert!(listed.roots[0].cut);
+
+        // And a root under it is not cut, which is every ordinary checkout.
+        gone(&many);
+        let listed = list(&[root(&worktree)]);
+
+        assert!(!listed.roots[0].cut);
+    }
+
+    /// A directory taken away, waited on rather than asserted the first time.
+    ///
+    /// A walk of a directory hands its handles back when it returns, and on
+    /// Windows the machine gets round to that a moment afterwards — so a removal
+    /// straight after a listing is answered with *the process cannot access the
+    /// file because it is being used by another process* often enough to redden a
+    /// suite over nothing. The same wait the launcher suite's own copy is removed
+    /// under, for the same reason — see `Bound` in
+    /// `crates/cli/tests/launcher_windows.rs`.
+    fn gone(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+        loop {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => return,
+                Err(_) if !path.exists() => return,
+                Err(error) => assert!(
+                    std::time::Instant::now() < deadline,
+                    "{} would not be removed: {error}",
+                    path.display(),
+                ),
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
     /// The marks of one root, as the paths they are drawn on paired with what
