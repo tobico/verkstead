@@ -473,27 +473,45 @@ pub(crate) fn here(
         store::Account::OpenCode { home } => Root::opencode(home),
     };
 
+    // What the question settled, which on this end is what a path could be named
+    // off: the Repo's entry is named off the match across devices, and the
+    // Worktree's off the directory this session is about to run in.
     let parts = carried(
         root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-        wanted,
+        wanted.repo.is_some(),
+        wanted.worktree.is_some(),
     );
 
     Some((root.account().to_owned(), parts))
 }
 
-/// The parts both ends can name, out of the ones this harness has.
+/// The parts there is a path for on this device, out of the ones this harness
+/// has.
 ///
-/// A part named off something the question did not settle is one the other end
-/// has no path for, so nothing of it travels in either direction: the Repo's
-/// entry where no Repo there is this repository, and the Worktree's where nothing
-/// said what this Worktree is called. Applied on both ends, so that the two lists
-/// of labels are the same list.
-pub(crate) fn carried(parts: Vec<Part>, wanted: &MemoryWanted) -> Vec<Part> {
+/// A part there is no path for here is one nothing of travels in either
+/// direction: the Repo's entry where no Repo of this device's is this
+/// repository, and the Worktree's where nothing said what this Worktree is
+/// called.
+///
+/// **What is asked is whether a path was found, rather than whether one was
+/// wanted** — and on the device that answers the two are not the same question.
+/// A question naming a Repo that has been unregistered since the match, or a
+/// Worktree stem that does not read as a bare name, leaves that end with nothing
+/// to name the entry off; and an entry named off an empty path is not a narrower
+/// entry but a **wider** one — `projects/` rather than one directory under it,
+/// which is every repository the human has ever run the harness in. So what
+/// filters is the finding, and a part nothing could be named for is left out.
+///
+/// **Left out on one end is enough.** The other end keeps its own copy of that
+/// part, and what it sends under the label is dropped by [`written_down`], which
+/// takes only the labels this device holds a path for — so a part left out here
+/// neither answers files nor takes any.
+pub(crate) fn carried(parts: Vec<Part>, repo: bool, worktree: bool) -> Vec<Part> {
     parts
         .into_iter()
         .filter(|part| match part.label {
-            root::REPO => wanted.repo.is_some(),
-            root::WORKTREE => wanted.worktree.is_some(),
+            root::REPO => repo,
+            root::WORKTREE => worktree,
             _ => true,
         })
         .collect()
@@ -956,7 +974,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert_eq!(
@@ -980,7 +999,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert_eq!(
@@ -1015,7 +1035,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &["abc123", "def456"]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert_eq!(
@@ -1047,7 +1068,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert_eq!(
@@ -1097,7 +1119,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         let carrying = gathered(account.path(), &parts).unwrap();
@@ -1112,7 +1135,8 @@ mod tests {
         let there = Root::opencode(landed.path());
         let theirs = carried(
             there.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         written_down(landed.path(), &theirs, &carrying).unwrap();
@@ -1144,7 +1168,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert!(parts.is_empty(), "no parts: {parts:?}");
@@ -1175,12 +1200,59 @@ mod tests {
 
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         assert_eq!(
             parts.iter().map(|part| part.label).collect::<Vec<_>>(),
             [root::WORKTREE],
+        );
+    }
+
+    /// And a part this device could not find a path for is left out rather than
+    /// **named off nothing**, which is the wider answer rather than the narrower
+    /// one: a Claude entry named off an empty path is the whole of `projects/`,
+    /// and what is under that is every repository the human has ever run the
+    /// harness in.
+    ///
+    /// Which is the shape [`crate::peer::memory`] is in when the question names a
+    /// Repo that has been unregistered since the match, or a Worktree stem it
+    /// will not take — so the finding is what filters, not the question.
+    #[test]
+    fn a_part_with_no_path_is_left_out_rather_than_naming_the_whole_store() {
+        let account = store(&[
+            ("projects/-srv-worktrees-verkstead/ours.jsonl", b"ours\n"),
+            (
+                "projects/-home-you-src-secrets/theirs.jsonl",
+                b"another repository's\n",
+            ),
+        ]);
+
+        // The two paths the answering device is left with where it could name
+        // neither: a Repo's path it has not got, with `.git` joined onto it, and
+        // no Worktree stem it will take.
+        let root = Root::claude(
+            crate::platform::Platform::Linux,
+            account.path(),
+            &PathBuf::new().join(".git"),
+            Path::new(""),
+        );
+
+        let asked = root.synced(Some("verkstead-rate-limiting"), &[]);
+
+        assert!(
+            carrying(account.path(), &asked)
+                .iter()
+                .any(|file| file.contains("secrets")),
+            "an entry named off nothing reaches every repository in the store, \
+             which is what there must be no path to: {:?}",
+            carrying(account.path(), &asked),
+        );
+
+        assert!(
+            carried(asked, false, false).is_empty(),
+            "so neither part is one that travels",
         );
     }
 
@@ -1199,7 +1271,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         let came_down = HashMap::from([
@@ -1239,7 +1312,8 @@ mod tests {
         let wanted = wanted("verkstead-rate-limiting", &[]);
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
         );
 
         let said = |part: &str, inside: &str| MemoryFile {

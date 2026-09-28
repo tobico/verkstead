@@ -262,6 +262,17 @@ async fn named(
         })
         .map(|stem| crate::worktrees::directory(&state.data_dir).join(stem));
 
+    // **Which of the two this device actually found a path for**, which is what
+    // says whether either part travels at all. Not what the question wanted: a
+    // Repo the other end matched may have been unregistered since, and a stem
+    // that does not read as a bare name is one this device will not join onto
+    // anything — and a Claude entry named off the empty path that is left is the
+    // whole of `projects/` rather than one directory under it. So the finding
+    // goes to [`carried`], which leaves the part out. See the pair of them below,
+    // which is why the fallbacks under them name nothing that is ever read.
+    let named_repo = repo.is_some();
+    let named_worktree = worktree.is_some();
+
     let platform = crate::platform::Platform::HERE;
     let account = held.account.clone();
     let wanted = wanted.clone();
@@ -273,9 +284,9 @@ async fn named(
                 claude_dir,
                 // The main checkout is what a root reads off a Worktree's own
                 // `.git`, so a Repo's path with `.git` on it is the same entry a
-                // session here would have named. Nothing where no Repo of this
-                // device's is that repository, which is a part `carried` then
-                // leaves out.
+                // session here would have named. An empty path where no Repo of
+                // this device's is that repository, which is a part `carried`
+                // leaves out — so the entry it names is never read.
                 &repo.unwrap_or_default().join(".git"),
                 worktree.as_deref().unwrap_or(Path::new("")),
             ),
@@ -287,7 +298,8 @@ async fn named(
 
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
-            &wanted,
+            named_repo,
+            named_worktree,
         );
 
         (root.account().to_owned(), parts)
