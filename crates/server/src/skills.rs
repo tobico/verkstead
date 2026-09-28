@@ -2588,6 +2588,141 @@ mod tests {
         );
     }
 
+    /// And what it does when the rebase that carries a stage into its roadmap's
+    /// chain stops in a conflict: it resolves it. A conflict at the join is the
+    /// joining session's rather than something to stop on — always stopping to
+    /// ask was weighed and turned down (ADR-0021, *The chain*) — so the skill has
+    /// to say that resolving is the job, and say it in the words a session sent
+    /// at a stack is already told it in.
+    ///
+    /// The failure mode is the one nothing downstream would catch: a conflict
+    /// "resolved" by taking one side wholesale rebases cleanly, passes the
+    /// checks, and has thrown away work somebody did without saying so.
+    #[test]
+    fn a_conflict_on_the_way_into_the_chain_is_the_joining_sessions_to_resolve() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let said = "**A conflict is two changes to reconcile**, and resolving it means keeping \
+                    both. Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same \
+                    thing done by hand — is not a resolution: it throws away work somebody did";
+
+        assert!(
+            next_task.contains(said),
+            "resolving is the job, in the words the resolution skill says it in: {next_task}"
+        );
+        assert!(
+            flowed("addressing/SKILL.md").contains(said),
+            "which is the sentence a session sent at a stack is already told, word for word",
+        );
+        assert!(
+            next_task.contains("an aborted rebase leaves this branch exactly as unjoined as it"),
+            "and undoing it to escape it leaves the join still to do: {next_task}"
+        );
+    }
+
+    /// The tree a conflicted rebase produced is one neither branch ever had, so
+    /// the work is not built until the repository's own checks have been over it
+    /// — and only then is anything pushed.
+    #[test]
+    fn a_resolved_join_runs_the_checks_again_before_anything_is_pushed() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let again = "**Then run the repository's checks again, before anything is pushed.**";
+        let built = "a rebase that compiles is not a rebase that reconciled anything";
+
+        assert!(
+            next_task.contains(again),
+            "the checks run over the result, and in front of the push: {next_task}"
+        );
+        assert!(
+            next_task.contains(built),
+            "and a tree that builds is not a tree anybody reconciled: {next_task}"
+        );
+    }
+
+    /// And the one thing a joining session must not do that a session sent at a
+    /// stack is asked for: move a branch below this one.
+    ///
+    /// A stage is rebased once, before it has a pull request anybody is reading,
+    /// and that promise is about the branches *under* it as much as about this
+    /// one — so a session resolving a conflict on the way in touches this branch
+    /// and nothing else. The sync that moves a whole stack is the other skill's,
+    /// and it runs after the pull requests are open rather than before this one
+    /// is.
+    #[test]
+    fn nothing_below_a_joining_branch_is_touched_while_its_conflict_is_resolved() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let neither = "no branch below it is rebased, none of them is pushed, and no pull \
+                       request of one changes base";
+
+        assert!(
+            next_task.contains("**Nothing below this branch is touched.**"),
+            "the chain below is left where it stands: {next_task}"
+        );
+        assert!(
+            next_task.contains(neither),
+            "in all three of the ways a branch below could be moved: {next_task}"
+        );
+    }
+
+    /// Where the two changes are two intentions, that is a decision rather than
+    /// a reconciliation: one Question Set through the ordinary ask, rather than a
+    /// guess committed on the human's behalf or a session that stopped with
+    /// nothing said.
+    #[test]
+    fn a_conflict_it_cannot_judge_goes_to_the_human_as_one_set() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let one_set = "one Question Set through the ordinary ask — see *When you need the human* \
+                       below — saying what conflicted, what each side was doing, and the options \
+                       you can see";
+
+        assert!(
+            next_task.contains("**Ask only where you cannot tell which side is meant.**"),
+            "the ask is for the conflict it cannot judge and no other: {next_task}"
+        );
+        assert!(
+            next_task.contains(one_set),
+            "one Set, saying what conflicted and what each side was doing: {next_task}"
+        );
+        assert!(
+            next_task
+                .contains("rather than a guess committed and rather than a session that stopped"),
+            "and neither of the two things it is instead of: {next_task}"
+        );
+    }
+
+    /// And the Timeline says the join met a conflict whichever of the two
+    /// happened, because a join that took a session an hour and a rebase that
+    /// moved nothing should not read alike.
+    ///
+    /// Said by the session on its way out rather than by Verkstead: a Notice is
+    /// the server's own account of a decision it took, and whether a rebase had
+    /// two changes to reconcile is a fact only the session that ran it holds. So
+    /// the last thing it prints is where it goes, which is what the skills that
+    /// end with nothing to commit already do with the one line they owe.
+    #[test]
+    fn the_join_says_it_met_a_conflict_whichever_way_it_went() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let either = "**And say the join met a conflict, whichever way it went.** As the last \
+                      thing you print";
+
+        assert!(
+            next_task.contains(either),
+            "said either way, and where the human reads what a session said: {next_task}"
+        );
+        assert!(
+            next_task.contains("what conflicted, and whether you reconciled it or asked"),
+            "with which of the two happened in it: {next_task}"
+        );
+        assert!(
+            next_task.contains("what the human reads on the Timeline"),
+            "which is what the Timeline carries of this session: {next_task}"
+        );
+    }
+
     /// And the finish extends to the companions. A Conversation working alongside
     /// read-write repositories ends on one pull request per repository it
     /// committed in, opened the way *that* repository says — and the three skills

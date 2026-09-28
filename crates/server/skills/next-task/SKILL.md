@@ -191,6 +191,49 @@ because merging is the human's act and nothing here is allowed to look like it
 was theirs. Then run `verkstead done`, once every companion below is finished
 too.
 
+### A conflict on the way in
+
+The step above is where a roadmap stage **joins its roadmap's chain**: where the
+prompt carried a *The chain this stage joins* section, this branch is rebased
+onto the top of that chain before anything is pushed, and its pull request opens
+against it. That rebase may stop in a conflict, and the conflict is **this
+session's to resolve** — a stage is rebased once, before it has a pull request
+anybody has started reading, and this session is the one holding it.
+
+**A conflict is two changes to reconcile**, and resolving it means keeping both.
+Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same thing done
+by hand — is not a resolution: it throws away work somebody did, and it throws
+it away silently, because the rebase then looks exactly like one that went
+cleanly. Write what the two changes together were meant to do. And do not undo
+it to escape it: an aborted rebase leaves this branch exactly as unjoined as it
+was, with the finish still to do.
+
+**Then run the repository's checks again, before anything is pushed.** A rebase
+that conflicted produced a tree neither branch ever had, so nothing has been
+over this work: a rebase that compiles is not a rebase that reconciled
+anything. Run the tests the way the tasks before this one ran them, fix what the
+reconciliation broke, and push once they are green rather than before.
+
+**Nothing below this branch is touched.** What conflicted is this branch's own
+commits arriving on top of the chain, so the resolution goes in this branch and
+nowhere else: no branch below it is rebased, none of them is pushed, and no pull
+request of one changes base. Where the repository's own block names the command
+that carries a rebase on through a conflict, that command moves this branch
+alone.
+
+**Ask only where you cannot tell which side is meant.** Two changes that are two
+intentions — each side having settled the same question a different way — are a
+decision rather than a reconciliation, and one guessed at is work the human
+never chose. That is one Question Set through the ordinary ask — see *When you
+need the human* below — saying what conflicted, what each side was doing, and
+the options you can see. One Set, rather than a guess committed and rather than
+a session that stopped with nothing said.
+
+**And say the join met a conflict, whichever way it went.** As the last thing
+you print, in a sentence: what conflicted, and whether you reconciled it or
+asked. That line is what the human reads on the Timeline, where a join that took
+an hour and a rebase that moved nothing should not read alike.
+
 ### And every companion repository you committed in
 
 This Conversation may be working alongside other repositories — the prompt

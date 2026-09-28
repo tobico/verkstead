@@ -2307,6 +2307,18 @@ roadmap whose Stages have all merged is a finish told no chain at all, and a
 Stage cut from what is still the top is told a chain ending exactly there, where
 the rebase moves no commit.
 
+**And a conflict on the way in is the joining session's to resolve.** A rebase
+that stops in one is two changes to reconcile rather than a reason to stop: the
+session resolves it, runs the repository's own checks over a tree neither branch
+ever had, pushes only once they are green, and asks the human — one Question
+Set — only where the two changes are two intentions and it cannot tell which is
+meant. Nothing below the branch is touched while it does: the resolution is in
+the joining branch, and the chain under it is where it stood. And it says on its
+way out that the join met a conflict either way, because a join that took a
+session an hour and a rebase that moved nothing should not read alike. Always
+stopping to ask was weighed and turned down — see ADR-0021, *The chain*, and the
+finish skill, which is where the words are.
+
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
 the only roadmap its wrap-up ever reads. A Worktree may hold any number of
 roadmaps and a branch touches a second one for ordinary reasons — a deferral

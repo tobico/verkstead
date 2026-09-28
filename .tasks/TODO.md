@@ -24,6 +24,6 @@ Roadmap stage: [03: Joining the chain](docs/roadmaps/parallel-stages/03-joining-
 - [x] 02: One at a time — [details](02-one-at-a-time.md)
 - [x] 03: This repository's own block — [details](03-this-repositorys-own-block.md)
 - [x] 04: The join — [details](04-the-join.md)
-- [ ] 05: A conflict on the way in — [details](05-a-conflict-on-the-way-in.md)
+- [x] 05: A conflict on the way in — [details](05-a-conflict-on-the-way-in.md)
 - [ ] 06: Cut from the highest settled stage — [details](06-cut-from-the-highest-settled-stage.md)
 - [ ] 07: The words — [details](07-the-words.md)
