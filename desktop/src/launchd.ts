@@ -3,27 +3,27 @@
 //!
 //! The Rust tray app registered itself by hand, with a property list at
 //! `~/Library/LaunchAgents/net.tobico.Verkstead.plist` that `launchd` reads when
-//! the user's agent domain comes up — see
-//! `crates/desktop/src/startup/launchd.rs`, which is the file this reads and the
-//! reading it makes of it. This app registers through Electron's login-item API
-//! instead (ADR-0020, Set 846 Q9a), and the two know nothing of each other: left
-//! alone after an upgrade, that agent is a launch at every login of a binary
-//! this roadmap deletes, while the box on the Desktop page reads off.
+//! the user's agent domain comes up: that file is what this module reads, and
+//! the reading it makes of it is that app's own. This app registers through
+//! Electron's login-item API instead (ADR-0020, Set 846 Q9a), and the two know
+//! nothing of each other: left alone after an upgrade, that agent is a launch
+//! at every login of a binary that is gone, while the box on the Desktop page
+//! reads off.
 //!
 //! So the first launch after an upgrade **reads it, carries what it said into
 //! the new registration, and removes it**. Once, because the file is then gone
 //! and the next launch finds nothing.
 //!
-//! **What is read is presence plus two keys**, exactly as that module's
-//! `says_on` reads them: `Disabled` set true is off, `RunAtLoad` set false is
+//! **What is read is presence plus two keys**, exactly as that app's own
+//! `says_on` read them: `Disabled` set true is off, `RunAtLoad` set false is
 //! off, and anything else — a key that is not there, a value that is not a
 //! boolean, a file that is not really a plist — is the file being there, which
 //! is most of what it says.
 //!
 //! **What the file *names* is not read at all.** It names the tray app's own
-//! binary, the verb `desktop` and `--no-open`, and every one of those is a thing
-//! this roadmap deletes: whichever it said, what stands afterwards is this app
-//! registered through the API, or nothing.
+//! binary, the verb `desktop` and `--no-open`, and not one of those exists any
+//! more: whichever it said, what stands afterwards is this app registered
+//! through the API, or nothing.
 //!
 //! **On a Mac, and only where there is a registration to make.**
 //! [`where`](./startup.js) answers `nowhere` on an unpackaged run by decision,
@@ -82,7 +82,7 @@ export function agentFile(machine: Machine): string | undefined {
 /// Whether `plist` — the tray app's launch agent as it was read — says Verkstead
 /// starts at login.
 ///
-/// `crates/desktop/src/startup/launchd.rs`'s `says_on`, key for key: being there
+/// The Rust tray app's own `says_on`, key for key: being there
 /// is most of what an agent says, and two keys can say otherwise. `Disabled` is
 /// `launchd`'s own way of keeping an agent that is not to be run, and
 /// `RunAtLoad` set false is an agent that is loaded and waits for something else

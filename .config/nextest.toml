@@ -12,7 +12,6 @@
 
 [test-groups]
 session-account = { max-threads = 1 }
-run-key = { max-threads = 1 }
 
 # **The suites that start processes as the session account**, one test at a
 # time across all of them. Three things they share are the machine's, and each
@@ -44,16 +43,6 @@ filter = '''
   | (binary_id(verkstead-server) & test(/^sandbox::granting::writing::tests::/))
 '''
 test-group = 'session-account'
-
-# **The Launch on Startup registry tests**, one at a time. Each writes
-# Verkstead's value under a key named for itself below
-# `HKCU\Software\net.tobico.Verkstead\tests`, and takes that key away again —
-# so none of them reads another's today. They take turns anyway: the registry is
-# the user's rather than the process's, these are the only tests that write to
-# it, and they are a handful of milliseconds between them.
-[[profile.default.overrides]]
-filter = 'binary_id(verkstead-desktop) & test(/^startup::(run_key::)?tests::/)'
-test-group = 'run-key'
 
 # **The one test that waits on a PowerShell to say something**, with nothing
 # else running beside it. A first `powershell.exe` on the runner is slow on its

@@ -219,9 +219,9 @@ impl Tailscale {
     /// The same again, with a way to ask this machine for the operator grant
     /// rather than only a line to show for it.
     ///
-    /// What an app started from an icon hands the server, and what nothing else
-    /// hands it: a daemon has nobody at the machine to ask — see [`Elevate`],
-    /// [`crate::elevate`] and `verkstead_desktop::Desktop::run`.
+    /// What a server started as the desktop app's sidecar is given, and what
+    /// nothing else is: a daemon has nobody at the machine to ask — see
+    /// [`Elevate`], [`crate::elevate`] and [`crate::StartedBy::escalation`].
     pub fn escalating(self, escalation: Arc<dyn Elevate>) -> Tailscale {
         Tailscale {
             escalation: Some(escalation),

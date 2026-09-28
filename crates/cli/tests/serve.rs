@@ -440,6 +440,53 @@ fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).unwrap()
 }
 
+/// And a taken address is refused before anything has been made: whatever is on
+/// the socket is a Verkstead that got there first — a second copy, or the daemon
+/// a unit file already started — and the one that lost is the one that must not
+/// have written over the winner's Data Directory on its way out.
+///
+/// **The whole of what [`verkstead_server::run`] promises about its own
+/// ordering, and the only test of it.** The bind is the first thing that can
+/// fail, and everything the server makes comes after it: the directory, the
+/// Skills written into it, the Build Cache, the database. So what is asserted
+/// here is the refusal *and* the absence — a server that named the address and
+/// made the directory anyway would pass the first half alone.
+#[test]
+fn a_taken_address_is_refused_by_the_port_it_names_and_makes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("never-made");
+
+    // Held for the whole of the run below, because a port let go of is a port
+    // the server would take. All this test wants of it is the socket, so it is
+    // a listener rather than a second Verkstead.
+    //
+    // The port is read off this listener rather than picked by `free_port`,
+    // which lets go of what it found: in the window between that release and a
+    // bind here, a test running beside this one is handed the same port — the
+    // one just freed is the one the kernel hands out next — and this bind is
+    // then the one that cannot have it.
+    let first = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = first.local_addr().unwrap().port();
+
+    let refusal = refused_to_start(&[
+        "--listen",
+        &format!("127.0.0.1:{port}"),
+        "--data-dir",
+        data_dir.to_str().unwrap(),
+    ]);
+
+    assert!(
+        refusal.contains(&format!("127.0.0.1:{port}")),
+        "the refusal should name the address it could not take, got:\n{refusal}"
+    );
+
+    assert!(
+        !data_dir.exists(),
+        "nothing should have been made, and {} is there",
+        data_dir.display()
+    );
+}
+
 #[test]
 fn the_served_api_round_trips_an_ask() {
     let tmp = tempfile::tempdir().unwrap();
@@ -870,7 +917,7 @@ fn the_desktop_flag_names_the_address_alone_and_leaves_the_key_in_its_file() {
 /// says so nowhere, and a Windows runner is on a visible station like any other
 /// process. Nothing about the fallback is Linux's own — it is the same branch
 /// of the same function — so what the other two lose is the premise, not the
-/// coverage. See `verkstead_server::display`.
+/// coverage. See `crates/server/src/display.rs`.
 ///
 /// Said as empty rather than taken away, which is the same answer and one this
 /// suite can give whatever the machine running it has exported: a name exported
@@ -989,26 +1036,6 @@ fn the_help_says_the_desktop_flag_belongs_to_the_app() {
             "`verkstead serve --help` should say {phrase:?}, got:\n{help}"
         );
     }
-}
-
-/// And it is not the tray verb's: that one hands the link over in-process, so a
-/// flag saying the caller is the app would be a flag saying nothing.
-#[cfg(feature = "desktop")]
-#[test]
-fn the_desktop_verb_does_not_take_the_flag() {
-    let help = flowed(&stdout(&run(&["desktop", "--help"])));
-
-    assert!(
-        !help.contains("--desktop"),
-        "`verkstead desktop --help` should not name the flag at all, got:\n{help}"
-    );
-
-    let refusal = String::from_utf8(run(&["desktop", "--desktop"]).stderr).unwrap();
-
-    assert!(
-        refusal.contains("--desktop"),
-        "and passing it there should be refused by name, got:\n{refusal}"
-    );
 }
 
 /// `help` with every run of whitespace flattened to one space.

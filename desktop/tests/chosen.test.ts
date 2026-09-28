@@ -3,9 +3,8 @@
 //!
 //! Which is the whole of what a machine with no screen can check about a tray
 //! — the icon itself is a thing on somebody's panel, and task 06 of this stage
-//! is what puts one on a real desktop. The same split
-//! `crates/desktop/src/tray.rs` made of its own menu, and the same three
-//! questions asked of it.
+//! is what puts one on a real desktop. The same split the Rust tray app made
+//! of its own menu, and the same three questions asked of it.
 
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 

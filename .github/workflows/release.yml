@@ -409,43 +409,58 @@ jobs:
       # turn on the TypeScript emitter, which is a test's business, and a
       # workspace-wide build would unify it into the release binary.
       #
-      # **`--no-default-features` is what makes these the headless assets.** The
-      # tray is a default-on `desktop` feature of this same package now
-      # (ADR-0012, as amended), and what the five rows above ship is the bare
-      # server-and-CLI: turning it off is what keeps the two musl legs linkable
-      # at all — GTK does not build against musl — and what keeps a toolkit out
-      # of the other three. The desktop legs below build the same package with
-      # the feature left where it is.
+      # Nothing else is narrowed, and nothing needs to be. No crate in the
+      # workspace links a GUI toolkit any more (ADR-0020), so the five rows above
+      # ship the bare server-and-CLI by building it plainly — and the desktop
+      # legs below pack this same headless binary inside the Electron app rather
+      # than building a second one beside it.
       - name: Build
         run: >
-          cargo build --release --locked --no-default-features
+          cargo build --release --locked
           --package verkstead-cli --target ${{ matrix.target }}
 
-      # Both claims the two paragraphs above make, checked rather than trusted —
-      # and from now on this is what holds the GUI out of the released CLI. The
-      # emitter is a normal dependency of `verkstead-render` whenever its
-      # `typescript` feature is on; `verkstead-desktop` and the GTK under it are
-      # normal dependencies of this package the moment anything outside the
-      # `desktop` feature reaches for the tray half. Either is in this tree or it
-      # is in nothing that was linked.
+      # **What a slim binary must not link, checked rather than trusted** — and
+      # this, with the store-closure grep in `nix.yml`, is now the whole of what
+      # holds a GUI out of the released CLI. There is no feature boundary behind
+      # it any more: with the `desktop` feature gone there is nothing that makes
+      # a toolkit *unlinkable*, so this list is what says a dependency added
+      # tomorrow may not start.
       #
-      # `--no-default-features` here for the reason the build has it: `cargo
-      # tree` resolves the default features unless it is told otherwise, and a
-      # tree that is not the one that was built answers a question nobody asked.
+      # `ts-rs` is the emitter, a normal dependency of `verkstead-render` whenever
+      # its `typescript` feature is on. The rest are a window: the toolkit the
+      # tray app used to link, the two others a Rust GUI is written against
+      # today, and the platform crates all three reach the screen through. Whole
+      # megabytes of shared libraries a machine with no screen would never load
+      # — and naming only `gtk`, as this did while the feature was what really
+      # held it out, would miss every one of the ways a GUI would arrive now.
+      # The same span as the closure grep in `nix.yml`, said in crate names
+      # where that one is said in store paths.
+      #
+      # **Matched against the names alone**, because a needle this short against
+      # the whole tree would be matched against a version, a feature list and
+      # the path the checkout happens to sit at as well. Asked for as names
+      # rather than parsed back out of the tree above: `{p}` is
+      # `name version (source)`, so the first field is the crate and nothing
+      # else, and no leg has to take the box-drawing apart. The tree itself is
+      # still printed, because it is what a red step is read against.
+      #
       # `--edges normal` is what makes this the binary's question — a
       # dev-dependency turns features on and is no part of what shipped.
       #
-      # A creep would fail to link on the two musl legs as well, loudly and much
+      # A toolkit would fail to link on the two musl legs as well, loudly and much
       # later; on the macOS and Windows ones it would link, and ship. So it is
       # named here, on every leg, rather than left to a linker on two of them.
-      - name: The build carries neither the emitter nor the toolkit
+      - name: The build links neither the emitter nor a toolkit
         run: |
-          tree=$(cargo tree --package verkstead-cli --edges normal \
-            --no-default-features --target ${{ matrix.target }})
-          echo "$tree"
-          for crate in ts-rs verkstead-desktop gtk; do
-            if printf '%s\n' "$tree" | grep -q "$crate"; then
-              echo "::error::$crate was linked into the release binary."
+          cargo tree --package verkstead-cli --edges normal \
+            --target ${{ matrix.target }}
+          names=$(cargo tree --package verkstead-cli --edges normal \
+            --target ${{ matrix.target }} --prefix none --format '{p}' \
+            | awk '{ print $1 }' | sort -u)
+          for crate in ts-rs gtk gdk glib appindicator winit tao tray-icon \
+            muda wayland x11 cocoa objc; do
+            if printf '%s\n' "$names" | grep -qF "$crate"; then
+              echo "::error::$crate must not be linked into the released CLI, and is."
               exit 1
             fi
           done
@@ -600,9 +615,9 @@ jobs:
       #
       # `xvfb` is the screen: the window is the point of this app, and a run
       # with no display is a run that proves the sidecar and nothing else.
-      # `dbus-x11` is `dbus-run-session`, under the name `ci.yml` asks for it —
-      # the tray is published onto the session bus, and a runner has no session,
-      # so the run below brings a bus of its own. `fuse3` is `fusermount3`: the
+      # `dbus-x11` is `dbus-run-session`, the name Ubuntu packages it under — the
+      # tray is published onto the session bus, and a runner has no session, so
+      # the run below brings a bus of its own. `fuse3` is `fusermount3`: the
       # pinned AppImage runtime links its own squashfuse but still asks that
       # helper for the mount, and the mount is what the two assertions after it
       # stand on. And `binutils` is `objdump`, which the floor below is read

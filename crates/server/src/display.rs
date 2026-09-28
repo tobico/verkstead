@@ -6,18 +6,18 @@
 //! entirely, whether there is anywhere for a window to appear, so it is a
 //! *display* here and the two are never read for each other.
 //!
-//! **Asked rather than risked**, and asked before anything is drawn — the tray
-//! app's icon as much as its dialogs, and the password dialog
-//! [`crate::elevate`] raises before that. GTK will not start without a display,
-//! and a Verkstead run over SSH, in a container or under a test has none: what
-//! starting the toolkit anyway would buy is GTK's own complaint on the standard
-//! error nobody launched from an icon is reading, printed underneath the very
-//! message that was being reported.
+//! **Asked rather than risked**, and asked before anything is drawn — the
+//! password dialog [`crate::elevate`] raises, which is the one thing this
+//! process ever puts on a screen of its own. A dialog will not come up without
+//! a display, and a Verkstead run over SSH, in a container or under a test has
+//! none: what raising it anyway would buy is the toolkit's own complaint on the
+//! standard error nobody launched from an icon is reading, printed underneath
+//! the very message that was being reported.
 //!
 //! What says there is one on Linux is `$DISPLAY` or `$WAYLAND_DISPLAY`, so that
 //! is what is read. A display that is *named* and is not there is a different
-//! question and one only GTK can answer — see `verkstead_desktop::tray::show`,
-//! which is where that answer arrives.
+//! question and one only a toolkit can answer — which is the app's rather than
+//! this server's: its window is what would not open.
 //!
 //! Windows says it nowhere in the environment and is asked instead: a process
 //! belongs to a **window station**, and only one of a session's stations is the
@@ -60,9 +60,10 @@ pub fn there_is_one() -> bool {
 ///
 /// **A question that could not be asked is a display.** Every reason this call
 /// fails is about this process rather than about the station, and the answer
-/// that costs least when it is wrong is the one that leaves the tray to
-/// `verkstead_desktop::tray::show` to fail at — which is where a tray that
-/// cannot be raised is already handled, and already logged.
+/// that costs least when it is wrong is the one that leaves the drawing to the
+/// app that started this server — which, being the thing that would put a
+/// window and an icon on that station, is where a station nobody is looking at
+/// is found out anyway.
 #[cfg(windows)]
 pub fn there_is_one() -> bool {
     use windows_sys::Win32::System::StationsAndDesktops::{
@@ -104,8 +105,8 @@ pub fn there_is_one() -> bool {
 /// were read — name one.
 ///
 /// Set and empty is unset: a shell that exported the name without a value has
-/// no more of a display than one that never mentioned it, and GTK is no happier
-/// with it.
+/// no more of a display than one that never mentioned it, and a toolkit handed
+/// it is no happier than one handed nothing.
 #[cfg(target_os = "linux")]
 fn there_is_one_with(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
     [display, wayland]

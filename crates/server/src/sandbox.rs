@@ -76,9 +76,9 @@
 // Built wherever the tests are rather than on its own platform alone: a
 // rendering is a description going in and a process coming out, so the arm this
 // machine will never run is still an arm its tests call — the same reason
-// `crates/desktop`'s startup registrations are all built here. Not on a Windows
-// build outside one: there is no namespace to unshare there, and the renderer a
-// Windows session gets is the third of them below.
+// `Platform` is a value rather than a `cfg`. Not on a Windows build outside
+// one: there is no namespace to unshare there, and the renderer a Windows
+// session gets is the third of them below.
 #[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
 mod bwrap;
 // The Apple rendering is built for its tests on a Unix and nowhere else: what
@@ -738,7 +738,7 @@ static SESSION_PATH: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Ve
 /// Read `session_path` out of `settings` and hold it for the run.
 ///
 /// Called once as the server comes up, before a router is built or a session is
-/// spawned — see [`crate::run_on_keyed`]. Everything that asks what a session's
+/// spawned — see [`crate::run`]. Everything that asks what a session's
 /// `PATH` is asks [`machine_path`], which reads what this held.
 pub fn hold_session_path(settings: &crate::settings::Settings) {
     let configured = kept_entries(

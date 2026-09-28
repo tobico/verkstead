@@ -8,9 +8,12 @@
 //! blink and for the Compile Server is all day — and either way it is an empty
 //! black rectangle nobody asked for.
 //!
-//! **And the server has no console**, because the tray app is started by
-//! `verkstead-desktop.exe` with `CREATE_NO_WINDOW` — see that binary, which is
-//! where the same sentence is said one level up. So every program the server
+//! **And the server has no console**, because the app that starts it has none
+//! to hand down. The packed `Verkstead.exe` is a windowed program — a fact
+//! about the file rather than about a run, which the Release's msi leg reads
+//! out of its PE header — and it starts the sidecar with `windowsHide`, which
+//! is Node's name for the very flag below: see `desktop/src/sidecar.ts`, which
+//! is where the same sentence is said one level up. So every program the server
 //! runs to read something back — git, `gh`, `taskkill`, the Compile Server —
 //! is one of those windows unless it says otherwise. On a machine where the
 //! server was started from a shell instead, the child inherits *that* console

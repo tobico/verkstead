@@ -8,9 +8,7 @@
 //! desktop app starts this very binary as its sidecar (ADR-0020), and
 //! `--desktop` is how it says so — a fact about who is at the machine rather
 //! than a setting, which is why it sits here with the server's own
-//! configuration flattened beneath it instead of on that configuration. The
-//! same `Config` is flattened under `verkstead desktop`, where a flag saying
-//! the caller is the app would be a flag saying nothing.
+//! configuration flattened beneath it instead of on that configuration.
 
 use anyhow::{Context, Result};
 use tracing_subscriber::EnvFilter;

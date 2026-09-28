@@ -114,10 +114,9 @@ linux:
   icon: ../target/electron/staged/icons
 
   # The desktop entry is electron-builder's to write — it has an `Exec` of its
-  # own that no configuration replaces, naming the launcher inside the image —
-  # so what carries over from `packaging/net.tobico.Verkstead.desktop` is the
-  # entry's fields. `Name` is the product name above, and `Type`, `Terminal` and
-  # `Icon` electron-builder fills in itself.
+  # own that no configuration replaces, naming the launcher inside the image — so
+  # these are the fields it is told to put in one. `Name` is the product name
+  # above, and `Type`, `Terminal` and `Icon` electron-builder fills in itself.
   category: Development
   description: The workbench, in the system tray
   desktop:

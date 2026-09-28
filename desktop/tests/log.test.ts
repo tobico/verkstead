@@ -5,7 +5,7 @@
 //! ordinary Node — the writer takes a directory rather than resolving one, and
 //! where the real one is is `platform.test.ts`'s question. These are the two
 //! rules the Rust app set and this app keeps, so they are asked here the way
-//! `crates/desktop/src/logs.rs` asks them of itself.
+//! that app asked them of itself.
 
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

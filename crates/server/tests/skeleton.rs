@@ -152,11 +152,13 @@ fn sandbox_binds_are_a_list_however_they_are_given() {
     );
 }
 
-/// The Log Directory, asked for the way stage 02's desktop binary will ask —
-/// from outside this crate, where it is the only caller there is ever going to
-/// be. Nothing in the server turns on the answer: it goes on logging to stdout,
-/// and the directory stands empty and uncreated until there is a binary with a
-/// log file to open in it.
+/// The Log Directory, asked from outside this crate the way anything asking it
+/// would. Nothing in the server turns on the answer: it goes on logging to
+/// stdout, and the directory stands empty and uncreated until something with a
+/// log file opens one in it — which is the desktop app, and it resolves the
+/// same three arms in TypeScript rather than calling this. So what is held
+/// here is the answer itself: the arms are what they say, and the read of a
+/// real machine is a path that machine named.
 #[test]
 fn the_log_directory_is_reachable_from_another_crate() {
     let env = Environment {
@@ -169,7 +171,8 @@ fn the_log_directory_is_reachable_from_another_crate() {
         Some(PathBuf::from("/home/you/.local/state/verkstead")),
     );
 
-    // And the read of the real environment, which is what that binary calls.
+    // And the read of the real environment, which is the answer this machine
+    // gives.
     // Whether this machine answers at all is the machine's business — nowhere
     // to resolve to is an answer of nothing rather than a failure of anything —
     // but an answer is a path the platform named, so it is absolute.

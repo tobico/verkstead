@@ -1407,8 +1407,7 @@ async fn steered(pool: &SqlitePool, id: i64) -> i64 {
         .await
         .unwrap()
         .into_iter()
-        .filter(|event| matches!(event.event, Event::Steer(..)))
-        .next_back()
+        .rfind(|event| matches!(event.event, Event::Steer(..)))
         .expect("there is a steer on the Timeline")
         .id
 }

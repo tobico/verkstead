@@ -3,13 +3,13 @@
 //!
 //! The Rust tray app registered itself with a value under
 //! `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, named for
-//! the app id and holding `"<exe>" desktop --no-open` — see
-//! `crates/desktop/src/startup/run_key.rs`, which is the value this reads and the
-//! reading it makes of it. This app registers through Electron's login-item API
-//! instead (ADR-0020, Set 846 Q9a), which writes a value of its own under
-//! [`VALUE`](./startup.js) and has never heard of that one: left alone after an
-//! upgrade, it is a sign-in start at every sign-in of a binary this roadmap
-//! deletes, while the box on the Desktop page reads off.
+//! the app id and holding `"<exe>" desktop --no-open`: that value is what this
+//! module reads, and the reading it makes of it is that app's own. This app
+//! registers through Electron's login-item API instead (ADR-0020, Set 846 Q9a),
+//! which writes a value of its own under [`VALUE`](./startup.js) and has never
+//! heard of that one: left alone after an upgrade, it is a sign-in start at
+//! every sign-in of a binary that is gone, while the box on the Desktop page
+//! reads off.
 //!
 //! So the first launch after an upgrade **reads it, carries what it said into the
 //! new registration, and removes it**. Once, because the value is then gone and
@@ -18,21 +18,20 @@
 //! **What is read is presence, and that is the whole of it.** A registry value
 //! has no `Disabled` and no `X-GNOME-Autostart-enabled`: the value is there and
 //! Verkstead started at sign-in, or it is not and Verkstead did not, which is
-//! what that module says for itself. So this is the shorter of the two
+//! what that app said for itself. So this is the shorter of the two
 //! take-overs — there is no key in it that could have said otherwise, and no
 //! branch for one that did.
 //!
 //! **What it *names* is not read at all**, the way the plist's command is not. It
-//! names the tray app's own binary, the verb `desktop` and `--no-open`, and every
-//! one of those is a thing this roadmap deletes: whichever it said, what stands
-//! afterwards is this app registered through the API.
+//! names the tray app's own binary, the verb `desktop` and `--no-open`, and not
+//! one of those exists any more: whichever it said, what stands afterwards is
+//! this app registered through the API.
 //!
 //! **And what this cannot see is the Startup tab.** A human who switched
 //! Verkstead off in Task Manager is recorded in a key of Explorer's own —
 //! `StartupApproved` — which is nothing to do with this value, so a value that is
-//! there is read as on either way. That is the honest answer
-//! `crates/desktop/src/startup/run_key.rs` already gave about the value it wrote,
-//! and it carries over unchanged. It is *not* the answer about the registration
+//! there is read as on either way. That is the honest answer the Rust tray app
+//! already gave about the value it wrote, and it carries over unchanged. It is *not* the answer about the registration
 //! that replaces it: Electron reads Explorer's key back for a value of its own,
 //! and [`switchedOff`](./startup.js) is where that is read.
 //!

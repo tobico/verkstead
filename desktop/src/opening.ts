@@ -4,8 +4,8 @@
 //!
 //! Two things are ever handed over, and to this app they are one act: the log
 //! file, which goes to whatever reads text here, and a link that leaves the
-//! workbench, which goes to a browser. `crates/desktop/src/opener.rs` was one
-//! module for the same pair and for the same reason — what the desktop starts
+//! workbench, which goes to a browser. The Rust tray app had one module for
+//! the same pair and for the same reason — what the desktop starts
 //! is the desktop's business rather than Verkstead's.
 //!
 //! **Linux is the arm with anything in it, and `xdg-open` is why.**
@@ -110,10 +110,11 @@ export function opening(
 
 /// Hand `what` over, and say so where it could not be.
 ///
-/// **Not waited on**, the same reading `opener.rs` made of it: what starts is
-/// somebody else's program, and an editor that takes ten seconds to come up is
-/// not something the app should be sitting on. Detached and unreferenced with
-/// it, so that what the human opened outlives the Verkstead that opened it.
+/// **Not waited on**, the same reading the Rust tray app made of it: what
+/// starts is somebody else's program, and an editor that takes ten seconds to
+/// come up is not something the app should be sitting on. Detached and
+/// unreferenced with it, so that what the human opened outlives the Verkstead
+/// that opened it.
 ///
 /// Both endings are read, because a refusal here is a refusal that reaches
 /// nobody otherwise: `gio` says on a non-zero exit that nothing is registered

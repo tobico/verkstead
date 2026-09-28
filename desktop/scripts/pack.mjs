@@ -223,8 +223,7 @@ function asking(given) {
       "In a checkout each is the headless binary a Release ships, built for one",
       "Apple target:",
       "",
-      "  cargo build --release -p verkstead-cli --no-default-features \\",
-      "    --target aarch64-apple-darwin",
+      "  cargo build --release -p verkstead-cli --target aarch64-apple-darwin",
     ];
   }
 
@@ -236,8 +235,8 @@ function asking(given) {
     "",
     "  pnpm run pack ../target/release/verkstead",
     "",
-    "In a checkout that is `cargo build --release -p verkstead-cli " +
-      "--no-default-features`, which is the headless binary a Release ships.",
+    "In a checkout that is `cargo build --release -p verkstead-cli`, which is " +
+      "the headless binary a Release ships.",
   ];
 }
 

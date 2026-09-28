@@ -71,18 +71,31 @@ jobs:
       - name: Flake check
         run: nix flake check --print-build-logs
 
-      # The claim `nix/verkstead-source.nix` makes about itself, read back off
-      # the store: the daemon package is the one binary built without its
-      # `desktop` feature (ADR-0012, as amended), and a toolkit anywhere in its
-      # closure would mean the feature had crept back in — a headless service
-      # pulling GTK onto a machine with no screen to draw it on. Nothing is
-      # built here: the flake check above already built this package, because
-      # the VM test runs it.
-      - name: The daemon package carries no toolkit
+      # **What a slim binary must not link**, read off the store rather than
+      # taken on trust. This is the package the NixOS module runs as a service,
+      # and a GUI toolkit anywhere in its closure would be megabytes downloaded
+      # onto a machine with no screen to draw them on. Nothing in the workspace
+      # links one today (ADR-0020), so this and the `cargo tree` grep in
+      # `release.yml` are together the whole of what keeps it that way — there is
+      # no feature left turned off behind them.
+      #
+      # The closure rather than the build's own dependency list, because that is
+      # what an adopter downloads: a toolkit reached at run time by a wrapper or
+      # an rpath is in here too, and in no `cargo tree`. Nothing is built: the
+      # flake check above already built this package, because the VM test runs
+      # it.
+      #
+      # **The same span the `cargo tree` grep names**, said in store paths where
+      # that one is said in crate names: the toolkit the tray app linked, what a
+      # Rust GUI would reach for instead, and the libraries any of them draws
+      # through. Two names would only say that the one way a toolkit used to
+      # arrive is still shut.
+      - name: The daemon package links no toolkit
         run: |
           closure=$(nix path-info --recursive .#verkstead-source)
           echo "$closure"
-          if printf '%s\n' "$closure" | grep -Ei 'gtk|appindicator'; then
-            echo "::error::The headless package's closure carries the desktop toolkit."
+          if printf '%s\n' "$closure" \
+            | grep -Ei -- 'gtk|gdk|glib|appindicator|pango|cairo|wayland|libx11|libxkbcommon'; then
+            echo "::error::A GUI toolkit must not be in the headless package's closure, and is."
             exit 1
           fi

@@ -11,8 +11,8 @@
 //! **On Linux that registration is the Rust tray app's own file** — an XDG
 //! autostart entry named for the app id, in the same directory under the same
 //! name — which is how the old registration is taken over rather than doubled.
-//! So the readings carry over exactly as `crates/desktop/src/startup/xdg.rs`
-//! makes them, because a human may have edited that file: the two keys a desktop
+//! So the readings carry over exactly as that app made them, because a human
+//! may have edited that file: the two keys a desktop
 //! turns an entry off with, the specification's own reading of
 //! `$XDG_CONFIG_HOME`, the path quoted whole, and `$APPIMAGE` in preference to
 //! the running executable. **What does not carry over is the command**: that
@@ -102,8 +102,8 @@ import { reg, type Registry, RUN } from "./registry.js";
 import type { Settings } from "./settings.js";
 
 /// The id every registration Verkstead makes with a platform is named for, and
-/// the one `crates/desktop/src/lib.rs` has held all along — the autostart entry
-/// is that app's file, so the name has to be that app's name.
+/// the one the Rust tray app held all along — the autostart entry is that
+/// app's file, so the name has to be that app's name.
 export const APP_ID = "net.tobico.Verkstead";
 
 /// The flag a login start carries, on the two platforms whose registration is a

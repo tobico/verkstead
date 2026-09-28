@@ -8,12 +8,11 @@
 //! mercy of what an agent claims. The Diff is the same rule answered by the
 //! other end: the server reads it off the Worktrees the Set was asked from.
 //!
-//! **And it is the only binary** (ADR-0004, and ADR-0012 as amended). `serve`
-//! runs the server out of the same file the agent asks with, and `desktop` runs
-//! that server with a tray icon over it — so the image a sandboxed session is
-//! handed is the image its server is running, and the two halves of an ask
-//! cannot skew. The tray half is a default-on `desktop` cargo feature, and the
-//! headless artifacts are the same binary built with the feature off.
+//! **And it is the only binary** (ADR-0004). `serve` runs the server out of the
+//! same file the agent asks with — so the image a sandboxed session is handed is
+//! the image its server is running, and the two halves of an ask cannot skew.
+//! The desktop app of ADR-0020 starts that same verb as its sidecar, so a
+//! machine with a window on Verkstead is running this binary too.
 
 use std::path::PathBuf;
 
@@ -23,8 +22,6 @@ use clap::{Parser, Subcommand};
 mod answers;
 mod ask;
 mod client;
-#[cfg(feature = "desktop")]
-mod desktop;
 mod done;
 mod guide;
 /// The verb nobody types: the launcher a Windows session's console is made by,
@@ -173,20 +170,6 @@ enum Command {
     /// (ADR-0020) and is nobody else's to pass.
     Serve(serve::Serve),
 
-    /// Run Verkstead on the desktop: the server, and a tray icon over it.
-    ///
-    /// `serve` with a screen in front of it — the viewer opened in the default
-    /// browser at startup unless `--no-open` says otherwise, an icon in the
-    /// system tray, and the log written to a file rather than to a terminal
-    /// nobody started this from. The flags are `serve`'s own beneath that one.
-    ///
-    /// Here rather than in a binary of its own so that the image the server is
-    /// running out of is an image that can also `ask` (ADR-0012, amended). A
-    /// build made with `--no-default-features` has no tray half and no verb for
-    /// it.
-    #[cfg(feature = "desktop")]
-    Desktop(verkstead_desktop::Desktop),
-
     /// The local account this machine's Windows sessions run as: make it, or
     /// take it away.
     ///
@@ -242,8 +225,6 @@ impl Cli {
                 waiting::waiting(length.as_deref(), &server)
             }
             Some(Command::Serve(asked)) => serve::serve(asked),
-            #[cfg(feature = "desktop")]
-            Some(Command::Desktop(app)) => desktop::desktop(app),
             #[cfg(windows)]
             Some(Command::SessionAccount { what }) => session_account::session_account(what),
             #[cfg(windows)]

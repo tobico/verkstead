@@ -7,12 +7,40 @@
 //! was started with and then either sits there or falls over, which between
 //! them are the two lifetimes a sidecar has from here.
 
-import { spawn } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+/// Every options object `spawn` has been handed in this file, in order.
+///
+/// **The one thing about a sidecar that a sidecar cannot be asked.**
+/// `windowsHide` is a Windows creation flag and nothing about the child shows
+/// whether it was passed — not its arguments, not its environment, not its
+/// streams — so what holds it is a read of the call rather than of what the
+/// call produced. `vi.hoisted` because the mock below is hoisted above the
+/// imports and would otherwise close over nothing.
+const spied = vi.hoisted(() => ({ handed: [] as (SpawnOptions | undefined)[] }));
+
+/// And the wrapper that records them, which **delegates**: what comes back is
+/// the real `spawn`'s real child, so every test in this file is still proved
+/// against one and the module is unchanged in every other respect.
+///
+/// Cast back to the real signature because `spawn` is overloaded and the
+/// callers here read `stdout` off what they get — a wrapper typed as one arm of
+/// it would narrow that away.
+vi.mock("node:child_process", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:child_process")>();
+
+  const recording = ((cli: string, args: string[], options?: SpawnOptions) => {
+    spied.handed.push(options);
+    return real.spawn(cli, args, options as SpawnOptions);
+  }) as typeof real.spawn;
+
+  return { ...real, spawn: recording };
+});
 
 import { FILE, heard, keep } from "../src/log.js";
 import { ARGUMENTS, byLine, how, start, type Lines, type Sidecar } from "../src/sidecar.js";
@@ -137,6 +165,31 @@ describe.skipIf(process.platform === "win32")("the sidecar", () => {
     const [said] = await recorded(record);
     expect(said).toBe(ARGUMENTS(ADDRESS).join(" "));
     expect(said).toBe(`serve --desktop --listen ${ADDRESS}`);
+  });
+
+  /// **And with no console window**, which is the one thing the app hands the
+  /// child that the child cannot be asked about. The packed `Verkstead.exe` is
+  /// a windowed program with no console of its own, so a console program it
+  /// starts is given one — an empty black rectangle in front of whatever the
+  /// human was looking at, for as long as the server runs. Nothing on a Linux
+  /// or a macOS runner would ever see that, and neither would a Windows one:
+  /// the failure is a window on somebody's desk.
+  ///
+  /// So it is read off the call. `windowsHide` is Node's name for
+  /// `CREATE_NO_WINDOW` and it is off unless it is said — see
+  /// `crates/server/src/unseen.rs`, which is the same flag one level down for
+  /// every program the server itself runs, and has a suite of its own.
+  ///
+  /// Once, because two spawns would be two servers on the one port.
+  it("is started with no console window for Windows to draw", async () => {
+    spied.handed.length = 0;
+    const { cli, record } = standIn();
+    started = start(cli, ADDRESS, heard, unmounted(process.env));
+
+    await recorded(record);
+
+    expect(spied.handed).toHaveLength(1);
+    expect(spied.handed[0]?.windowsHide).toBe(true);
   });
 
   /// **Told rather than left to the default**, which is the same number: the

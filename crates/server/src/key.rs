@@ -162,9 +162,13 @@ impl WorkbenchKey {
     /// leaves every device holding a key that still works rather than a server
     /// admitting one nothing on disk agrees with.
     ///
-    /// Every handle on this key sees it: the desktop app and the server share
-    /// one — see [`crate::Config::workbench_key`] — so the tray's Open opens on
-    /// the new link without the app having been told anything.
+    /// Every handle on this key sees it, and so does the desktop app, which
+    /// holds none: it reads `workbench.key` out of the same Data Directory
+    /// afresh every time it wants a link — see `desktop/src/key.ts`, and
+    /// [`crate::Config::workbench_key`] for why the file is the only thing the
+    /// two of them share. So its window meets the 401 this makes, reads the
+    /// file again and loads the new link, without the app having been told
+    /// anything.
     pub fn reissue(&self) -> std::io::Result<()> {
         let fresh = invented()?;
 
@@ -255,10 +259,12 @@ pub enum HandsOverTheLink {
     /// and what somebody reading the journal pastes is the whole link. A key
     /// redacted there would leave such a machine with no way in at all.
     TheStartupLine,
-    /// The caller, which is the desktop app: it opens a browser on the link as
-    /// it comes up, and the tray's **Open** opens another whenever it is
-    /// pressed. So the line names the address alone, and the secret stays out
-    /// of the log file **View Logs** opens.
+    /// The caller, which is the desktop app: it reads the key out of the Data
+    /// Directory before there is a server to ask one of, and opens its own
+    /// window on the link — again at every opening after that, and again
+    /// wherever a 401 says the window has to be let back in. So the line names
+    /// the address alone, and the secret stays out of the log file
+    /// **View Logs** opens.
     TheCaller,
 }
 
