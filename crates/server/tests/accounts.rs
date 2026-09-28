@@ -98,6 +98,43 @@ printf 'settings: %s\n' "$(cat "$HOME/.claude/settings.json" 2>&1)"
 printf 'config: %s\n' "$(cat "$HOME/.claude.json" 2>&1)"
 "#;
 
+/// What stands where claude goes when the question is the **memory sync**: a
+/// session that reads out everything its store holds, writes a transcript into
+/// the entry for the directory it is working in, and a memory into the other
+/// entry it was given.
+///
+/// **The entry name is computed inside**, out of the directory the session was
+/// started in and by the harness's own rule — every character outside
+/// `[a-zA-Z0-9]` a hyphen — so that what lands is what claude itself would have
+/// written and nothing here is told where to put it.
+const PRINTS_AND_WRITES_ITS_MEMORY: &str = r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+
+for file in "$HOME"/.claude/projects/*/*; do
+  [ -f "$file" ] || continue
+  printf 'memory: %s\n' "$(cat "$file")"
+done
+
+mkdir -p "$HOME/.claude/projects/$entry"
+printf 'a transcript of the session\n' > "$HOME/.claude/projects/$entry/transcript.jsonl"
+
+for dir in "$HOME"/.claude/projects/*; do
+  [ -d "$dir" ] || continue
+  case "$dir" in
+    */"$entry") ;;
+    *) printf 'what the session learned\n' > "$dir/learned.jsonl" ;;
+  esac
+done
+
+printf 'ran\n'
+"#;
+
+/// And what stands there on the device the account is at home on, which starts no
+/// session of its own: a Verkstead that keeps what it makes in a Data Directory,
+/// because a memory sync asks the home device for its worktrees directory and a
+/// router with nowhere to keep anything has none.
+const NOTHING_RUNS: &str = "exit 0";
+
 /// A `gh` that answers nothing: no finish step in this suite reaches GitHub, and
 /// the real one would need an account.
 const NO_GITHUB: &str = "exit 1";
@@ -340,6 +377,121 @@ impl Verkstead {
         called(&self.profiles().await, name)
             .expect("the Profile that was just saved is on the list")
             .id
+    }
+
+    /// And the same account with its **memory switch off**, which is a session
+    /// given a store of its own rather than the account's — at home and away
+    /// alike.
+    async fn account_forgetting(&self, name: &str) -> i64 {
+        let profile = self.account(name).await;
+
+        let said = press(
+            &self.workbench,
+            &format!("{PROFILES}/{profile}"),
+            Some(
+                &serde_json::json!({
+                    "name": name,
+                    "account": {
+                        "agent_type": "Claude",
+                        "claude_dir": self.elsewhere.path().join(name).join(".claude"),
+                        "config_file": self.elsewhere.path().join(name).join(".claude.json"),
+                    },
+                    "models": [MODEL],
+                    "memory": false,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "switching {name}'s memory off");
+
+        profile
+    }
+
+    /// A repository of this device's own, registered — which is what makes it one
+    /// of this device's Repos for the match across devices to find, and so what
+    /// says where that account's memory of it is kept.
+    async fn repo(&self) -> PathBuf {
+        let path = self.elsewhere.path().join("verkstead");
+
+        if !path.exists() {
+            repository(path.clone());
+        }
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(
+            registered.contains("Added") || registered.contains("AlreadyRegistered"),
+            "registering the repository: {registered}",
+        );
+
+        path
+    }
+
+    /// What that account remembers of the directory at `path`, written into the
+    /// entry this harness keeps it under.
+    fn remembers(&self, name: &str, path: &Path, file: &str, text: &str) {
+        let entry = self.entry(name, path);
+
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::write(entry.join(file), text).unwrap();
+    }
+
+    /// And what is in that entry now, polled until it holds `file` — or a panic
+    /// saying what it holds instead.
+    ///
+    /// Polled because a write-back is the last thing a session's ending does,
+    /// after the process has been reaped and the profile seen to.
+    async fn remembered(&self, name: &str, path: &Path, file: &str) -> String {
+        let entry = self.entry(name, path);
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            if let Ok(text) = std::fs::read_to_string(entry.join(file)) {
+                return text;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "{} never came to hold {file}. It holds: {:?}",
+                entry.display(),
+                walked(&entry),
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// Where that account keeps what it remembers of the directory at `path`.
+    fn entry(&self, name: &str, path: &Path) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(name)
+            .join(".claude/projects")
+            .join(entry_named(path))
+    }
+
+    /// And the path this device would have cut this Conversation's work in: its
+    /// own worktrees directory under its Data Directory, with the stem the other
+    /// machine's Worktree carries.
+    fn would_have_cut(&self, stem: &str) -> PathBuf {
+        self.dir.path().join("worktrees").join(stem)
+    }
+
+    /// What the one Worktree this device has cut is called, which is the stem
+    /// both machines name theirs with.
+    fn worktree_stem(&self) -> String {
+        let mut under = walked_directories(&self.dir.path().join("worktrees"));
+
+        assert_eq!(under.len(), 1, "one Worktree has been cut: {under:?}");
+
+        under.pop().expect("one Worktree")
     }
 
     /// That account signed in, or signed in again with another token — which is
@@ -702,6 +854,21 @@ async fn linked_up_running(stub: &str) -> (Verkstead, Verkstead, Holding) {
     (a, b, holding)
 }
 
+/// The same with **both** devices keeping what they make in a Data Directory,
+/// which is what the memory sync needs of the device at home: the entry a
+/// Worktree's memory is kept under there is named off that machine's own
+/// worktrees directory, and a router given nowhere to keep anything has none.
+async fn linked_up_at_home_too(stub: &str) -> (Verkstead, Verkstead, Holding) {
+    let a = Verkstead::running(A, NOTHING_RUNS).await;
+    let b = Verkstead::running(B, stub).await;
+
+    joined(&a, &b).await;
+
+    let holding = b.holding();
+
+    (a, b, holding)
+}
+
 /// `b` and `a` linked both ways, which is what a member is: each device holds the
 /// other's certificate and the address to reach it at.
 async fn joined(a: &Verkstead, b: &Verkstead) {
@@ -760,6 +927,38 @@ fn git(dir: &Path, args: &[&str]) {
         .expect("git should be on the PATH for these tests");
 
     assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// The name Claude gives the `projects/` entry for `path`, worked out here
+/// rather than asked of the server: what the memory sync has to get right is
+/// that both machines name an entry the harness's own way, and a test that asked
+/// the code under test what the name was would be asking it to agree with
+/// itself.
+///
+/// Every UTF-16 unit outside `[a-zA-Z0-9]` becomes `-`, one for one. Nothing here
+/// is long enough for the cut and the hash that follow it.
+fn entry_named(path: &Path) -> String {
+    path.to_string_lossy()
+        .encode_utf16()
+        .map(|unit| match char::from_u32(u32::from(unit)) {
+            Some(kept) if kept.is_ascii_alphanumeric() => kept,
+            _ => '-',
+        })
+        .collect()
+}
+
+/// The directories directly under `dir`, by name and in order.
+fn walked_directories(dir: &Path) -> Vec<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+
+    found.sort();
+    found
 }
 
 /// One row of a Profiles list, by the name on it.
@@ -1246,5 +1445,145 @@ async fn a_home_that_has_gone_away_is_said_on_the_timeline() {
         a.login_at_home("work")
             .is_some_and(|held| held.contains(TOKEN)),
         "the account at home is what it was, nothing having reached it",
+    );
+}
+
+/// A session on B under A's Profile **starts with what A's account remembered of
+/// this repository**, and a memory it writes is in A's account afterwards.
+///
+/// Which of B's Repos is A's is git's own answer on both ends, and the entry each
+/// machine keeps that memory under is named off its own path for the repository:
+/// what crosses the link is the files and which part of the store they are in.
+#[tokio::test]
+async fn a_session_away_from_home_starts_with_what_the_account_remembered() {
+    let (a, b, _holding) = linked_up_at_home_too(PRINTS_AND_WRITES_ITS_MEMORY).await;
+
+    let at_home = a.repo().await;
+
+    a.account("work").await;
+    a.remembers(
+        "work",
+        &at_home,
+        "remembered.jsonl",
+        "what this account remembers of the repository\n",
+    );
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(mirror.id).await;
+    let said = b.printed(conversation, "ran").await;
+
+    assert!(
+        said.contains("what this account remembers of the repository"),
+        "the session started with what A remembered of this repository. It printed: {said:?}",
+    );
+
+    assert_eq!(
+        a.remembered("work", &at_home, "learned.jsonl").await,
+        "what the session learned\n",
+        "and what it wrote is in the account on {A_MACHINE}",
+    );
+}
+
+/// And **its transcript is readable on A** once the session ends, under the entry
+/// A's own Worktree for that branch would carry.
+///
+/// A Worktree lives under the Data Directory rather than under the Repo, so there
+/// is no match to ask for: the entry is named off A's own worktrees directory
+/// with the same stem B's Worktree carries, which is the path A would have used
+/// for this work.
+#[tokio::test]
+async fn the_transcript_of_a_session_away_from_home_comes_home() {
+    let (a, b, _holding) = linked_up_at_home_too(PRINTS_AND_WRITES_ITS_MEMORY).await;
+
+    a.repo().await;
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(mirror.id).await;
+
+    b.printed(conversation, "ran").await;
+
+    let stem = b.worktree_stem();
+
+    assert_eq!(
+        a.remembered("work", &a.would_have_cut(&stem), "transcript.jsonl")
+            .await,
+        "a transcript of the session\n",
+        "the transcript is under the entry {A_MACHINE}'s own Worktree would carry",
+    );
+}
+
+/// **No Repo match pulls nothing, says so on the Timeline, and still starts the
+/// session** — the Worktree's half of the store travelling either way, being
+/// named off the Data Directory rather than off the Repo.
+#[tokio::test]
+async fn no_repo_match_is_said_on_the_timeline_and_starts_the_session_anyway() {
+    let (a, b, _holding) = linked_up_at_home_too(PRINTS_AND_WRITES_ITS_MEMORY).await;
+
+    // Nothing of A's is registered, so nothing of A's is this repository.
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(mirror.id).await;
+
+    b.printed(conversation, "ran").await;
+
+    let said = b.notices(conversation).await.join("\n");
+
+    assert!(
+        said.contains("no Repo that is this repository"),
+        "the Timeline says what was not pulled. It says: {said:?}",
+    );
+
+    let stem = b.worktree_stem();
+
+    assert_eq!(
+        a.remembered("work", &a.would_have_cut(&stem), "transcript.jsonl")
+            .await,
+        "a transcript of the session\n",
+        "and the session ran, and its transcript came home",
+    );
+}
+
+/// **Memory switched off syncs nothing in either direction and the session starts
+/// empty** — which is what the switch means at home, and means away from home for
+/// the same reason.
+#[tokio::test]
+async fn a_profile_that_shares_no_memory_syncs_nothing_away_from_home() {
+    let (a, b, _holding) = linked_up_at_home_too(PRINTS_AND_WRITES_ITS_MEMORY).await;
+
+    let at_home = a.repo().await;
+
+    a.account_forgetting("work").await;
+    a.remembers(
+        "work",
+        &at_home,
+        "remembered.jsonl",
+        "what this account remembers of the repository\n",
+    );
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(mirror.id).await;
+    let said = b.printed(conversation, "ran").await;
+
+    assert!(
+        !said.contains("what this account remembers of the repository"),
+        "the session started on a store of its own. It printed: {said:?}",
+    );
+
+    // And the ending carried nothing back: what A holds is what A held, with
+    // nothing of this session's beside it.
+    let entry = a.entry("work", &at_home);
+
+    assert_eq!(
+        walked(&entry),
+        ["remembered.jsonl"],
+        "nothing of the session's landed in the account at home",
+    );
+
+    assert!(
+        !a.would_have_cut(&b.worktree_stem()).exists()
+            && walked(&a.entry("work", &a.would_have_cut(&b.worktree_stem()))).is_empty(),
+        "and nothing was written under the entry its Worktree would have carried",
     );
 }

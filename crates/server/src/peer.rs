@@ -79,6 +79,7 @@ pub mod announcing;
 pub mod dialling;
 pub mod exchange;
 pub mod joining;
+pub mod memory;
 pub mod news;
 pub mod renewing;
 pub mod repos;

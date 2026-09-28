@@ -121,6 +121,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::news::route())
         .merge(super::repos::route())
         .merge(super::account::route())
+        .merge(super::memory::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))
 }

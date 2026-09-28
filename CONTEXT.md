@@ -2611,7 +2611,10 @@ the transcript it leaves are the account's, and the next session reads them.
 **Off**, the store is the root's own and empty as each session starts: fresh
 memory, none of the human's transcripts in reach, and the session's own
 transcript written into the root, where Verkstead reads it from. The login and
-the written configuration are the same either way. On the Profile form it is one
+the written configuration are the same either way. **And the switch holds away
+from home**: a session on one device under a Profile whose account is on another
+is given what that account remembers of this Repo, and what it writes goes back
+— see **Memory sync**. On the Profile form it is one
 checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
 the whole of what most accounts are — the one Claude Code login on this machine,
@@ -2801,7 +2804,8 @@ what reaches a model, its `.claude.json` without the MCP servers *or* the
 their paths and their history — and each other harness's `config.toml` or
 `opencode.json` filtered the same way. No plugins, hooks, rules, skills, global
 instructions file, or any other repository's transcripts. The memory store is not
-on the list.
+on the list: it is joined rather than composed, and is carried entry by entry on
+its own terms — see **Memory sync**.
 **A member's own call rather than the viewer's**: the home device answers it at
 `/api/peer/v1/profiles/<id>/account` on the **Peer Listener** behind the **Member
 Gate**, by the id the mirror row records for it there, and only for a Profile of
@@ -2837,6 +2841,66 @@ Timeline carries a **Notice** saying the account was not written and naming the
 machine. The next session at home may find itself signed out, which is worth a
 line rather than a silent loss.
 _Avoid_: account copy, cached account, synced login, borrowed account
+
+**Memory sync**:
+What carries an **Agent Profile**'s memory store to the device a session is
+running on and back again, where that Profile's account is at home on another
+one (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
+from; this carries what it *joins*, and the two together are what makes a
+session away from home the session it would have been at home. Before launch,
+what the home account remembers of this Repo and of this Conversation is
+written into the mirror; as the session ends, what the session wrote goes back.
+That is what makes a session run on B readable on A afterwards, and what a
+harness's own resume stands on after a **Transfer**.
+**The memory switch holds away from home.** Switched off, nothing syncs in
+either direction and the session starts on an empty store, exactly as it does
+at home.
+**A label apiece, and each machine names its own path.** A memory store is keyed
+by the path a session ran in wherever it is keyed by anything, and every one of
+those paths is a different string on every machine. So nothing crosses the link
+but the part of the store — the Repo's entry, the Worktree's, the sessions, the
+memory files, the data directory — and the files under it, and each device joins
+that word onto a directory of its own. Which is the whole of the path rewrite,
+done twice rather than sent: the name is computed by the harness's own encoding
+on both ends, and a name computed any other way is a second entry rather than
+the same memory.
+**The unit is the smallest one each harness's store has.** Claude's is the two
+entries a Built Root already names, one for the Repo and one for the Worktree.
+Codex's is its memory files whole, and out of the one flat directory of
+rollouts it keeps for every directory it has ever run in, the ones whose session
+was working in a Worktree of this name — the Worktree being called the same
+thing on every machine of a cluster and at a different path on each. Grok
+Build's is the same, its session directories picked out by the ids Verkstead
+named them with, and not its index of the whole store. OpenCode's is its data
+directory whole, the database in it running in write-ahead-log mode and one
+carried a file at a time not opening at all.
+**Which path each part is named off is two different answers.** The Repo's goes
+through the match across devices — see **Repo**, where origin then name is the
+rule — and **no match is an answer**: there is nothing of that Repo to pull, the
+session starts without it, and the Timeline says so rather than the launch being
+refused. The Worktree's is named off the Data Directory instead, a Worktree
+living under one rather than under the Repo: the home device joins **its own**
+worktrees directory onto the same stem this Worktree carries, which is the path
+it would have used for this work and is what leaves the transcript findable when
+the work comes home.
+**A member's own call rather than the viewer's**, beside the account's: the home
+device answers at `/api/peer/v1/profiles/<id>/memory` on the **Peer Listener**
+behind the **Member Gate**, and takes what the session left at
+`/api/peer/v1/profiles/<id>/memory/left`. A press rather than a path each way,
+the question being three facts about the asking device's side and one of them a
+list.
+**Only what changed travels back**, which is the account mirror's rule for the
+login: what came down is remembered by a fingerprint apiece, and a file still
+exactly as it arrived is not sent. **Nothing at home is deleted** — a file the
+session took away is not a file it asked the account to lose, and the rest of
+that store is the human's own work in other repositories.
+**Best effort rather than a gate.** A home that will not answer is a session
+that starts on an empty store with a **Notice** saying so, where a home that
+will not answer for the *account* starts no session at all: a session with no
+memory comes up new, and a session with no login comes up logged out with
+nothing saying why. The same at the end — what could not be written home is a
+line on the Timeline rather than a retry.
+_Avoid_: memory mirror, transcript sync, store copy
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a

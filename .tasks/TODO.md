@@ -25,5 +25,5 @@ Roadmap stage: [08: Shared Profiles](docs/roadmaps/cluster-mode/08-shared-profil
 - [x] 03: Repo matching across devices — [details](03-repo-matching-across-devices.md)
 - [x] 04: The account mirror, and a session away from home — [details](04-the-account-mirror.md)
 - [x] 05: The login written back home — [details](05-the-login-written-back-home.md)
-- [ ] 06: Memory sync — [details](06-memory-sync.md)
+- [x] 06: Memory sync — [details](06-memory-sync.md)
 - [ ] 07: Broken states and the refusals — [details](07-broken-states-and-the-refusals.md)

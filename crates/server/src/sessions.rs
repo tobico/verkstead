@@ -2394,16 +2394,38 @@ impl Sessions {
         // the session is over — with the store and the cluster handle it needs
         // there, this call's own being borrowed. See
         // [`crate::mirroring::account::Lending`].
-        let (launching_under, lending) = match mirrored {
-            Some(crate::mirroring::account::Mirrored { profile, lent }) => (
-                Some(store::Pairing {
-                    profile,
-                    model: pairing.model.clone(),
-                }),
-                Some(crate::mirroring::account::Lending::of(pool, devices, lent)),
-            ),
+        //
+        // And the **memory store** with it, where the Profile's memory switch is
+        // on: what that account remembers of this Repo, and of this Conversation,
+        // comes over into the mirror before anything is built out of it and goes
+        // back as the session ends — the switch holding away from home exactly as
+        // it holds at home. Best effort rather than a gate, unlike the account: a
+        // session with no memory starts new, where a session with no login comes
+        // up logged out, and only the second is worth refusing a launch over. See
+        // [`crate::mirroring::memory`], which says on the Timeline what it did not
+        // carry.
+        let (launching_under, lending, syncing) = match mirrored {
+            Some(crate::mirroring::account::Mirrored { profile, lent }) => {
+                let syncing = match pairing.profile.mirror.as_ref() {
+                    Some(at) => {
+                        crate::mirroring::memory::pulled(pool, devices, conversation, at, &profile)
+                            .await
+                    }
 
-            None => (None, None),
+                    None => None,
+                };
+
+                (
+                    Some(store::Pairing {
+                        profile,
+                        model: pairing.model.clone(),
+                    }),
+                    Some(crate::mirroring::account::Lending::of(pool, devices, lent)),
+                    syncing,
+                )
+            }
+
+            None => (None, None, None),
         };
 
         let pairing = launching_under.as_ref().unwrap_or(pairing);
@@ -2769,6 +2791,20 @@ impl Sessions {
                     // says nothing where the login is still what came down and
                     // puts a sentence on the Timeline where the home has gone
                     // away.
+                    // What the session wrote to the account's **memory store**
+                    // first: its memory of the Repo, and the transcript of this
+                    // session, put back under the entries the home device names
+                    // for them — which is what makes a session run here readable
+                    // there. Before the login, so that the login has the last word
+                    // over the one file both of them can name: an OpenCode account
+                    // keeps its login inside the data directory the memory sync
+                    // carries whole. Only what the session changed travels, and
+                    // nothing at home is deleted — see
+                    // [`crate::mirroring::memory::Syncing::written_home`].
+                    if let Some(syncing) = syncing {
+                        syncing.written_home(conversation_id).await;
+                    }
+
                     if let Some(lending) = lending {
                         lending.written_home(conversation_id).await;
                     }

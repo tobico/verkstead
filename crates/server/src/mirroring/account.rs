@@ -484,7 +484,7 @@ fn written(
 /// the answer to each is that it is not a file of an account. Spelled with
 /// forward slashes by the device that answered, whichever platform it is on — see
 /// [`crate::peer::account::held`].
-fn named(inside: &str) -> Option<PathBuf> {
+pub(crate) fn named(inside: &str) -> Option<PathBuf> {
     let path = PathBuf::from(inside.replace('\\', "/"));
     let mut parts = path.components();
 

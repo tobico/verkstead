@@ -70,3 +70,32 @@ pub async fn session_id(pool: &SqlitePool, event_id: i64) -> Result<Option<Strin
 
     Ok(named.map(|(session_id,)| session_id))
 }
+
+/// And every name a session of `conversation` was given, oldest first.
+///
+/// What one harness's memory store is asked by across a cluster: grok files a
+/// session's directory under the id it was run with, so the ids this
+/// Conversation has had are what say which of a shared account's sessions are
+/// this Conversation's — see the server's `mirroring::memory`. The one this
+/// session is about to run under is on the list too, its Capture having been
+/// opened before the launch that reads this.
+///
+/// Empty for a Conversation whose sessions were never named, which is every
+/// backend that takes no session id.
+pub async fn session_ids(pool: &SqlitePool, conversation: i64) -> Result<Vec<String>> {
+    let named: Vec<(String,)> = sqlx::query_as(
+        "SELECT session_names.session_id
+         FROM session_names
+         JOIN timeline_events ON timeline_events.id = session_names.event_id
+         WHERE timeline_events.conversation_id = ?
+         ORDER BY session_names.event_id",
+    )
+    .bind(conversation)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("looking up the names of the sessions of Conversation {conversation}")
+    })?;
+
+    Ok(named.into_iter().map(|(session_id,)| session_id).collect())
+}

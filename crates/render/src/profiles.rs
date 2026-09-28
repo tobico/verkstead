@@ -461,3 +461,88 @@ pub enum ProfileChosen {
     /// The Conversation is past drafting, so both its Pairings are fixed.
     NotDrafting,
 }
+
+/// What a device away from home asks the home device for, of a Profile's
+/// **memory store** (ADR-0020, *Shared Profiles*).
+///
+/// **Facts about this device's side, rather than paths for that one to use.** A
+/// memory store is keyed by the path a session ran in wherever it is keyed by
+/// anything, and every one of those paths is a different string on every
+/// machine — so what travels is what each end needs to name *its own*: which of
+/// its Repos this repository is, what this Worktree is called, and what
+/// Verkstead named the sessions of this Conversation. The device that answers
+/// joins each onto its own directories, and the device that asked joins them
+/// onto its own; neither ever writes a path the other chose. See
+/// [`MemoryFile`], which is what comes back.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MemoryWanted {
+    /// Which of the answering device's Repos is this repository, by the id it
+    /// has **there** — the answer of the match across devices.
+    ///
+    /// `None` is *no match*, which is an answer rather than a failure: that
+    /// device holds nothing that is this repository, so there is nothing of the
+    /// Repo's memory to carry either way. The Worktree's half still travels,
+    /// being named off the Data Directory rather than off the Repo.
+    pub repo: Option<i64>,
+
+    /// And what this Conversation's Worktree directory is called, which is the
+    /// stem both machines name theirs with — the Repo and the branch, as
+    /// Verkstead spells a directory name.
+    ///
+    /// The answering device joins it onto its own worktrees directory, which is
+    /// the path it *would* have used for this work: a Worktree lives under the
+    /// Data Directory rather than under the Repo, so there is nothing to match
+    /// it by, and naming it that machine's way is what leaves the transcript
+    /// findable when the work comes home.
+    pub worktree: Option<String>,
+
+    /// And every session id Verkstead has given this Conversation, for the one
+    /// harness whose store files a session's directory under it.
+    pub sessions: Vec<String>,
+}
+
+/// One file of a memory store on its way across the link.
+///
+/// **Under a label rather than under a path.** The part of the store it belongs
+/// to is named by a word both machines hold to — the Repo's entry, the
+/// Worktree's, the sessions, the memory files, the data directory — and each of
+/// them joins that word onto a path of its own. `inside` is where the file sits
+/// under that part, which is the one piece of a path that is the same on both
+/// machines.
+///
+/// **Bytes rather than text**, base64 as this travels: three of the four stores
+/// hold a SQLite database, and a store carried as text is a store that arrives
+/// broken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryFile {
+    /// Which part of the store it is in.
+    pub part: String,
+
+    /// And where it is under that part, with forward slashes whichever machine
+    /// composed it — `index.sqlite`, `2026/09/29/rollout-….jsonl`.
+    pub inside: String,
+
+    /// What is in it, base64 with padding, as the standard alphabet spells it.
+    pub bytes: String,
+}
+
+/// And what a session away from home left in its memory store, on its way into
+/// the account it belongs to.
+///
+/// **The question comes back with the answer.** The device at home names its own
+/// path for each part of the store, and it names them off exactly what it was
+/// asked the first time — which of its Repos this repository is, what this
+/// Worktree is called — so a write-back carrying a different question would be
+/// writing into a different part of the store than the one it read.
+///
+/// **Only what changed is in it.** A file still exactly as it came down is not
+/// here, and neither is one the session took away: nothing is deleted at home,
+/// the rest of that account's store being somebody else's work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryLeft {
+    /// The same question the store was read with.
+    pub wanted: MemoryWanted,
+
+    /// And the files, each under the part it belongs to.
+    pub files: Vec<MemoryFile>,
+}

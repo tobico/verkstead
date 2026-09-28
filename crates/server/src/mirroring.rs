@@ -60,6 +60,7 @@
 //! [`removed`].
 
 pub mod account;
+pub mod memory;
 
 use anyhow::Result;
 use sqlx::SqlitePool;

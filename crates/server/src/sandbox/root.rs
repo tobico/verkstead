@@ -341,11 +341,22 @@ enum Harness {
     /// Claude Code: `.credentials.json` linked, two entries under `projects/`
     /// as its memory, and a `settings.json` written.
     Claude {
-        /// The `projects/` entries joined, in the order they are said: the
-        /// Repo's main checkout's first, which holds Claude's per-Repo memory,
-        /// and the Worktree's after it, where the session's transcript is
-        /// written. One where the two are the same name.
-        entries: Vec<String>,
+        /// The `projects/` entry of the Repo's main checkout, which holds
+        /// Claude's memory of the Repo.
+        repo: String,
+
+        /// And the Worktree's, where the session's transcript is written — the
+        /// same name as `repo` where the session works in the main checkout
+        /// itself.
+        ///
+        /// **Two names rather than the joined list**, because the two are two
+        /// different things wherever the machine at the other end of a link is
+        /// concerned: the memory sync carries each to the entry *that* machine
+        /// names for the same thing, and a list with the repeat already taken
+        /// out would have nothing left to say which was which — see
+        /// [`Root::synced`]. What is joined is [`Root::entries`], which is
+        /// these two with a repeat taken out.
+        worktree: String,
 
         /// The same two paths as `.claude.json` keys its `projects` entries:
         /// the plain path, with forward slashes on Windows. One where the two
@@ -394,16 +405,13 @@ impl Root {
             Platform::MacOs | Platform::Windows => resolved(worktree),
         };
 
-        let mut entries = Vec::new();
+        let mut named = Vec::new();
         let mut trusted = Vec::new();
 
         for path in [main_checkout(git_dir), worktree] {
             let plain = super::plainly(&path);
-            let entry = entry_named(&plain);
 
-            if !entries.contains(&entry) {
-                entries.push(entry);
-            }
+            named.push(entry_named(&plain));
 
             let key = match platform {
                 Platform::Windows => plain.to_string_lossy().replace('\\', "/"),
@@ -415,9 +423,17 @@ impl Root {
             }
         }
 
+        let [repo, worktree] = named
+            .try_into()
+            .expect("one name apiece, and there are two paths");
+
         Root {
             account: account.to_owned(),
-            harness: Harness::Claude { entries, trusted },
+            harness: Harness::Claude {
+                repo,
+                worktree,
+                trusted,
+            },
             memory: true,
         }
     }
@@ -810,8 +826,9 @@ impl Root {
         }
 
         match &self.harness {
-            Harness::Claude { entries, .. } => entries
-                .iter()
+            Harness::Claude { .. } => self
+                .entries()
+                .into_iter()
                 .map(|entry| Path::new(PROJECTS).join(entry))
                 .collect(),
             Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
@@ -819,6 +836,167 @@ impl Root {
             Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
         }
     }
+
+    /// The `projects/` entries a Claude root joins, in the order they are said
+    /// and with a repeat taken out: the Repo's main checkout's first, which
+    /// holds Claude's memory of the Repo, and the Worktree's after it, where
+    /// the session's transcript is written. One where the session is working in
+    /// the main checkout itself.
+    ///
+    /// None for every other harness, none of which keys its store by the
+    /// directory a session runs in.
+    fn entries(&self) -> Vec<&str> {
+        match &self.harness {
+            Harness::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
+            Harness::Claude { repo, worktree, .. } => vec![repo, worktree],
+            Harness::Codex | Harness::Grok | Harness::OpenCode => Vec::new(),
+        }
+    }
+
+    /// The **parts of the memory store** a session away from home syncs, each
+    /// said from the account's directory as *this* machine names it — see
+    /// [`Part`] and [`crate::mirroring::memory`].
+    ///
+    /// **A label apiece, and each machine names its own path for it.** Which
+    /// directory holds Claude's memory of this Repo is a different name on
+    /// every machine, the name being the path's; so what crosses the link is
+    /// the label and the files under it, and the device that writes them down
+    /// joins them onto the path *it* names. Which is the whole of the path
+    /// rewrite, done twice rather than sent: a name computed any way but the
+    /// harness's own is a second entry rather than the same memory.
+    ///
+    /// **The unit is the smallest one each harness's store has**, because only
+    /// one of the four keys its store by path:
+    ///
+    /// - **Claude** — the two entries a root already names, one for the Repo and
+    ///   one for the Worktree.
+    /// - **Codex** — the memory files whole, and out of the one flat directory
+    ///   of rollouts the ones this Conversation's sessions wrote, which is what
+    ///   `worktree` picks out: the store is filed by date and holds every
+    ///   repository the human has ever worked in, and none of the rest of it is
+    ///   this Repo's anything.
+    /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
+    ///   named them with, which is what its store files a session's directory
+    ///   under. Not `session_search.sqlite` at the top of it, which is the
+    ///   human's index of the whole store: a copy of a mirror's partial one
+    ///   written over it at home would be a search that had lost the rest.
+    /// - **OpenCode** — its data directory whole. The database in it runs in
+    ///   write-ahead-log mode and one carried a file at a time will not open, so
+    ///   the directory travels with its `-wal` and `-shm` siblings or not at all.
+    ///
+    /// **Nothing at all where the memory switch is off**, which is the reading
+    /// [`Root::joined_store`] makes of the same switch: a session away from home
+    /// starts on an empty store exactly as it does at home, and neither
+    /// direction carries anything.
+    ///
+    /// `worktree` is the name this Conversation's Worktree directory carries —
+    /// the stem both machines name theirs with — and `sessions` is every session
+    /// id Verkstead has given this Conversation. Each is what one harness's
+    /// store is asked by, and nothing to the other three.
+    pub(crate) fn synced(&self, worktree: Option<&str>, sessions: &[String]) -> Vec<Part> {
+        if !self.memory {
+            return Vec::new();
+        }
+
+        let part = |label: &'static str, inside: PathBuf, whose: Whose| Part {
+            label,
+            inside,
+            whose,
+        };
+
+        match &self.harness {
+            Harness::Claude {
+                repo,
+                worktree: written,
+                ..
+            } => vec![
+                part(REPO, Path::new(PROJECTS).join(repo), Whose::Everything),
+                part(
+                    WORKTREE,
+                    Path::new(PROJECTS).join(written),
+                    Whose::Everything,
+                ),
+            ],
+
+            Harness::Codex => vec![
+                part(MEMORY, PathBuf::from(CODEX_MEMORY[1]), Whose::Everything),
+                part(
+                    SESSIONS_PART,
+                    PathBuf::from(SESSIONS),
+                    Whose::Naming(worktree.unwrap_or_default().to_owned()),
+                ),
+            ],
+
+            Harness::Grok => vec![
+                part(MEMORY, PathBuf::from(GROK_MEMORY[1]), Whose::Everything),
+                part(
+                    SESSIONS_PART,
+                    PathBuf::from(SESSIONS),
+                    Whose::Called(sessions.to_vec()),
+                ),
+            ],
+
+            Harness::OpenCode => vec![part(DATA, PathBuf::from(OPENCODE_DATA), Whose::Everything)],
+        }
+    }
+}
+
+/// What a part of a memory store is called on the link, which is the one thing
+/// about it both machines hold to: each of them names a path of its own for it.
+///
+/// Spelled out rather than taken off the path, for the reason the account
+/// mirror's allowlist is a list rather than whatever arrived: a device that
+/// wrote down a name the other end chose would be writing wherever that end
+/// said.
+pub(crate) const REPO: &str = "repo";
+pub(crate) const WORKTREE: &str = "worktree";
+pub(crate) const SESSIONS_PART: &str = "sessions";
+pub(crate) const MEMORY: &str = "memory";
+pub(crate) const DATA: &str = "data";
+
+/// One part of a memory store, as the device it is on names it.
+///
+/// See [`Root::synced`], which is the list of them per harness, and
+/// [`crate::mirroring::memory`], which carries what is under each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Part {
+    /// What it is called on the link — [`REPO`] and the four beside it.
+    pub(crate) label: &'static str,
+
+    /// And where it is inside the account's own directory on this machine.
+    pub(crate) inside: PathBuf,
+
+    /// And which of the files under it are this Conversation's.
+    pub(crate) whose: Whose,
+}
+
+/// Which files under a part of a store this Conversation's sync carries.
+///
+/// **A rule rather than a list**, because the two ends apply it to two different
+/// stores: the home device picks out what this Conversation left there and the
+/// device away from home picks out what it is about to send back, and each of
+/// them is looking at files the other has never seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Whose {
+    /// Every file under it. What a part keyed by this Repo or this Worktree
+    /// holds is this Conversation's by construction — and so is what an
+    /// account's memory files hold, which is the account's rather than any
+    /// Repo's and belongs on whichever machine the session is running on.
+    Everything,
+
+    /// The rollouts whose session was working in a Worktree of this name: the
+    /// rule for the one store filed by date rather than by anything a
+    /// Conversation could look itself up under.
+    ///
+    /// **The name rather than the path**, because the path is a different one on
+    /// every machine and the name is the same on all of them — the Worktree
+    /// directory is named for the Repo and the branch, and that is what makes it
+    /// this Conversation's on both ends.
+    Naming(String),
+
+    /// And the session directories called one of these, which is what the store
+    /// that files a session under the id Verkstead gave it is asked by.
+    Called(Vec<String>),
 }
 
 /// Where an account keeps its login, whatever else is true of it.
@@ -1666,7 +1844,7 @@ mod tests {
     /// A Claude root's `projects/` entries.
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
-            Harness::Claude { entries, .. } => entries.clone(),
+            Harness::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
             Harness::Codex | Harness::Grok | Harness::OpenCode => {
                 panic!("only a Claude root has `projects/` entries")
             }
