@@ -15,6 +15,16 @@
 //! by a **local** id, and a mirror is what gives one of A's accounts an id here.
 //! So the assertions about a removal are assertions about B's Conversations, and
 //! the one about a refresh is that the id did not move.
+//!
+//! **Unix, with `tests/accounts.rs` and `tests/news.rs`**, and for the reason
+//! those two are: what a device here is judged on is a `PATH` of this suite's
+//! own making, with a shell stub for each harness it is to have — a mirror whose
+//! harness is not on the box reads broken, so the box this runs on must not be
+//! what decides. That stub is a `#!/bin/sh` script and a mode, which is not what
+//! *installed* means on Windows. The rest of the relay under this runs there:
+//! see `tests/relaying.rs` and `tests/freshness.rs`, which do.
+
+#![cfg(unix)]
 
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
