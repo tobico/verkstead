@@ -2488,10 +2488,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 ///
 /// [`crate::continuing::begun`]'s wording, with the two things adoption changes
 /// taken out of it. *With nobody asked* goes, because somebody did: a human
-/// pressed this. What stays is both halves: an adopted stage stacks on the base
-/// the human fixed it to, wherever that base is a predecessor there is anything
-/// left to stack on, and the half it did not take is as much worth saying as
-/// the half it did.
+/// pressed this. What stays is both halves: an adopted stage is cut from the
+/// base the human fixed it to, wherever that base is a predecessor there is
+/// anything left to stand on, and the half it did not take is as much worth
+/// saying as the half it did.
+///
+/// **Cut from** rather than *stacks on*, for [`crate::continuing::begun`]'s
+/// reason: where the stage ends up in its roadmap's chain is settled at its
+/// finish, when it joins — see [`crate::joins`].
 fn adopted(
     stage: &crate::stages::Stage,
     branch: &str,
@@ -2508,14 +2512,15 @@ fn adopted(
 
     match stacks_on {
         Some(predecessor) => format!(
-            "{started} Its branch `{branch}` stacks on `{predecessor}`, the base this \
-             Conversation was fixed to, the way this repository's `{}` records.",
+            "{started} Its branch `{branch}` was cut from `{predecessor}`, the base this \
+             Conversation was fixed to, and it joins its roadmap's chain at its finish the way \
+             this repository's `{}` records.",
             crate::stages::GIT_WORKFLOW,
         ),
         None => format!(
-            "{started} Its branch `{branch}` came off `{from}` and stacks on nothing: the base \
-             is the default branch, or work already in it, or this repository's `{}` records no \
-             way to stack a roadmap stage on the one before it.",
+            "{started} Its branch `{branch}` came off `{from}` and was cut from nothing else: \
+             the base is the default branch, or work already in it, or this repository's `{}` \
+             records no way to stack a roadmap stage on the one before it.",
             crate::stages::GIT_WORKFLOW,
         ),
     }

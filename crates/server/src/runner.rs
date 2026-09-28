@@ -647,13 +647,13 @@ async fn backlog_again(
         // half happened: a stage that has planned nothing has pushed nothing and
         // opened nothing, so what an empty backlog means there is that the run
         // has not started rather than that it is over.
-        if let Some(stacked_on) = stage_to_plan(&state, conversation_id, working_in, base).await {
+        if let Some(cut_from) = stage_to_plan(&state, conversation_id, working_in, base).await {
             tracing::info!(
                 conversation_id,
                 "a stage's backlog was never planned, so the planning is being run again",
             );
 
-            return plan_stage(state, conversation_id, stacked_on, driving).await;
+            return plan_stage(state, conversation_id, cut_from, driving).await;
         }
 
         return nothing_left(state, conversation_id, working_in, base, driving).await;
@@ -959,9 +959,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 /// whose backlog nothing else would ever write, so what is read there is a run
 /// that never began rather than one that is worked out — see [`stage_to_plan`].
 ///
-/// `stacked_on` is the branch this stage's branch was made on top of, which the
-/// fork is told because it is the one thing about a stage the repository does not
-/// say.
+/// `cut_from` is the branch this stage's branch was cut from, which the fork is
+/// told because it is the one thing about a stage the repository does not say.
+/// The base rather than what the stage ends up stacked on: the join is at the
+/// finish — see [`crate::joins`] — and a session told otherwise now would be
+/// told something the finish contradicts.
 ///
 /// `driving` is the registration that says this Conversation is being driven,
 /// taken by whoever is starting the planning rather than here — the stage being
@@ -972,11 +974,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 pub(crate) async fn plan_stage(
     state: AppState,
     conversation_id: i64,
-    stacked_on: Option<String>,
+    cut_from: Option<String>,
     driving: Driving,
 ) {
     let Some(session) =
-        launch_in_turn(&state, conversation_id, Prompt::PlanningStage(stacked_on)).await
+        launch_in_turn(&state, conversation_id, Prompt::PlanningStage(cut_from)).await
     else {
         return;
     };
@@ -3684,7 +3686,7 @@ fn pending(worktree: &Path, path: &Path) -> Option<bool> {
 ///
 /// So it is asked for here. `Some` is that stage, carrying what
 /// [`crate::skills::next_stage`] has to be told — the branch this stage's branch
-/// stacks on, or `None` inside where it came off the default branch. `None` is
+/// was cut from, or `None` inside where it came off the default branch. `None` is
 /// every other Conversation: one that is not a stage, one whose backlog has been
 /// written already, and one with no base commit to read a branch's writing
 /// against.
@@ -3706,12 +3708,12 @@ pub(crate) async fn stage_to_plan(
     // writing can be read against either.
     let base = base?;
 
-    let stacked_on = match store::stacks_on(&state.pool, conversation_id).await {
+    let cut_from = match store::stacks_on(&state.pool, conversation_id).await {
         // The outer answer is whether this is a stage at all, and the inner one
-        // is what its branch was made on top of. Only the outer one decides
+        // is the branch its own was cut from. Only the outer one decides
         // anything here; the inner is carried through to the fork, which is the
         // one thing about a stage the repository does not say.
-        Ok(stacked_on) => stacked_on?,
+        Ok(cut_from) => cut_from?,
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -3723,7 +3725,7 @@ pub(crate) async fn stage_to_plan(
         }
     };
 
-    (!wrote_a_backlog(worktree, Some(base)).await).then_some(stacked_on)
+    (!wrote_a_backlog(worktree, Some(base)).await).then_some(cut_from)
 }
 
 /// [`backlog_written`] as the two things that turn on it ask it: off the
@@ -3885,7 +3887,7 @@ fn next_step(worktree: &Path) -> Step {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Prompt {
     /// Its fork of next-stage, which writes a roadmap stage's backlog instead —
-    /// carrying what the branch was made on top of, which is the one thing about
+    /// carrying the branch this one was cut from, which is the one thing about
     /// a stage the session cannot read out of the repository.
     PlanningStage(Option<String>),
 
@@ -4152,8 +4154,8 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             let handoff = handoff.as_deref();
 
             match &inside {
-                Prompt::PlanningStage(stacked_on) => {
-                    skills::next_stage(skills, &brief, stacked_on.as_deref())
+                Prompt::PlanningStage(cut_from) => {
+                    skills::next_stage(skills, &brief, cut_from.as_deref())
                 }
                 Prompt::Staging => skills::staging(skills, &brief),
                 // And the chain under it, on the finish of a stage: the section

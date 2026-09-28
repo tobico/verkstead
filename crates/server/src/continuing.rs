@@ -36,16 +36,22 @@
 //! of those cards is this Conversation's own effort and the rest are roadmaps it
 //! edited in passing.
 //!
-//! **What is decided is where the branch goes**, and only that — see [`Stands`],
-//! which is the whole of the rule. A stage stands on the branch the stage before
-//! it was worked on wherever the default branch does not already hold that work,
-//! because that is where the work this one builds on is; and it comes off the
-//! default branch where there is nothing left to stand on. Whether the
-//! repository records a stacking mechanism decides what the *session* does about
-//! the pull request rather than where the branch starts: Verkstead carries no
-//! mechanism of its own, and where the block is missing the pull request carries
-//! the stage before it until that one merges. The Timeline says which of the
-//! three happened.
+//! **What is decided is where the branch goes**, and only that — see
+//! [`cut_from`] and [`Stands`], which are the whole of the rule. A stage is cut
+//! from the **highest settled branch of its roadmap's chain**, so that it
+//! builds on everything the roadmap has finished rather than on its own
+//! predecessor alone; it stands on that branch wherever the default branch does
+//! not already hold it, and comes off the default branch where there is nothing
+//! left to stand on. Whether the repository records a stacking mechanism decides
+//! what the *session* does about the pull request rather than where the branch
+//! starts: Verkstead carries no mechanism of its own, and where the block is
+//! missing the pull request carries the branch below it until that one merges.
+//! The Timeline says which of the three happened.
+//!
+//! **What it ends up stacked on is not decided here.** A stage joins the chain
+//! at its finish, on top of whatever is there by then — see [`crate::joins`].
+//! A base and a place in the chain were one fact while a roadmap ran its stages
+//! one at a time, and they part company the moment two can run side by side.
 //!
 //! **And the companions come across with it.** A stage is given everything a
 //! human would have settled before pressing anything, and the parent
@@ -53,9 +59,9 @@
 //! Pairings do: a stage has no draft moment of its own, so there is nowhere else
 //! the set could come from. Read-only ones come across as they are and are
 //! checked out detached at whatever their base resolves to now; read-write ones
-//! cut a branch of their own per stage, named after the stage's branch, and
-//! standing on the predecessor stage's companion branch wherever the stage's own
-//! branch stands on the predecessor's. Every one of them is checked out in the
+//! cut a branch of their own per stage, named after the stage's branch, and cut
+//! from the companion branch of whatever the stage's own branch was cut from,
+//! wherever that was a branch at all. Every one of them is checked out in the
 //! same act as the stage's own worktree and recorded with it — and a companion
 //! that cannot be delivered starts nothing, the way everything else that stops a
 //! stage stops it.
@@ -151,6 +157,24 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         }
     };
 
+    // And the chain that roadmap has built so far, which is what the new stage
+    // is cut from the top of — see [`cut_from`]. A read that fails is not a
+    // record saying there is a chain, and an empty one is the branch that has
+    // just settled: today's answer, which is the safe one to fall back on.
+    let chain = match store::stage_chain(&state.pool, conversation.repo.id, &roadmap).await {
+        Ok(chain) => chain,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading the chain the next stage would be cut from the top of failed",
+            );
+            Vec::new()
+        }
+    };
+
+    let base = cut_from(&chain, &record, &roadmap, &conversation.branch).to_owned();
+
     let branch = conversation.branch.clone();
 
     // Both readings together, off the runtime's threads: a handful of file
@@ -216,7 +240,51 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         }
     };
 
-    start(&state, &conversation, conversation_id, stage, stacks).await;
+    start(&state, &conversation, conversation_id, stage, stacks, base).await;
+}
+
+/// Which branch the next stage is **cut from**: the highest stage of its
+/// roadmap's chain that has settled, and the branch that has just settled where
+/// the chain holds none.
+///
+/// The highest rather than the predecessor, so that a stage builds on
+/// everything the roadmap has finished — its own dependencies among them — and
+/// the rebase at its finish is small. In a roadmap run in order the two are the
+/// same branch: the stage that has just settled is the top of the chain, so
+/// nothing about such a roadmap's start moves. They part company where a
+/// sibling above the settling stage has settled first, which is what this is
+/// for.
+///
+/// **The fallback is the chain's foot.** A roadmap whose chain is empty is one
+/// whose first stage this is, and the branch that has just settled is the
+/// Conversation that *wrote* the roadmap: the chain starts there while its pull
+/// request is unmerged, because the default branch does not hold the roadmap
+/// the stage is started from. Which is the answer this gave before there was a
+/// chain to read, and it is still the answer here.
+///
+/// **Only what the record calls settled.** A link still wrapping up is a branch
+/// that may yet be pushed again — see [`crate::joins`], where the same rule
+/// holds a finish — and a stage cut from one would be cut from a commit that is
+/// about to stop existing.
+///
+/// Walked from the top down, which is what settles a stage attempted twice: two
+/// Conversations answer to one label and the record has one standing for both,
+/// so the branch this finds is the attempt that joined later — the one the
+/// chain is actually stacked through.
+///
+/// Whether that branch is still worth standing on is a separate question and
+/// git's to answer: see [`standing`], which is handed this and asks it.
+fn cut_from<'a>(
+    chain: &'a [store::Joined],
+    record: &store::StageStandings,
+    roadmap: &str,
+    settled: &'a str,
+) -> &'a str {
+    chain
+        .iter()
+        .rev()
+        .find(|link| record.of(roadmap, &link.stage) == Some(store::StageStanding::Settled))
+        .map_or(settled, |link| link.branch.as_str())
 }
 
 /// What happens when a settling Conversation has no roadmap recorded against it:
@@ -294,12 +362,17 @@ async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i6
 /// Conversation that has just settled. That is where the human is looking — the
 /// stage that would have carried it on does not exist, so there is no Timeline of
 /// its own to say anything on.
+///
+/// `base` is the branch the stage is cut from — see [`cut_from`], which chose
+/// it, and [`standing`], which is handed it and decides whether it is still
+/// worth standing on.
 async fn start(
     state: &AppState,
     conversation: &store::Conversation,
     settled: i64,
     stage: Stage,
     stacks: bool,
+    base: String,
 ) {
     let branch = stage.branch();
     let repo = conversation.repo.path.clone();
@@ -423,9 +496,8 @@ async fn start(
     let stands = tokio::task::spawn_blocking({
         let repo = repo.clone();
         let default = conversation.repo.default_branch.clone();
-        let predecessor = conversation.branch.clone();
 
-        move || standing(&repo, &default, &predecessor, stacks)
+        move || standing(&repo, &default, &base, stacks)
     })
     .await;
 
@@ -459,7 +531,7 @@ async fn start(
         }
     };
 
-    let stacked_on = stands.stacked_on().map(str::to_owned);
+    let cut_from = stands.base().map(str::to_owned);
     let from = stands.from().to_owned();
 
     let started = store::start_conversation(&state.pool, conversation.repo.id, &branch).await;
@@ -516,7 +588,7 @@ async fn start(
         let from = from.clone();
         let data = state.data_dir.clone();
         let companions = conversation.companions.clone();
-        let predecessor = stacked_on.clone();
+        let base = cut_from.clone();
         let checkouts = state.checkouts.clone();
 
         move || {
@@ -546,7 +618,7 @@ async fn start(
                     &data,
                     id,
                     &branch,
-                    predecessor.as_deref(),
+                    base.as_deref(),
                     companion,
                     &claimed,
                 )?);
@@ -596,7 +668,7 @@ async fn start(
             named: Some(&from),
         },
         &path,
-        stacked_on.as_deref(),
+        cut_from.as_deref(),
         store::RoadmapStage {
             roadmap: &stage.roadmap,
             label: &stage.label,
@@ -687,18 +759,20 @@ async fn start(
     tokio::spawn(crate::runner::plan_stage(
         state.clone(),
         id,
-        stacked_on,
+        cut_from,
         driving,
     ));
 }
 
 /// Where a stage's branch starts, and why it starts there.
 ///
-/// Two questions decide it, in this order. The first is whether the repository
+/// Handed the branch [`cut_from`] chose — the highest settled branch of the
+/// roadmap's chain — and asked whether that is still somewhere to start. Two
+/// questions decide it, in this order. The first is whether the repository
 /// records a way to stack a stage for review, and one that does gets what it
 /// records. The second is asked where it does not, and it is a fact about git
-/// rather than a convention: **is the stage before this one in the branch this
-/// one would otherwise come off?**
+/// rather than a convention: **is the branch this one would be cut from already
+/// in the default branch?**
 ///
 /// The second question is asked because the first cannot answer it. A repository
 /// that has written nothing down has said nothing about where a stage's work
@@ -711,33 +785,37 @@ async fn start(
 /// What the block still decides is the half that was always the repository's:
 /// what the session does about the *pull request*. Where it is there the session
 /// stacks the review the way the block says; where it is not the session opens
-/// an ordinary pull request, which carries the stage before it until that one
+/// an ordinary pull request, which carries the branch below it until that one
 /// merges — and the Timeline says so, because a decision taken while nobody was
 /// looking is owed an account of itself.
+///
+/// **None of this says what the stage ends up stacked on.** That is settled at
+/// its finish, when it joins the chain on top of whatever is there by then —
+/// see [`crate::joins`]. What is decided here is the base, and the two stopped
+/// being one fact when the join moved to the finish.
 pub(crate) enum Stands {
-    /// The repository records a way to stack a stage for review, so this one
-    /// stands on the predecessor's branch and the session follows the block when
-    /// it opens the pull request.
+    /// The repository records a way to stack a stage for review, so this one is
+    /// cut from the base and the session follows the block when it opens the
+    /// pull request.
     Recorded {
-        /// The branch the stage before this one was worked on.
-        predecessor: String,
+        /// The branch this stage is cut from.
+        base: String,
     },
 
-    /// It records none, and the default branch does not hold the stage before
-    /// this one — so the branch stands on the predecessor's anyway, that being
-    /// where the work this stage builds on is.
+    /// It records none, and the default branch does not hold the base — so the
+    /// branch is cut from it anyway, that being where the work this stage
+    /// builds on is.
     Unrecorded {
-        /// The branch the stage before this one was worked on.
-        predecessor: String,
+        /// The branch this stage is cut from.
+        base: String,
 
         /// And the default branch that does not hold it, for saying which one
         /// was asked.
         default: String,
     },
 
-    /// It records none and there is nothing left to stand on: the stage before
-    /// this one is already in the default branch, which is the ordinary
-    /// unstacked start.
+    /// It records none and there is nothing left to stand on: the base is
+    /// already in the default branch, which is the ordinary unstacked start.
     Off {
         /// The default branch, as origin is holding it.
         default: String,
@@ -748,19 +826,19 @@ impl Stands {
     /// The ref the branch is cut from.
     fn from(&self) -> &str {
         match self {
-            Self::Recorded { predecessor } | Self::Unrecorded { predecessor, .. } => predecessor,
+            Self::Recorded { base } | Self::Unrecorded { base, .. } => base,
             Self::Off { default } => default,
         }
     }
 
-    /// The branch this stage stands on, where it stands on one — which is what
-    /// the record keeps, what a companion's own branch mirrors, and what the
-    /// session is told.
-    fn stacked_on(&self) -> Option<&str> {
+    /// The branch this stage was cut from, where that is a branch rather than
+    /// the default branch — which is what the record keeps, what a companion's
+    /// own branch mirrors, and what the planning session is told.
+    ///
+    /// Not what it ends up stacked on: the join at its finish decides that.
+    fn base(&self) -> Option<&str> {
         match self {
-            Self::Recorded { predecessor } | Self::Unrecorded { predecessor, .. } => {
-                Some(predecessor)
-            }
+            Self::Recorded { base } | Self::Unrecorded { base, .. } => Some(base),
             Self::Off { .. } => None,
         }
     }
@@ -769,32 +847,32 @@ impl Stands {
 /// Ask git where the stage's branch starts — or `None` where it would not
 /// fetch, which is the one answer that starts nothing.
 ///
-/// **A recorded stack asks git nothing.** It stands on the predecessor's branch,
-/// which is work on this machine and nowhere else: there is no remote copy of it
-/// to be behind, so there is nothing a fetch could freshen and nothing about the
+/// **A recorded stack asks git nothing.** It is cut from `base`, which is work
+/// on this machine and nowhere else: there is no remote copy of it to be
+/// behind, so there is nothing a fetch could freshen and nothing about the
 /// default branch that would change the answer.
 ///
 /// **Everything else fetches first.** What the default branch *means* is what
 /// origin is holding rather than wherever this checkout's copy of it was last
 /// left, and both things asked of it here turn on that — the commit an unstacked
-/// stage comes off, and whether the stage before this one is in it. Without the
-/// fetch a machine that has not pulled for a week would start every stage a week
-/// behind, and would read a predecessor merged a week ago as still in flight.
+/// stage comes off, and whether the base is in it. Without the fetch a machine
+/// that has not pulled for a week would start every stage a week behind, and
+/// would read a base merged a week ago as still in flight.
 ///
 /// **And what git will not say reads as unmerged**, which is the safe way round
-/// for the one thing it decides. Standing on a predecessor that had in fact
-/// merged costs a base behind the default branch, which the next merge carries
-/// forward; coming off the default branch when the predecessor is unmerged costs
-/// the whole of the work the stage was to build on. A predecessor that resolves
-/// to no commit is the exception, and not the same thing: there is no branch
-/// there to stand on, so the default branch is all there is.
+/// for the one thing it decides. Standing on a base that had in fact merged
+/// costs a base behind the default branch, which the next merge carries
+/// forward; coming off the default branch when it is unmerged costs the whole
+/// of the work the stage was to build on. A base that resolves to no commit is
+/// the exception, and not the same thing: there is no branch there to stand on,
+/// so the default branch is all there is.
 ///
 /// Blocking, and called on a borrowed thread: a fetch has no deadline to answer
 /// within.
-fn standing(repo: &Path, default: &str, predecessor: &str, stacks: bool) -> Option<Stands> {
+fn standing(repo: &Path, default: &str, base: &str, stacks: bool) -> Option<Stands> {
     if stacks {
         return Some(Stands::Recorded {
-            predecessor: predecessor.to_owned(),
+            base: base.to_owned(),
         });
     }
 
@@ -810,7 +888,7 @@ fn standing(repo: &Path, default: &str, predecessor: &str, stacks: bool) -> Opti
 
     let default = worktrees::default_ref(repo, default);
 
-    let held = match worktrees::resolve(repo, predecessor) {
+    let held = match worktrees::resolve(repo, base) {
         Some(tip) => worktrees::merged(repo, &tip, &default) == Some(true),
         None => true,
     };
@@ -819,7 +897,7 @@ fn standing(repo: &Path, default: &str, predecessor: &str, stacks: bool) -> Opti
         Stands::Off { default }
     } else {
         Stands::Unrecorded {
-            predecessor: predecessor.to_owned(),
+            base: base.to_owned(),
             default,
         }
     })
@@ -828,10 +906,15 @@ fn standing(repo: &Path, default: &str, predecessor: &str, stacks: bool) -> Opti
 /// What the stage's own Timeline is told: which stage it is, and where its
 /// branch came from.
 ///
-/// All of it said plainly, including the half that is an absence — a stage
-/// standing on unmerged work in a repository that records no way to stack one
-/// for review is a decision, and one the human may want to do something about
+/// All of it said plainly, including the half that is an absence — a stage cut
+/// from unmerged work in a repository that records no way to stack one for
+/// review is a decision, and one the human may want to do something about
 /// before the pull request is opened.
+///
+/// **Cut from** rather than *stacks on*, because those are two facts now: this
+/// is the base, and what the stage ends up stacked on is settled at its finish
+/// when it joins the chain — see [`crate::joins`]. A notice promising the one
+/// while saying the other is a notice the finish would contradict.
 fn begun(stage: &Stage, branch: &str, stands: &Stands) -> String {
     // The brief named rather than linked: it is a path in a Worktree the
     // workbench has no route to, and a link that went nowhere would be worse
@@ -842,25 +925,23 @@ fn begun(stage: &Stage, branch: &str, stands: &Stands) -> String {
     );
 
     match stands {
-        Stands::Recorded { predecessor } => format!(
-            "{started} Its branch `{branch}` stacks on `{predecessor}`, the branch of the stage \
-             before it, the way this repository's `{}` records.",
+        Stands::Recorded { base } => format!(
+            "{started} Its branch `{branch}` was cut from `{base}`, the highest settled branch \
+             of this roadmap's chain, and it joins that chain at its finish the way this \
+             repository's `{}` records.",
             stages::GIT_WORKFLOW,
         ),
-        Stands::Unrecorded {
-            predecessor,
-            default,
-        } => format!(
-            "{started} Its branch `{branch}` stands on `{predecessor}`, the branch of the stage \
-             before it, because `{default}` does not hold that work yet — a stage off the \
-             default branch would be built without the stage it builds on. This repository's \
-             `{}` records no way to stack a stage for review, so the pull request this one ends \
-             on carries the stage before it until that one merges.",
+        Stands::Unrecorded { base, default } => format!(
+            "{started} Its branch `{branch}` was cut from `{base}`, the highest settled branch \
+             of this roadmap's chain, because `{default}` does not hold that work yet — a stage \
+             off the default branch would be built without the work it builds on. This \
+             repository's `{}` records no way to stack a stage for review, so the pull request \
+             this one ends on carries the branch below it until that one merges.",
             stages::GIT_WORKFLOW,
         ),
         Stands::Off { default } => format!(
-            "{started} Its branch `{branch}` came off `{default}`, which already holds the stage \
-             before it: there is nothing left to stand on.",
+            "{started} Its branch `{branch}` came off `{default}`, which already holds \
+             everything this roadmap has finished: there is nothing left to stand on.",
         ),
     }
 }
@@ -985,13 +1066,13 @@ impl Why {
 /// with what it will be.
 ///
 /// **A read-write companion is cut a branch named after the stage's own**,
-/// whatever the predecessor's row said — see [`settle`], which is where the
-/// typed name is dropped. Where the stage's own branch stands on the
-/// predecessor's, this branch stands on the predecessor's companion branch in
-/// the same repository: that is where the work it builds on is, the predecessor
-/// having committed in it and its pull request there being unmerged for just as
-/// long. Which is `predecessor`'s whole job — the settled Conversation's branch
-/// where the stage stacks, and `None` where it does not.
+/// whatever the row it inherited said — see [`settle`], which is where the
+/// typed name is dropped. Where the stage's own branch was cut from a branch,
+/// this one is cut from that branch's companion in the same repository: that is
+/// where the work it builds on is, the stage it came from having committed in
+/// it and its pull request there being unmerged for just as long. Which is
+/// `base`'s whole job — the branch the stage's own was cut from where it was
+/// cut from one, and `None` where it came off the default branch.
 ///
 /// A branch on this machine and nowhere else has no remote copy to be behind, so
 /// a stacked companion asks for no fetch, exactly as a stacked stage's own
@@ -1011,7 +1092,7 @@ fn beside(
     data: &Path,
     id: i64,
     branch: &str,
-    predecessor: Option<&str>,
+    base: Option<&str>,
     companion: store::Companion,
     claimed: &[PathBuf],
 ) -> Result<Checkout, Halted> {
@@ -1021,7 +1102,7 @@ fn beside(
         why,
     };
 
-    // The row this stage will hold is the predecessor's with the branch name
+    // The row this stage will hold is the inherited one with the branch name
     // taken off, so what it is called resolves through the mirroring rule rather
     // than being assigned here — one place for that rule, and it is
     // [`store::Companion::branch_for`].
@@ -1031,14 +1112,14 @@ fn beside(
     }
     .branch_for(branch);
 
-    // And the predecessor's own name in this repository, resolved the same way
-    // against the branch the settled Conversation was worked on. `None` on a
-    // read-only companion and on an unstacked stage, both of which come off the
+    // And that base's own name in this repository, resolved the same way
+    // against the branch the stage's own was cut from. `None` on a read-only
+    // companion and on an unstacked stage, both of which come off the
     // configured base instead.
-    let stands_on = predecessor.and_then(|predecessor| companion.branch_for(predecessor));
+    let cut_from = base.and_then(|base| companion.branch_for(base));
 
-    let named = match &stands_on {
-        Some(stands_on) => stands_on.clone(),
+    let named = match &cut_from {
+        Some(cut_from) => cut_from.clone(),
         None => {
             if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
                 tracing::error!(
@@ -1441,15 +1522,16 @@ mod tests {
 
     use super::*;
 
-    /// A repository with a default branch and a predecessor branch off it —
+    /// A repository with a default branch and a branch off it to be cut from —
     /// which is the shape every stage start reads, whatever it decides.
     struct Repo {
         dir: tempfile::TempDir,
     }
 
     impl Repo {
-        /// One commit on `main`, and a `predecessor` branch holding one commit
-        /// more: a stage that has finished and whose work `main` has not taken.
+        /// One commit on `main`, and a `roadmap/01-first` branch holding one
+        /// commit more: a stage that has finished and whose work `main` has not
+        /// taken.
         fn new() -> Repo {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path();
@@ -1477,8 +1559,8 @@ mod tests {
             self.dir.path()
         }
 
-        /// Take the predecessor into the default branch, which is the human
-        /// merging its pull request.
+        /// Take that branch into the default branch, which is the human merging
+        /// its pull request.
         fn merge(&self) {
             run(
                 self.path(),
@@ -1556,15 +1638,15 @@ mod tests {
     }
 
     /// A repository that records a stacking mechanism gets what it records, and
-    /// git is asked nothing about it: the predecessor's branch is where the work
-    /// is whether or not the default branch has taken it.
+    /// git is asked nothing about it: the base is where the work is whether or
+    /// not the default branch has taken it.
     #[test]
-    fn a_recorded_stack_stands_on_the_predecessor() {
+    fn a_recorded_stack_stands_on_the_base() {
         let repo = Repo::new();
 
         assert!(matches!(
             repo.stands(true),
-            Stands::Recorded { predecessor } if predecessor == "roadmap/01-first",
+            Stands::Recorded { base } if base == "roadmap/01-first",
         ));
 
         repo.merge();
@@ -1575,22 +1657,18 @@ mod tests {
         );
     }
 
-    /// The case this rule was written for: nothing recorded, and a predecessor
-    /// the default branch does not hold. The branch stands on it anyway, because
-    /// the alternative is a whole stage built without the stage it builds on.
+    /// The case this rule was written for: nothing recorded, and a base the
+    /// default branch does not hold. The branch is cut from it anyway, because
+    /// the alternative is a whole stage built without the work it builds on.
     #[test]
-    fn an_unrecorded_stack_stands_on_an_unmerged_predecessor() {
+    fn an_unrecorded_stack_is_cut_from_an_unmerged_base() {
         let repo = Repo::new();
 
-        let Stands::Unrecorded {
-            predecessor,
-            default,
-        } = repo.stands(false)
-        else {
-            panic!("a predecessor `main` does not hold is one to stand on");
+        let Stands::Unrecorded { base, default } = repo.stands(false) else {
+            panic!("a base `main` does not hold is one to stand on");
         };
 
-        assert_eq!(predecessor, "roadmap/01-first");
+        assert_eq!(base, "roadmap/01-first");
         assert_eq!(
             default, "main",
             "and which branch was asked, for the notice"
@@ -1601,7 +1679,7 @@ mod tests {
     /// the branch comes off the default branch — the ordinary unstacked start,
     /// which is what this always was for a roadmap whose stages land as they go.
     #[test]
-    fn a_merged_predecessor_leaves_nothing_to_stand_on() {
+    fn a_merged_base_leaves_nothing_to_stand_on() {
         let repo = Repo::new();
         repo.merge();
 
@@ -1612,9 +1690,9 @@ mod tests {
     }
 
     /// What the default branch *is* is what origin is holding, so the refs are
-    /// made current before either question is asked of them. A predecessor
-    /// merged on origin and not yet here reads as merged, and the branch that
-    /// comes off origin's tip has the work origin has.
+    /// made current before either question is asked of them. A base merged on
+    /// origin and not yet here reads as merged, and the branch that comes off
+    /// origin's tip has the work origin has.
     #[test]
     fn origin_is_fetched_before_the_default_branch_is_read() {
         let repo = Repo::new();
@@ -1639,7 +1717,7 @@ mod tests {
                 repo.stands(false),
                 Stands::Off { ref default } if default == "origin/main",
             ),
-            "a fetch is what tells this the predecessor has landed: {:?}",
+            "a fetch is what tells this the base has landed: {:?}",
             run(repo.path(), &["log", "--oneline", "-1", "main"]),
         );
     }
@@ -1664,15 +1742,141 @@ mod tests {
         );
     }
 
-    /// A predecessor branch that resolves to nothing is not a branch: there is
+    /// A base branch that resolves to nothing is not a branch: there is
     /// nothing to stand on, so the default branch is all there is.
     #[test]
-    fn a_predecessor_that_resolves_to_nothing_is_not_stood_on() {
+    fn a_base_that_resolves_to_nothing_is_not_stood_on() {
         let repo = Repo::new();
 
         assert!(matches!(
             standing(repo.path(), "main", "roadmap/no-such-branch", false),
             Some(Stands::Off { .. }),
         ));
+    }
+
+    /// One link of a chain, as [`store::stage_chain`] reads it back.
+    fn link(conversation_id: i64, stage: &str) -> store::Joined {
+        store::Joined {
+            conversation_id,
+            stage: stage.to_owned(),
+            branch: format!("roadmaps/rate-limiting/{stage}"),
+        }
+    }
+
+    /// And what the record says each of them got to, in the shape both
+    /// readings of a roadmap take one.
+    fn standings(rows: &[(&'static str, store::StageStanding)]) -> store::StageStandings {
+        store::StageStandings::from_rows(
+            rows.iter()
+                .map(|(label, standing)| ("rate-limiting", *label, *standing)),
+        )
+    }
+
+    /// [`cut_from`] at the one roadmap every one of these is about.
+    fn base<'a>(
+        chain: &'a [store::Joined],
+        record: &store::StageStandings,
+        settled: &'a str,
+    ) -> &'a str {
+        cut_from(chain, record, "rate-limiting", settled)
+    }
+
+    /// A roadmap run in order gives the branch that has just settled, because
+    /// that branch is the top of the chain. Which is every roadmap so far, and
+    /// the whole of what must not move: nothing about such a start changes.
+    #[test]
+    fn a_roadmap_run_in_order_is_cut_from_the_stage_that_settled() {
+        let chain = [link(7, "01"), link(9, "02")];
+        let record = standings(&[
+            ("01", store::StageStanding::Settled),
+            ("02", store::StageStanding::Settled),
+        ]);
+
+        assert_eq!(
+            base(&chain, &record, "roadmaps/rate-limiting/02"),
+            "roadmaps/rate-limiting/02",
+        );
+    }
+
+    /// A sibling that joined above the stage that settled, and settled itself,
+    /// is what the next stage is cut from: it is higher in the chain, so its
+    /// branch holds everything below it as well as its own work.
+    #[test]
+    fn a_settled_sibling_above_the_stage_that_settled_is_the_base() {
+        let chain = [link(7, "01"), link(9, "02")];
+        let record = standings(&[
+            ("01", store::StageStanding::Settled),
+            ("02", store::StageStanding::Settled),
+        ]);
+
+        assert_eq!(
+            base(&chain, &record, "roadmaps/rate-limiting/01"),
+            "roadmaps/rate-limiting/02",
+            "stage 01 settled last, and stage 02 is above it in the chain",
+        );
+    }
+
+    /// A link that has joined and not settled is a branch still moving, so the
+    /// highest one that *has* settled is what is cut from — which may be the
+    /// branch that just settled, under a sibling still wrapping up.
+    #[test]
+    fn an_unsettled_link_above_is_not_cut_from() {
+        let chain = [link(7, "01"), link(9, "02")];
+        let record = standings(&[
+            ("01", store::StageStanding::Settled),
+            ("02", store::StageStanding::InFlight),
+        ]);
+
+        assert_eq!(
+            base(&chain, &record, "roadmaps/rate-limiting/01"),
+            "roadmaps/rate-limiting/01",
+        );
+    }
+
+    /// Stage 01 of a roadmap: nothing has joined, so the chain is its foot
+    /// alone — the branch the roadmap itself was written on, which is the
+    /// branch that has just settled. As it comes off today, and for the reason
+    /// it has to keep coming off it.
+    #[test]
+    fn an_empty_chain_is_cut_from_the_branch_that_settled() {
+        assert_eq!(
+            base(&[], &standings(&[]), "roadmap/rate-limiting"),
+            "roadmap/rate-limiting",
+        );
+    }
+
+    /// And a chain whose every link is still moving comes to the same thing:
+    /// the branch that settled is what there is.
+    #[test]
+    fn a_chain_with_nothing_settled_in_it_is_cut_from_the_branch_that_settled() {
+        let chain = [link(9, "02")];
+        let record = standings(&[("02", store::StageStanding::InFlight)]);
+
+        assert_eq!(
+            base(&chain, &record, "roadmap/rate-limiting"),
+            "roadmap/rate-limiting",
+        );
+    }
+
+    /// A stage attempted twice is two branches in the chain under one label,
+    /// and the record has one standing for both. Walked from the top down, so
+    /// what is found is the attempt that joined later — the one the chain is
+    /// actually stacked through.
+    #[test]
+    fn a_stage_attempted_twice_is_cut_from_the_attempt_that_joined_later() {
+        let chain = [
+            store::Joined {
+                conversation_id: 7,
+                stage: "01".to_owned(),
+                branch: "roadmaps/rate-limiting/01-abandoned".to_owned(),
+            },
+            link(9, "01"),
+        ];
+        let record = standings(&[("01", store::StageStanding::Settled)]);
+
+        assert_eq!(
+            base(&chain, &record, "roadmap/rate-limiting"),
+            "roadmaps/rate-limiting/01",
+        );
     }
 }

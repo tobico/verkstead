@@ -70,23 +70,21 @@ Iterate until they approve the breakdown. Every round is an ordinary Set, and
 nothing you send ends anything. What ends this session is `verkstead done`,
 once the plan commit below is on the branch.
 
-## 4. Put the branch in the stack, if the prompt says it is stacked
+## 4. Note where the branch came from, and leave the stack alone
 
-The prompt says what this branch came off. Where it says the branch **stacks on**
-a named predecessor, the branch has the predecessor's commits under it already
-and what is left is registering it. Read the repository's
-`docs/agents/git-workflow.md` — its `## Review process`, and the
-`### Stacking roadmap stages` block inside it — and do what that block says
-about adding a branch that already exists to a stack.
+The prompt says what this branch was **cut from**: a named branch whose commits
+are under this one already, or the repository's default branch. Either way
+there is nothing to do about it here.
 
-That block is the repository's own mechanism, so what is written there is what to
-do. Do not invent one, do not rebase anything, and do not touch the predecessor's
-branch: it is finished work waiting on a human to merge it. If registering the
-stack fails, say so plainly and carry on with the rest — the plan matters more
-than the bookkeeping, and a stack can be registered afterwards.
+**The stack is not registered now.** Where this stage's branch goes in its
+roadmap's chain is settled at its *finish* — the branch is rebased onto the top
+of the chain, registered and pushed there, all in one step, by the repository's
+own `docs/agents/git-workflow.md` — and that is the only rebase it gets. A
+stack registered here would name a predecessor the finish is about to move this
+branch off, so registering one now is worse than registering none.
 
-Where the prompt says the branch is off the default branch, there is nothing to
-do here.
+Do not rebase anything, and do not touch the branch this one was cut from: it
+is finished work waiting on a human to merge it.
 
 ## 5. Write the task files
 

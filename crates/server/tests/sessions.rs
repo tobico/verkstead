@@ -18071,12 +18071,14 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
-        let started = conversations(&fixture.app)
-            .await
-            .into_iter()
-            .find(|entry| entry.id != fixture.id);
+        // Every other Conversation rather than the newest of them: a test may
+        // have put a stage of its own into the record by hand, and one of those
+        // is never working.
+        for entry in conversations(&fixture.app).await {
+            if entry.id == fixture.id {
+                continue;
+            }
 
-        if let Some(entry) = started {
             let view: ConversationView =
                 get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
 
@@ -18208,9 +18210,10 @@ fn escalation(notice: &NoticeEvent) -> bool {
 ///
 /// The stage is a Conversation of its own — one Repo, one branch, one Worktree —
 /// against the same Repo, under the same Profiles, primed with the stage brief as
-/// its Brief and going straight to Implementing. Its branch stacks on the
-/// predecessor because this repository records how, and the session it starts is
-/// the bundled fork of next-stage, told which of the two happened.
+/// its Brief and going straight to Implementing. Its branch is cut from the
+/// roadmap's own, the chain holding nothing higher that has settled, and the
+/// session it starts is the bundled fork of next-stage, told which of the two
+/// happened.
 #[tokio::test]
 async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() {
     let spill = tempfile::tempdir().unwrap();
@@ -18313,7 +18316,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     pool.close().await;
     assert!(
         said.contains(&format!("<code>{roadmap_branch}</code>")),
-        "and that its branch stacks on the one the stage before it was worked on: {said:?}",
+        "and that its branch was cut from the one the stage before it was worked on: {said:?}",
     );
 
     // The branch really is on top of the predecessor's work, which is what
@@ -18322,7 +18325,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
 
     assert!(
         git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
-        "the stage's branch stands on the predecessor's unmerged work",
+        "the stage's branch really is on top of that unmerged work",
     );
 
     // And the Conversation that settled says what became of it, where the human
@@ -18353,8 +18356,8 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         "primed with the stage brief: {prompt:?}",
     );
     assert!(
-        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
-        "and told what its branch stands on, which it cannot read anywhere: {prompt:?}",
+        prompt.contains(&format!("cut from `{roadmap_branch}`")),
+        "and told what its branch was cut from, which it cannot read anywhere: {prompt:?}",
     );
 
     // And what the plan commit hands over to: the runner works the backlog the
@@ -18525,7 +18528,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
 
     assert!(
         said.contains(&format!("<code>{roadmap_branch}</code>")),
-        "the branch stands on the one the stage before it was worked on: {said:?}",
+        "the branch was cut from the one the stage before it was worked on: {said:?}",
     );
     assert!(
         said.contains("<code>main</code>") && said.contains("does not hold that work yet"),
@@ -18536,7 +18539,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
         "what was missing is said rather than swallowed: {said:?}",
     );
     assert!(
-        said.contains("carries the stage before it"),
+        said.contains("carries the branch below it"),
         "and what that costs the pull request this stage ends on: {said:?}",
     );
 
@@ -18550,7 +18553,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
     let prompt = until_written(&planning).await;
 
     assert!(
-        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
+        prompt.contains(&format!("cut from `{roadmap_branch}`")),
         "and the session is told that rather than left to guess: {prompt:?}",
     );
 }
@@ -18580,12 +18583,13 @@ async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
     let said = notices(&stage).join("\n");
 
     assert!(
-        said.contains("<code>main</code>") && said.contains("already holds the stage before it"),
+        said.contains("<code>main</code>")
+            && said.contains("already holds everything this roadmap has finished"),
         "the notice says where the branch came off and why there was nothing to stand on: \
          {said:?}",
     );
     assert!(
-        !said.contains(&format!("stands on <code>{roadmap_branch}</code>")),
+        !said.contains(&format!("cut from <code>{roadmap_branch}</code>")),
         "and it does not stand on a branch whose work is already in the base: {said:?}",
     );
 
@@ -18599,10 +18603,109 @@ async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
     let prompt = until_written(&planning).await;
 
     assert!(
-        prompt.contains("not stacked on anything"),
+        prompt.contains("nothing unmerged left to stand on"),
         "and the session is told that rather than left to guess: {prompt:?}",
     );
 }
+
+/// A stage is cut from the **highest settled stage of its roadmap's chain**
+/// rather than from the branch whose settling started it.
+///
+/// Which is a difference only a roadmap with a sibling in it can show. Here the
+/// chain holds a stage 01 somebody else finished — joined, and settled — above
+/// the roadmap Conversation whose wrap-up is about to start stage 02. The
+/// predecessor reading would give the roadmap's own branch; the chain gives the
+/// sibling, and the sibling is where the work stage 02 builds on is.
+///
+/// Both halves are checked, because the base is two things at once: what
+/// Verkstead says it did, and what git actually cut. The sibling's own commit
+/// is in the stage's history, which no base but the sibling would put there.
+#[tokio::test]
+async fn a_stage_is_cut_from_the_highest_settled_stage_of_the_chain() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(
+            &planning,
+            &worked,
+            TWO_STAGES,
+            RECORDS_STACKING,
+            BRANCHES_A_SIBLING,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let roadmap_branch = fixture.view().await.branch;
+    let repo_id = fixture.view().await.repo.id;
+
+    // Stage 01 of this roadmap, finished by somebody else: in the chain,
+    // because it opened a pull request, and settled, because it reached Done.
+    // Recorded before the wrap-up settles, which is when the chain is read.
+    let sibling = a_stage_in_the_chain(&fixture, repo_id, "01", 41).await;
+    settles(&fixture, sibling).await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.branch, "roadmaps/rate-limiting/02-refusing",
+        "the stage the record says is left, stage 01 having settled",
+    );
+
+    let said = notices(&stage).join("\n");
+
+    assert!(
+        said.contains("cut from <code>roadmaps/rate-limiting/01-by-hand</code>"),
+        "the branch is cut from the settled sibling rather than from the branch that \
+         settled: {said:?}",
+    );
+    assert!(
+        !said.contains(&format!("cut from <code>{roadmap_branch}</code>")),
+        "which is not the predecessor this carry-on would have given: {said:?}",
+    );
+
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+    let history = git(&worktree, &["log", "--oneline"]);
+
+    assert!(
+        history.contains("feat: the sibling stage"),
+        "and git really cut it there: no other base puts that commit under it: {history:?}",
+    );
+    assert!(
+        history.contains("docs: stage the rate-limiting roadmap"),
+        "the roadmap is under it too, the sibling standing on the branch that wrote it",
+    );
+
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("cut from `roadmaps/rate-limiting/01-by-hand`"),
+        "and the planning session is told the base rather than a place in a chain \
+         its own finish decides: {prompt:?}",
+    );
+}
+
+/// What the review session leaves behind for the stage after it: a branch of
+/// the roadmap's own, one commit further on, standing in for a sibling stage
+/// somebody else finished while this roadmap was being written.
+///
+/// Named for the stage the record is given by hand — see
+/// [`a_stage_of_the_roadmap`], which names a by-hand stage's branch the same
+/// way — and made with `commit-tree` rather than a checkout, there being no
+/// worktree here to make one in. The commit is what the test reads back: a
+/// branch cut from this one has it, and a branch cut from anywhere else does
+/// not.
+///
+/// The repository is found from the worktree the session is standing in, for
+/// [`MERGES_THE_PREDECESSOR`]'s reason: there is no way to pass one in.
+const BRANCHES_A_SIBLING: &str = r#"    repo="$(dirname "$(git rev-parse --git-common-dir)")"
+    sibling=$(git -C "$repo" commit-tree "$(git rev-parse 'HEAD^{tree}')" -p "$(git rev-parse HEAD)" -m 'feat: the sibling stage')
+    git -C "$repo" branch roadmaps/rate-limiting/01-by-hand "$sibling""#;
 
 /// Give `repo` an origin it is behind: an upstream holding everything it holds
 /// plus one commit more, which this checkout has heard nothing about.
@@ -21385,8 +21488,8 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
         "primed with the stage brief: {prompt:?}",
     );
     assert!(
-        prompt.contains("not stacked on anything"),
-        "and told its branch stands on nothing: adoption never stacks: {prompt:?}",
+        prompt.contains("nothing unmerged left to stand on"),
+        "and told its branch came off the default branch: adoption never stacks: {prompt:?}",
     );
 }
 
@@ -21519,7 +21622,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
         "the second one is the fork of next-stage as well: {planned:?}",
     );
     assert!(
-        prompts(&planned)[1].contains("not stacked on anything"),
+        prompts(&planned)[1].contains("nothing unmerged left to stand on"),
         "and told where its branch came from, exactly as the first was: {planned:?}",
     );
 

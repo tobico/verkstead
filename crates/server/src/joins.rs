@@ -242,10 +242,13 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
 /// Two readings put together, and the second is only ever reached at the bottom:
 ///
 /// - **the stages that have joined**, in the order they joined — `store::stage_chain`;
-/// - and **the branch this stage stands on**, where that is not one of them,
+/// - and **the branch this stage was cut from**, where that is not one of them,
 ///   which is the **foot** of the chain — `store::stacks_on`. A roadmap's chain
 ///   starts at the roadmap's own branch while its pull request is unmerged, and
 ///   that branch is no stage, so nothing above reads it back out of the chain.
+///   A stage cut from a settled sibling — see [`crate::continuing`], where the
+///   base is chosen — was cut from a link instead, and the first reading has
+///   it already.
 ///
 /// **A branch already in the default branch is out of it.** A stage that merged
 /// is work the default branch holds, and a branch rebased onto a merged tip
@@ -289,7 +292,7 @@ pub(crate) async fn joining(state: &AppState, conversation_id: i64) -> Vec<skill
             tracing::error!(
                 error = ?error,
                 conversation_id,
-                "reading what a joining stage's branch stands on failed",
+                "reading what a joining stage's branch was cut from failed",
             );
             None
         }

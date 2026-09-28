@@ -419,13 +419,18 @@ pub(crate) fn staging(skills: &Skills, brief: &str) -> String {
 /// It arrives as the Conversation's Brief, so it is primed exactly as every
 /// other session is primed with one — see [`on_the_documents`].
 ///
-/// `stacked_on` is the predecessor's branch where this stage's branch was made
-/// on top of it, and `None` where it came off the default branch. Said because
-/// it is the one thing about the stage the session cannot read out of the
-/// repository: a branch says what it is descended from, not what somebody meant
-/// by it, and what the session does about it — registering the stack the way the
-/// repository records — turns on which of the two this is.
-pub(crate) fn next_stage(skills: &Skills, brief: &str, stacked_on: Option<&str>) -> String {
+/// `cut_from` is the branch this stage's was cut from, and `None` where it came
+/// off the default branch. Said because it is the one thing about the stage the
+/// session cannot read out of the repository: a branch says what it is
+/// descended from, not what somebody meant by it.
+///
+/// **The base rather than what it will be stacked on.** Those stopped being one
+/// fact when the join moved to the finish: a stage is cut from the highest
+/// settled branch of its roadmap's chain and joins that chain later, on top of
+/// whatever is there by then — see [`crate::joins`]. A planning session told
+/// *stacks on* would be told something its own finish contradicts, and would go
+/// and register a stack the join is about to rebuild.
+pub(crate) fn next_stage(skills: &Skills, brief: &str, cut_from: Option<&str>) -> String {
     let skill = skills.named(NEXT_STAGE);
 
     let prompt = on_the_documents(
@@ -434,13 +439,14 @@ pub(crate) fn next_stage(skills: &Skills, brief: &str, stacked_on: Option<&str>)
         None,
     );
 
-    let branch = match stacked_on {
-        Some(predecessor) => format!(
-            "This stage's branch stacks on `{predecessor}`, the branch the stage before it \
-             was worked on, which is not merged yet.",
+    let branch = match cut_from {
+        Some(base) => format!(
+            "This stage's branch was cut from `{base}`, the highest settled branch of its \
+             roadmap's chain, which is not merged yet. Where it goes in that chain is settled \
+             at this stage's finish rather than now, so there is nothing to stack here.",
         ),
-        None => "This stage's branch came off the repository's default branch, so it is not \
-                 stacked on anything."
+        None => "This stage's branch came off the repository's default branch, there being \
+                 nothing unmerged left to stand on."
             .to_owned(),
     };
 
@@ -2351,21 +2357,25 @@ mod tests {
         );
     }
 
-    /// Stacking is the repository's mechanism rather than Verkstead's, so the
-    /// fork is told where to read it and told not to invent one.
+    /// A stage joins its roadmap's chain at its **finish**, so the planning
+    /// session registers no stack: the branch it would name is one the join is
+    /// about to move this branch off.
     #[test]
-    fn the_next_stage_fork_stacks_the_repositorys_own_way() {
+    fn the_next_stage_fork_leaves_the_stack_to_the_finish() {
         let next_stage = skill("next-stage/SKILL.md");
 
         assert!(
-            next_stage.contains("docs/agents/git-workflow.md")
-                && next_stage.contains("### Stacking roadmap stages"),
-            "the mechanism is the repository's, read out of the file that records it: \
-             {next_stage}"
+            next_stage.contains("cut from") && next_stage.contains("not registered now"),
+            "the branch has a base rather than a place in the chain: {next_stage}"
         );
         assert!(
-            next_stage.contains("Do not invent one"),
-            "and where there is none there is none: {next_stage}"
+            next_stage.contains("docs/agents/git-workflow.md"),
+            "and where the join is done by is the repository's own file: {next_stage}"
+        );
+        assert!(
+            next_stage.contains("Do not rebase anything"),
+            "nothing here moves a branch, the join being the one rebase a stage \
+             gets: {next_stage}"
         );
         assert!(
             !next_stage.contains("/next-stage") && !next_stage.contains("/to-tasks"),
@@ -2405,13 +2415,21 @@ mod tests {
 
     /// Where the branch came from is the one thing about a stage the session
     /// cannot read out of the repository, so it is the one thing it is told.
+    ///
+    /// The **base** rather than what the stage will be stacked on: the join is
+    /// at the finish, so a planning session promised a place in the chain would
+    /// be promised something its own finish decides.
     #[test]
-    fn a_stage_session_is_told_whether_its_branch_is_stacked() {
-        let stacked = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
+    fn a_stage_session_is_told_what_its_branch_was_cut_from() {
+        let cut = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
 
         assert!(
-            stacked.contains("`wrap-up`"),
-            "the predecessor is named, because registering the stack needs it: {stacked:?}"
+            cut.contains("cut from `wrap-up`"),
+            "the branch it came off is named: {cut:?}"
+        );
+        assert!(
+            !cut.contains("stacks on"),
+            "and not as a place in the chain, which the finish settles: {cut:?}"
         );
 
         let alone = next_stage(&mounted(), "# 05. Roadmap direction\n", None);

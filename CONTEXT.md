@@ -1049,8 +1049,10 @@ against a repository would otherwise build without it. Read-only ones come
 across as they are; read-write ones cut a branch of their own per stage, named
 after the stage's own branch rather than carrying a name somebody typed while
 drafting the roadmap, because two stages sharing one companion branch would be
-two review units on one branch. Where the stage's own branch stacks on its
-predecessor's, its companion branches stack too.
+two review units on one branch. Where the stage's own branch is cut from
+another branch, its companion branches are cut from that branch's companions —
+the base rather than whatever the Stage ends up stacked on, that being settled
+at its finish.
 
 **Always a Worktree of Verkstead's own, never the human's checkout.** Whenever
 one is made — a grill start, an adopted stage, a steer, a stage a settling
