@@ -2824,6 +2824,10 @@ would sign a session out for no reason anybody could see. What the home device
 sends is written over what is there — beside and renamed, so a session already
 running keeps the file it started with — and every file of the allowlist it did
 *not* send is taken away, a sign-out at home being a mirror with no login in it.
+**And it goes when the mirror row does**, which is the last thing on this device
+that says whose login it holds: a Profile the human removed at home, or a device
+unlinked, takes the directory with the row rather than leaving a member's login
+here with nothing pointing at it.
 **Only the allowlist travels.** The login as the harness wrote it, and the
 configuration composed the way a root's is: Claude's `settings.json` filtered to
 what reaches a model, its `.claude.json` without the MCP servers *or* the

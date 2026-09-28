@@ -32,7 +32,9 @@
 //! all, and the rows stay on the list with that machine drawn unreachable on
 //! them. What takes a mirror away is a member *saying* it no longer holds that
 //! Profile — which is what a removal at home comes to — or the device ceasing to
-//! be a member of this cluster.
+//! be a member of this cluster. **And the account mirror goes with the row**,
+//! because the row is the last thing here that says whose login that was — see
+//! [`swept`].
 //!
 //! **What is mirrored is the member's own rows and nothing it is mirroring.** A
 //! cluster of three has A holding mirrors of C, and a list read off A carries
@@ -259,7 +261,9 @@ async fn read_every_member(state: &AppState) {
 /// answering is not this — its rows are as much its own as they were yesterday.
 ///
 /// The pages are told where anything went, because a Profile leaving is a list
-/// that reads differently everywhere it is drawn.
+/// that reads differently everywhere it is drawn — and the account mirror of
+/// each goes with the row, an unlink being the one press that says this machine
+/// holds nothing of that device's.
 async fn pruned(state: &AppState, members: &[String]) {
     match store::forget_mirrors_of_departed(&state.pool, members).await {
         Ok(gone) if gone.is_empty() => {}
@@ -270,6 +274,8 @@ async fn pruned(state: &AppState, members: &[String]) {
                 "the Profiles of devices this one is no longer linked to are gone",
             );
 
+            swept(state, &gone).await;
+
             state.nudges.announce_here(Nudge::Profiles);
         }
 
@@ -277,6 +283,67 @@ async fn pruned(state: &AppState, members: &[String]) {
             error = ?error,
             "the Profiles of devices this one is no longer linked to could not be taken away",
         ),
+    }
+}
+
+/// And the **account mirror** of each of those Profiles taken away with the row
+/// that named it.
+///
+/// **The row is the last thing on this device that says whose account that
+/// was.** What is fetched into a mirror is a login and the configuration around
+/// it, kept per Profile under the Data Directory and named by the local id —
+/// see [`account`] and [`crate::sandbox::Homes::account_mirror`]. So a row going
+/// and the directory staying would leave a member's login on this disk with
+/// nothing left pointing at it: after a Profile the human removed at home, and
+/// after an unlink, which is the press that says this machine is to hold nothing
+/// of theirs.
+///
+/// **Nothing at all on a device that runs no session**, which is one that never
+/// fetched an account to mirror: the directory is named off the homes a launch
+/// is given, and a router with no agents was never given any.
+///
+/// **And a directory that will not go is a line in the log rather than anything
+/// louder.** The row is already gone, the Profile is off every list and every
+/// picker, and what is left behind is a file to sweep rather than a press to
+/// refuse — the next removal of that member's is not held up by it.
+async fn swept(state: &AppState, gone: &[i64]) {
+    let Some(agents) = state.sessions.agents() else {
+        return;
+    };
+
+    let mirrors: Vec<PathBuf> = gone
+        .iter()
+        .map(|id| agents.homes().account_mirror(*id))
+        .collect();
+
+    let taken = tokio::task::spawn_blocking(move || {
+        for under in mirrors {
+            match std::fs::remove_dir_all(&under) {
+                Ok(()) => tracing::info!(
+                    mirror = %under.display(),
+                    "the mirror of a member's account is gone with the row that named it",
+                ),
+
+                // Never fetched, which is a Profile nothing was ever launched
+                // under here.
+                Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+                Err(why) => tracing::warn!(
+                    error = ?why,
+                    mirror = %under.display(),
+                    "the mirror of a member's account could not be taken away, so a login of \
+                     theirs is still on this device",
+                ),
+            }
+        }
+    })
+    .await;
+
+    if let Err(why) = taken {
+        tracing::error!(
+            error = ?why,
+            "taking away the mirrors of members' accounts ended badly",
+        );
     }
 }
 
@@ -378,6 +445,11 @@ async fn read_member(state: &AppState, device: &str) {
             Vec::new()
         }
     };
+
+    // And the account mirror of each of those goes with its row: a Profile the
+    // human removed at home is one this device has no business holding a login
+    // of any longer — see [`swept`].
+    swept(state, &gone).await;
 
     // And the pages are told, this being the moment there is something new for
     // them to read — said the way the merged list says it after a list of a

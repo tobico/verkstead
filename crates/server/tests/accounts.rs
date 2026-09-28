@@ -580,6 +580,41 @@ impl Verkstead {
         waited.unwrap_or_else(|_| panic!("no mirror of {name} was ever written down: {last:#?}"))
     }
 
+    /// And the wait for the other way round: the mirror of `name` gone from this
+    /// device's list, which is what the refresher does once the device it is at
+    /// home on stops naming it.
+    async fn without(&self, name: &str) {
+        let mut last = Vec::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = self.profiles().await;
+
+                if called(&last, name).is_none() {
+                    return;
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the mirror of {name} is still listed: {last:#?}"));
+    }
+
+    /// One of this device's own Profiles taken away, which is what leaves every
+    /// device's mirror of it with nothing to refresh off.
+    async fn removes(&self, profile: i64) {
+        let said = press(
+            &self.workbench,
+            &format!("{PROFILES}/{profile}/delete"),
+            None,
+        )
+        .await;
+
+        assert_eq!(said, "\"Removed\"", "removing {profile}");
+    }
+
     /// The account of that row fetched from the device it is at home on, exactly
     /// as a launch here fetches it — the Profile the launch then reads, naming this
     /// device's own mirror as its account, and what its ending has to write home.
@@ -1188,6 +1223,47 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
         "and a sign-out at home is a mirror with no login in it rather than one \
          holding a login nobody can use",
     );
+}
+
+/// **A Profile removed at home takes the mirror of its account with it.** The
+/// row is the last thing on this device that says whose login the mirror holds,
+/// so a directory left standing under the Data Directory would be a member's
+/// login here with nothing pointing at it.
+#[tokio::test]
+async fn a_profile_removed_at_home_takes_the_mirror_of_its_account_with_it() {
+    let (a, b, _holding) = linked_up().await;
+
+    let at_home = a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let under = b.mirror_directory(mirror.id);
+
+    b.fetches(&mirror).await.expect("A answered");
+
+    assert!(
+        login_in(&under).is_some_and(|login| login.contains(TOKEN)),
+        "the mirror holds A's login, which is what there is to be rid of",
+    );
+
+    a.removes(at_home).await;
+    b.without("work").await;
+
+    // Waited for rather than read at once: the row goes inside the transaction
+    // that forgets it and the directory goes after, so the list may be right a
+    // moment before the disk is.
+    let swept = tokio::time::timeout(WAITING, async {
+        while under.exists() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await;
+
+    swept.unwrap_or_else(|_| {
+        panic!(
+            "the mirror of the removed Profile is still on this device: {:?}",
+            walked(&under),
+        )
+    });
 }
 
 /// Nothing lands in the mirror but the files a Built Root is made of, checked
