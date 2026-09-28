@@ -1224,9 +1224,8 @@ fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
 /// there is somebody at the machine rather than a journal on it
 /// ([ADR-0020](../../../docs/adr/0020-electron-desktop.md)). So it crosses in
 /// here as a value of its own rather than as a field of [`Config`] — that struct
-/// is what points *any* caller at a Data Directory and an address, the desktop
-/// verb's own flags included, and a caller that hands the link over in-process
-/// has no flag to have said.
+/// is what points *any* caller at a Data Directory and an address, and who is
+/// standing at the machine is not one of the things a caller is pointed at.
 ///
 /// **Nothing about it reaches the wire.** It is behaviour on this side of the
 /// socket: nothing serialisable carries it and no viewer can read it, which is
