@@ -1289,7 +1289,15 @@ async fn steps(
 
     Ok(StepsView {
         dependencies: dependencies_met(dependencies),
-        accounts: !profiles.is_empty(),
+
+        // This device's own, rather than the list whole. A member's Profile is
+        // on that list as a mirror (ADR-0020, *Shared Profiles*) and nothing has
+        // fetched the account behind it, so a session launched under one would
+        // run logged out — which is not a machine that has what it takes to run
+        // a session. A device linked to another before it has an account of its
+        // own is exactly the case this step is for.
+        accounts: profiles.iter().any(|profile| profile.mirror.is_none()),
+
         git: author.name().is_some() && author.email().is_some(),
     })
 }

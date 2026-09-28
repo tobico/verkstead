@@ -692,8 +692,12 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * Not a way of being saved: every Profile here passed the same checks when it
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
+ *
+ * And one of them is not about a path at all: a **mirror** names an account
+ * that is on another machine, which is a thing to say about the row rather
+ * than something to go and put right.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NotOnThisDevice";
 
 /**
  * The build cache as the human has just set it.
@@ -3453,6 +3457,13 @@ form: SteerForm, };
  * review* as a row of its own: a Conversation that picked it is as ready to
  * start as one that picked a Pairing, and a page that could not tell it from an
  * empty picker would draw the placeholder over a settled choice.
+ *
+ * One variant carries a Profile and the other two carry nothing, which is what
+ * the size lint is about — a Profile got bigger when it gained the device it is
+ * at home on. Left as it is: these are made one at a time on the way to being
+ * serialized, none of them is held in a collection, and a `Box` in a view type
+ * would be a pointer written into the shape the viewer is generated from for a
+ * few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -3679,7 +3690,21 @@ broken: Broken | null,
  * or starts with an empty one of its own. On unless the human switched it
  * off.
  */
-memory: boolean, };
+memory: boolean, 
+/**
+ * Which device this Profile is at home on, and `null` for this one's own —
+ * which is every Profile on a Verkstead that is linked to nothing.
+ *
+ * The same shape a Conversation's row carries whose work it is, and for the
+ * same reason: the name and the mark for the operating system are this
+ * device's own reading of its membership rather than anything the far end
+ * said, and one shape means one way of drawing a device wherever a list has
+ * several machines' rows in it. See [`crate::RowDevice`].
+ *
+ * One list rather than a section per device: a Profile is a Profile, and
+ * which machine its account sits on is a fact on the row.
+ */
+device: RowDevice | null, };
 
 /**
  * What became of saving a Profile.
@@ -5533,6 +5558,9 @@ export type SteerOpened = "Opened" | "NoSuchConversation";
  * nothing, and a steer whose account has been removed since picked something
  * that is gone. A pane that drew them the same would say *nothing picked* over
  * a choice the human made.
+ *
+ * The size lint is left alone here for [`crate::PickedView`]'s reason, which is
+ * the same shape and the same Profile inside it.
  */
 export type SteerPairingView = "Nothing" | "Removed" | { "Under": PairingView };
 

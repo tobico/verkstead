@@ -133,8 +133,9 @@ pub use pending_steers::{
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
 pub use profiles::{
-    Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
-    create_profile, delete_profile, load_profile, profiles, update_profile,
+    Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
+    Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
+    load_profile, profiles, record_mirror, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

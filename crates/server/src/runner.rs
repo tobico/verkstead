@@ -4883,6 +4883,7 @@ mod tests {
                 },
                 models: vec![model.to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some(model.to_owned()),
         }

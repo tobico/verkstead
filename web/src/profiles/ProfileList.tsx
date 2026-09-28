@@ -51,6 +51,14 @@
 //! agent type stays on the card as the mark it is drawn by rather than as a
 //! word, and is the form's own field in the pane, over the paths it decides.
 //!
+//! And under that line, on the rows that have one, the machine the account is
+//! on: every device of a cluster lists every member's accounts here beside its
+//! own, so which machine a row's account sits on is a fact on the row rather
+//! than a section it is filed under. Nothing at all on this device's own, which
+//! is every row where there is no cluster — and what the warning under it says
+//! for one of those rows is where to go and look rather than a path to put
+//! right, nothing here having fetched the account.
+//!
 //! Removing is in that pane too, under the form. It was a second control on
 //! every row, which put a destructive press beside a list somebody was only
 //! reading; under the form it is beside the Profile it is about, and its
@@ -106,6 +114,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { HarnessMark } from "../HarnessMark";
+import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
@@ -116,6 +125,7 @@ import {
   listProfiles,
 } from "../api/client";
 import { AGENT_NAME, type AgentType } from "../agents";
+import { osIcon } from "../devices";
 import type {
   Broken,
   ProfileAccount,
@@ -171,12 +181,26 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   NoSuchProfile: "That profile is gone already.",
 };
 
-/// What is wrong with a profile whose pair is no longer where it was left.
+/// What is wrong with a profile whose pair is no longer where it was left — or,
+/// for the last of them, with one that was never here to begin with.
 export const BROKEN: Record<Broken, string> = {
   DirMissing: "Its claude directory is gone.",
   ConfigMissing: "Its config file is gone.",
   HomeMissing: "The home it kept its account under is gone.",
+  NotOnThisDevice: "Its account is on another device.",
 };
+
+/// The same, with the machine named where the row knows which one it is.
+///
+/// A profile of a member's is on this list like any other and cannot be started
+/// under from here — nothing has fetched the account — so what the line says is
+/// which machine to look on. The words above stand where the membership has not
+/// landed, which is the one case the row carries no name.
+export function brokenly(broken: Broken, profile: ProfileEntry): string {
+  return broken === "NotOnThisDevice" && profile.device
+    ? `Its account is on ${profile.device.name}.`
+    : BROKEN[broken];
+}
 
 /// One path an account of some agent type is: the key it is held under, what the
 /// label over it says, an example to type into it, and whether the path it names
@@ -463,12 +487,29 @@ function ProfileCard(props: {
           <HarnessMark of={props.profile.account.agent_type} />
           {summary(props.profile)}
         </span>
+        {/* And which machine the account is on, where it is not this one: every
+            device lists every member's accounts as one list, so which machine a
+            row's account sits on is a fact on the row rather than a section it
+            is filed under. Drawn the way a sidebar row draws the same fact —
+            the mark for the operating system and the name after it, the mark
+            unlabelled because the words beside it say it. Nothing at all for
+            this device's own, which is every row where there is no cluster. */}
+        <Show when={props.profile.device}>
+          {(device) => (
+            <span class={styles.device}>
+              <Icon of={osIcon(device().os)} class={styles.os} />
+              {device().name}
+            </span>
+          )}
+        </Show>
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
         <Show when={props.profile.broken}>
           {(broken) => (
-            <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>
+            <ErrorLine class={styles.broken}>
+              {brokenly(broken(), props.profile)}
+            </ErrorLine>
           )}
         </Show>
       </CardButton>

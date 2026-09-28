@@ -25,6 +25,11 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
+//! And a third is a `UNIQUE` going the same way, for the same reason and by the
+//! same recipe: two devices of a cluster may call an account the same thing, so
+//! a Profile's name is unique among *this* device's own rows and the rule is a
+//! partial index, which a column constraint cannot be.
+//!
 //! Eleven of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
@@ -88,7 +93,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     standings_that_named_no_pull_request(pool).await?;
     settlements_that_were_one_per_repository(pool).await?;
     fix_attempts_that_were_one_per_repository(pool).await?;
-    pull_requests_that_named_no_base_branch(pool).await
+    pull_requests_that_named_no_base_branch(pool).await?;
+    profiles_whose_name_was_unique_everywhere(pool).await
 }
 
 /// Give every pull request recorded before the chain was worth reading the
@@ -128,6 +134,82 @@ async fn pull_requests_that_named_no_base_branch(pool: &SqlitePool) -> Result<()
     Ok(())
 }
 
+/// Let two devices call an account the same thing: rebuild `profiles` without
+/// the `UNIQUE` on the name column, the rule having become this device's own
+/// rows'.
+///
+/// A member's Profile is written down here as a **mirror** — an ordinary row
+/// marked with the device it is at home on — and two machines each holding an
+/// account called `work`, or each holding the one unnamed Claude account, are
+/// two rows this table has to take. So the rule is a partial index over the rows
+/// with no home device on them, which a column constraint cannot be; and SQLite
+/// cannot drop a column constraint in place, the index behind it being one it
+/// made rather than one anybody named.
+///
+/// The same recipe as [`profiles_that_had_to_be_named`], for the same reason and
+/// with the same care: foreign keys off on the one connection, the rebuild in a
+/// transaction, `foreign_key_check` before the commit, and the pragma back on
+/// however it went. The ids are copied rather than reassigned, so every row that
+/// named a Profile still names the same one.
+///
+/// **Every saved Profile keeps its name and stays this device's own.** Nothing
+/// here writes a home device: the rows come across as they stand, and what
+/// changes is only what the table is allowed to hold beside them from now on.
+///
+/// The partial indexes are made by [`super::profiles::apply_schema`], which runs
+/// before this and again on every start after it — so what is left here is the
+/// rebuild itself and putting the three of them back on the table it made.
+///
+/// Safe to run twice: what says whether there is anything to do is the table
+/// still carrying an index of SQLite's own making, and after the first run it
+/// carries none.
+async fn profiles_whose_name_was_unique_everywhere(pool: &SqlitePool) -> Result<()> {
+    // `origin = 'u'` is an index SQLite made for a `UNIQUE` on a column, which
+    // is the one thing this rewrite is about: the three partial rules are
+    // `origin = 'c'`, having been created by name.
+    let implicit: (i64,) =
+        sqlx::query_as("SELECT count(*) FROM pragma_index_list('profiles') WHERE origin = 'u'")
+            .fetch_one(pool)
+            .await
+            .context("looking at whether a Profile's name is unique across every device")?;
+
+    if implicit.0 == 0 {
+        return Ok(());
+    }
+
+    // And the two columns the rebuild carries across, which a database old
+    // enough to have needed the rewrite above no longer has: that one remade the
+    // table in the shape it had before either of them existed, undoing what
+    // `apply_schema` had just added. Asked for again here rather than once at
+    // the start, because this is the last hand the table passes through.
+    super::profiles::mirror_columns(pool).await?;
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("letting two devices call an account the same thing")?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("holding the foreign keys off while the profiles table is rebuilt")?;
+
+    let rebuilt = rebuild_profiles_for_mirrors(&mut conn).await;
+
+    // However that went, for the reason the rebuild above puts it back: a
+    // connection handed to the pool with its foreign keys off would enforce
+    // nothing for the rest of the run.
+    let restored = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .context("putting the foreign keys back on");
+
+    rebuilt?;
+    restored?;
+
+    Ok(())
+}
+
 /// Give every half-written steer from before Investigating was a target the
 /// column that holds the question one would be opened on.
 ///
@@ -162,6 +244,109 @@ async fn pending_steers_that_had_no_investigation(pool: &SqlitePool) -> Result<(
         .context("settling the half-written steers from before Investigating was a target")?;
 
     Ok(())
+}
+
+/// That rebuild, in one transaction on the connection whose foreign keys are
+/// off.
+async fn rebuild_profiles_for_mirrors(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+    use sqlx::Connection;
+
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .context("letting two devices call an account the same thing")?;
+
+    // The shape written out rather than borrowed from [`super::profiles`], which
+    // is the rule every rewrite here is written under: this is a shape rows are
+    // put into once and never again, and a rewrite that moved with the
+    // declaration would make a database opened after the next column arrives
+    // come out a different shape from one opened today.
+    //
+    // The two mirror columns are in it because the declaration has them by the
+    // time this runs — `apply_schema` adds them to an old table before the
+    // migrations are reached — so leaving them out here would be taking them
+    // away again.
+    sqlx::query(
+        "CREATE TABLE profiles_named_per_device (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1,
+             home_device TEXT,
+             home_id     INTEGER
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the profiles table over with a name two devices may share")?;
+
+    sqlx::query(
+        "INSERT INTO profiles_named_per_device
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id)
+         SELECT id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id
+         FROM profiles",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("carrying the saved Profiles across")?;
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the profiles table as it was")?;
+
+    sqlx::query("ALTER TABLE profiles_named_per_device RENAME TO profiles")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt profiles table where the old one was")?;
+
+    // The drop took the partial indexes with it, and the table it replaced them
+    // on is gone. They are made again here rather than waited for, because
+    // `apply_schema` has already run this start: a server that opened a database
+    // needing this rewrite would otherwise enforce neither rule until it was
+    // restarted.
+    for (index, over) in [
+        ("profiles_named_here", "(name) WHERE home_device IS NULL"),
+        (
+            "profiles_one_unnamed_here_per_agent",
+            "(agent_type) WHERE name IS NULL AND home_device IS NULL",
+        ),
+        (
+            "profiles_one_mirror_per_home",
+            "(home_device, home_id) WHERE home_device IS NOT NULL",
+        ),
+    ] {
+        sqlx::query(&format!(
+            "CREATE UNIQUE INDEX IF NOT EXISTS {index} ON profiles {over}",
+        ))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("putting the {index} index back on the rebuilt table"))?;
+    }
+
+    // Nothing was left pointing at a Profile that is not there, which is what
+    // the pragma above stopped SQLite from checking as it went. The ids were
+    // copied, so there is nothing to find — and a rewrite that had lost one
+    // would otherwise be a database that opened fine and refused to remove a
+    // Profile months later.
+    let dangling: (i64,) = sqlx::query_as("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&mut *tx)
+        .await
+        .context("checking that nothing was left naming a Profile that is not there")?;
+
+    if dangling.0 != 0 {
+        bail!(
+            "the rebuilt profiles table left {} rows naming a Profile that is not there",
+            dangling.0
+        );
+    }
+
+    tx.commit()
+        .await
+        .context("letting two devices call an account the same thing")
 }
 
 /// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put

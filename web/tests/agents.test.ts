@@ -29,6 +29,8 @@ const profile = (
   models: [],
   memory: true,
   broken: null,
+  /// This device's own, which is every account on a Verkstead linked to nothing.
+  device: null,
 });
 
 /// A list with two Claude Code accounts on it, which is what makes the account's

@@ -252,9 +252,9 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
         // the grilling picker has no row to prefill onto since *No grilling*
         // retired, so a Repo remembering one arrives exactly as a Repo with
         // nothing remembered for the role does.
-        grilling: usable(remembered.grilling).await?,
-        implementation: usable(remembered.implementation).await?,
-        review: prefilled(remembered.review).await?,
+        grilling: usable(&state.pool, remembered.grilling).await?,
+        implementation: usable(&state.pool, remembered.implementation).await?,
+        review: prefilled(&state.pool, remembered.review).await?,
     })
 }
 
@@ -289,24 +289,35 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: filled(last.grilling, &profiles, store::Role::Grilling).await?,
-        implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
-        review: under(filled(last.review, &profiles, store::Role::Review).await?),
+        grilling: filled(&state.pool, last.grilling, &profiles, store::Role::Grilling).await?,
+        implementation: filled(
+            &state.pool,
+            last.implementation,
+            &profiles,
+            store::Role::Implementation,
+        )
+        .await?,
+        review: under(filled(&state.pool, last.review, &profiles, store::Role::Review).await?),
     })
 }
 
 /// One role of [`unremembered`]: the last start's pick where it is a usable
 /// Pairing, and the platform default where it is anything else.
 async fn filled(
+    pool: &SqlitePool,
     copied: store::Picked,
     profiles: &[store::Profile],
     role: store::Role,
 ) -> Result<Option<PairingView>> {
-    if let Some(pairing) = usable(copied).await? {
+    if let Some(pairing) = usable(pool, copied).await? {
         return Ok(Some(pairing));
     }
 
-    usable(crate::pairing_defaults::platform_default(profiles, role)).await
+    usable(
+        pool,
+        crate::pairing_defaults::platform_default(profiles, role),
+    )
+    .await
 }
 
 /// One role's memory as a picker would show it, for the one role that can
@@ -314,12 +325,12 @@ async fn filled(
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
 /// as itself, and everything else goes through [`usable`].
-async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
+async fn prefilled(pool: &SqlitePool, remembered: store::Picked) -> Result<PickedView> {
     if remembered.skipped() {
         return Ok(PickedView::Skipped);
     }
 
-    Ok(match usable(remembered).await? {
+    Ok(match usable(pool, remembered).await? {
         Some(pairing) => PickedView::Under(pairing),
         None => PickedView::Nothing,
     })
@@ -342,7 +353,7 @@ async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
 /// neither of them should have to put the two together again.
-async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
+async fn usable(pool: &SqlitePool, remembered: store::Picked) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -350,7 +361,7 @@ async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(remembered.pairing().cloned()).await? else {
+    let Some(pairing) = crate::profiles::pairing(pool, remembered.pairing().cloned()).await? else {
         return Ok(None);
     };
 
@@ -1475,10 +1486,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(pool, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
 
     // What kind of work this is, which decides three things below: which roles
     // the press waits on, where it lands the Conversation, and which session it
@@ -2292,10 +2303,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(pool, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
@@ -2747,8 +2758,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // reads them: a Profile whose pair has gone is not one to run a session
     // under, and the id alone cannot say so.
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
 
     // And how many of them this Process waits on, which is the one thing about
     // the press its own row decides: a **Review** reads the branch under the

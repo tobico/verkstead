@@ -10,6 +10,14 @@
 //! single home each backend after it keeps one under — is the agent type's, and
 //! every judgement here is made per type for that reason.
 //!
+//! **And a Profile may be a member's**, which is the one row here nothing is
+//! judged about against this filesystem: a **mirror** names an account on
+//! another machine, and its paths belong to no filesystem here — see
+//! [`crate::mirroring`]. So it is answered first and out of the row itself,
+//! reading as one whose account is not on this device, and the machine it is at
+//! home on rides out beside it for every list that draws several devices'
+//! accounts as one.
+//!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
@@ -21,7 +29,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -70,21 +78,30 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted>
     })
 }
 
-/// Every Profile, each with whether its account is still where it was left.
+/// Every Profile, each with whether its account is still where it was left —
+/// **this device's own rows and every mirror together**.
+///
+/// One list rather than a section per device (ADR-0020, *Shared Profiles*): a
+/// Profile is a Profile, and which machine its account sits on is a fact on the
+/// row. What refreshes the mirrors is [`crate::mirroring`]; what this does is
+/// read them back beside this device's own.
 pub(crate) async fn listed(pool: &SqlitePool) -> Result<Vec<ProfileEntry>> {
-    entries(store::profiles(pool).await?).await
+    entries(pool, store::profiles(pool).await?).await
 }
 
 /// The same reading for one Pairing, for the panes that show a Conversation's
 /// own choices rather than the whole list.
-pub(crate) async fn pairing(pairing: Option<store::Pairing>) -> Result<Option<PairingView>> {
+pub(crate) async fn pairing(
+    pool: &SqlitePool,
+    pairing: Option<store::Pairing>,
+) -> Result<Option<PairingView>> {
     let Some(pairing) = pairing else {
         return Ok(None);
     };
 
     let model = pairing.model;
 
-    Ok(entries(vec![pairing.profile])
+    Ok(entries(pool, vec![pairing.profile])
         .await?
         .pop()
         .map(|profile| PairingView { profile, model }))
@@ -99,6 +116,7 @@ pub(crate) async fn pairing(pairing: Option<store::Pairing>) -> Result<Option<Pa
 /// hops. What it is for is the steers on a Timeline — see `crate::ui`, which
 /// reads them all before it draws any.
 pub(crate) async fn keyed(
+    pool: &SqlitePool,
     pairings: Vec<(i64, store::Pairing)>,
 ) -> Result<HashMap<i64, PairingView>> {
     let (keys, profiles): (Vec<i64>, Vec<store::Profile>) = pairings
@@ -110,7 +128,7 @@ pub(crate) async fn keyed(
 
     Ok(keys
         .into_iter()
-        .zip(entries(profiles).await?)
+        .zip(entries(pool, profiles).await?)
         .zip(models)
         .map(|((key, profile), model)| (key, PairingView { profile, model }))
         .collect())
@@ -123,11 +141,11 @@ pub(crate) async fn keyed(
 /// that runs no session stays what it is, and a Profile whose row has gone
 /// reads as nothing picked — which is what it is, since there is no account
 /// left to launch under.
-pub(crate) async fn picked(picked: store::Picked) -> Result<PickedView> {
+pub(crate) async fn picked(pool: &SqlitePool, picked: store::Picked) -> Result<PickedView> {
     Ok(match picked {
         store::Picked::Nothing => PickedView::Nothing,
         store::Picked::Skipped => PickedView::Skipped,
-        store::Picked::Under(under) => match pairing(Some(under)).await? {
+        store::Picked::Under(under) => match pairing(pool, Some(under)).await? {
             Some(pairing) => PickedView::Under(pairing),
             None => PickedView::Nothing,
         },
@@ -140,13 +158,27 @@ pub(crate) async fn picked(picked: store::Picked) -> Result<PickedView> {
 /// Off the runtime, because every one of those looks is a blocking read — and
 /// together rather than one call per Profile, since the whole point of the batch
 /// is that it is one hop off the runtime instead of a list's worth.
-async fn entries(profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
+///
+/// **And the devices the mirrors among them are at home on, read once beside
+/// them.** A mirror carries a Device Id and nothing else about the machine: what
+/// the row is drawn with — the name, the word for the operating system, whether
+/// the last dial got through — is this device's own reading of its membership,
+/// exactly as a merged sidebar row's is (see [`crate::merging`]). Asked only
+/// where there is a mirror in the batch, so the ordinary installation pays
+/// nothing for it.
+async fn entries(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
+    let homes = homes_of(pool, &profiles).await?;
+
     Ok(tokio::task::spawn_blocking(move || {
         profiles
             .into_iter()
             .map(|profile| ProfileEntry {
                 id: profile.id,
                 broken: broken(&profile),
+                device: profile
+                    .mirror
+                    .as_ref()
+                    .map(|mirror| whose(&homes, &mirror.device)),
                 name: profile.name,
                 account: account(&profile.account),
                 models: profile.models,
@@ -155,6 +187,49 @@ async fn entries(profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
             .collect()
     })
     .await?)
+}
+
+/// The membership, where any of `profiles` is a mirror, and nothing at all
+/// otherwise.
+async fn homes_of(
+    pool: &SqlitePool,
+    profiles: &[store::Profile],
+) -> Result<HashMap<String, store::Member>> {
+    if !profiles.iter().any(|profile| profile.mirror.is_some()) {
+        return Ok(HashMap::new());
+    }
+
+    Ok(store::members(pool)
+        .await?
+        .into_iter()
+        .map(|member| (member.device.clone(), member))
+        .collect())
+}
+
+/// How a mirror's home device is drawn, off that reading.
+///
+/// **A device the membership no longer holds still draws a row**, under the id
+/// itself and reading as not answering: the mirrors of an unlinked device are
+/// taken away by the refresher rather than here (see
+/// [`crate::mirroring`]), so what this covers is the moment between the
+/// unlink and the next sweep — and a row with no name at all would be worse than
+/// one naming a machine by its id.
+fn whose(homes: &HashMap<String, store::Member>, device: &str) -> RowDevice {
+    match homes.get(device) {
+        Some(member) => RowDevice {
+            id: Some(member.device.clone()),
+            name: member.name.clone(),
+            os: member.os.clone(),
+            reachable: member.reachable,
+        },
+
+        None => RowDevice {
+            id: Some(device.to_owned()),
+            name: device.to_owned(),
+            os: String::new(),
+            reachable: false,
+        },
+    }
 }
 
 /// Whether everything the next stage needs before it will start is settled.
@@ -236,7 +311,18 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// what is checked here and what was checked at the save are the one question:
 /// a dangling symlink where the account was is a Profile that cannot be run
 /// under.
+///
+/// **A mirror is answered before any of that and without looking at anything.**
+/// Its paths are the home machine's, so resolving them here would be asking the
+/// wrong filesystem a question it may well answer *yes* to — two machines set up
+/// alike hold the same paths, and the account under them is somebody else's.
+/// Nothing has fetched the account, so a session launched under one would run
+/// logged out, and that is what the row says.
 fn broken(profile: &store::Profile) -> Option<Broken> {
+    if profile.mirror.is_some() {
+        return Some(Broken::NotOnThisDevice);
+    }
+
     let paths: Vec<(PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,

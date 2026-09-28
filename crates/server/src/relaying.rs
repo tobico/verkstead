@@ -52,8 +52,13 @@
 //! member through this hop would draw it once and go stale, nothing over here
 //! having heard that anything moved on that machine — so this device holds a
 //! Nudge stream to each of its members and announces what comes down one
-//! locally, under the Device Id it came from. That is [`freshness`], and it is
-//! the one dial in this module that no browser asked for.
+//! locally, under the Device Id it came from. That is [`freshness`].
+//!
+//! **And so do the reads that news sets going**, which are the other calls here
+//! no browser asked for: a member's Conversations for the merged sidebar, and
+//! its Agent Profiles for the mirror rows. Both are one shape — a dial, a
+//! status, a bound, and a line in the log rather than a failure — so they go
+//! through [`read_of`] rather than being written twice.
 
 mod bridging;
 pub(crate) mod freshness;
@@ -392,6 +397,120 @@ impl Stream for OneAttempt {
             .expect("nothing panics holding this")
             .as_mut()
             .poll_next(context)
+    }
+}
+
+/// One read this device makes of a member **of its own accord**: what it said,
+/// up to `most` bytes of it, or nothing and a line in the log saying why what
+/// this device last held stands.
+///
+/// **The calls nobody asked for.** Everything above is a browser's request
+/// carried across; this is the other kind — the sidebar's account of a member's
+/// Conversations, and the mirrors of a member's Agent Profiles — so it carries
+/// no header of a browser's and no body at all. Both readers want the same four
+/// things of it: the dial, the status, a bound on what is read, and a sentence
+/// in the log rather than a failure, so it is written once here rather than
+/// twice beside each of them.
+///
+/// `about` is what the read was for, in a word, so that two of them are told
+/// apart in the log. `most` is the caller's own bound, because what a long
+/// answer means differs: see [`crate::merging::MOST_A_LIST_IS`] and
+/// [`crate::mirroring::MOST_THE_PROFILES_ARE`].
+pub(crate) async fn read_of(
+    devices: &crate::device::Devices,
+    device: &str,
+    onwards: String,
+    about: &str,
+    most: usize,
+) -> Option<Vec<u8>> {
+    let answered = match devices.relay(device, asking(onwards)).await {
+        Ok(answered) => answered,
+        Err(why) => {
+            tracing::debug!(
+                device,
+                "a member's {about} could not be read, so what it last said stands: {}",
+                unrelayed(&why),
+            );
+            return None;
+        }
+    };
+
+    if !answered.status().is_success() {
+        tracing::warn!(
+            device,
+            status = %answered.status(),
+            "a member refused the read of its {about}, so what it last said stands",
+        );
+        return None;
+    }
+
+    match bounded(answered, most).await {
+        Ok(body) => Some(body),
+        Err(why) => {
+            tracing::warn!(
+                device,
+                "a member's {about} could not be read to the end: {why:#}"
+            );
+            None
+        }
+    }
+}
+
+/// The call one of those is made with: a `GET` of `onwards` asking for JSON, on
+/// nobody's behalf.
+fn asking(onwards: String) -> Call {
+    let mut headers = HeaderMap::new();
+
+    headers.insert(
+        axum::http::header::ACCEPT,
+        HeaderValue::from_static("application/json"),
+    );
+
+    Call {
+        method: reqwest::Method::GET,
+        onwards,
+        headers,
+        body: Streamed::Nothing,
+    }
+}
+
+/// What a member answered, up to `most` of it.
+///
+/// Read chunk by chunk rather than in one call, so the bound is applied as the
+/// bytes arrive: a body read whole and then measured is a body this device has
+/// already held.
+async fn bounded(answered: reqwest::Response, most: usize) -> anyhow::Result<Vec<u8>> {
+    use tokio_stream::StreamExt;
+
+    let mut body = answered.bytes_stream();
+    let mut held: Vec<u8> = Vec::new();
+
+    while let Some(chunk) = body.next().await {
+        held.extend_from_slice(&chunk?);
+
+        if held.len() > most {
+            anyhow::bail!("it is longer than the {most} bytes this device will hold of one");
+        }
+    }
+
+    Ok(held)
+}
+
+/// What a dial that was never made is said in the log as: the four findings, in
+/// as many words.
+///
+/// The browser's own sentences for the same four are [`refused`]'s — each
+/// carries a status code and names the device, those being an answer to a call
+/// somebody made. This is the other reader: a line about a read nobody asked
+/// for.
+fn unrelayed(why: &Unrelayed) -> String {
+    match why {
+        Unrelayed::ThisDevice => "the id is this device's own".to_owned(),
+        Unrelayed::NoSuchMember => "the device is no member of this cluster".to_owned(),
+        Unrelayed::Unreachable(why) => format!("{why:#}"),
+        Unrelayed::Unreadable(why) => {
+            format!("the devices this one is linked to could not be read: {why:#}")
+        }
     }
 }
 

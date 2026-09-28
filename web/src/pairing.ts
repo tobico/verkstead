@@ -13,6 +13,12 @@
 //! of the backend, the model and the profile's name. What is here is the pairing
 //! vocabulary — the rows, and the string one travels as.
 //!
+//! And one thing that reading has no way to say, because it is about the account
+//! rather than about what it runs: which machine the account is on. Every device
+//! of a cluster offers every member's accounts, so a row says the machine where
+//! that is not this one — see [`on`], which is the one rule for all four places
+//! a pairing is read.
+//!
 //! There is no default model anywhere, which is why nothing here invents one: a
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
@@ -60,17 +66,26 @@ export function value(pairing: Pairing): string {
 /// `saved` is the profiles as they stand, which decides whether the profile's
 /// own name is said at all — and a profile nobody named reads as *Default* where
 /// it has to be said. See [`reading`](./agents.ts).
+///
+/// And the machine on the end of it where the account is on another one, which
+/// is what makes a cluster-wide list readable: every device lists every member's
+/// accounts, so two rows called "work" are two machines' and the name alone
+/// would not say which. Nothing at all for this device's own, which is every row
+/// on a Verkstead that is linked to nothing.
 export function label(
   pairing: { profile: ProfileEntry; model: string | null },
   saved: ProfileEntry[] | undefined,
 ): string {
-  return reading(
-    {
-      agent: pairing.profile.account.agent_type,
-      model: pairing.model,
-      profile: pairing.profile.name,
-    },
-    saved,
+  return on(
+    reading(
+      {
+        agent: pairing.profile.account.agent_type,
+        model: pairing.model,
+        profile: pairing.profile.name,
+      },
+      saved,
+    ),
+    pairing.profile,
   );
 }
 
@@ -82,14 +97,32 @@ export function shown(
   pairing: { profile: ProfileEntry; model: string | null },
   saved: ProfileEntry[] | undefined,
 ): string {
-  return briefly(
-    {
-      agent: pairing.profile.account.agent_type,
-      model: pairing.model,
-      profile: pairing.profile.name,
-    },
-    saved,
+  return on(
+    briefly(
+      {
+        agent: pairing.profile.account.agent_type,
+        model: pairing.model,
+        profile: pairing.profile.name,
+      },
+      saved,
+    ),
+    pairing.profile,
   );
+}
+
+/// One reading with the machine the account is at home on after it, where that
+/// is not this device.
+///
+/// Said once here rather than at each of the four places a pairing is read,
+/// because it is one rule: which machine an account sits on is a fact on the
+/// row, and a row that said it in one list and not in the next would be two
+/// answers to *whose account is this*.
+///
+/// A middle dot rather than the em dash the profile's own name hangs off, so
+/// that "Claude Code Fable 5 — Work · the-laptop" reads as an account and then
+/// a machine rather than as a name with a machine in it.
+function on(words: string, profile: ProfileEntry): string {
+  return profile.device ? `${words} · ${profile.device.name}` : words;
 }
 
 /// What is chosen now, as [`value`] would have written it.

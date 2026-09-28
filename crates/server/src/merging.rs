@@ -80,13 +80,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use tokio_stream::StreamExt;
 use verkstead_render::{ConversationEntry, RowDevice, ShowingArchived};
 use verkstead_schema::Nudge;
 use verkstead_store::Member;
 
-use crate::device::{Devices, Unrelayed};
-use crate::relaying::{Call, Streamed};
+use crate::relaying::read_of;
 use crate::{AppState, store};
 
 /// The path a member's own sidebar list is read at, which is the path this
@@ -113,7 +111,7 @@ const ARCHIVES: &str = "/api/ui/conversations/archived";
 /// stopping, which this device holds one read of per member. The same bound the
 /// Nudge stream takes against the same machine — see
 /// [`crate::relaying::freshness`].
-const MOST_A_LIST_IS: usize = 4 * 1024 * 1024;
+pub(crate) const MOST_A_LIST_IS: usize = 4 * 1024 * 1024;
 
 /// The lists this device holds of its members: the last one each of them
 /// answered, by **Device Id**.
@@ -421,7 +419,21 @@ async fn read_member(state: &AppState, device: &str) {
         }
     };
 
-    let Some(said) = read_of(devices, device, asking(showing), "Conversations").await else {
+    // **The position rides on the query rather than in a body**, this being a
+    // read: `?archived=true` is the hub saying where its own switch stands, and
+    // a member that is asked nothing answers at its own — see
+    // [`crate::ui::conversations`]. The dial itself is the one every read this
+    // device makes of its own accord goes through, carrying no header of a
+    // browser's and no body at all — see [`crate::relaying::read_of`].
+    let Some(said) = read_of(
+        devices,
+        device,
+        format!("{LIST}?archived={showing}"),
+        "Conversations",
+        MOST_A_LIST_IS,
+    )
+    .await
+    else {
         return;
     };
 
@@ -442,7 +454,15 @@ async fn read_member(state: &AppState, device: &str) {
         }
     };
 
-    let Some(said) = read_of(devices, device, asking_about_archives(), "archives").await else {
+    let Some(said) = read_of(
+        devices,
+        device,
+        ARCHIVES.to_owned(),
+        "archives",
+        MOST_A_LIST_IS,
+    )
+    .await
+    else {
         return;
     };
 
@@ -479,126 +499,6 @@ async fn read_member(state: &AppState, device: &str) {
     // either way: its own list is its own, and this is only this device's account
     // of it catching up. See [`crate::nudge::Nudges::announce_here`].
     state.nudges.announce_here(Nudge::Conversations);
-}
-
-/// One of those two reads, up to the bound: what `device` said, or nothing and a
-/// line in the log saying why what it last said stands.
-///
-/// `about` is what the call was for, in a word, so that the two reads are told
-/// apart in the log without being written out twice.
-async fn read_of(devices: &Devices, device: &str, asking: Call, about: &str) -> Option<Vec<u8>> {
-    let answered = match devices.relay(device, asking).await {
-        Ok(answered) => answered,
-        Err(why) => {
-            tracing::debug!(
-                device,
-                "a member's {about} could not be read for the merged list, so what it last said \
-                 stands: {}",
-                unrelayed(&why),
-            );
-            return None;
-        }
-    };
-
-    if !answered.status().is_success() {
-        tracing::warn!(
-            device,
-            status = %answered.status(),
-            "a member refused the read of its {about}, so what it last said stands",
-        );
-        return None;
-    }
-
-    match bounded(answered).await {
-        Ok(body) => Some(body),
-        Err(why) => {
-            tracing::warn!(
-                device,
-                "a member's {about} could not be read to the end: {why:#}",
-            );
-            None
-        }
-    }
-}
-
-/// What a dial that was never made is said in the log as: the four findings, in
-/// as many words.
-///
-/// The browser's own sentences for the same four are [`crate::relaying`]'s —
-/// each carries a status code and names the device, those being an answer to a
-/// call somebody made. This is the other reader: a line about a read nobody
-/// asked for.
-fn unrelayed(why: &Unrelayed) -> String {
-    match why {
-        Unrelayed::ThisDevice => "the id is this device's own".to_owned(),
-        Unrelayed::NoSuchMember => "the device is no member of this cluster".to_owned(),
-        Unrelayed::Unreachable(why) => format!("{why:#}"),
-        Unrelayed::Unreadable(why) => {
-            format!("the devices this one is linked to could not be read: {why:#}")
-        }
-    }
-}
-
-/// The call the list is read with: the member's own `/api/ui/conversations`,
-/// asked at the position this device's switch stands at.
-///
-/// The same [`Call`] a browser's relayed request is put over, because it is the
-/// same dial. What is different is who asked: nobody. This is one of the two
-/// calls in the namespace this device makes of its own accord — the other being
-/// the Nudge stream it holds — so it carries no header of a browser's and no
-/// body at all.
-///
-/// **The position rides on the query rather than in a body**, this being a read:
-/// `?archived=true` is the hub saying where its own switch stands, and a member
-/// that is asked nothing answers at its own — see [`crate::ui::conversations`].
-fn asking(showing_archived: bool) -> Call {
-    call(format!("{LIST}?archived={showing_archived}"))
-}
-
-/// And the call the other half is read with: that member's own archives, whose
-/// position is thrown away and whose `any` is held.
-fn asking_about_archives() -> Call {
-    call(ARCHIVES.to_owned())
-}
-
-/// What the two have in common: a `GET` of `onwards` asking for JSON, on nobody's
-/// behalf.
-fn call(onwards: String) -> Call {
-    let mut headers = axum::http::HeaderMap::new();
-
-    headers.insert(
-        axum::http::header::ACCEPT,
-        axum::http::HeaderValue::from_static("application/json"),
-    );
-
-    Call {
-        method: reqwest::Method::GET,
-        onwards,
-        headers,
-        body: Streamed::Nothing,
-    }
-}
-
-/// What a member answered, up to [`MOST_A_LIST_IS`] of it.
-///
-/// Read chunk by chunk rather than in one call, so the bound is applied as the
-/// bytes arrive: a body read whole and then measured is a body this device has
-/// already held.
-async fn bounded(answered: reqwest::Response) -> anyhow::Result<Vec<u8>> {
-    let mut body = answered.bytes_stream();
-    let mut held: Vec<u8> = Vec::new();
-
-    while let Some(chunk) = body.next().await {
-        held.extend_from_slice(&chunk?);
-
-        if held.len() > MOST_A_LIST_IS {
-            anyhow::bail!(
-                "the list is longer than the {MOST_A_LIST_IS} bytes this device will hold of one",
-            );
-        }
-    }
-
-    Ok(held)
 }
 
 /// The merged list: this device's own rows and every member's, ordered by rank.

@@ -3643,6 +3643,21 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &a_stated_machine(&get(&asking, "/api/ui/devices").await),
     );
 
+    // And the Agent Profiles of a device that is in a cluster, which is the
+    // other list a membership changes the shape of: every device lists every
+    // member's accounts beside its own, each mirror row saying which machine it
+    // is at home on (ADR-0020, *Shared Profiles*).
+    //
+    // An app of its own rather than a member added to the one the Profiles above
+    // are written from, because a membership is not local to one reading: a
+    // member on that router would put a device on every sidebar row it answers
+    // as well.
+    let (_dir, shared) = a_shared_profiles_app().await;
+    write(
+        "profiles-shared.json",
+        &get(&shared, "/api/ui/profiles").await,
+    );
+
     // And the list under those rows, which is the other reading that section
     // makes: the devices nobody has typed an address for. Two of them, because
     // that is what the list is for — a machine somebody is about to link, and a
@@ -3815,6 +3830,82 @@ const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 /// member: a device that asked and was told no is a device nothing links to.
 #[cfg(unix)]
 const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
+
+/// A router whose Profiles are a cluster's: two of this device's own, and one
+/// **mirror** of a member's, which is the row every device in a cluster keeps
+/// per Profile it has heard of (ADR-0020, *Shared Profiles*).
+///
+/// The member row beside it is what the mirror is drawn with: the machine's
+/// name and the word its mark comes off are this device's own reading of its
+/// membership rather than anything the far end sent with the Profile. So the
+/// fixture holds both, which is what a linked Verkstead holds.
+///
+/// The mirror's account paths are the member's own — `/home/you/…` on a Mac,
+/// which is nowhere on the box writing this — and that is the point of them:
+/// what a session away from home is given is another stage's, and until then
+/// the row reads as one whose account is not on this device.
+#[cfg(unix)]
+async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = empty_app().await;
+
+    for (name, home, models) in [
+        ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
+        ("opus", "/srv/accounts/opus", &["claude-opus-5"][..]),
+    ] {
+        store::create_profile(
+            &pool,
+            &store::ProfileFacts {
+                name: Some(name.to_owned()),
+                account: store::Account::Claude {
+                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                },
+                models: models.iter().map(|model| (*model).to_owned()).collect(),
+                memory: true,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    verkstead_store::record_member(
+        &pool,
+        &verkstead_store::Linking {
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "macOS".to_owned(),
+            addresses: vec!["100.64.0.2".to_owned()],
+            fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Numbered the way the member numbers it rather than the way this device
+    // would: the id on the row is that machine's, and the local id this write
+    // hands out is what everything here names it by.
+    verkstead_store::record_mirror(
+        &pool,
+        &verkstead_store::Mirror {
+            device: A_MEMBER.to_owned(),
+            id: 4,
+        },
+        &store::ProfileFacts {
+            name: Some("personal".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: std::path::PathBuf::from("/home/you/accounts/personal/.claude"),
+                config_file: std::path::PathBuf::from("/home/you/accounts/personal/.claude.json"),
+            },
+            models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    (dir, app)
+}
 
 /// The same router with three joins asked for and none of them a link: one
 /// still inside its ten minutes, one whose ten minutes ran out, and one the far

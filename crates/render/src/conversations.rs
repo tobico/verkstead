@@ -2063,6 +2063,10 @@ pub struct SteerRecordView {
 /// nothing, and a steer whose account has been removed since picked something
 /// that is gone. A pane that drew them the same would say *nothing picked* over
 /// a choice the human made.
+///
+/// The size lint is left alone here for [`crate::PickedView`]'s reason, which is
+/// the same shape and the same Profile inside it.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerPairingView {

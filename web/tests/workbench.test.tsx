@@ -5675,6 +5675,7 @@ describe("a conversation's pairings", () => {
       broken: null,
       id: 9,
       memory: true,
+      device: null,
       models: ["grok-4.6"],
       name: "grok",
     },

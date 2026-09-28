@@ -3354,6 +3354,7 @@ mod tests {
             },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
+            mirror: None,
         }
     }
 
@@ -3378,6 +3379,7 @@ mod tests {
                 },
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("gpt-5-codex".to_owned()),
         }
@@ -3394,6 +3396,7 @@ mod tests {
                 },
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("grok-4.6".to_owned()),
         }
@@ -3412,6 +3415,7 @@ mod tests {
                 },
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("opencode/big-pickle".to_owned()),
         }

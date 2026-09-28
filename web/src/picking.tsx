@@ -343,13 +343,18 @@ export function Listbox<T>(
     ///
     /// Beside [`mark`] rather than in place of it because the two are drawn out
     /// of different things: a harness is a brand's own drawing, carried whole
-    /// (see `HarnessMark.tsx`), and this is one of the app's own icons. No
-    /// caller hands in both, there being one mark in front of a row's words.
+    /// (see `HarnessMark.tsx`), and this is one of the app's own icons.
+    ///
+    /// **And one caller hands in both.** A pairing picker is cluster-wide — it
+    /// offers every member's accounts beside this device's own — so a row there
+    /// says which harness it runs *and* which machine it is on, and the two
+    /// marks stand in that order. Which is why nothing here is per row: a row
+    /// with no machine to name answers nothing, and no element is drawn for it.
     ///
     /// Unlabelled where it is drawn, as the same mark is on a sidebar row: what
     /// the human is choosing between is the words, and the mark is a shape to
     /// scan a list by.
-    icon?: (option: T) => IconDefinition;
+    icon?: (option: T) => IconDefinition | undefined;
 
     /// What the *closed* control reads, where that is not what the row it came
     /// off reads.
@@ -625,14 +630,16 @@ export function Listbox<T>(
 /// because a control showing one thing and offering the same thing drawn
 /// differently is a control the eye has to check.
 ///
-/// The mark is a harness's or one of the app's own icons — see [`Listbox`]'s
-/// `mark` and `icon`, which no caller hands in together. Neither is drawn where
-/// the caller offers neither, which is most of them: nothing is put in front of
-/// the words, so no row carries a gap where a mark would have been.
+/// The mark is a harness's, or one of the app's own icons, or both where a row
+/// names a machine as well as a backend — see [`Listbox`]'s `mark` and `icon`.
+/// Neither is drawn where the caller offers neither, which is most of them, and
+/// the second is left out row by row where that row has no machine to name:
+/// nothing is put in front of the words, so no row carries a gap where a mark
+/// would have been.
 function Reading<T>(props: {
   of: T;
   mark?: (option: T) => AgentType | null;
-  icon?: (option: T) => IconDefinition;
+  icon?: (option: T) => IconDefinition | undefined;
   label: (option: T) => string;
 }): JSX.Element {
   return (

@@ -56,6 +56,7 @@
 //! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -1264,6 +1265,13 @@ export function ProfileChoices(props: {
 /// nobody. **Whether there is one, and what it says, is the table's** — see
 /// [`away`](./processes.ts), which the caller asks of each picker it draws
 /// exactly as it asks [`uses`] whether to draw it at all.
+///
+/// **And the list is the cluster's.** Every device offers every member's
+/// accounts beside its own, so a row of a member's says which machine it is on
+/// and wears that machine's mark after the harness's — two accounts called
+/// "work" are two machines', and the words alone would not say which. Nothing
+/// at all on this device's own rows, which is every row where there is no
+/// cluster.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
@@ -1372,7 +1380,15 @@ export function RolePicker(props: {
       ? // No mark: the row is not an account, so there is no harness for one to
         // be of — see [`Row`]. And nothing shorter to read on the trigger: the
         // words are already the whole of what the choice is.
-        [{ value: pairing.NONE, label: props.away, shown: props.away, mark: null }]
+        [
+          {
+            value: pairing.NONE,
+            label: props.away,
+            shown: props.away,
+            mark: null,
+            on: undefined,
+          },
+        ]
       : []),
     ...pairing.pairings(props.saved).map((row) => ({
       value: pairing.value(row),
@@ -1384,6 +1400,12 @@ export function RolePicker(props: {
       // to say which backend and a quarter of the box to say the rest in.
       shown: pairing.shown(row, props.saved),
       mark: row.profile.account.agent_type,
+      // And the mark for the machine the account is on, after the harness's,
+      // where that machine is not this one: this picker is cluster-wide, and a
+      // member's account is scanned for by the shape its operating system wears
+      // exactly as a sidebar row of that machine's work is. Nothing at all for
+      // this device's own, which is every row where there is no cluster.
+      on: row.profile.device ? osIcon(row.profile.device.os) : undefined,
     })),
   ];
 
@@ -1420,6 +1442,7 @@ export function RolePicker(props: {
         label={(row) => row.label}
         closed={(row) => row.shown}
         mark={(row) => row.mark}
+        icon={(row) => row.on}
         chosen={props.chosen}
         pick={(picked) => props.pick(picked)}
         disabled={props.disabled}
@@ -1446,6 +1469,11 @@ type Row = {
   /// glanced at where a row is read down — see `shown` in `../pairing.ts`.
   shown: string;
   mark: AgentType | null;
+
+  /// And the mark for the machine the account is at home on, after the
+  /// harness's, where it is not this one. `undefined` is this device's own — and
+  /// the row that runs nothing, which is on no machine at all.
+  on: IconDefinition | undefined;
 };
 
 /// The branch the work will be done on: empty until the human names one, and

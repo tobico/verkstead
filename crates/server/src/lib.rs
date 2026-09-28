@@ -137,6 +137,10 @@ mod merges;
 /// One sidebar for the cluster: every member's Conversations held in memory and
 /// merged with this device's own by Rank (ADR-0020, *The opened device relays*).
 mod merging;
+/// One list of accounts for the cluster: a mirror row per member Agent Profile,
+/// fetched over the link and kept beside this device's own (ADR-0020, *Shared
+/// Profiles*).
+mod mirroring;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
 /// Public for the one thing a Nudge is announced about from outside the
@@ -1425,6 +1429,14 @@ fn standing(
     // what the two share is the one Nudge channel, and this end of it is the
     // one that needs the state.
     merging::refreshing(&state);
+
+    // And the mirror rows of every member's Agent Profiles, beside it and on the
+    // same channel: read once now, and again whenever a member says its Profiles
+    // moved or the membership itself does (ADR-0020, *Shared Profiles*) — see
+    // [`mirroring`]. A sweep of its own rather than a second thing the one above
+    // does, because what it keeps is rows in this store rather than a list in
+    // this device's memory, and the two are refreshed by different news.
+    mirroring::refreshing(&state);
 
     // And the verdict about the machine itself, which is the one sweep here
     // that decides something rather than tidying something: whether this

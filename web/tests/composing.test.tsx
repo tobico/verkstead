@@ -110,6 +110,7 @@ import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
+import shared from "./fixtures/profiles-shared.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
@@ -249,6 +250,11 @@ const remembering = (
 /// reachable laptop, and a WSL that did not answer the last dial.
 const MEMBER = LINKED.members[0]!.identity;
 const AWAY = LINKED.members[1]!.identity;
+
+/// And the Agent Profiles a device in a cluster answers: two of its own, and a
+/// mirror of a member's account with the machine it is at home on.
+const SHARED = shared as ProfileEntry[];
+const SHARED_MACHINE = SHARED[2]!.device!;
 
 /// Where a call for that member stands. The prefix takes the place of
 /// `/api/ui`, so the far end sees the path the browser would have written
@@ -1064,6 +1070,55 @@ describe("the device the compose page is drafting onto", () => {
       mark(MEMBER.os),
       mark(AWAY.os),
     ]);
+  });
+
+  /// And the pairing pickers are cluster-wide, which is the other list a
+  /// membership changes the shape of: every device offers every member's
+  /// accounts beside its own, with the machine on the row (ADR-0020, *Shared
+  /// Profiles*). Two accounts called `work` are two machines', and the name
+  /// alone would not say which.
+  ///
+  /// `tests/fixtures/profiles-shared.json` is that list as the server really
+  /// answers it — the mirror row carries the machine, and this device's own
+  /// carry none.
+  it("offers a member's accounts on the pairing pickers, with the machine", async () => {
+    theCluster(whenever("/api/ui/profiles", json(SHARED)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await openAgent(container);
+
+    // All three, because a member's account is offered for whichever role the
+    // human would run it in — and the two that can run nothing offer that row
+    // above the accounts, which is on no machine at all.
+    await waitFor(() =>
+      expect(rows("Implementation")).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+      ),
+    );
+
+    for (const role of ["Grilling", "Review"]) {
+      expect(rows(role)).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+      );
+    }
+
+    // This device's own say nothing about a machine: a name on every row would
+    // be a column of one answer repeated.
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+
+    // And the member's row wears its machine's mark after the harness's, which
+    // is what a list of several devices' accounts is scanned by.
+    const theirs = offered("Implementation").find((row) =>
+      row.textContent!.includes(SHARED_MACHINE.name),
+    )!;
+
+    expect(
+      [...theirs.querySelectorAll("svg path")].map((drawn) =>
+        drawn.getAttribute("d"),
+      ),
+    ).toContain(mark(SHARED_MACHINE.os));
   });
 
   /// The select stands left of the Repo, because the Repo is one of the picked

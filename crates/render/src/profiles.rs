@@ -82,6 +82,10 @@ pub enum ProfileAccount {
 /// Not a way of being saved: every Profile here passed the same checks when it
 /// was written down. This is what has become of its account since — the pair
 /// for a Claude Profile, and the one home for every type that keeps one.
+///
+/// And one of them is not about a path at all: a **mirror** names an account
+/// that is on another machine, which is a thing to say about the row rather
+/// than something to go and put right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Broken {
@@ -93,6 +97,20 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
+
+    /// The Profile is at home on another device, and nothing here has fetched
+    /// its account — so a session launched under it would run logged out.
+    ///
+    /// Read off the row rather than off the filesystem, and read *first*: the
+    /// paths on a mirror are the home machine's, and two machines set up alike
+    /// would have them resolving here to an account that is somebody else's.
+    ///
+    /// Said in the same field as the three above because it is the same
+    /// question at the moment it is asked — is this something a session can be
+    /// started under — and the pickers, the cards and the press that starts the
+    /// work all read that field. What lifts it is the stage that mirrors the
+    /// account itself.
+    NotOnThisDevice,
 }
 
 /// One row of the Profile list.
@@ -131,6 +149,19 @@ pub struct ProfileEntry {
     /// or starts with an empty one of its own. On unless the human switched it
     /// off.
     pub memory: bool,
+
+    /// Which device this Profile is at home on, and `null` for this one's own —
+    /// which is every Profile on a Verkstead that is linked to nothing.
+    ///
+    /// The same shape a Conversation's row carries whose work it is, and for the
+    /// same reason: the name and the mark for the operating system are this
+    /// device's own reading of its membership rather than anything the far end
+    /// said, and one shape means one way of drawing a device wherever a list has
+    /// several machines' rows in it. See [`crate::RowDevice`].
+    ///
+    /// One list rather than a section per device: a Profile is a Profile, and
+    /// which machine its account sits on is a fact on the row.
+    pub device: Option<crate::RowDevice>,
 }
 
 /// A Profile as the human has just written it, for saving or for rewriting.
@@ -269,6 +300,14 @@ pub struct PairingView {
 /// review* as a row of its own: a Conversation that picked it is as ready to
 /// start as one that picked a Pairing, and a page that could not tell it from an
 /// empty picker would draw the placeholder over a settled choice.
+///
+/// One variant carries a Profile and the other two carry nothing, which is what
+/// the size lint is about — a Profile got bigger when it gained the device it is
+/// at home on. Left as it is: these are made one at a time on the way to being
+/// serialized, none of them is held in a collection, and a `Box` in a view type
+/// would be a pointer written into the shape the viewer is generated from for a
+/// few bytes nobody is counting.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PickedView {

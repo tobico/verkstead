@@ -1507,7 +1507,12 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(conversation.grilling_pairing).await {
+    let grilling_pairing = match crate::profiles::pairing(
+        &state.pool,
+        conversation.grilling_pairing,
+    )
+    .await
+    {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1515,8 +1520,11 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let implementation_pairing = match crate::profiles::pairing(conversation.implementation_pairing)
-        .await
+    let implementation_pairing = match crate::profiles::pairing(
+        &state.pool,
+        conversation.implementation_pairing,
+    )
+    .await
     {
         Ok(pairing) => pairing,
         Err(error) => {
@@ -1525,7 +1533,9 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let review_pairing = match crate::profiles::picked(conversation.review_pairing).await {
+    let review_pairing = match crate::profiles::picked(&state.pool, conversation.review_pairing)
+        .await
+    {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
@@ -2029,7 +2039,7 @@ pub(crate) async fn conversation_view(
     // A read that fails leaves the steers to draw without their Pairing rather
     // than taking the Conversation down with it: everything else about the
     // record is in hand, and a pane short one line is better than no pane.
-    let steer_pairings = match crate::profiles::keyed(steered(&timeline)).await {
+    let steer_pairings = match crate::profiles::keyed(&state.pool, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading what a steer picked failed");
@@ -4931,7 +4941,10 @@ async fn create_profile(
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
     match crate::profiles::create(&state.pool, &edit).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, "saving an Agent Profile failed");
             unavailable("the agent profile could not be saved")
@@ -4950,7 +4963,10 @@ async fn edit_profile(
     };
 
     match crate::profiles::edit(&state.pool, id, &edit).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
             unavailable("the agent profile could not be saved")
@@ -4965,11 +4981,36 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
     };
 
     match crate::profiles::remove(&state.pool, id).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileDeleted::Removed);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
+    }
+}
+
+/// Say that the Agent Profiles moved, where the press that just answered moved
+/// them.
+///
+/// **This is what a member watches.** Every device in a cluster lists every
+/// member's Profiles as mirror rows of its own, refreshed off the news that
+/// member sends (ADR-0020, *Shared Profiles*) — so a save, a rewrite or a
+/// removal pressed here is what tells the rest of the cluster to read this
+/// device's list again. See [`crate::mirroring`], which is the other end of it.
+///
+/// Ordinary news rather than [`crate::nudge::Nudges::announce_here`]: this is
+/// about the accounts this device holds, which is precisely what a member has a
+/// use for. The browser that pressed reads its own change back either way, which
+/// is why nothing announced this while a device was alone.
+///
+/// Nothing at all where the press was refused: a name that was taken is a list
+/// exactly as it was, and a page told to re-read it would read the same rows.
+fn moved_profiles(state: &AppState, moved: bool) {
+    if moved {
+        state.nudges.announce(Nudge::Profiles);
     }
 }
 

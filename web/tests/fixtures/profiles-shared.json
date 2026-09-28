@@ -5,7 +5,7 @@
       "claude_dir": "/srv/accounts/fable/.claude",
       "config_file": "/srv/accounts/fable/.claude.json"
     },
-    "broken": null,
+    "broken": "DirMissing",
     "device": null,
     "id": 1,
     "memory": true,
@@ -20,29 +20,33 @@
       "claude_dir": "/srv/accounts/opus/.claude",
       "config_file": "/srv/accounts/opus/.claude.json"
     },
-    "broken": null,
+    "broken": "DirMissing",
     "device": null,
     "id": 2,
     "memory": true,
     "models": [
-      "claude-opus-5",
-      "claude-haiku-4-5-20251001"
+      "claude-opus-5"
     ],
     "name": "opus"
   },
   {
     "account": {
       "agent_type": "Claude",
-      "claude_dir": "/srv/accounts/sonnet/.claude",
-      "config_file": "/srv/accounts/sonnet/.claude.json"
+      "claude_dir": "/home/you/accounts/personal/.claude",
+      "config_file": "/home/you/accounts/personal/.claude.json"
     },
-    "broken": null,
-    "device": null,
+    "broken": "NotOnThisDevice",
+    "device": {
+      "id": "0011223344556677889900aabbccddee",
+      "name": "laptop",
+      "os": "macOS",
+      "reachable": true
+    },
     "id": 3,
     "memory": true,
     "models": [
-      "claude-sonnet-5"
+      "claude-opus-5"
     ],
-    "name": "sonnet"
+    "name": "personal"
   }
 ]

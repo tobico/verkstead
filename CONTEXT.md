@@ -2613,6 +2613,36 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
+**A cluster's Profiles are one list on every device of it.** A device linked to
+another keeps a **mirror** per Profile that other device holds: a row of its own
+`profiles` table carrying what a row is drawn and picked by — the name, the
+harness, the account as the far end holds it, the models and the memory switch —
+marked with the **Device Id** it is at home on and the id it has there
+(ADR-0020). A row rather than a list held in memory, because a Pairing, a Repo's
+memory of what it was last grilled with and every Conversation name a Profile by
+a **local** id, and a mirror is what gives a member's account one here — so
+nothing that reads a Profile id changes, and a mirror keeps its local id across
+every refresh. What that costs is that the two uniqueness rules above become
+*this device's own rows'*: two machines may each hold a `work`, and each the one
+unnamed Claude account, which is what nearly every installation holds.
+**Which machine an account sits on is a fact on the row**, drawn with the mark
+its operating system wears wherever a device is drawn — on the settings card and
+on every pairing picker, one list rather than a section per device. And nothing
+at all on this device's own rows, a machine's own name on every one of them being
+a column of one answer repeated.
+**They are fetched device to device rather than through the browser**: each
+device reads its members' own `/api/ui/profiles` over the **Relay**, at the
+start, whenever a member says its Profiles moved, and whenever the membership
+itself moves. A member that is not answering keeps the rows it last gave, exactly
+as its Conversations are kept; a Profile removed at home is gone from what that
+device answers, so the mirror goes with it on the next refresh — nulled out of
+every Pairing that named it, exactly as a removal pressed here is. A device that
+has been unlinked takes its mirrors with it, the membership being what prunes
+those.
+**And a mirror cannot be started under.** Nothing has fetched the account, so a
+session launched under one would run logged out: it reads as broken on the row —
+*its account is on the-laptop* — and the press that starts the work is refused
+the way it is refused a Profile whose directory has gone.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it

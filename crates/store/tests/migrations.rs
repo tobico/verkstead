@@ -87,15 +87,15 @@ use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Pairing, ProfileFacts,
-    PullRequest, RanUnder, Rollup, Saving, Standing, WaitingOn, asked_to_stop, check_rollup,
-    clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
-    fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
-    pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
+    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Mirror, Pairing,
+    ProfileFacts, PullRequest, RanUnder, Rollup, Saving, Standing, WaitingOn, asked_to_stop,
+    check_rollup, clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile,
+    finish_wrap_up, fix_attempts, load_conversation, load_profile, merging, open_database,
+    open_pending_steer, pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
-    record_fix_attempt, recorded_commits, register_repo, save_pending_steer, settle_wrap_up, stack,
-    standing, start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop,
-    stopped, timeline, update_profile, wrap_up_settled,
+    record_fix_attempt, record_mirror, recorded_commits, register_repo, save_pending_steer,
+    settle_wrap_up, stack, standing, start_capture, start_conversation, start_grilling,
+    start_unnamed_conversation, stop, stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2713,6 +2713,171 @@ async fn the_profiles_of_before_the_memory_switch_share_their_memory() {
     assert!(
         !load_profile(&pool, 1).await.unwrap().unwrap().memory,
         "a reopening does not switch it back on"
+    );
+}
+
+/// A database whose Profile names were unique across every device, which is
+/// every Verkstead before a member's account could be written down here.
+///
+/// The table is written out as that Verkstead declared it — the name `UNIQUE` on
+/// the column, and no room at all for a device to be named — with two Profiles
+/// in it and the models of each hung off, so that what is copied across is the
+/// row and what points at the row alike.
+async fn profiles_named_across_every_device(dir: &Path) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE profiles (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT UNIQUE,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Both rules as that Verkstead held them: the name over every row, and one
+    // unnamed Profile per harness.
+    sqlx::query(
+        "CREATE UNIQUE INDEX profiles_one_unnamed_per_agent
+         ON profiles (agent_type) WHERE name IS NULL",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (id, name) in [(1, Some("work")), (2, None)] {
+        sqlx::query(
+            "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type, memory)
+             VALUES (?, ?, ?, ?, 'claude-opus-5', 'claude', 1)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(format!(
+            "/watched/accounts/{}/.claude",
+            name.unwrap_or("here")
+        ))
+        .bind(format!(
+            "/watched/accounts/{}/.claude.json",
+            name.unwrap_or("here")
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO profile_models (profile_id, position, model)
+             VALUES (?, 0, 'claude-opus-5')",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+}
+
+/// Every saved Profile keeps its name and stays this device's own, and a
+/// member's account called the same thing goes in beside it — which is the whole
+/// of what the rewrite is for.
+#[tokio::test]
+async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_named_across_every_device(dir.path()).await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again, and the table is not rebuilt twice",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let saved = profiles(&pool).await.unwrap();
+        assert_eq!(saved.len(), 2, "{opening}");
+        assert_eq!(saved[0].name, None, "the unnamed one sorts first");
+        assert_eq!(saved[1].name.as_deref(), Some("work"));
+        assert_eq!(
+            saved[1].id, 1,
+            "the ids come across, being what points here"
+        );
+        assert_eq!(saved[1].account, claude("work"));
+        assert_eq!(saved[1].models, ["claude-opus-5"]);
+        assert!(
+            saved.iter().all(|profile| profile.mirror.is_none()),
+            "and every one of them is still this device's own: {opening}",
+        );
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // A member's account called what this device already calls one of its own,
+    // and a member's unnamed Claude account beside this device's: two rows the
+    // old table's rules would each have refused.
+    for (at_home, name) in [(7, Some("work")), (9, None)] {
+        record_mirror(
+            &pool,
+            &Mirror {
+                device: "0011223344556677889900aabbccddee".to_owned(),
+                id: at_home,
+            },
+            &ProfileFacts {
+                name: name.map(str::to_owned),
+                account: claude("theirs"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(profiles(&pool).await.unwrap().len(), 4);
+
+    // And both rules still hold over this device's own rows.
+    assert_eq!(
+        create_profile(
+            &pool,
+            &ProfileFacts {
+                name: Some("work".to_owned()),
+                account: claude("second"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            }
+        )
+        .await
+        .unwrap(),
+        Err(Clash::NameTaken),
+    );
+
+    assert_eq!(
+        create_profile(
+            &pool,
+            &ProfileFacts {
+                name: None,
+                account: claude("second"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            }
+        )
+        .await
+        .unwrap(),
+        Err(Clash::DefaultTaken),
     );
 }
 

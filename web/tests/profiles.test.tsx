@@ -64,6 +64,7 @@ import { art, marked } from "./marking";
 import { offered as offeredRows, pick, rows, showing } from "./pickers";
 import { askedFor, json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
+import shared from "./fixtures/profiles-shared.json" with { type: "json" };
 
 const SAVED = profiles as ProfileEntry[];
 const FABLE = SAVED[0]!;
@@ -71,6 +72,16 @@ const FABLE = SAVED[0]!;
 /// The fixture's other account, which lists more than one model — a profile
 /// says everything it can launch, and the card is where that is read.
 const OPUS = SAVED[1]!;
+
+/// And the same list answered by a device that is in a cluster: two of its own,
+/// and a **mirror** of a member's account.
+const CLUSTER = shared as ProfileEntry[];
+
+/// The mirror among them, and the machine it is at home on — which is the
+/// device's own reading of its membership rather than anything the far end sent
+/// with the Profile.
+const MIRROR = CLUSTER[2]!;
+const MACHINE = MIRROR.device!;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -436,6 +447,62 @@ describe("the cards", () => {
     expect(title.textContent).not.toContain(DEFAULT_PROFILE);
     expect(title.textContent).not.toContain("—");
     expect(marked(title)).toBe(art(claudeMarkFile));
+  });
+});
+
+/// Every device's Profiles section lists every member's accounts beside its own
+/// (ADR-0020, *Shared Profiles*), which is one list rather than a section per
+/// machine: a profile is a profile, and which machine its account sits on is a
+/// fact on the row.
+///
+/// `tests/fixtures/profiles-shared.json` is that list as the server really
+/// answers it — two of this device's own and one mirror of a member's, with the
+/// membership row behind it saying what the machine is called and which mark it
+/// wears.
+describe("a member's accounts", () => {
+  it("says which machine one is on, under the reading", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const card = theCard(reads(MIRROR));
+
+    expect(card.querySelector(`.${styles.device}`)!.textContent).toBe(
+      MACHINE.name,
+    );
+    // The mark for its operating system, drawn the way a sidebar row of that
+    // machine's work draws it — a Mac here, which is what the fixture holds.
+    expect(card.querySelector(`.${styles.os}`)).toBeTruthy();
+  });
+
+  /// And nothing at all on this device's own, which is every row where there is
+  /// no cluster: a machine's own name on every card would be a column of one
+  /// answer repeated.
+  it("says nothing about a machine on this device's own", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(CLUSTER[0]!)).querySelector(`.${styles.device}`),
+    ).toBeNull();
+  });
+
+  /// It cannot be started under from here — nothing has fetched the account, so
+  /// a session launched under it would run logged out — and the card says which
+  /// machine to look on rather than naming a path to go and put right.
+  it("says its account is not on this device, and where it is", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(MIRROR.broken).toBe("NotOnThisDevice");
+    expect(theCard(reads(MIRROR)).textContent).toContain(
+      `Its account is on ${MACHINE.name}.`,
+    );
   });
 });
 

@@ -19,6 +19,7 @@
         "config_file": "/srv/accounts/fable/.claude.json"
       },
       "broken": null,
+      "device": null,
       "id": 1,
       "memory": true,
       "models": [
@@ -37,6 +38,7 @@
         "config_file": "/srv/accounts/opus/.claude.json"
       },
       "broken": null,
+      "device": null,
       "id": 2,
       "memory": true,
       "models": [
