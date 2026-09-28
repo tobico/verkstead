@@ -2363,6 +2363,17 @@ Stage's join, dependent on it or not. Only the join — the waiting Stages' own
 work, their checks and their reviews wait on nobody. A roadmap run in order
 builds the chain it always built, each Stage cut from what turns out to be the
 top and its rebase moving no commit. See ADR-0021, *The chain*.
+
+**One chain per roadmap per repository, and only the Conversation's own so
+far.** A **Companion** repository a Stage commits in has a chain of its own
+shape — a branch per Stage, each cut from the companion of whatever the Stage's
+own branch was cut from — and nothing joins it: the finish is told the chain in
+the Conversation's own repository, and a companion branch is left where
+`continuing` cut it. Which holds while roadmaps run their Stages one at a time,
+because there the base and the top of the chain are the same branch and the
+companion is already where the join would have put it. Two Stages side by side
+are where they part company, so joining a companion's chain is work for the
+Stage that starts them — see the `parallel-stages` roadmap.
 _Avoid_: stack (that is `gh stack`'s word for how a target repository reviews
 one, and the chain is the record the rebase is read off), dependency order
 (the order is the order Stages finished, and what a Stage stands on is declared

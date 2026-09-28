@@ -978,6 +978,15 @@ pub(crate) struct Link {
 ///
 /// A stage with nothing under it is the prompt unchanged: an empty heading would
 /// tell a session there was a chain to join.
+///
+/// **And the chain is the Conversation's own repository's.** A companion
+/// repository a stage commits in has a chain of its own shape and nothing joins
+/// it: its branch is left where [`crate::continuing::beside`] cut it, which is
+/// the companion of whatever this stage's own branch was cut from. That is the
+/// same branch as the top of the chain while a roadmap runs its stages one at a
+/// time, so nothing is out of place yet — and joining a companion's chain is
+/// work for the stage that first starts two side by side. See CONTEXT's
+/// **Chain**, where the deferral is written down.
 pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
     let Some((top, under)) = chain.split_last() else {
         return prompt.to_owned();
