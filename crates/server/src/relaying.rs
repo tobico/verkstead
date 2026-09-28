@@ -59,6 +59,16 @@
 //! its Agent Profiles for the mirror rows. Both are one shape — a dial, a
 //! status, a bound, and a line in the log rather than a failure — so they go
 //! through [`read_of`] rather than being written twice.
+//!
+//! **And the presses nobody asked for, the same way.** Some of what crosses a
+//! link is this device writing to a member rather than reading it: a Rank minted
+//! on the machine that merged the lists, and an edit or a removal over a
+//! **mirror** put to the device that Agent Profile is at home on. Those go
+//! through [`put_to`] and [`word_from`], which are [`read_of`]'s counterparts —
+//! and what comes back is the far end's own answer, so a name already taken over
+//! there is said in the words a local clash is said in. A machine that did not
+//! take the press is named in a [`Refusal`] the page draws under the control that
+//! was pressed.
 
 mod bridging;
 pub(crate) mod freshness;
@@ -512,6 +522,184 @@ fn unrelayed(why: &Unrelayed) -> String {
             format!("the devices this one is linked to could not be read: {why:#}")
         }
     }
+}
+
+/// The headers a press this device composes of its own accord carries: JSON going
+/// out, and JSON expected back.
+///
+/// Written once here rather than beside each of the presses, a `Content-Type` and
+/// an `Accept` being the whole of what any of them sends. The browser's own
+/// headers go through [`forwarded`] instead, this being a call no browser made.
+pub(crate) fn as_json() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        axum::http::header::ACCEPT,
+        HeaderValue::from_static("application/json"),
+    );
+
+    headers
+}
+
+/// Why a **press** this device put to one of its members was not made, in the
+/// shape the page draws under the control that was pressed.
+///
+/// A status and a sentence, because both are the page's: the status is what the
+/// viewer's fetch reads a refusal off, and the sentence is what it shows —
+/// naming the machine by the name the human gave it rather than by sixteen bytes
+/// of hex. See [`called`].
+///
+/// **Its own two answers rather than an [`Unrelayed`] handed on**, because the
+/// four findings of a dial are not four things to tell a human: a member that is
+/// switched off and one that has stopped being a member both come to *that
+/// machine did not take it*, and something wrong on this side of the link is a
+/// different sentence under a different status.
+pub(crate) struct Refusal {
+    pub(crate) status: StatusCode,
+    pub(crate) saying: String,
+}
+
+impl Refusal {
+    /// This device's own trouble: a store it could not read, a membership it
+    /// could not read, an identity it does not have.
+    pub(crate) fn ours(saying: String) -> Refusal {
+        Refusal {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            saying,
+        }
+    }
+
+    /// And a device on the other side of a link that did not answer, or
+    /// answered a refusal.
+    pub(crate) fn theirs(saying: String) -> Refusal {
+        Refusal {
+            status: StatusCode::BAD_GATEWAY,
+            saying,
+        }
+    }
+}
+
+/// One **press** this device puts to a member of its own accord, and what it
+/// answered — or the sentence naming the machine that did not take it.
+///
+/// [`read_of`]'s counterpart in the other direction, and the calls are the same
+/// kind of call: nobody's browser asked for either. A Rank is written to the
+/// device that owns the row it belongs to — see [`crate::ranking`] — and an edit
+/// or a removal over a **mirror** is put to the device that Agent Profile is at
+/// home on, see [`crate::mirroring`]. One function rather than the arms written
+/// out twice, the four findings of a dial reading the same either way.
+///
+/// **A refusal from the far end is a refusal here** rather than an answer handed
+/// back for the caller to read a status off. What the human has to be told about
+/// a press their own hand made is *that machine did not take it*, and which of
+/// the statuses it was belongs in the sentence rather than in the shape.
+pub(crate) async fn put_to(
+    state: &AppState,
+    device: &str,
+    call: Call,
+) -> Result<reqwest::Response, Refusal> {
+    let Some(devices) = state.devices.as_ref() else {
+        return Err(Refusal::ours(
+            "this server holds no device identity to relay through".to_owned(),
+        ));
+    };
+
+    let named = called(state, device).await;
+
+    match devices.relay(device, call).await {
+        Ok(answered) if answered.status().is_success() => Ok(answered),
+
+        Ok(answered) => Err(Refusal::theirs(format!(
+            "{named} refused it: {}",
+            answered.status(),
+        ))),
+
+        Err(Unrelayed::Unreachable(_)) => {
+            Err(Refusal::theirs(format!("{named} could not be reached")))
+        }
+
+        Err(Unrelayed::NoSuchMember) => Err(Refusal::theirs(format!(
+            "{named} is no longer one of this device's members",
+        ))),
+
+        Err(Unrelayed::ThisDevice) => Err(Refusal::ours(
+            "something of this device's own was addressed as a member's".to_owned(),
+        )),
+
+        Err(Unrelayed::Unreadable(why)) => Err(Refusal::ours(format!(
+            "the devices this one is linked to could not be read: {why:#}",
+        ))),
+    }
+}
+
+/// And one whose answer is a **word** rather than a status: what the far end said
+/// it did, read back into the very type a browser pressing over there would have
+/// received.
+///
+/// Which is the whole of how a press relayed home answers in the home device's
+/// own vocabulary. A name already taken on that machine comes back as the word
+/// its own store refused with, so the page says it in the words a local clash is
+/// said in and this device composes no second opinion about somebody else's
+/// rows.
+///
+/// `most` is the caller's bound, applied as [`read_of`]'s is: an outcome is one
+/// short word, and what a bound is for is the machine that answers and then
+/// writes without stopping.
+pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
+    state: &AppState,
+    device: &str,
+    call: Call,
+    most: usize,
+) -> Result<T, Refusal> {
+    let answered = put_to(state, device, call).await?;
+
+    let body = match bounded(answered, most).await {
+        Ok(body) => body,
+        Err(why) => return Err(unreadable(state, device, format!("{why:#}")).await),
+    };
+
+    match serde_json::from_slice(&body) {
+        Ok(said) => Ok(said),
+        Err(why) => Err(unreadable(state, device, why.to_string()).await),
+    }
+}
+
+/// A member that answered something this device cannot make a word of: the far
+/// end's trouble rather than this one's, so the machine is named.
+///
+/// The name is read here rather than carried down from [`put_to`] because this is
+/// the one path that would need it twice, and a membership read on the way to a
+/// sentence nobody usually sees is cheaper than a second one on every press.
+async fn unreadable(state: &AppState, device: &str, why: String) -> Refusal {
+    Refusal::theirs(format!(
+        "{} answered in a way this device cannot read: {why}",
+        called(state, device).await,
+    ))
+}
+
+/// What a device is called, for the sentence a [`Refusal`] carries.
+///
+/// The name off the membership rather than the Device Id, because the id is
+/// sixteen bytes of hex and the human named the machine. The id where there is
+/// no name to be had, which is a membership that could not be read at the moment
+/// something else about it went wrong.
+pub(crate) async fn called(state: &AppState, device: &str) -> String {
+    let Some(devices) = state.devices.as_ref() else {
+        return device.to_owned();
+    };
+
+    let Ok(members) = devices.membership().rows().await else {
+        return device.to_owned();
+    };
+
+    members
+        .into_iter()
+        .find(|member| member.device == device)
+        .map_or_else(|| device.to_owned(), |member| member.name)
 }
 
 /// A name for a header this hop keeps back, for a test to name one by.

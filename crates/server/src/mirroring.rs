@@ -46,11 +46,24 @@
 //! [`verkstead_render::Broken::NotOnThisDevice`] on every row that draws it, and
 //! the press that starts the work refuses it by that reading exactly as it
 //! refuses a Profile whose directory has gone.
+//!
+//! **And an edit or a removal over a mirror is put to the device it is at home
+//! on.** Every device's Profiles section lists everyone's and the form over a
+//! mirror saves — the human's choice over editing an account only where it lives
+//! — so a save pressed here is put to the home device as the ordinary edit of
+//! *its own* Profile, addressed by the id the row records for it there. What
+//! comes back is that device's own answer rather than a second opinion composed
+//! here, the two uniqueness rules being its rows' to hold; and the mirror then
+//! redraws off the refreshed row rather than off what was typed. A removal is the
+//! same hop, and takes the Profile off its home device. See [`edited`] and
+//! [`removed`].
 
-use verkstead_render::{ProfileAccount, ProfileEntry};
+use anyhow::Result;
+use sqlx::SqlitePool;
+use verkstead_render::{ProfileAccount, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved};
 use verkstead_schema::Nudge;
 
-use crate::relaying::read_of;
+use crate::relaying::{self, Call, Refusal, Streamed, as_json, read_of};
 use crate::{AppState, store};
 
 /// What a member's Agent Profiles are read at, which is the path this device
@@ -69,6 +82,15 @@ const PROFILES: &str = "/api/ui/profiles";
 /// device makes one read of per member. The merged list's own bound, for its
 /// reason — see [`crate::merging::MOST_A_LIST_IS`].
 pub(crate) const MOST_THE_PROFILES_ARE: usize = 1024 * 1024;
+
+/// And the most a press this device puts home may be answered with: **four
+/// kilobytes**.
+///
+/// An outcome is a single word — `"Saved"`, `"NameTaken"`, `"Removed"` — so four
+/// kilobytes is thousands of times what one is. What a bound is for here is the
+/// same thing it is for above: a machine on the far end of a relay that answers
+/// and then writes without stopping.
+const MOST_AN_OUTCOME_IS: usize = 4 * 1024;
 
 /// Keep every member's mirrors fresh, for as long as this server runs.
 ///
@@ -316,6 +338,147 @@ async fn read_member(state: &AppState, device: &str) {
     if wrote > 0 || !gone.is_empty() {
         state.nudges.announce_here(Nudge::Profiles);
     }
+}
+
+/// Where a press over one Profile row is made, and what came of it where that is
+/// not here.
+///
+/// Three answers rather than two, because *this row is one of this device's own*
+/// is not an outcome of anything: it is the finding that there was nothing to
+/// relay, and the press goes on to the half of the endpoint that was always
+/// there.
+pub(crate) enum Pressed<T> {
+    /// One of this device's own rows. Nothing was put anywhere, and the press is
+    /// this device's own to make.
+    Here,
+
+    /// A mirror, and the device it is at home on answered this — in that
+    /// device's own vocabulary, which is the vocabulary a local press answers
+    /// in.
+    Away(T),
+
+    /// A mirror whose home did not take it, named as the human named the
+    /// machine. Nothing here has moved.
+    Refused(Refusal),
+}
+
+/// Put an edit over a Profile row to the device it is at home on, or say that
+/// the row is this device's own.
+///
+/// **The browser's own fields, put to the far end as the edit of its own Profile
+/// it is.** The form over a mirror is the form over any other Profile — every
+/// device's Profiles section lists everyone's, which is the human's choice over
+/// editing an account only where it lives — and what crosses the link is what
+/// was typed, addressed by the id the mirror records for that Profile at home.
+/// Nothing here judges any of it: the paths belong to the home machine's
+/// filesystem, and the two uniqueness rules are that device's own rows' (see the
+/// `profiles` table's partial indexes). So the answer is that device's own — a
+/// name already taken there comes back as the word its own store refused with,
+/// said in the words a local clash is said in.
+///
+/// **And the mirror redraws off the refreshed row rather than off what was
+/// typed**: a save that landed is followed by the ordinary read of that member,
+/// so what this device holds is what the home device now says rather than what
+/// the form sent it. A save that was refused there leaves every row alone.
+///
+/// **Nothing is relayed twice.** The row names one device and the press goes to
+/// it and nowhere else; a third device of the cluster learns of the change by
+/// refreshing its own mirror, which is the rule every announcement here is held
+/// under. And the hop cannot chain: a mirror is only ever written from a
+/// member's *own* rows — see this module's documentation — so the id this
+/// addresses is a row of that device's own, and the same call arriving there
+/// answers [`Pressed::Here`].
+pub(crate) async fn edited(
+    state: &AppState,
+    id: i64,
+    edit: &ProfileEdit,
+) -> Result<Pressed<ProfileSaved>> {
+    let Some(at) = home_of(&state.pool, id).await? else {
+        return Ok(Pressed::Here);
+    };
+
+    let call = Call {
+        method: reqwest::Method::POST,
+        onwards: format!("{PROFILES}/{}", at.id),
+        headers: as_json(),
+        body: Streamed::saying(serde_json::to_vec(edit)?),
+    };
+
+    Ok(
+        match relaying::word_from::<ProfileSaved>(state, &at.device, call, MOST_AN_OUTCOME_IS).await
+        {
+            Ok(said) => {
+                if said == ProfileSaved::Saved {
+                    redrawn(state, &at.device).await;
+                }
+
+                Pressed::Away(said)
+            }
+            Err(why) => Pressed::Refused(why),
+        },
+    )
+}
+
+/// And a removal, which is the same hop: it takes the Profile off its home
+/// device.
+///
+/// What follows from there is what follows from any removal at home — every
+/// device's mirror of it goes on that device's next refresh, and each nulls the
+/// Pairings that named it, so a Profile removed from B leaves a Conversation on C
+/// reading as one nothing has been picked for. This device's own mirror is read
+/// again at once rather than waiting for the news to come back round.
+pub(crate) async fn removed(state: &AppState, id: i64) -> Result<Pressed<ProfileDeleted>> {
+    let Some(at) = home_of(&state.pool, id).await? else {
+        return Ok(Pressed::Here);
+    };
+
+    let call = Call {
+        method: reqwest::Method::POST,
+        onwards: format!("{PROFILES}/{}/delete", at.id),
+        headers: as_json(),
+        body: Streamed::Nothing,
+    };
+
+    Ok(
+        match relaying::word_from::<ProfileDeleted>(state, &at.device, call, MOST_AN_OUTCOME_IS)
+            .await
+        {
+            Ok(said) => {
+                if said == ProfileDeleted::Removed {
+                    redrawn(state, &at.device).await;
+                }
+
+                Pressed::Away(said)
+            }
+            Err(why) => Pressed::Refused(why),
+        },
+    )
+}
+
+/// Read that member again, now that the press has moved something over there.
+///
+/// The same read the refresher makes, made here so that the list the human is
+/// looking at redraws off the saved row rather than a round trip later: the home
+/// device announces its own Profiles moved and this device would hear it and read
+/// them anyway, and doing it now is that read brought forward. Idempotent for
+/// exactly that reason — the news arriving a moment later finds the rows it would
+/// have written already written.
+async fn redrawn(state: &AppState, device: &str) {
+    read_member(state, device).await;
+}
+
+/// Which device a Profile row is at home on and what it is numbered there — or
+/// `None` for one of this device's own, which is every row on a Verkstead that is
+/// linked to nothing.
+///
+/// **A row that is not there at all reads as this device's own**, so the press
+/// falls through to the local half and is refused in the words a press over a
+/// Profile that has gone is always refused in. A second sentence for one finding
+/// would be two ways of saying *that profile is gone*.
+async fn home_of(pool: &SqlitePool, id: i64) -> Result<Option<store::Mirror>> {
+    Ok(store::load_profile(pool, id)
+        .await?
+        .and_then(|profile| profile.mirror))
 }
 
 /// One row a member answered, as this device writes a Profile down.

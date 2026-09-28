@@ -55,15 +55,13 @@
 
 use std::sync::Arc;
 
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use tokio::sync::Mutex;
 use verkstead_render::{DroppedRow, MergedRow, NewRank};
 use verkstead_schema::Nudge;
 use verkstead_store::ranks;
 
-use crate::device::Unrelayed;
 use crate::merging::{self, Ranked};
-use crate::relaying::{Call, Streamed};
+use crate::relaying::{self, Call, Refusal, Streamed};
 use crate::{AppState, store};
 
 /// What holds two drops apart on this device.
@@ -86,37 +84,6 @@ impl Minting {
     }
 }
 
-/// Why a drop was not saved, in the shape the sidebar draws under the list.
-///
-/// The wording is the human's rather than a log line's, and it is written as the
-/// tail of the line the pane already draws — *The order could not be saved: …* —
-/// so a member that could not be reached is named in it by the name the human
-/// gave the machine.
-pub(crate) struct Refusal {
-    pub(crate) status: StatusCode,
-    pub(crate) saying: String,
-}
-
-impl Refusal {
-    /// This device's own trouble: a store it could not read, a membership it
-    /// could not read.
-    fn ours(saying: String) -> Refusal {
-        Refusal {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            saying,
-        }
-    }
-
-    /// And a device on the other side of a link that did not answer, or answered
-    /// a refusal.
-    fn theirs(saying: String) -> Refusal {
-        Refusal {
-            status: StatusCode::BAD_GATEWAY,
-            saying,
-        }
-    }
-}
-
 /// Where the human has just dropped one row of the merged list: mint its rank
 /// and write it to the device that owns it.
 ///
@@ -125,6 +92,12 @@ impl Refusal {
 /// under it, so there is nothing left to rank against and the order stays as the
 /// rest of the list says. Nothing is written and the call is taken, which is the
 /// stance the route it replaced took for the same reason.
+///
+/// **What a refusal says is the human's sentence rather than a log line's**, and
+/// it is written as the tail of the line the pane already draws — *The order
+/// could not be saved: …* — so a member that could not be reached is named in it
+/// by the name the human gave the machine. See [`crate::relaying::Refusal`],
+/// which is the shape every press this device puts to a member is refused in.
 pub(crate) async fn dropped(state: &AppState, moved: DroppedRow) -> Result<(), Refusal> {
     // Taken for the whole of the mint — the read, the arithmetic and the write
     // — rather than for the write alone: what two drops must not share is the
@@ -256,91 +229,37 @@ pub(crate) async fn stated(state: &AppState, id: i64, rank: &str) -> anyhow::Res
 
 /// And write a member's row, over the link this device holds to it.
 ///
-/// The same route on the far end, reached the way every other call for a member
-/// is. What comes back is a status and nothing else, so a success is the whole
-/// of the answer.
+/// The same route on the far end, reached the way every other press this device
+/// makes of its own accord is — see [`crate::relaying::put_to`], which is where
+/// the four findings of a dial become the one sentence the sidebar draws. What
+/// comes back is a status and nothing else, so a success is the whole of the
+/// answer.
 ///
 /// **The held list is told at once.** The member will say the new rank itself on
 /// its next Nudge, which is a round trip away — and the next drop is minted off
 /// what is held right now. See [`crate::merging::MemberLists::ranked`].
 async fn relayed(state: &AppState, device: &str, id: i64, rank: &str) -> Result<(), Refusal> {
-    let Some(devices) = state.devices.as_ref() else {
-        return Err(Refusal::ours(
-            "this server holds no device identity to relay through".to_owned(),
-        ));
-    };
-
     let saying = serde_json::to_vec(&NewRank {
         rank: rank.to_owned(),
     })
     .map_err(|why| Refusal::ours(format!("the rank could not be written down: {why}")))?;
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+    relaying::put_to(
+        state,
+        device,
+        Call {
+            method: reqwest::Method::PUT,
+            onwards: format!("/api/ui/conversations/{id}/rank"),
+            headers: relaying::as_json(),
+            body: Streamed::saying(saying),
+        },
+    )
+    .await?;
 
-    let call = Call {
-        method: reqwest::Method::PUT,
-        onwards: format!("/api/ui/conversations/{id}/rank"),
-        headers,
-        body: Streamed::saying(saying),
-    };
+    state.merged.ranked(device, id, rank);
+    state.nudges.announce(Nudge::Conversations);
 
-    let named = called(state, device).await;
-
-    match devices.relay(device, call).await {
-        Ok(answered) if answered.status().is_success() => {
-            state.merged.ranked(device, id, rank);
-            state.nudges.announce(Nudge::Conversations);
-
-            Ok(())
-        }
-
-        Ok(answered) => Err(Refusal::theirs(format!(
-            "{named} refused it: {}",
-            answered.status(),
-        ))),
-
-        Err(Unrelayed::Unreachable(_)) => {
-            Err(Refusal::theirs(format!("{named} could not be reached")))
-        }
-
-        Err(Unrelayed::NoSuchMember) => Err(Refusal::theirs(format!(
-            "{named} is no longer one of this device's members",
-        ))),
-
-        Err(Unrelayed::ThisDevice) => Err(Refusal::ours(
-            "a row of this device's own was addressed as a member's".to_owned(),
-        )),
-
-        Err(Unrelayed::Unreadable(why)) => Err(Refusal::ours(format!(
-            "the devices this one is linked to could not be read: {why:#}",
-        ))),
-    }
-}
-
-/// What a device is called, for the sentence the sidebar draws.
-///
-/// The name off the membership rather than the Device Id, because the id is
-/// sixteen bytes of hex and the human named the machine. The id where there is
-/// no name to be had, which is a membership that could not be read at the moment
-/// something else about it went wrong.
-async fn called(state: &AppState, device: &str) -> String {
-    let Some(devices) = state.devices.as_ref() else {
-        return device.to_owned();
-    };
-
-    let Ok(members) = devices.membership().rows().await else {
-        return device.to_owned();
-    };
-
-    members
-        .into_iter()
-        .find(|member| member.device == device)
-        .map_or_else(|| device.to_owned(), |member| member.name)
+    Ok(())
 }
 
 /// A row as this device names one: nothing at all where it is this device's own,

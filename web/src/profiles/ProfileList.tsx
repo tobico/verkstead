@@ -593,6 +593,23 @@ export function ProfilePane(props: {
         />
       </PaneSticky>
 
+      {/* And where a save over this Profile goes, on the rows whose account is
+          on another machine. Every device's Profiles section lists every
+          member's accounts and the form over one of those saves like any other
+          — the save and the removal are put to the machine the account is on,
+          as edits of its own Profile (ADR-0020, *Shared Profiles*), and what
+          comes back is that machine's own answer. Said because the paths under
+          it are that machine's rather than this one's, which is the one thing
+          about this form a reader cannot tell by looking at it. */}
+      <Show when={saved()?.device}>
+        {(device) => (
+          <p class={styles.athome}>
+            This account is on {device().name}. Saving or removing it here is
+            put to that machine.
+          </p>
+        )}
+      </Show>
+
       {/* The blank form first, so that adding one never waits on a read it has
           no use for. Everything below it is about a Profile that is saved, and
           the fallback is what is left once the list has been read and has no

@@ -504,6 +504,63 @@ describe("a member's accounts", () => {
       `Its account is on ${MACHINE.name}.`,
     );
   });
+
+  /// And the pane over one of them is the same form, which saves: every device's
+  /// Profiles section lists everyone's, and an edit or a removal is put to the
+  /// machine the account is on (ADR-0020, *Shared Profiles*). Said over the form
+  /// because the paths under it are that machine's rather than this one's.
+  it("says in the pane that a save over one goes to that machine", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(MIRROR.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    expect(document.body.textContent).toContain(
+      `This account is on ${MACHINE.name}.`,
+    );
+  });
+
+  /// And nothing at all over one of this device's own accounts, which is every
+  /// row where there is no cluster.
+  it("says nothing of the sort over one of this device's own", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(CLUSTER[0]!.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    expect(document.body.textContent).not.toContain("This account is on");
+  });
+
+  /// The save goes to the Profile's own endpoint on the device the browser
+  /// opened, exactly as a save over one of this device's own rows does: the hop
+  /// is the server's, and nothing here knows there is one. A mirror keeps a
+  /// **local** id, which is what that endpoint is addressed by.
+  it("saves a mirror at its own local id, the hop being the server's", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(CLUSTER)),
+      whenever(`/api/ui/profiles/${MIRROR.id}`, json("Saved"), "POST"),
+    );
+    const { done } = mountPane(MIRROR.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    fireEvent.input(screen.getByLabelText(/^Name, where two accounts/), {
+      target: { value: "weekend" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(done).toHaveBeenCalled());
+
+    // The account as the row carries it — the home machine's paths — with the
+    // name changed: what is judged against that filesystem is judged on that
+    // machine.
+    expect(sent(fetching, `/api/ui/profiles/${MIRROR.id}`)).toEqual({
+      name: "weekend",
+      account: MIRROR.account,
+      models: MIRROR.models,
+      memory: MIRROR.memory,
+    });
+  });
 });
 
 describe("the plus that adds one", () => {

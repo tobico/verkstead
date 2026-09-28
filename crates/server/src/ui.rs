@@ -4953,6 +4953,15 @@ async fn create_profile(
 }
 
 /// `POST /api/ui/profiles/{id}` — rewrite one, whole.
+///
+/// **Reached for a mirror too, and relayed home when it is one** (ADR-0020,
+/// *Shared Profiles*). Every device's Profiles section lists every member's
+/// accounts, so the form over one of those saves like any other — and the save is
+/// put to the device that Profile is at home on, as the ordinary edit of its own
+/// Profile it is. What comes back is that device's own word, so a name already
+/// taken there is said in the words a local clash is said in; a home that did not
+/// take it is named in the refusal and nothing here has moved. See
+/// [`crate::mirroring::edited`].
 async fn edit_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4961,6 +4970,30 @@ async fn edit_profile(
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
     };
+
+    match crate::mirroring::edited(&state, id, &edit).await {
+        // One of this device's own rows, which is every row where there is no
+        // cluster: the press falls through to the half below.
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Agent Profile was not saved at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                profile_id = id,
+                "reading which device an Agent Profile is at home on failed",
+            );
+            return unavailable("the agent profile could not be saved");
+        }
+    }
 
     match crate::profiles::edit(&state.pool, id, &edit).await {
         Ok(outcome) => {
@@ -4975,10 +5008,38 @@ async fn edit_profile(
 }
 
 /// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
+///
+/// **The same hop for a mirror**: the removal is put to the device the Profile is
+/// at home on and takes it off that machine, and every device's mirror of it goes
+/// on its next refresh — so a Conversation on a third device that had picked it is
+/// left with an empty picker, exactly as a local removal leaves one. See
+/// [`crate::mirroring::removed`].
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
     };
+
+    match crate::mirroring::removed(&state, id).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Agent Profile was not removed at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                profile_id = id,
+                "reading which device an Agent Profile is at home on failed",
+            );
+            return unavailable("the agent profile could not be removed");
+        }
+    }
 
     match crate::profiles::remove(&state.pool, id).await {
         Ok(outcome) => {

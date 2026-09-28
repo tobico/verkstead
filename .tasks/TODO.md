@@ -21,7 +21,7 @@ Roadmap stage: [08: Shared Profiles](docs/roadmaps/cluster-mode/08-shared-profil
 ## Tasks
 
 - [x] 01: Mirror rows and the cluster-wide picker — [details](01-mirror-rows-and-the-cluster-wide-picker.md)
-- [ ] 02: Edits and removals relayed home — [details](02-edits-and-removals-relayed-home.md)
+- [x] 02: Edits and removals relayed home — [details](02-edits-and-removals-relayed-home.md)
 - [ ] 03: Repo matching across devices — [details](03-repo-matching-across-devices.md)
 - [ ] 04: The account mirror, and a session away from home — [details](04-the-account-mirror.md)
 - [ ] 05: The login written back home — [details](05-the-login-written-back-home.md)

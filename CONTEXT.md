@@ -2643,6 +2643,24 @@ those.
 session launched under one would run logged out: it reads as broken on the row —
 *its account is on the-laptop* — and the press that starts the work is refused
 the way it is refused a Profile whose directory has gone.
+**But a mirror is edited and removed from wherever it is drawn**, and the press
+is relayed to the device the account is on: every device's Profiles section lists
+everyone's, and the form over a mirror saves. A save is put to the home device as
+the ordinary edit of *its own* Profile, addressed by the id the row records for
+it there, and what comes back is that device's own answer rather than a second
+opinion composed here — a name already taken at home is a name already taken,
+said in the words a local clash is said in, the two uniqueness rules staying that
+device's to hold. The mirror then redraws off the refreshed row rather than off
+what was typed, and the pane says which machine the press goes to, the paths on
+the form being that machine's. A removal is the same hop and takes the Profile
+off its home device, so every device's mirror of it goes on that device's next
+refresh — a Profile removed from one device leaves a Conversation on a third
+reading as one nothing has been picked for. **A home that is not answering
+refuses the press by name** and writes nothing here: a mirror edited against a
+machine that is not there would be a row disagreeing with the account it stands
+for. And **nothing is relayed twice** — a device puts the edit to the Profile's
+home and nowhere else, a third device learning of it by refreshing its own
+mirror, which is the rule every announcement in a cluster is held under.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it

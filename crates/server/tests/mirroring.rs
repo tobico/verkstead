@@ -272,6 +272,66 @@ impl Verkstead {
         assert_eq!(said, "\"Removed\"", "removing {id}");
     }
 
+    /// And one nobody named, which is the account nearly every installation
+    /// holds: what the second of the two uniqueness rules is about.
+    async fn saves_unnamed(&self) {
+        let (claude_dir, config_file) = self.account("default");
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": null,
+                    "account": {
+                        "agent_type": "Claude",
+                        "claude_dir": claude_dir,
+                        "config_file": config_file,
+                    },
+                    "models": [MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the account nobody named");
+    }
+
+    /// The form over one row of this device's list, saved under another name.
+    ///
+    /// **The fields the pane really sends**: the account, the models and the
+    /// memory switch as the row itself carries them, with the name changed — which
+    /// is what the human does to a Profile they are renaming, and is the same form
+    /// whether the row is this device's own or a **mirror** of a member's. The
+    /// paths of a mirror are the home machine's, so the form sending them back is
+    /// what sends that machine its own account.
+    ///
+    /// The status is given back with the answer, because a press over a mirror can
+    /// be refused by the hop rather than answered by the endpoint.
+    async fn saves_over(&self, row: &ProfileEntry, name: Option<&str>) -> (StatusCode, String) {
+        pressing(
+            &self.workbench,
+            &format!("{PROFILES}/{}", row.id),
+            Some(
+                &serde_json::json!({
+                    "name": name,
+                    "account": row.account,
+                    "models": row.models,
+                    "memory": row.memory,
+                })
+                .to_string(),
+            ),
+        )
+        .await
+    }
+
+    /// And the removal, with the status left to be read for the same reason.
+    async fn pressing_removal(&self, id: i64) -> (StatusCode, String) {
+        pressing(&self.workbench, &format!("{PROFILES}/{id}/delete"), None).await
+    }
+
     /// The Profiles as this device's own browser reads them.
     async fn profiles(&self) -> Vec<ProfileEntry> {
         reading(&self.workbench, PROFILES).await
@@ -416,6 +476,20 @@ async fn reading<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T 
 
 /// And a press on `path`, with a body where the endpoint takes one.
 async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
+    let (status, said) = pressing(app, path, saying).await;
+
+    assert!(status.is_success(), "POST {path}: {status} {said}");
+
+    said
+}
+
+/// The same press, with the status left for the caller to read.
+///
+/// What a press that was *refused* is read off: a press over a **mirror** is put
+/// to the device the Profile is at home on, and a machine that did not take it is
+/// a status and a sentence rather than one of the endpoint's own words — see
+/// `relaying::Refusal`.
+async fn pressing(app: &Router, path: &str, saying: Option<&str>) -> (StatusCode, String) {
     let asking = Request::builder().method("POST").uri(path);
 
     let asking = match saying {
@@ -429,11 +503,8 @@ async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
 
     let status = answered.status();
     let bytes = answered.into_body().collect().await.unwrap().to_bytes();
-    let said = String::from_utf8_lossy(&bytes).into_owned();
 
-    assert!(status.is_success(), "POST {path}: {status} {said}");
-
-    said
+    (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// One row of a Profiles list, by the name on it.
@@ -712,5 +783,285 @@ async fn a_members_own_profiles_are_taken_and_its_mirrors_are_not() {
         names(&b.profiles().await),
         vec!["work"],
         "A's own account, and nothing A is itself mirroring",
+    );
+}
+
+/// An edit made on B lands in A's own Profiles, and both devices' rows redraw off
+/// the row A saved rather than off what was typed here.
+///
+/// The form over a mirror saves — which is the human's choice over editing an
+/// account only where it lives — and the save is one hop: put to A as the ordinary
+/// edit of A's own Profile, addressed by the id the mirror records for it there.
+#[tokio::test]
+async fn an_edit_made_here_lands_in_the_home_devices_own_profiles() {
+    let (a, b, _holding) = linked_up().await;
+
+    let there = a.saves("work").await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let mirror = called(&landed, "work").unwrap().clone();
+
+    // A Pairing made against the mirror, so that *the row did not move* is an
+    // assertion about something that names it.
+    let conversation = b.drafting().await;
+    b.picks(conversation, mirror.id).await;
+
+    let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
+
+    assert_eq!(status, StatusCode::OK, "A took it: {said}");
+    assert_eq!(said, "\"Saved\"", "and the answer is A's own word for it");
+
+    // A's own list, which is where the account is.
+    let at_home = a.profiles().await;
+
+    assert_eq!(names(&at_home), vec!["weekend"], "renamed at home");
+    assert_eq!(
+        called(&at_home, "weekend").unwrap().id,
+        there,
+        "on A's own row rather than as a second Profile",
+    );
+    assert_eq!(
+        called(&at_home, "weekend").unwrap().device,
+        None,
+        "and it is still A's own rather than something A is mirroring",
+    );
+
+    // And B's, which is the mirror redrawn off the saved row.
+    let here = b
+        .profiles_saying(|rows| called(rows, "weekend").is_some())
+        .await;
+
+    assert_eq!(names(&here), vec!["weekend"], "the one row, renamed");
+    assert_eq!(
+        called(&here, "weekend").unwrap().id,
+        mirror.id,
+        "on the local row it already had, so the Pairing against it stands",
+    );
+
+    let drawn: ConversationView = reading(
+        &b.workbench,
+        &format!("/api/ui/conversations/{conversation}"),
+    )
+    .await;
+
+    assert_eq!(
+        drawn
+            .implementation_pairing
+            .expect("the Pairing made against the mirror survived the edit")
+            .profile
+            .name
+            .as_deref(),
+        Some("weekend"),
+    );
+}
+
+/// A name already taken at home is a name already taken: the refusal is the word
+/// A's own store turned the write away with, which is the word a clash pressed on
+/// A itself would give.
+///
+/// The first of the two uniqueness rules, and it is A's to hold — B has no Profile
+/// called `work` at all, so nothing on this device could have refused this.
+#[tokio::test]
+async fn a_name_taken_at_home_comes_back_as_the_refusal_a_local_clash_gives() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves("work").await;
+    a.saves("weekend").await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "weekend").is_some())
+        .await;
+    let mirror = called(&landed, "weekend").unwrap().clone();
+
+    let (status, said) = b.saves_over(&mirror, Some("work")).await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a clash is an outcome of the press rather than a failure of the hop",
+    );
+    assert_eq!(
+        said, "\"NameTaken\"",
+        "the first of the two rules, named as a local clash names it",
+    );
+
+    assert_eq!(
+        names(&a.profiles().await),
+        vec!["weekend", "work"],
+        "and nothing at home moved",
+    );
+}
+
+/// And the other of the two rules, which is the one a Profile with no name can
+/// hit: A already holds the one unnamed Claude account.
+///
+/// Which of the two refused a save is read off what was being saved, so a mirror
+/// saved with the name taken out has to come back as the second of them rather
+/// than as the first.
+#[tokio::test]
+async fn an_unnamed_save_that_clashes_at_home_names_the_other_rule() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves("work").await;
+    a.saves_unnamed().await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let mirror = called(&landed, "work").unwrap().clone();
+
+    let (status, said) = b.saves_over(&mirror, None).await;
+
+    assert_eq!(status, StatusCode::OK, "A took it and refused it: {said}");
+    assert_eq!(
+        said, "\"DefaultTaken\"",
+        "the second of the two rules, in A's own word",
+    );
+}
+
+/// A removal pressed on B takes the Profile off A — and the mirror off every
+/// device of the cluster, each leaving the Conversations that had picked it with
+/// nothing picked.
+///
+/// **A third device is what makes the claim worth making.** C mirrors A as B does
+/// and nothing here ever tells C anything: it learns of the removal by refreshing
+/// its own mirror off A's news, which is the rule every announcement in a cluster
+/// is held under. Nothing is relayed twice.
+#[tokio::test]
+async fn a_removal_pressed_here_takes_the_profile_off_home_and_every_mirror_with_it() {
+    let (a, b, _holding) = linked_up().await;
+
+    // The third device, linked to A both ways and holding its own streams, exactly
+    // as B is.
+    let c = Verkstead::answering(C).await;
+    let (machine, os) = this_machine();
+
+    c.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+    a.linked_to(&c.device, &machine, &os, vec![c.at()]).await;
+
+    let _third = c.holding();
+
+    let there = a.saves("work").await;
+
+    let on_b = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let on_c = c
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+
+    let here = called(&on_b, "work").unwrap().id;
+    let over_there = called(&on_c, "work").unwrap().id;
+
+    // One Conversation per device, each having picked the account: on A its own
+    // row, and on the other two the mirror of it.
+    let at_a = a.drafting().await;
+    a.picks(at_a, there).await;
+
+    let at_b = b.drafting().await;
+    b.picks(at_b, here).await;
+
+    let at_c = c.drafting().await;
+    c.picks(at_c, over_there).await;
+
+    // The press, made over the mirror on the device whose account it is not.
+    b.removes(here).await;
+
+    assert!(
+        called(&a.profiles().await, "work").is_none(),
+        "off the device its account lives on",
+    );
+
+    b.profiles_saying(|rows| called(rows, "work").is_none())
+        .await;
+    c.profiles_saying(|rows| called(rows, "work").is_none())
+        .await;
+
+    for (device, conversation, whose) in [(&a, at_a, "A"), (&b, at_b, "B"), (&c, at_c, "C")] {
+        let drawn: ConversationView = reading(
+            &device.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await;
+
+        assert!(
+            drawn.implementation_pairing.is_none(),
+            "the Conversation on {whose} reads as one nothing has been picked for",
+        );
+    }
+}
+
+/// With A not answering, both the save and the removal are refused naming the
+/// machine, and nothing on this device has moved.
+///
+/// A mirror edited against a machine that is not there would be a row disagreeing
+/// with the account it stands for, so the press is refused rather than written down
+/// here and put over later.
+#[tokio::test]
+async fn with_the_home_device_away_both_presses_are_refused_naming_it() {
+    let b = Verkstead::answering(B).await;
+
+    // A device that is a member and is not there: the identity is real, so the
+    // membership row is a real one, and nothing is listening at the address.
+    let away = tempfile::tempdir().unwrap();
+    let asleep = Device::stated(away.path(), A).unwrap();
+
+    b.linked_to(&asleep, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    // What A last gave, which on a running server is what the last refresh wrote
+    // down.
+    store::record_mirror(
+        &b.pool,
+        &Mirror {
+            device: A.to_owned(),
+            id: 7,
+        },
+        &store::ProfileFacts {
+            name: Some("work".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
+                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
+            },
+            models: vec![MODEL.to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let rows = b.profiles().await;
+    let mirror = called(&rows, "work").expect("the row A last gave").clone();
+
+    let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
+
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "the hop refused it rather than the endpoint answering: {said}",
+    );
+    assert!(
+        said.contains(A_MACHINE),
+        "the machine is named by the name the human gave it: {said}",
+    );
+
+    let (status, said) = b.pressing_removal(mirror.id).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "and so is the removal");
+    assert!(said.contains(A_MACHINE), "named the same way: {said}");
+
+    let rows = b.profiles().await;
+
+    assert_eq!(
+        names(&rows),
+        vec!["work"],
+        "and the row stands as A last gave it",
+    );
+    assert_eq!(
+        called(&rows, "work").unwrap().id,
+        mirror.id,
+        "on the id it had, so nothing a Pairing names has moved",
     );
 }

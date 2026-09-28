@@ -81,6 +81,16 @@
   width: 1em;
 }
 
+/* And the same fact said in the pane, over the form: which machine the account is
+   on, and that a save or a removal here is put to it. A line of prose rather than
+   the card's mark and name, because what it is saying is where the press goes
+   rather than which row this is — the paths under it are that machine's. */
+.athome {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* A profile whose pair has gone. Said in the card's edge as well as in the words
    under it, because a list is scanned before it is read — and those words are
    the same class one level down, which is what tells the two rules apart.
