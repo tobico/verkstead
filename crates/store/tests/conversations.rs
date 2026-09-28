@@ -5,16 +5,17 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
-    ProfileFacts, Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer,
-    Switched, Unarchiving, add_companion, adopted_pull_request, adopting, any_archived,
+    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Joined, Lifecycle,
+    ProfileFacts, PullRequest, Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged,
+    Steer, Switched, Unarchiving, add_companion, adopted_pull_request, adopting, any_archived,
     archive_conversation, archived, close_conversation, conversation_branch, conversations,
     create_profile, follow_branch, hold_pull_request, load_conversation, open_database,
-    register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
-    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
-    stacks_on, stage_roadmap, stage_standings, start_adoption, start_conversation, start_grilling,
-    start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
-    switch_repo, target, timeline, unarchive_conversation,
+    record_another_pull_request, record_pull_request, register_repo, reinvent_branch,
+    rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
+    settle_naming, show_archived, showing_archived, stacks_on, stage_chain, stage_roadmap,
+    stage_standings, start_adoption, start_conversation, start_grilling, start_stage,
+    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, target,
+    timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -2061,5 +2062,164 @@ async fn a_row_with_no_label_stands_for_no_stage() {
         stage_standings(&pool, repo_id).await.unwrap(),
         verkstead_store::StageStandings::default(),
         "a roadmap with no label against it puts nothing in the reading",
+    );
+}
+
+/// One pull request opened on a stage's branch, which is what joins it to the
+/// chain.
+///
+/// The number is the caller's, so two pull requests in one test cannot be
+/// confused for each other, and the branch is the Conversation's: what a chain
+/// holds is branches, and this is the one the finish pushed.
+async fn opened(pool: &SqlitePool, repo_id: i64, id: i64, number: i64) {
+    let branch = conversation_branch(pool, id)
+        .await
+        .unwrap()
+        .expect("a Conversation is on a branch from the moment it exists");
+
+    record_pull_request(
+        pool,
+        id,
+        repo_id,
+        &PullRequest {
+            number,
+            title: format!("Stage {number}"),
+            url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some(branch),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// The chain is the stages that opened a pull request, bottom to top, in the
+/// order they opened one — and nothing else.
+///
+/// Which is the whole of what a join is: a stage joins its roadmap's chain when
+/// its finish pushes its branch and opens a pull request on it, so the pull
+/// request is the record of the join and the Timeline Event it hangs off is the
+/// record of when. A stage still working its backlog has pushed nothing and is
+/// no link of anything.
+///
+/// The order is the order they *finished* rather than the order the roadmap
+/// numbers them in, which is the case worth writing down: stage 02 finishing
+/// first puts stage 02 at the foot of the chain, and stage 01 joins on top of
+/// it.
+#[tokio::test]
+async fn a_roadmaps_chain_is_the_stages_that_opened_a_pull_request_in_that_order() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "02").await;
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    // And one still working its backlog, which has pushed nothing and opened
+    // nothing: a stage nothing can rebase onto is no link of the chain.
+    stage(&pool, repo_id, "mvp", "03").await;
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp").await.unwrap(),
+        Vec::new(),
+        "a roadmap whose stages have opened nothing has no chain yet",
+    );
+
+    opened(&pool, repo_id, first, 42).await;
+    opened(&pool, repo_id, second, 43).await;
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp").await.unwrap(),
+        vec![
+            Joined {
+                conversation_id: first,
+                stage: "02".to_owned(),
+                branch: "roadmaps/mvp/02".to_owned(),
+            },
+            Joined {
+                conversation_id: second,
+                stage: "01".to_owned(),
+                branch: "roadmaps/mvp/01".to_owned(),
+            },
+        ],
+        "the order they joined in, which is the order they finished in",
+    );
+}
+
+/// A stage that opens a second pull request keeps the place its first one gave
+/// it.
+///
+/// A stack is what a finished roadmap leaves behind, so a Conversation may have
+/// more than one pull request recorded against it — the rest of a stack, a
+/// companion repository's. What says when this stage joined is the first of
+/// them, and a later row must not float it back to the top of the chain above
+/// stages that joined while it was wrapping up.
+#[tokio::test]
+async fn a_stage_joins_the_chain_where_its_first_pull_request_put_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let below = stage(&pool, repo_id, "mvp", "01").await;
+    let above = stage(&pool, repo_id, "mvp", "02").await;
+
+    opened(&pool, repo_id, below, 42).await;
+    opened(&pool, repo_id, above, 43).await;
+
+    record_another_pull_request(
+        &pool,
+        below,
+        repo_id,
+        &PullRequest {
+            number: 44,
+            title: "The rest of the stack".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/44".to_owned(),
+            head: Some("roadmaps/mvp/01".to_owned()),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|link| link.stage)
+            .collect::<Vec<_>>(),
+        vec!["01".to_owned(), "02".to_owned()],
+        "the first pull request is what says when a stage joined",
+    );
+}
+
+/// The chain is one Repo's and one roadmap's. Two Repos may hold roadmaps of
+/// the same name, and one Repo holds every roadmap it has ever run — so a stage
+/// of `mvp` over there, and a stage of `processes` over here, are links of
+/// neither chain.
+#[tokio::test]
+async fn a_chain_holds_no_other_repos_stages_and_no_other_roadmaps() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let mine = stage(&pool, ours, "mvp", "01").await;
+    opened(&pool, ours, mine, 42).await;
+
+    let beside = stage(&pool, ours, "processes", "01").await;
+    opened(&pool, ours, beside, 43).await;
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    opened(&pool, theirs, elsewhere, 44).await;
+
+    assert_eq!(
+        stage_chain(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|link| link.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![mine],
+        "one roadmap of one Repo, and neither of the other two",
     );
 }

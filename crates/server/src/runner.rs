@@ -209,6 +209,14 @@ pub struct Pace {
     /// rest: what it is watching is a clock counted in days.
     pub cleanup: Duration,
 
+    /// And how often a stage held before its finish looks at whether the chain
+    /// below it has settled — see [`crate::joins`].
+    ///
+    /// Here beside the rest for [`Pace::checks`]'s reason: a caller standing a
+    /// server up chooses how often Verkstead looks at things, and the chain a
+    /// stage is waiting to join is one of the things it looks at.
+    pub joins: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -229,6 +237,7 @@ impl Default for Pace {
             waking: Duration::from_secs(300),
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
             reviewing: Duration::ZERO,
@@ -667,6 +676,16 @@ async fn backlog_again(
         return;
     }
 
+    // And the press waits for the chain exactly as the loop does, which is the
+    // second of the two places a finish session is launched from: a stage whose
+    // boxes are all ticked is one whose next step is the join, whether the run
+    // reached it by itself or a Resume took it up — see [`crate::joins`]. The
+    // registration is held across the wait for the loop's reason, and it is held
+    // here already: it is handed on to [`work`] below.
+    if step == Step::Finish {
+        crate::joins::hold(&state, conversation_id).await;
+    }
+
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
@@ -1084,6 +1103,17 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         if let Step::Broken { label } = &step {
             nothing_to_work_from(&state, conversation_id, &step, label).await;
             return;
+        }
+
+        // And the finish waits for the chain, where this is a stage of a roadmap
+        // and a stage already in that chain has not settled: the finish is what
+        // joins the chain, and nothing rebases onto a branch that is still
+        // moving — see [`crate::joins`]. In front of the launch rather than
+        // inside it, so a held stage is one no session has been started in; and
+        // inside the loop, which holds the registration, so a stage waiting here
+        // is still a Conversation being driven.
+        if step == Step::Finish {
+            crate::joins::hold(&state, conversation_id).await;
         }
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");

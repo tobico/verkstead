@@ -177,6 +177,20 @@ pub struct ConversationEntry {
     /// read aloud — *Waiting on checks* where the plain state word would be.
     pub waiting_on_checks: bool,
 
+    /// Whether this one is a roadmap stage whose tasks are all done and whose
+    /// finish is held until the chain below it settles.
+    ///
+    /// The same kind of thing `waiting_on_checks` above is, one state earlier: a
+    /// condition of Implementing rather than a state, nothing stored for it, and
+    /// read off the server's own register of the stages it is holding at the
+    /// moment the list is drawn. Which stage it is waiting on is on its Timeline
+    /// rather than here — the label says that something is being waited on, and
+    /// the line says what.
+    ///
+    /// So what this comes out as is the label read aloud, exactly as the one
+    /// above is: *Waiting to join* where the plain state word would be.
+    pub waiting_to_join: bool,
+
     /// The session on this row having gone quiet without asking — see
     /// [`Parked`] — or `null` where it has not.
     ///
@@ -654,6 +668,24 @@ pub struct ConversationView {
     /// `false` in every state but Wrapping, which is where the condition is
     /// derived from and the only place it can hold.
     pub waiting_on_checks: bool,
+
+    /// Whether this is a roadmap stage with every task done, held before its
+    /// finish until every stage already in its roadmap's chain has settled.
+    ///
+    /// What the *Waiting to join* label is drawn from, and a condition of
+    /// Implementing rather than a state of its own — `waiting_on_checks` above
+    /// is the precedent, and this sits beside `state` for the same reason.
+    /// Nothing is stored for it either: it is the server's register of the
+    /// stages it is holding, read at the moment the page was.
+    ///
+    /// A flag rather than the stages it is waiting on, because those are on the
+    /// Timeline where the hold wrote them: the label says that the finish is
+    /// waiting, and the line beneath it says which stage of the roadmap it is
+    /// waiting on.
+    ///
+    /// `false` in every state but Implementing, which is where a backlog is
+    /// worked and the only place the condition can hold.
+    pub waiting_to_join: bool,
 
     /// The session running on this Conversation having gone quiet without
     /// asking — see [`Parked`] — or `null` where none is or none has.

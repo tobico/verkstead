@@ -288,6 +288,7 @@ static COUNTING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync
 static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     poll: Duration::from_millis(100),
     checks: Duration::from_millis(100),
+    joins: Duration::from_millis(100),
     reviewing: Duration::ZERO,
     grace: Duration::from_secs(600),
     proposing: Duration::from_secs(600),

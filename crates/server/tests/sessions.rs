@@ -1091,6 +1091,11 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // can assert *nothing happened* inside — and one long enough that a loaded
     // machine cannot close it.
     waking: paced(Duration::from_millis(3600)),
+    // How often a stage held before its finish looks at whether the chain
+    // below it has settled, which is the same kind of choice as the poll above:
+    // what it decides is how long after the stage below settles the one behind
+    // it gets going.
+    joins: paced(Duration::from_millis(100)),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
     // of these fixtures is a Conversation whose grilling session has printed and
@@ -20027,7 +20032,14 @@ async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
 /// The same, with something else where `gh` goes — for the test that carries an
 /// adopted stage the whole way to a settled wrap-up.
 async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    let bench = bench(spill, stub, gh).await;
+    adopting_at_pace(spill, stub, gh, *BRISKLY).await
+}
+
+/// And the same at a pace of the caller's choosing — for the tests about what
+/// the stall sweep makes of a stage that is waiting rather than working, that
+/// being the one thing [`BRISKLY`] deliberately keeps slow.
+async fn adopting_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+    let bench = bench_at_pace(spill, stub, gh, pace, None).await;
 
     a_roadmap_already_committed(&bench.repo);
 
@@ -21758,6 +21770,361 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
         index.contains("- [ ] 01: Count the requests — [brief](01-counter.md)\n"),
         "stage 01's line is exactly as the roadmap was written: {index:?}",
     );
+}
+
+/// A stub that plans one task, works it at a gate the test opens, and then
+/// finishes the stage — writing a line per `next-task` session so that a test
+/// can say which of the two steps ran and which did not.
+///
+/// The gate is inside the *task* rather than the finish, which is what makes
+/// the window it opens unmistakable: while the session sits there the stage has
+/// a box left to tick, so nothing about the chain has been asked yet, and the
+/// test has as long as it likes to put a stage below into the record.
+fn a_stage_worked_to_its_finish(worked: &Path, gate: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    git add -A
+    git commit --quiet -m 'chore: plan the stage'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    if [ -n "$number" ]; then
+        printf 'worked=%s\n' "$number" >> {worked}
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        printf 'working the task\n'
+        printf 'a counter\n' >> counter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+        : > /tmp/verkstead/done
+    else
+        printf 'finished=yes\n' >> {worked}
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish the stage'
+        : > /tmp/verkstead/done
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        worked = quoted(worked),
+        gate = quoted(gate),
+    )
+}
+
+/// Put another stage of the same roadmap into the record by hand, already in
+/// the chain and not settled: started as a stage, with a pull request recorded
+/// against it and nothing since.
+///
+/// By hand because nothing starts two stages of one roadmap yet — the stage
+/// after this one starts when this one *settles*, which is the ordering the
+/// roadmap this work belongs to is taking apart. What the hold reads is the
+/// record, and this is the record a second stage in flight leaves: a
+/// `stage_roadmaps` row saying which stage it is, and a pull request saying it
+/// has joined.
+///
+/// No worktree on disk and no session: nothing here reads either. What it is
+/// standing in for is a branch somebody else's stage is still pushing to.
+async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, number: i64) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let branch = format!("roadmaps/rate-limiting/{label}-by-hand");
+
+    let id = verkstead_store::start_conversation(&pool, repo_id, &branch)
+        .await
+        .unwrap()
+        .expect("the branch is free");
+
+    verkstead_store::start_stage(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/by-hand"),
+        None,
+        verkstead_store::RoadmapStage {
+            roadmap: "rate-limiting",
+            label,
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    verkstead_store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &verkstead_store::PullRequest {
+            number,
+            title: format!("Stage {label}"),
+            url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some(branch),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+/// And what settles it, which is the whole of what the hold is waiting for: the
+/// Conversation reaching Done.
+async fn settles(fixture: &Grilling, id: i64) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::set_state(&pool, id, verkstead_store::Lifecycle::Done)
+        .await
+        .unwrap();
+}
+
+/// A stage whose every box is ticked and whose roadmap's chain holds a stage
+/// that has not settled gets **no finish session**: it waits, says on its
+/// Timeline which stage it is waiting on, and is released the moment that stage
+/// settles.
+///
+/// The whole of the hold. A stage joins the chain at its finish — the branch is
+/// rebased onto the top, pushed and opened — and nothing rebases onto a branch
+/// that is still moving, so a stage below that is still wrapping up is one
+/// nothing may join above. Held in front of the launch rather than inside the
+/// skill, which is what makes it the server's judgement: there is no session
+/// sitting in a Worktree waiting to be told it may push.
+///
+/// At [`SWEEPING`]'s pace, because half of what is being asked is what the
+/// stall sweep makes of a held stage. The run holds its registration across the
+/// whole loop, so a stage waiting inside it is a Conversation being driven —
+/// and a sweep that read it as standing still would stop the very thing the
+/// hold is waiting on the chain for.
+#[tokio::test]
+async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+
+    let fixture = adopting_at_pace(
+        spill,
+        &a_stage_worked_to_its_finish(&worked, &gate),
+        &gh_about(GREEN, "", ""),
+        *SWEEPING,
+    )
+    .await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    // The task session is sitting at the gate, so the stage has a box left to
+    // tick and nothing has asked about the chain yet. Which is the window this
+    // puts a second stage into the record in.
+    until_written_saying(&worked, "worked=01").await;
+
+    let below = a_stage_in_the_chain(&fixture, repo_id, "02", 77).await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    // The box is ticked, the backlog is worked out, and what the run does next
+    // is wait — saying so, and saying on which stage.
+    let said = said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02"),
+        "the Timeline names the stage it is waiting on: {said:?}",
+    );
+    assert!(
+        said.contains("<code>rate-limiting</code>"),
+        "and whose roadmap that stage is of: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and no finish session was launched: the hold stands in front of the launch",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.waiting_to_join,
+        "which the card says as a label beside the state",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "a condition of Implementing rather than a state: the Lifecycle is untouched",
+    );
+    assert!(
+        fixture.row().await.waiting_to_join,
+        "and the sidebar row says the same, from the same register",
+    );
+
+    // And nothing reads it as standing still. The sweep is running at this
+    // fixture's pace and the run is holding its registration across the wait,
+    // so a held stage is one being driven rather than one to stop.
+    assert!(view.driven, "the run that is waiting is still driving it");
+    assert!(
+        view.blocked_on.is_none() && !view.ready_to_resume,
+        "so nothing stopped it: {:?}",
+        notices(&view),
+    );
+
+    // Then the stage below settles, and the finish runs exactly as it does
+    // today — same session, same skill, and on to the pull request it opens.
+    settles(&fixture, below).await;
+
+    until_written_saying(&worked, "finished=yes").await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        !fixture.view().await.waiting_to_join,
+        "and the label goes with the hold",
+    );
+}
+
+/// And a restart finds it held again: the take-up a resume makes over a stage
+/// whose boxes are all ticked asks the chain exactly as the run's own loop
+/// does, and launches nothing either.
+///
+/// The second of the two places a finish session is launched from, and the one
+/// a restarting server goes through — no driver survives the process, so every
+/// Conversation left mid-run is taken up again from where it stands. A hold
+/// that only the loop knew about would be a stage that pushed on a restart,
+/// onto a branch still moving.
+///
+/// The register is this process's, so the second server holds nothing to begin
+/// with: what it draws the label from is the hold its own take-up entered.
+#[tokio::test]
+async fn a_restarted_server_takes_a_held_stage_up_and_holds_it_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+    let stub = a_stage_worked_to_its_finish(&worked, &gate);
+
+    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    until_written_saying(&worked, "worked=01").await;
+
+    a_stage_in_the_chain(&fixture, repo_id, "02", 77).await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    // A second server over the same database, which is what a restart is. It
+    // takes up everything it was left driving, and this stage is one of them:
+    // its boxes are all ticked, so what it is taken up to is the finish — and
+    // the chain below it is where it was.
+    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+
+    let held = loop {
+        let view: ConversationView =
+            get(&restarted, &format!("/api/ui/conversations/{}", fixture.id)).await;
+
+        if view.waiting_to_join {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server never held the stage. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(
+        held.state,
+        Lifecycle::Implementing,
+        "held where it stood, with the Lifecycle untouched",
+    );
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and the take-up launched no finish session either",
+    );
+}
+
+/// And a roadmap run in order holds nothing, which is every roadmap until
+/// stages start side by side.
+///
+/// The other half of the hold, and the one that has to stay true while the rest
+/// of this roadmap lands: a stage is started by the stage before it *settling*,
+/// so by the time the one after it reaches its finish the chain below is
+/// settled to the bottom. The rebase moves nothing, nobody waits, and nothing
+/// is said.
+///
+/// Two stages the whole way, because one proves half of it. Stage 01 finishes
+/// with an empty chain below it, and stage 02 finishes with stage 01 in the
+/// chain and settled.
+#[tokio::test]
+async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01, planned, worked, finished and settled — which is what puts it
+    // in the chain, and what starts the stage after it.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    for (which, view) in [("01", fixture.view().await), ("02", settled)] {
+        assert!(
+            !notices(&view).join("\n").contains("Waiting to join"),
+            "stage {which} never waited for anything: {:?}",
+            notices(&view),
+        );
+        assert!(!view.waiting_to_join, "and wears no label for it either",);
+    }
 }
 
 /// The wrap-up over a pull request Verkstead never opened is the wrap-up: its

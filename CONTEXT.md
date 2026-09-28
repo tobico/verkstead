@@ -2275,6 +2275,19 @@ done, and a ticked box on its own says *its tasks are done* rather than *it
 settled*, the tick landing before that pull request has even opened. See
 ADR-0021.
 
+**And it joins its roadmap's chain at its finish, not before.** A roadmap is one
+chain of branches in the order its Stages finish, and a Stage joins it when its
+finish pushes its branch and opens its pull request — so the pull request
+recorded against a Stage is what says it has joined, and the Timeline Event that
+row hangs off is what says when. A Stage whose every box is ticked and that has
+a Stage in the chain which has not *settled* is **held before its finish**: no
+session is launched, the Timeline says which Stage it is waiting on, and it is
+released the moment that one settles. Nothing rebases onto a branch that is
+still moving, which is what buys the rest of it — a Stage is rebased once,
+before it has a pull request anybody has started reading. In a roadmap run in
+order the Stage below has always settled first, so nothing is ever held. See
+ADR-0021, *The chain*, and **Waiting to join**.
+
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
 the only roadmap its wrap-up ever reads. A Worktree may hold any number of
 roadmaps and a branch touches a second one for ordinary reasons — a deferral
@@ -2880,6 +2893,31 @@ quietening again is a fresh Notice rather than a duplicate of the first or a
 silence.
 _Avoid_: blocked on you (that is about the human, this is about GitHub), CI
 (the word here is checks), pending, green, state
+
+**Waiting to join**:
+What a **Stage** whose every task is done is doing while a Stage already in its
+roadmap's chain has not *settled*. No finish session is launched: a
+**Notice** says so on the Timeline and names the Stage or Stages it is waiting
+on, the status button reads the words where its status word goes, and the
+sidebar row reads them in place of the state word, Implementing being what has
+come down to this.
+
+A condition of Implementing rather than a state, drawn exactly as *Waiting on
+checks* is drawn one state later: the Lifecycle is untouched, nothing is pushed
+to any device, and the run holds its registration across the whole wait, so a
+held Stage is one being driven rather than one standing still. Nothing at all is
+stored for it — the hold is a task of the running server, so a restart is
+holding nothing and the resume that takes the Stage up finds it held again.
+
+Only a Stage: an ordinary feature's backlog belongs to no roadmap and joins no
+chain. And only the join — a waiting Stage's own work, its checks and its review
+wait on nobody. **The joins are the one thing a roadmap does in single file**,
+so a Stage whose wrap-up cannot finish holds up every later Stage's join,
+dependent on it or not. That is the price of never rebasing a branch anybody is
+reading. See ADR-0021, *The chain*.
+_Avoid_: blocked, queued, stalled (nothing has gone wrong and nothing is
+waiting on the human), stacking or rebasing (that is how the branch gets in,
+and it is the repository's business), state
 
 **Check rollup**:
 How a pull request's checks are getting on, taken all together and said in one

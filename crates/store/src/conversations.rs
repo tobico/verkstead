@@ -5916,6 +5916,84 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
     Ok(standings)
 }
 
+/// One stage that has **joined** its roadmap's chain: the Conversation it is,
+/// which stage of the roadmap, and the branch it joined with.
+///
+/// See [`stage_chain`], which is where the order they are in comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Joined {
+    /// The stage's Conversation, which is what [`StageStandings`] answers about
+    /// it under the label below.
+    pub conversation_id: i64,
+
+    /// Which stage of the roadmap, as the roadmap's own line labels it — `05`,
+    /// with the roadmap's zero-padding kept.
+    pub stage: String,
+
+    /// And the branch it joined with, as the Conversation's record names it
+    /// now: the name a session renamed it to where one did, and the name it was
+    /// cut under where none has.
+    pub branch: String,
+}
+
+/// One roadmap's **chain**, bottom to top: the stages of it that have joined,
+/// in the order they joined.
+///
+/// A stage **joins** the chain when its finish pushes its branch and opens its
+/// pull request — see
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), *The chain*. So
+/// what says a stage has joined is the pull request recorded against it, and
+/// what says *when* is the Timeline Event the first of them hangs off: the row
+/// is written in the same transaction as the move into Wrapping, and a stage
+/// that opened one has a branch for the next one to rebase onto.
+///
+/// Nothing is stored for this beyond that. A join is a fact that already has a
+/// record — the pull request — and a second row saying so could come to
+/// disagree with it.
+///
+/// The **foot** of the chain is the roadmap's own branch while its pull request
+/// is unmerged, and it is not in here: it is not a stage, nothing waits on it
+/// settling, and where a new stage is cut from is decided where a stage is
+/// started rather than read back here. What this answers is which stages are in
+/// the chain and in what order, which is what the hold in front of a finish
+/// asks — see the server's `joins` module.
+///
+/// One Repo's and one roadmap's, for the reason [`stage_standings`] is one
+/// Repo's: two Repos may hold roadmaps of the same name, and a stage of `mvp`
+/// over there is no link of this chain. The Conversation's own repository's
+/// pull request and no other, so a companion repository's pull request — opened
+/// against a different Repo in the same breath — is not a second join.
+///
+/// A stage attempted twice is two Conversations answering to one label, and
+/// each of them that opened a pull request is a link: what is in the chain is a
+/// branch rather than a label, and both of those branches are there.
+pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Result<Vec<Joined>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT r.conversation_id, r.stage, COALESCE(c.named_branch, c.branch)
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         JOIN pull_requests p
+           ON p.conversation_id = r.conversation_id AND p.repo_id = c.repo_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
+         GROUP BY r.conversation_id
+         ORDER BY MIN(p.event_id)",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the chain of the {roadmap} roadmap in Repo {repo_id}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(conversation_id, stage, branch)| Joined {
+            conversation_id,
+            stage,
+            branch,
+        })
+        .collect())
+}
+
 /// Put a move on a Conversation's Timeline.
 ///
 /// Shared with [`super::pull_requests`], which moves a Conversation into

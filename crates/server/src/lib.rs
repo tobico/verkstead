@@ -106,6 +106,7 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod investigations;
+mod joins;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
 /// read, and the gate that answers 401 to everything which has not shown it.
 ///
@@ -360,6 +361,12 @@ pub(crate) struct AppState {
     /// question: a session is one agent running, and a driver is the task that
     /// keeps starting them — see [`drivers`].
     drivers: drivers::Drivers,
+
+    /// And which of them are stages held before their finish, waiting for the
+    /// chain below them to settle — see [`joins`]. Beside the drivers rather
+    /// than inside them, because a held stage is being driven: the run holding
+    /// it is the driver, and this is what it is holding it for.
+    joins: joins::Joins,
 
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
@@ -981,6 +988,7 @@ fn routed(
         watchers: watchers::Watchers::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
+        joins: joins::Joins::new(),
         signals: done::Signals::new(),
         updates,
 

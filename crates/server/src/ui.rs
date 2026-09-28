@@ -1071,6 +1071,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // [`crate::sessions::Sessions::all_parked`].
     let sitting = state.sessions.all_parked();
 
+    // And which of them are stages held before their finish, read once for the
+    // whole list for the reason the three above are — one lock rather than one
+    // per row, over an answer that cannot meaningfully change between them.
+    let held = state.joins.all_waiting();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -1095,6 +1100,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And the condition one state earlier, which is the run's own
+                // register rather than the record: a stage whose tasks are all
+                // done and whose finish is held until the chain below it settles
+                // — see [`crate::joins`].
+                waiting_to_join: held.contains(&conversation.id),
                 // And the rescue's own reading of the session, paired with
                 // `working` for the reason `idle` above is: the two reads are a
                 // moment apart, and a row saying a session that has gone is
@@ -1873,6 +1883,11 @@ pub(crate) async fn conversation_view(
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
         waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
+        // And the condition one state earlier, off the register the run holding
+        // the stage put it on — see [`crate::joins`]. No pairing with what is
+        // running is wanted here, unlike the label above: the hold stands in
+        // front of the launch, so a held stage is one with no session at all.
+        waiting_to_join: state.joins.waiting(id),
         // And the other condition, which is the one a running session can be in:
         // idle past the grace with the rescue watching it, said in the same
         // numbers the sidebar row carries — and not while anything is waiting on

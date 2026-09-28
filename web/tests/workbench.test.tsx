@@ -17570,6 +17570,66 @@ describe("a wrap-up waiting on its checks", () => {
   });
 });
 
+/// And the same kind of condition one state earlier: a roadmap stage with every
+/// task done, held before its finish until every stage already in its roadmap's
+/// chain has settled.
+///
+/// A condition of implementing rather than a state, drawn the way the one above
+/// is — a flag beside the lifecycle, a label rather than a control. What it is
+/// waiting on is another stage, so there is nothing here to press either; which
+/// stage is on the timeline, where the hold wrote it.
+describe("a stage waiting to join its chain", () => {
+  it("says so where the conversation is named", async () => {
+    theBuilding({ waiting_to_join: true, ready_to_resume: false });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Waiting to join");
+    expect(line.state).toBe("Implementing");
+
+    // A condition to read rather than one to do something about: the stage
+    // below is being got on with by whoever is on it.
+    expect(line.attention).toBe(false);
+  });
+
+  it("says nothing where the stage is getting on with its own work", async () => {
+    expect(BUILDING.waiting_to_join).toBe(false);
+
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    expect((await standing(container)).word).not.toBe("Waiting to join");
+  });
+
+  /// And in the sidebar it is the label the row is read aloud by, in place of
+  /// the lifecycle word, exactly as a wrap-up down to its checks is.
+  it("is what the sidebar row says in place of its state", async () => {
+    theSidebar(
+      { state: "Implementing", working: false, waiting: false },
+      {
+        state: "Implementing",
+        working: false,
+        waiting: false,
+        waiting_to_join: true,
+      },
+    );
+    const { container } = mount();
+
+    const [working, held] = await cards(container);
+
+    expect(
+      working!.querySelector("button")!.getAttribute("aria-label"),
+    ).toContain("Implementing");
+    expect(held!.querySelector("button")!.getAttribute("aria-label")).toContain(
+      "Waiting to join",
+    );
+    expect(
+      held!.querySelector("button")!.getAttribute("aria-label"),
+    ).not.toContain("Implementing");
+  });
+});
+
 /// A session the Rescue is watching sit there: idle long past the grace, with
 /// nothing open on the conversation and nothing to show for itself.
 ///
