@@ -201,11 +201,15 @@ export function start(
     // program started by one is given a console — an empty black rectangle in
     // front of whatever the human was looking at, for as long as the server
     // runs. `windowsHide` is Node's name for `CREATE_NO_WINDOW`, and it is off
-    // unless it is said. Said unconditionally rather than worked out: the other
-    // two platforms have no such notion, and a run from a terminal hands the
-    // child the console that is already there, where there was never a window
-    // to suppress. `crates/server/src/unseen.rs` is the same sentence one level
-    // down, for every program the server itself runs.
+    // unless it is said.
+    //
+    // **Said unconditionally rather than worked out.** The other two platforms
+    // have no such notion at all; and on Windows the flag does not hand the
+    // child a console of the parent's — a process started under it has none,
+    // the terminal's included. Which costs a sidecar nothing, because both of
+    // its streams are read above rather than inherited and it never writes to a
+    // console on any run. `crates/server/src/unseen.rs` is the same flag one
+    // level down, for every program the server itself runs.
     windowsHide: true,
   });
 
