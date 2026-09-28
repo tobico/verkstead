@@ -48,16 +48,14 @@ rustPlatform.buildRustPackage {
   # is a test's business, and a workspace-wide build would unify it into the
   # release binary.
   #
-  # And without that package's own default features, which is where the tray half
-  # of the one binary lives (ADR-0012, as amended). This is the daemon the NixOS
-  # module runs: a machine with no screen has no use for a tray icon, and GTK in
-  # a service's closure is a download nothing there would ever load. Said as a
-  # flag rather than as `buildNoDefaultFeatures`, so that what cargo is given is
-  # read off this list and nowhere else.
+  # Nothing is turned *off*, because there is nothing left to turn off: no crate
+  # in the workspace links a GUI toolkit any more (ADR-0020). This is the daemon
+  # the NixOS module runs, and a machine with no screen would never load one — so
+  # `nix.yml` greps this package's store closure for a toolkit rather than
+  # trusting that none has crept in.
   cargoBuildFlags = [
     "--package"
     "verkstead-cli"
-    "--no-default-features"
   ];
 
   # The tests run the server and the CLI against each other over a socket, and

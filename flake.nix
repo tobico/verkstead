@@ -113,6 +113,12 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
+          # Tools to run and nothing to compile against: no `buildInputs`, no
+          # pkg-config and no development headers, because nothing in this
+          # repository links a system library. The tray app was the one thing
+          # that did — GTK, and the `dbus-run-session` its suite was run under —
+          # and it is gone (ADR-0020); the SQLite `sqlx` reaches for is bundled C
+          # compiled by cc-rs rather than a library found on the host.
           packages =
             (webTools pkgs)
             ++ (with pkgs; [
@@ -163,35 +169,7 @@
               # same tool downscales the same artwork into the sizes a desktop's
               # launcher draws — see tools/generate-packaging.sh.
               imagemagick
-              # `desktop-file-validate`, which that script runs over the entry it
-              # writes: an entry a desktop will not parse is one that never
-              # appears in a menu, and nothing else here would notice.
-              desktop-file-utils
-              # What the desktop crate's C dependencies below are found with.
-              # Nothing else here needs one: `crates/desktop` is the first thing
-              # in this repository to link a system library at all.
-              pkg-config
-              # `dbus-run-session`, which the tray's suite is run under: the
-              # icon is published onto the session bus, and what that suite puts
-              # on the bus is the panel's own name — so it wants a session of
-              # its own rather than the desktop's. Nothing links this and the
-              # AppImage carries none of it; a developer running
-              # `crates/desktop/tests/tray.rs` is the whole of what it is for.
-              dbus
             ]);
-
-          # The desktop app's toolkit (ADR-0012). A build input rather than a
-          # package so that pkg-config is pointed at its development files: the
-          # app's dialogs compile against GTK3 headers, and a shell without them
-          # cannot build `crates/desktop` at all. It is what the AppImage
-          # carries, and it is now the only such library — the tray used to be
-          # drawn over an appindicator beside it, and is spoken onto the session
-          # bus in Rust instead. See `crates/desktop/Cargo.toml` for the swap,
-          # and note that nothing is needed at *run* time either: there is no
-          # longer a library opened by name with no rpath to find it by.
-          buildInputs = with pkgs; [
-            gtk3
-          ];
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };
