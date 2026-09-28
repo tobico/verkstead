@@ -862,11 +862,14 @@ fn plainly(inside: &Path) -> String {
 /// transcript and a memory rather than a login, and the directory it lands in is
 /// already the account's own or the mirror's own.
 ///
+/// The name it is written beside under is [`super::aside`]'s, which is where the
+/// reason two of these must never share one is — and this is the half of a
+/// mirror where the window is widest, a store being a file per entry rather than
+/// one login.
+///
 /// Blocking.
 fn beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(format!(".verkstead-{}", std::process::id()));
-    let temporary = PathBuf::from(temporary);
+    let temporary = super::aside(path);
 
     let written =
         std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, path));

@@ -502,10 +502,11 @@ fn plain(part: Component<'_>) -> bool {
 /// Owner-only from the moment it exists, which is what it has to be: the file
 /// written here may be a login, and one that spent a moment readable by the
 /// machine would be one the moment was enough for.
+///
+/// The name it is written beside under is [`super::aside`]'s, which is where the
+/// reason two of these must never share one is.
 fn beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(format!(".verkstead-{}", std::process::id()));
-    let temporary = PathBuf::from(temporary);
+    let temporary = super::aside(path);
 
     let written = std::fs::write(&temporary, bytes)
         .and_then(|()| owner_only(&temporary))
