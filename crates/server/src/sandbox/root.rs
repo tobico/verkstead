@@ -546,11 +546,8 @@ impl Root {
     /// the data directory joined whole — see [`Root::login_alone`].
     pub(crate) fn login_of(account: &crate::store::Account, memory: bool) -> Option<PathBuf> {
         match account {
-            crate::store::Account::Claude { claude_dir, .. } => Some(claude_dir.join(CREDENTIALS)),
-            crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
-                Some(home.join(AUTH))
-            }
-            crate::store::Account::OpenCode { home } => (!memory).then(|| home.join(OPENCODE_AUTH)),
+            crate::store::Account::OpenCode { .. } if memory => None,
+            account => Some(login_at(account)),
         }
     }
 
@@ -824,6 +821,40 @@ impl Root {
     }
 }
 
+/// Where an account keeps its login, whatever else is true of it.
+///
+/// **The path rather than the file**, and asked of the account rather than of a
+/// root: the login is the one file of an account a session genuinely changes, so
+/// it is named in three places that are not a launch — the mirror a session away
+/// from home is given, the write-back that puts what the session left into the
+/// account at home, and the reading that says an account has no login to lend at
+/// all. See [`crate::mirroring::account`] and [`login_inside`].
+///
+/// [`Root::login_of`] is the same path where a session is given the file as one of
+/// its own, which is every root but an OpenCode one sharing its memory — there
+/// the login is inside the data directory joined whole, and this is still where it
+/// is.
+pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
+    match account {
+        crate::store::Account::Claude { claude_dir, .. } => claude_dir.join(CREDENTIALS),
+        crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
+            home.join(AUTH)
+        }
+        crate::store::Account::OpenCode { home } => home.join(OPENCODE_AUTH),
+    }
+}
+
+/// And where a **mirror** of an account of `agent_type` keeps its login, said from
+/// the home the mirror is — which is the first path of [`mirrored_of`].
+///
+/// What both ends of the write-back hold to: the device away from home reads the
+/// login off its mirror at this path, and the home device writes what arrives into
+/// its own account's own — see [`login_at`], which is the same file said of a real
+/// account.
+pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
+    login_at(&super::kept_in(agent_type, Path::new("")))
+}
+
 /// Every path a **mirror** of an account of `agent_type` holds, each said from
 /// the home an account of that harness is kept in.
 ///
@@ -847,33 +878,35 @@ impl Root {
 /// harness's account inside it, which is what [`super::kept_in`] builds and what
 /// a root is then built out of.
 pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
+    // The login first, by the one name both ends of the write-back hold to — see
+    // [`login_inside`] — and the configuration after it.
+    let login = login_inside(agent_type);
+
     match agent_type {
         crate::store::AgentType::Claude => {
             let claude = Path::new(super::CLAUDE_DIR_INSIDE_HOME);
 
             vec![
-                claude.join(CREDENTIALS),
+                login,
                 claude.join(SETTINGS),
                 PathBuf::from(super::CLAUDE_CONFIG_INSIDE_HOME),
             ]
         }
 
         crate::store::AgentType::Codex => {
-            let codex = Path::new(super::CODEX_INSIDE_HOME);
-
-            vec![codex.join(AUTH), codex.join(CODEX_CONFIG)]
+            vec![
+                login,
+                Path::new(super::CODEX_INSIDE_HOME).join(CODEX_CONFIG),
+            ]
         }
 
         crate::store::AgentType::Grok => {
-            let grok = Path::new(super::GROK_INSIDE_HOME);
-
-            vec![grok.join(AUTH), grok.join(GROK_CONFIG)]
+            vec![login, Path::new(super::GROK_INSIDE_HOME).join(GROK_CONFIG)]
         }
 
-        crate::store::AgentType::OpenCode => vec![
-            PathBuf::from(OPENCODE_AUTH),
-            Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0]),
-        ],
+        crate::store::AgentType::OpenCode => {
+            vec![login, Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0])]
+        }
     }
 }
 
@@ -3056,6 +3089,33 @@ mod tests {
                 held.len() >= 2,
                 "{agent_type:?} mirrors its login and its \
                  configuration: {held:?}"
+            );
+        }
+    }
+
+    /// And the login is the one path both ends of the write-back hold to: the
+    /// device away from home reads what its session left off the mirror there, and
+    /// the home device writes it into the account's own file.
+    #[test]
+    fn a_mirrors_login_is_that_accounts_login_under_the_mirror() {
+        let under = Path::new("/var/lib/verkstead/accounts/7");
+
+        for agent_type in [
+            crate::store::AgentType::Claude,
+            crate::store::AgentType::Codex,
+            crate::store::AgentType::Grok,
+            crate::store::AgentType::OpenCode,
+        ] {
+            assert_eq!(
+                mirrored_of(agent_type).first(),
+                Some(&login_inside(agent_type)),
+                "{agent_type:?} mirrors its login first",
+            );
+            assert_eq!(
+                under.join(login_inside(agent_type)),
+                login_at(&crate::sandbox::kept_in(agent_type, under)),
+                "{agent_type:?}: a mirror is a home, so the login in it is the \
+                 login of the account that home holds",
             );
         }
     }

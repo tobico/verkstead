@@ -2323,10 +2323,12 @@ started and where that Stage's branch went, that a roadmap has no Stage left to
 run, that the roadmap on the record is not on the branch to read, that a branch
 wrote no single roadmap so no Stage was started, that a Stage predates the
 record of which roadmap it belongs to and is the human's to continue, that a
-wrap-up is down to its checks, or — as a **stop Notice** — what stopped driving,
-why, and what the evidence was. No agent wrote it and nobody pressed anything
-for it. It is what running unattended owes the human: a decision made while
-nobody was watching is one they have to be able to read afterwards.
+wrap-up is down to its checks, that a session away from home could not write its
+Profile's login back to the device the account is on — see **Account mirror** — or
+— as a **stop Notice** — what stopped driving, why, and what the evidence was. No
+agent wrote it and nobody pressed anything for it. It is what running unattended
+owes the human: a decision made while nobody was watching is one they have to be
+able to read afterwards.
 
 The three about a roadmap that was not carried on all report the same outcome:
 **nothing was started**, with the reason it was not. None of them is a thing to
@@ -2808,6 +2810,32 @@ its own — a row that is itself a mirror is an account on a third machine.
 session launched under an account nothing fetched is one that comes up logged out
 with nothing on the Timeline saying why, so the refusal goes in the session's
 Capture naming the machine.
+**And the login is written back as the session ends**, at
+`/api/peer/v1/profiles/<id>/account/login` on the same listener behind the same
+gate. It is the one file of a root a session genuinely changes — the harness
+refreshes its OAuth pair as it works — so an account lent out and never written
+back would be one signing itself out a session at a time. What the session left is
+read off the mirror once the ending has written everything back into it, and the
+home device writes it **in place over the account's own file**, which is how a
+local session's ending writes one: whatever else is a name for that file — a
+session running there has it linked into its root — is a name for what arrived.
+Nothing else of a root comes home, the rest being Verkstead's own or the human's
+and no session's to change. A **Terminal**'s ending goes the same way, a human who
+logged in at that shell having logged in to somebody else's account.
+**Only what changed travels**: a login the session replaced, or made where the
+account had none, goes back whole; one still exactly what came down is not sent at
+all. Which is the three cases a local ending already tells apart.
+**Last write wins.** Two machines refreshing one login at once may sign one of
+them out; that is accepted rather than locked against — nothing is merged and
+nothing is held, and the write that arrives later is the one the account keeps. A
+sign-out that results reads as the Profile being broken there, and the fix is a
+login on its home device. Lending a Profile out exclusively was rejected as a lock
+nobody asked for.
+**And a home that has gone away by then is said rather than swallowed**: the
+mirror is left exactly where it is, nothing retries, and the Conversation's
+Timeline carries a **Notice** saying the account was not written and naming the
+machine. The next session at home may find itself signed out, which is worth a
+line rather than a silent loss.
 _Avoid_: account copy, cached account, synced login, borrowed account
 
 **Pairing**:

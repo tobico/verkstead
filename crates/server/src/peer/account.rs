@@ -29,14 +29,22 @@
 //! and this device has no files of it to hand over: it answers as it answers a
 //! Profile that is not there at all, and the asking device is one hop from the
 //! machine the account is on either way.
+//!
+//! **And one thing comes back.** A login is the one file of a root a session
+//! genuinely changes — the harness refreshes its OAuth pair as it works — so an
+//! account lent out and never written back would be an account signing itself out
+//! a session at a time. As a session away from home ends, that device puts what it
+//! left into the account here, on [`LOGIN`] beside the read. Nothing else comes
+//! home: everything else in a root is either Verkstead's own, written fresh each
+//! launch, or the human's own and never a session's to change.
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use verkstead_render::AccountFile;
+use axum::routing::{get, post};
+use verkstead_render::{AccountFile, AccountLogin};
 
 use crate::{AppState, store};
 
@@ -46,6 +54,23 @@ use crate::{AppState, store};
 /// **Not under `/api/ui/`**, which is the viewer's namespace and is drawn by a
 /// browser. The same shape the news, the renewal and the Repos beside it take.
 pub const ACCOUNT: &str = "/api/peer/v1/profiles/{profile}/account";
+
+/// And where a device away from home puts the **login** its session left, for the
+/// same Profile by the same id.
+///
+/// Under the account rather than beside it, because that is what it is one file
+/// of: the read hands over what a root is made from and this hands one of those
+/// back, and the two are the two directions of one thing.
+pub const LOGIN: &str = "/api/peer/v1/profiles/{profile}/account/login";
+
+/// The most a login sent back here may be before the call is refused rather than
+/// read: **sixty-four kilobytes**.
+///
+/// An OAuth pair is a few hundred bytes, and what a bound is for here is what every
+/// bound across a link is for — a machine on the far end that writes without
+/// stopping. The mirror's own bound is the other direction's, for its reason — see
+/// [`crate::mirroring::account`].
+const MOST_A_LOGIN_IS: usize = 64 * 1024;
 
 /// `GET /api/peer/v1/profiles/{profile}/account` — every file a Built Root is
 /// made out of for that Profile's account, each with what is in it or with
@@ -134,49 +159,175 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<i64>
     }
 }
 
-/// The route, over the state the workbench answers out of.
+/// `POST /api/peer/v1/profiles/{profile}/account/login` — the login a session away
+/// from home left, written into that Profile's account.
+///
+/// **The answering half of the write-back**, and the one direction anything of an
+/// account travels in on its way *back*: a harness refreshes its OAuth pair as it
+/// works, so a login lent out and never returned is an account signing itself out
+/// a session at a time. Everything else a root holds is Verkstead's own or the
+/// human's own and never comes home — see
+/// [`crate::mirroring::account::Lending::written_home`], which is the end that
+/// reads what the session left and puts it here.
+///
+/// **Written in place over the account's own file**, which is how a local session's
+/// ending writes one: whatever else is a name for that file — a session running
+/// here right now has the login hard-linked or bound into its root — is a name for
+/// what arrived, rather than for a file left behind by a rename. Owner-only,
+/// because it is a login.
+///
+/// **Last write wins, and nothing is merged.** Two devices refreshing one login may
+/// sign one of them out; that is accepted rather than locked against, and the write
+/// that arrives later is the one the account keeps (ADR-0020, *Shared Profiles*).
+/// So nothing here reads what is already at the path, and nothing is held.
+///
+/// **A Profile that is not one of this device's own is `404`**, as the read beside
+/// it answers one: a row that is itself a mirror is an account on a third machine,
+/// and a row that has gone is a Profile removed while a session ran under it.
+pub(crate) async fn written(
+    State(state): State<AppState>,
+    Path(profile): Path<i64>,
+    Json(sent): Json<AccountLogin>,
+) -> Response {
+    let held = match store::load_profile(&state.pool, profile).await {
+        Ok(held) => held,
+
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                profile,
+                "a member sent back the login of one of this device's accounts and the Profile \
+                 could not be read",
+            );
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read its own Profile\n",
+            )
+                .into_response();
+        }
+    };
+
+    let Some(account) = held
+        .filter(|held| held.mirror.is_none())
+        .map(|held| held.account)
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            "this device holds no Agent Profile of its own under that id\n",
+        )
+            .into_response();
+    };
+
+    let login = crate::sandbox::root::login_at(&account);
+
+    match tokio::task::spawn_blocking({
+        let login = login.clone();
+
+        move || crate::mirroring::account::into_the_account(&login, &sent.text)
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            tracing::debug!(
+                profile,
+                "the login a member's session left was written into this device's account",
+            );
+
+            StatusCode::NO_CONTENT.into_response()
+        }
+
+        Ok(Err(why)) => {
+            tracing::error!(
+                error = ?why,
+                profile,
+                login = %login.display(),
+                "the login a member's session left could not be written into this device's \
+                 account, so that account may read as signed out here",
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not write the login into its own account\n",
+            )
+                .into_response()
+        }
+
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                profile,
+                "writing the login a member's session left ended badly",
+            );
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not write the login into its own account\n",
+            )
+                .into_response()
+        }
+    }
+}
+
+/// The routes, over the state the workbench answers out of.
 ///
 /// **Built here and mounted by [`super::workbench::served`]**, for the reason the
-/// Repos beside it are: it answers out of this device's own Profiles, and a
+/// Repos beside it are: they answer out of this device's own Profiles, and a
 /// router over a second state would be answering for a second device's accounts.
 pub(crate) fn route() -> Router<AppState> {
-    Router::new().route(ACCOUNT, get(held))
+    Router::new().route(ACCOUNT, get(held)).route(
+        LOGIN,
+        post(written).layer(DefaultBodyLimit::max(MOST_A_LOGIN_IS)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// It is a member's call, so it goes where a member's calls go rather than
-    /// through any of the three the gate stands aside for: what it hands over is
-    /// a login.
+    /// Both are a member's calls, so they go where a member's calls go rather than
+    /// through any of the three the gate stands aside for: what one hands over is
+    /// a login, and what the other takes is one.
     #[test]
     fn the_account_is_not_one_of_the_un_gated_three() {
-        assert_ne!(ACCOUNT, super::super::IDENTITY);
-        assert_ne!(ACCOUNT, super::super::joining::JOIN);
-        assert_ne!(ACCOUNT, super::super::exchange::SETTLED);
+        for path in [ACCOUNT, LOGIN] {
+            assert_ne!(path, super::super::IDENTITY);
+            assert_ne!(path, super::super::joining::JOIN);
+            assert_ne!(path, super::super::exchange::SETTLED);
+        }
     }
 
-    /// And it is outside the three prefixes this device keeps to itself, which is
-    /// what it has to be: a reading served on the one namespace a member is never
-    /// served would be a route nothing could ever reach.
+    /// And both are outside the three prefixes this device keeps to itself, which
+    /// is what they have to be: a route served on the one namespace a member is
+    /// never served would be a route nothing could ever reach.
     #[test]
     fn the_account_is_not_in_a_namespace_kept_back() {
         for prefix in super::super::workbench::KEPT_TO_ITSELF {
+            for path in [ACCOUNT, LOGIN] {
+                assert!(
+                    !path.starts_with(prefix),
+                    "{path} would be held back with {prefix}/",
+                );
+            }
+        }
+    }
+
+    /// And each names the Profile by the id it has on the device that answers,
+    /// which is what a mirror row records for it there.
+    #[test]
+    fn the_account_names_the_profile() {
+        for path in [ACCOUNT, LOGIN] {
             assert!(
-                !ACCOUNT.starts_with(prefix),
-                "the account would be held back with {prefix}/",
+                path.contains("{profile}"),
+                "the path names the Profile it is about: {path}",
             );
         }
     }
 
-    /// And it names the Profile by the id it has on the device that answers,
-    /// which is what a mirror row records for it there.
+    /// And the login is one file of the account rather than a route beside it, the
+    /// two being the two directions of one thing.
     #[test]
-    fn the_account_names_the_profile() {
-        assert!(
-            ACCOUNT.contains("{profile}"),
-            "the account path names the Profile it is about: {ACCOUNT}",
-        );
+    fn the_login_is_under_the_account() {
+        assert_eq!(LOGIN, format!("{ACCOUNT}/login"));
     }
 }

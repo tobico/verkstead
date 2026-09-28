@@ -2386,10 +2386,26 @@ impl Sessions {
         // by the same local id, naming the mirror as its account. So the root,
         // the Tail that follows the session's log and everything the ending
         // writes back are what they are for an account on this machine.
-        let launching_under = mirrored.map(|profile| store::Pairing {
-            profile,
-            model: pairing.model.clone(),
-        });
+        //
+        // And beside it what the *ending* writes back over the link: the login is
+        // the one file of a root a session genuinely changes, so what it leaves in
+        // the mirror's own goes into the account at home once the profile has been
+        // seen to. Carried into the relay below, which is the thing that knows when
+        // the session is over — with the store and the cluster handle it needs
+        // there, this call's own being borrowed. See
+        // [`crate::mirroring::account::Lending`].
+        let (launching_under, lending) = match mirrored {
+            Some(crate::mirroring::account::Mirrored { profile, lent }) => (
+                Some(store::Pairing {
+                    profile,
+                    model: pairing.model.clone(),
+                }),
+                Some(crate::mirroring::account::Lending::of(pool, devices, lent)),
+            ),
+
+            None => (None, None),
+        };
+
         let pairing = launching_under.as_ref().unwrap_or(pairing);
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -2735,6 +2751,26 @@ impl Sessions {
                             conversation_id,
                             "seeing to what a session wrote to its account ended badly"
                         );
+                    }
+
+                    // And where that account was a **mirror**, the login it now
+                    // holds goes into the account on the device it is at home on:
+                    // a harness refreshes its OAuth pair as it works, and an
+                    // account lent out and never written back would be one
+                    // signing itself out a session at a time. After the close
+                    // rather than before it, because the close is what puts a
+                    // login the session replaced rather than wrote through back
+                    // over the mirror's own file — and before the word that the
+                    // session is over, for the reason the close itself is: the
+                    // next launch fetches the account again, and one made before
+                    // this had landed would be given the login this session
+                    // refreshed away from. See
+                    // [`crate::mirroring::account::Lending::written_home`], which
+                    // says nothing where the login is still what came down and
+                    // puts a sentence on the Timeline where the home has gone
+                    // away.
+                    if let Some(lending) = lending {
+                        lending.written_home(conversation_id).await;
                     }
 
                     // The session is over, so the branches are finished moving.

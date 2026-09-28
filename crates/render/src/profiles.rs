@@ -187,6 +187,31 @@ pub struct AccountFile {
     pub text: Option<String>,
 }
 
+/// And the **login** going the other way: what a session away from home left in
+/// it, on its way into the account it belongs to.
+///
+/// **The one file a session genuinely changes.** A harness refreshes its OAuth
+/// pair as it works, so an account lent to another device and never written back
+/// would be an account signing itself out a session at a time — and everything
+/// else a root holds is either Verkstead's own or the human's own and travels in
+/// one direction only. So this is the whole of what comes home: the login, whole,
+/// as the harness left it.
+///
+/// **Sent only where it changed.** A login the session wrote through or replaced
+/// comes home; one that is still exactly what came down is not sent at all; and
+/// one made where the account had none is handed over. Which is the same three
+/// cases a local session's ending already tells apart, and the reason this is a
+/// press rather than a file kept in step.
+///
+/// **Last write wins.** Two machines refreshing one login may sign one of them
+/// out; nothing is merged and nothing is locked, and the write that arrives later
+/// is the one the account keeps (ADR-0020, *Shared Profiles*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountLogin {
+    /// What the harness left in the login file, whole and as it wrote it.
+    pub text: String,
+}
+
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
 /// The account says which type it is, because the fields beside it are that

@@ -366,6 +366,36 @@ impl Verkstead {
             .join(".claude/.credentials.json")
     }
 
+    /// And what is in it, which on the home device is what a write-back landed.
+    fn login_at_home(&self, name: &str) -> Option<String> {
+        std::fs::read_to_string(self.login_of(name)).ok()
+    }
+
+    /// The same, polled until it says `saying` — or a panic saying what it holds
+    /// instead.
+    ///
+    /// Polled because a write-back is the last thing a session's ending does, after
+    /// the process has been reaped and the profile seen to: what is being waited for
+    /// is a real session finishing and a real call crossing a real link.
+    async fn logged_in_with(&self, name: &str, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let held = self.login_at_home(name).unwrap_or_default();
+
+            if held.contains(saying) {
+                return held;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the account {name} never came to hold {saying:?}. It holds: {held:?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
     /// The Profiles as this device's own browser reads them.
     async fn profiles(&self) -> Vec<ProfileEntry> {
         reading(&self.workbench, PROFILES).await
@@ -393,9 +423,9 @@ impl Verkstead {
     }
 
     /// The account of that row fetched from the device it is at home on, exactly
-    /// as a launch here fetches it — and the Profile the launch then reads,
-    /// naming this device's own mirror as its account.
-    async fn fetches(&self, row: &ProfileEntry) -> Result<store::Profile, Refusal> {
+    /// as a launch here fetches it — the Profile the launch then reads, naming this
+    /// device's own mirror as its account, and what its ending has to write home.
+    async fn fetches(&self, row: &ProfileEntry) -> Result<mirroring::account::Mirrored, Refusal> {
         let profile = store::load_profile(&self.pool, row.id)
             .await
             .unwrap()
@@ -404,6 +434,68 @@ impl Verkstead {
         mirroring::account::fetched(Some(&self.cluster), &self.homes(), &profile)
             .await
             .map(|fetched| fetched.expect("a mirror is a row whose account is fetched"))
+    }
+
+    /// And that session ending, which is where the login it left goes home —
+    /// exactly as a session's relay and a terminal's follow loop see to it, once
+    /// everything they were given has been written back into the mirror.
+    ///
+    /// `conversation` is whose Timeline a home that has gone away is said on.
+    async fn ends(&self, lent: mirroring::account::Lent, conversation: i64) {
+        mirroring::account::Lending::of(&self.pool, Some(&self.cluster), lent)
+            .written_home(conversation)
+            .await;
+    }
+
+    /// A Conversation of this device's own to say something on, with nothing
+    /// running in it: what a Timeline sentence about an ending needs is a
+    /// Conversation to be on.
+    async fn conversation(&self) -> i64 {
+        let path = repository(self.elsewhere.path().join("verkstead"));
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(registered.contains("Added"), "registering the repository");
+
+        let repos: Vec<verkstead_render::RepoEntry> =
+            reading(&self.workbench, "/api/ui/repos").await;
+
+        let started = press(
+            &self.workbench,
+            "/api/ui/conversations",
+            Some(&serde_json::json!({ "repo_id": repos[0].id }).to_string()),
+        )
+        .await;
+
+        let Started::Started { id, .. } = serde_json::from_str(&started).unwrap() else {
+            panic!("the Conversation was not started: {started}")
+        };
+
+        id
+    }
+
+    /// Every Notice on that Conversation's Timeline, which is where Verkstead says
+    /// what it did on its own account.
+    async fn notices(&self, conversation: i64) -> Vec<String> {
+        let drawn: ConversationView = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await;
+
+        drawn
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The homes a session on this device is given, which is what says where a
@@ -593,17 +685,44 @@ fn no_tailscale() -> Tailscale {
 /// A, holding the account, and B, running the session — linked both ways, with B
 /// holding the streams that refresh its mirrors.
 async fn linked_up() -> (Verkstead, Verkstead, Holding) {
+    linked_up_running(PRINTS_ITS_ROOT).await
+}
+
+/// The same, with the session B runs said: what a session does to the account it
+/// was lent is the other half of this suite, and what it does is what the stub
+/// does.
+async fn linked_up_running(stub: &str) -> (Verkstead, Verkstead, Holding) {
     let a = Verkstead::answering(A).await;
-    let b = Verkstead::running(B, PRINTS_ITS_ROOT).await;
+    let b = Verkstead::running(B, stub).await;
 
-    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
-
-    let (machine, os) = this_machine();
-    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+    joined(&a, &b).await;
 
     let holding = b.holding();
 
     (a, b, holding)
+}
+
+/// `b` and `a` linked both ways, which is what a member is: each device holds the
+/// other's certificate and the address to reach it at.
+async fn joined(a: &Verkstead, b: &Verkstead) {
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+}
+
+/// What stands where claude goes when the question is the **write-back**: a
+/// session that refreshes its own login and stops, which is the one thing a
+/// harness does to an account it is running as.
+///
+/// **Written in place rather than renamed over**, which is how a harness that keeps
+/// its login in a file saves one — and what a bind takes: on this platform the
+/// login in the root is a bind of the mirror's own file.
+fn refreshes_its_login(token: &str) -> String {
+    format!(
+        "printf '{{\"claudeAiOauth\":{{\"accessToken\":\"%s\"}}}}' '{token}' \
+> \"$HOME/.claude/.credentials.json\"\nprintf 'refreshed the login\\n'\n"
+    )
 }
 
 /// What a device says about the machine it is on, read the way the server reads
@@ -798,7 +917,7 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
     let fetched = b.fetches(&mirror).await.expect("A answered");
 
     assert_eq!(
-        fetched.account,
+        fetched.profile.account,
         verkstead_store::Account::Claude {
             claude_dir: under.join(".claude"),
             config_file: under.join(".claude.json"),
@@ -912,5 +1031,220 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
         None,
         "and nothing was written: a mirror half-fetched would be a session \
          running as somebody nothing said was signed in",
+    );
+}
+
+/// A token refreshed **inside a session on B** is in A's account once that session
+/// ends: the login is the one file of a root a session genuinely changes, and an
+/// account lent out and never written back would be one signing itself out a
+/// session at a time.
+#[tokio::test]
+async fn a_token_refreshed_in_a_session_away_from_home_lands_in_the_account() {
+    const INSIDE: &str = "sk-ant-oat01-refreshed-in-the-session";
+
+    let (a, b, _holding) = linked_up_running(&refreshes_its_login(INSIDE)).await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(mirror.id).await;
+
+    b.printed(conversation, "refreshed the login").await;
+
+    let held = a.logged_in_with("work", INSIDE).await;
+
+    assert!(
+        !held.contains(TOKEN),
+        "the account holds what the session left rather than what it was lent: \
+         {held:?}",
+    );
+    assert_eq!(
+        login_in(&b.mirror_directory(mirror.id)).as_deref(),
+        Some(held.as_str()),
+        "and the mirror is left where it is: the account was written, and \
+         nothing here was taken away",
+    );
+}
+
+/// And only what changed travels: a login the session replaced goes back whole,
+/// one it left exactly as it was given is not written at all, and one made where
+/// the account had none is handed over.
+///
+/// **The mirror's own login is written here rather than by a session**, which is
+/// what a session's ending has already done by the time the write-back runs — see
+/// `a_token_refreshed_in_a_session_away_from_home_lands_in_the_account` for the
+/// whole of that path. What is being asked is which of the three cases sends
+/// anything.
+#[tokio::test]
+async fn only_a_login_the_session_changed_goes_back_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.conversation().await;
+    let under = b.mirror_directory(mirror.id);
+
+    // Untouched: the ending writes nothing, which is read off a home that has
+    // refreshed its own login since the fetch — a write of what came down would
+    // have put the old token back over it.
+    let lent = b.fetches(&mirror).await.expect("A answered").lent;
+
+    a.logged_in("work", REFRESHED);
+    b.ends(lent, conversation).await;
+
+    let held = a.login_at_home("work").expect("the account holds a login");
+
+    assert!(
+        held.contains(REFRESHED) && !held.contains(TOKEN),
+        "a login the session left alone is not written, so the refresh at home \
+         stands: {held:?}",
+    );
+
+    // Replaced: what the session left goes back whole.
+    let lent = b.fetches(&mirror).await.expect("A answered again").lent;
+    let refreshed = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-and-away"}}"#;
+
+    std::fs::write(under.join(".claude/.credentials.json"), refreshed).unwrap();
+    b.ends(lent, conversation).await;
+
+    assert_eq!(
+        a.login_at_home("work").as_deref(),
+        Some(refreshed),
+        "a login the session replaced goes back whole",
+    );
+
+    // And one made where the account had none, which is the case a Profile
+    // nobody has logged in to starts in.
+    a.signed_out("work");
+
+    let lent = b.fetches(&mirror).await.expect("A answered once more").lent;
+
+    assert_eq!(login_in(&under), None, "nothing came down in the login");
+
+    let made = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-logged-in-away"}}"#;
+
+    std::fs::write(under.join(".claude/.credentials.json"), made).unwrap();
+    b.ends(lent, conversation).await;
+
+    assert_eq!(
+        a.login_at_home("work").as_deref(),
+        Some(made),
+        "and a login made where the account had none is handed over",
+    );
+}
+
+/// Two devices refreshing the one login end on the **later write**: nothing is
+/// locked and nothing is merged, and what the account keeps is whatever arrived
+/// last.
+#[tokio::test]
+async fn two_devices_refreshing_one_login_end_on_the_later_write() {
+    /// The third device, which is the second one away from home.
+    const C: &str = "ffeeddccbbaa00998877665544332211";
+
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::running(B, PRINTS_ITS_ROOT).await;
+    let c = Verkstead::running(C, PRINTS_ITS_ROOT).await;
+
+    joined(&a, &b).await;
+    joined(&a, &c).await;
+
+    let (_b_holding, _c_holding) = (b.holding(), c.holding());
+
+    a.account("work").await;
+
+    // Both fetch the account, which is two sessions running at once under the one
+    // Profile — neither of them holding anything against the other.
+    let (b_mirror, c_mirror) = (b.mirror_of("work").await, c.mirror_of("work").await);
+
+    let b_lent = b.fetches(&b_mirror).await.expect("A answered B").lent;
+    let c_lent = c.fetches(&c_mirror).await.expect("A answered C").lent;
+
+    let (b_refreshed, c_refreshed) = (
+        r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-b-refreshed"}}"#,
+        r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-c-refreshed"}}"#,
+    );
+
+    std::fs::write(
+        b.mirror_directory(b_mirror.id)
+            .join(".claude/.credentials.json"),
+        b_refreshed,
+    )
+    .unwrap();
+    std::fs::write(
+        c.mirror_directory(c_mirror.id)
+            .join(".claude/.credentials.json"),
+        c_refreshed,
+    )
+    .unwrap();
+
+    let (b_conversation, c_conversation) = (b.conversation().await, c.conversation().await);
+
+    b.ends(b_lent, b_conversation).await;
+
+    assert_eq!(
+        a.login_at_home("work").as_deref(),
+        Some(b_refreshed),
+        "the first to end is the login the account holds meanwhile",
+    );
+
+    c.ends(c_lent, c_conversation).await;
+
+    assert_eq!(
+        a.login_at_home("work").as_deref(),
+        Some(c_refreshed),
+        "and the write that arrived later is the one the account keeps — nothing \
+         merged, and nothing held against the second device",
+    );
+}
+
+/// A home that has gone away by the time the session ends leaves the mirror where
+/// it is and puts a **sentence on the Timeline** saying the account was not
+/// written: the next session at home may find itself signed out, and that is worth
+/// a line rather than a silent loss.
+#[tokio::test]
+async fn a_home_that_has_gone_away_is_said_on_the_timeline() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.conversation().await;
+    let under = b.mirror_directory(mirror.id);
+
+    let lent = b.fetches(&mirror).await.expect("A answered").lent;
+
+    // And then the machine moves: what B has written down for A is an address
+    // nothing is listening at, which is what a device switched off comes to.
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    let refreshed = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-nowhere-to-go"}}"#;
+
+    std::fs::write(under.join(".claude/.credentials.json"), refreshed).unwrap();
+    b.ends(lent, conversation).await;
+
+    let notices = b.notices(conversation).await;
+    let said = notices
+        .iter()
+        .find(|notice| notice.contains("login"))
+        .unwrap_or_else(|| {
+            panic!("nothing on the Timeline says the account was not written: {notices:#?}")
+        });
+
+    assert!(
+        said.contains(A_MACHINE),
+        "the sentence names the machine the human named: {said}",
+    );
+
+    assert_eq!(
+        login_in(&under).as_deref(),
+        Some(refreshed),
+        "and the mirror is left exactly where it is",
+    );
+    assert!(
+        a.login_at_home("work")
+            .is_some_and(|held| held.contains(TOKEN)),
+        "the account at home is what it was, nothing having reached it",
     );
 }
