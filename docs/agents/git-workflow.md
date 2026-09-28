@@ -106,15 +106,26 @@ belongs above branches it was never based on. Adopt the chain with this
 branch named last, and let the extension move it:
 
     gh stack init <bottom> … <top> <this-branch>
-    gh stack rebase
+    gh stack rebase --no-trunk --upstack
 
 `init` records where each branch actually sits rather than where the
 argument order implies, so a branch not yet rebased onto the top comes
 back from `gh stack view` with a `⚠` beside it and `needsRebase: true`
-in `--json`. That is what says the join has not happened yet.
-`gh stack rebase` then rebases only the branches that need it: the ones
-already at origin's commit stay at it, so the push that follows moves
-this branch alone.
+in `--json`. That marks this branch, and it does not single it out: a
+trunk that has moved since the branches below were pushed sets it on
+those too.
+
+**Both flags, and neither is decoration.** A bare `gh stack rebase`
+fetches the trunk and cascade-rebases the whole stack from the bottom
+up, so the moment `main` has moved the branches below this one leave
+their pushed commits behind — and the push that follows force-pushes
+pull requests somebody is reading. Measured: three branches, one commit
+on `main` after the lower two were pushed, and a bare `gh stack rebase`
+moved all three off origin. `--upstack` rebases only from the current
+branch up, `--no-trunk` leaves the trunk out of it, and with both the
+branches below stay at origin's commit while this one still lands on top
+of the one under it. Which is the whole of the join: this branch moves
+and nothing else does.
 
 A conflict exits 3 and stops in it, working tree and all. Resolve the
 files, `git add` them, and `gh stack rebase --continue`;
@@ -128,8 +139,11 @@ the chain and opens this branch's pull request.
 ### Updating a stack after review
 
 Don't rebase stacked branches by hand — here or at the join, where
-`gh stack rebase` is what moves the joining branch. From any branch in the
-stack, and in a worktree that has adopted the chain:
+`gh stack rebase --no-trunk --upstack` is what moves the joining branch.
+Here the whole stack moving is the point, which is why the flags the join
+needs are not wanted: what follows is for branches that are already on
+pull requests and are meant to be brought forward together. From any
+branch in the stack, and in a worktree that has adopted the chain:
 
 - `gh stack sync` — fetches, cascade-rebases each branch onto its updated
   parent, force-pushes atomically, and re-links the stack on GitHub. Use
