@@ -171,16 +171,23 @@ choice:
 - an **unstacked** branch — the ordinary case — is pushed, and then opened as a
   **draft** pull request titled for the feature, with a summary of the completed
   tasks as its body;
-- a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
-  through `gh stack submit --auto` instead, after which this branch's own pull
-  request has its title and body corrected. Leave the stack's other pull
-  requests alone: they belong to finished work.
+- a **stacked** branch, one with a chain under it, goes through
+  `gh stack submit --auto` instead, after which this branch's own pull request
+  has its title and body corrected. Leave the stack's other pull requests
+  alone: they belong to finished work.
 
 Work out which of the two this branch is before running either, and follow what
-the repository's own sequence says about it — `gh stack view` naming this branch
-is what says it is in a stack, and an error or a stack without it says it is not. A repository whose file says
-nothing about finishing, or has no such file: push the branch and open a draft
-pull request titled for the feature —
+the repository's own sequence says about it. **A prompt carrying a *The chain
+this stage joins* section is what settles it**: that branch is a stacked one,
+whatever this checkout says. `gh stack` keeps its registry per worktree and
+every stage is worked in a worktree of its own, so `gh stack view` erroring
+here is an empty registry rather than proof of anything — adopt the chain and
+join it the way the repository's block says, and come back to the sequence
+above. Where no chain was carried, `gh stack view` naming this branch is what
+says it is in a stack, and an error or a stack without it says it is not.
+
+A repository whose file says nothing about finishing, or has no such file: push
+the branch and open a draft pull request titled for the feature —
 
     git push -u origin HEAD
     gh pr create --draft --title '<feature name>' --body '<the tasks this delivered>'

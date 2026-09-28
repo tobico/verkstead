@@ -2606,6 +2606,35 @@ mod tests {
         );
     }
 
+    /// And which of the two shapes a stage is, is settled by the chain it was
+    /// handed rather than by what `gh stack view` says in this worktree.
+    ///
+    /// `gh stack` keeps its registry per worktree and every stage is worked in a
+    /// worktree of its own, so `view` errors there whatever GitHub holds — a
+    /// skill that read the error as proof would send every stage there has ever
+    /// been down the unstacked sequence, and the join would never happen. The
+    /// repository's own block says the same thing, and this is the sentence that
+    /// decides which sequence runs.
+    #[test]
+    fn a_stage_handed_a_chain_is_a_stacked_branch_whatever_this_worktree_says() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains(
+                "**A prompt carrying a *The chain this stage joins* section is what settles it**"
+            ),
+            "the chain in the prompt is what says the branch is stacked: {next_task}"
+        );
+        assert!(
+            next_task.contains("erroring here is an empty registry rather than proof of anything"),
+            "and an empty registry is not an unstacked branch: {next_task}"
+        );
+        assert!(
+            next_task.contains("Where no chain was carried, `gh stack view` naming this branch"),
+            "the old reading still answering for everything that joins nothing: {next_task}"
+        );
+    }
+
     /// And what it does when the rebase that carries a stage into its roadmap's
     /// chain stops in a conflict: it resolves it. A conflict at the join is the
     /// joining session's rather than something to stop on — always stopping to
