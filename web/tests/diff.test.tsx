@@ -30,7 +30,7 @@ const UNDIFFED = readable(answered);
 /// files, and a third out of the other repository.
 const ALONGSIDE = readable(alongside);
 
-/// Where the wrap setting is kept — the key `src/device.ts` writes, asked for
+/// Where the wrap setting is kept — the key `src/remembered.ts` writes, asked for
 /// here by the name a browser would find it under.
 const WRAP = "verkstead.diff-wrap";
 
