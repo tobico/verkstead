@@ -20,8 +20,8 @@ import { describe, expect, it } from "vitest";
 import { reg, RUN } from "../src/registry.js";
 
 /// A key of this test's own under this user's, named for what it is about so that
-/// nothing here ever touches the real one — `run_key.rs`'s own habit, which had
-/// the same reason.
+/// nothing here ever touches the real one — the Rust tray app's own habit,
+/// which had the same reason.
 const NOWHERE = String.raw`HKCU\Software\net.tobico.Verkstead\tests\nothing`;
 
 describe("where the registration is kept", () => {

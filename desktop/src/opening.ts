@@ -110,10 +110,11 @@ export function opening(
 
 /// Hand `what` over, and say so where it could not be.
 ///
-/// **Not waited on**, the same reading `opener.rs` made of it: what starts is
-/// somebody else's program, and an editor that takes ten seconds to come up is
-/// not something the app should be sitting on. Detached and unreferenced with
-/// it, so that what the human opened outlives the Verkstead that opened it.
+/// **Not waited on**, the same reading the Rust tray app made of it: what
+/// starts is somebody else's program, and an editor that takes ten seconds to
+/// come up is not something the app should be sitting on. Detached and
+/// unreferenced with it, so that what the human opened outlives the Verkstead
+/// that opened it.
 ///
 /// Both endings are read, because a refusal here is a refusal that reaches
 /// nobody otherwise: `gio` says on a non-zero exit that nothing is registered

@@ -105,8 +105,8 @@ pub fn there_is_one() -> bool {
 /// were read — name one.
 ///
 /// Set and empty is unset: a shell that exported the name without a value has
-/// no more of a display than one that never mentioned it, and GTK is no happier
-/// with it.
+/// no more of a display than one that never mentioned it, and a toolkit handed
+/// it is no happier than one handed nothing.
 #[cfg(target_os = "linux")]
 fn there_is_one_with(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
     [display, wayland]

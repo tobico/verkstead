@@ -10,9 +10,9 @@
 //!
 //! On Linux a sandbox outlives nothing because bubblewrap says so. Every
 //! session and the compile server are started `--die-with-parent` — see the
-//! `bwrap` rendering — and ADR-0012 leans on it: the tray's **Exit** is a stop
-//! where it stands, with no shutdown path anywhere in the server, precisely
-//! because what it leaves behind is nothing.
+//! `bwrap` rendering — and the desktop app leans on it (ADR-0020): the tray's
+//! **Quit** is a stop where it stands, with no shutdown path anywhere in the
+//! server, precisely because what it leaves behind is nothing.
 //!
 //! Apple's sandbox has no such flag to keep. A process under `sandbox-exec` is
 //! an ordinary child of whoever started it, so a server that is gone leaves one
@@ -38,7 +38,7 @@
 //!
 //! **Nothing of the server's runs at that moment**, which is the whole of why
 //! it is out here rather than on some path through the shutdown the server does
-//! not have. **Exit** off the tray, a `kill -9` of the process and a crash all
+//! not have. **Quit** off the tray, a `kill -9` of the process and a crash all
 //! end the same way, because there is nothing to end them differently: the
 //! promise is kept from outside the process.
 //!
@@ -505,7 +505,7 @@ mod tests {
     /// A keeper ends the whole group the moment the server is gone, however it
     /// went — and `kill -9` of the server is *however it went* at its worst:
     /// there is no path through the server's own code at all, which is what
-    /// makes it the same answer as Exit off the tray.
+    /// makes it the same answer as Quit off the tray.
     ///
     /// Run on whatever machine the suite is on rather than on a Mac alone. The
     /// keeper is a shell script and a process group, and both are the same on
@@ -634,7 +634,7 @@ mod tests {
     /// handle to it closes.
     ///
     /// Which is what a server exiting does, however it exits — the tray's
-    /// **Exit**, a `kill`, a crash — so this is the promise the Compile Server
+    /// **Quit**, a `kill`, a crash — so this is the promise the Compile Server
     /// is held to on this platform, asked by letting go on purpose.
     #[test]
     fn what_is_in_a_job_goes_when_the_last_handle_to_it_closes() {

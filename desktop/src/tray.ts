@@ -183,11 +183,11 @@ export function logs(kept: Kept, by: Opening | undefined): void {
     return;
   }
 
-  // Handed over rather than waited on, the same reading the Rust app made of
-  // it in `opener.rs`: what starts is somebody else's program, and a text editor
-  // that takes ten seconds to come up is not something the app should be
-  // sitting on. `openPath` reports a refusal as a string rather than as a
-  // rejection, so both endings are read.
+  // Handed over rather than waited on, the same reading the Rust tray app made
+  // of it: what starts is somebody else's program, and a text editor that takes
+  // ten seconds to come up is not something the app should be sitting on.
+  // `openPath` reports a refusal as a string rather than as a rejection, so both
+  // endings are read.
   shell
     .openPath(act.open)
     .then((trouble) => {
