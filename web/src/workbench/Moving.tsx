@@ -203,10 +203,9 @@ function MoveSheet(props: {
       </p>
 
       <p class={styles.why}>
-        The brief, the branch name and the files go with it, and this draft is
-        closed once they have. The base goes back to the default-branch rule
-        over there, the repos this one works alongside stay here, and the
-        pairings arrive as that machine remembers them.
+        The brief, the branch name, the base and the files go with it, and this
+        draft is closed once they have. The repos this one works alongside are
+        left behind, and the pairings arrive as that machine remembers them.
       </p>
 
       {/* The one question the move cannot answer for itself, asked with the

@@ -49,7 +49,12 @@ import {
   ATTACH_REFUSAL,
   SERVER_REFUSAL,
 } from "../src/workbench/Composer";
-import { BRANCH_REFUSAL, TARGET, TARGET_REFUSAL } from "../src/workbench/Setup";
+import {
+  BASE_REFUSAL,
+  BRANCH_REFUSAL,
+  TARGET,
+  TARGET_REFUSAL,
+} from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
 import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
@@ -2709,6 +2714,7 @@ describe("moving a saved draft to another device", () => {
       whenever(at("/conversations"), json({ Started: { id: MOVED } }), "POST"),
       whenever(at(`/conversations/${MOVED}/brief`), json("Saved"), "POST"),
       whenever(at(`/conversations/${MOVED}/branch`), json("Renamed"), "POST"),
+      whenever(at(`/conversations/${MOVED}/base`), json("Recorded"), "POST"),
       ...OPEN.attachments.map((attachment) =>
         whenever(
           readable(attachment.id),
@@ -2810,9 +2816,9 @@ describe("moving a saved draft to another device", () => {
   });
 
   /// The whole of a move in one: the Conversation started over there against the
-  /// Repo that was picked, the Brief and the branch name written onto it, and
-  /// every file read off this device and put on it.
-  it("carries the brief, the branch name and every attached file", async () => {
+  /// Repo that was picked, the Brief, the branch name and the base written onto
+  /// it, and every file read off this device and put on it.
+  it("carries the brief, the branch name, the base and every attached file", async () => {
     const fetching = moving();
     const { container } = await draft();
 
@@ -2834,6 +2840,13 @@ describe("moving a saved draft to another device", () => {
       branch: OPEN.branch,
     });
 
+    // The base too, an override being a branch name picked out of that
+    // repository's own list rather than an id — so it means what it means
+    // wherever the repository is cloned.
+    expect(sent(fetching, at(`/conversations/${MOVED}/base`))).toEqual({
+      branch: OPEN.base_commit,
+    });
+
     // Each file read off the device the draft is on and put on the new
     // Conversation: there is no hop between two members, so the bytes come here
     // and go back out.
@@ -2848,8 +2861,9 @@ describe("moving a saved draft to another device", () => {
   });
 
   /// And what a Repo id, a companion's Repo id and a Pairing's Profile id are
-  /// each one Verkstead's own means for the move: none of the three travels.
-  it("carries no base, no companions and no pairings", async () => {
+  /// each one Verkstead's own means for the move: none of those travels. Which
+  /// the base is not one of — see the test above, where it goes with the branch.
+  it("carries no companions and no pairings", async () => {
     const fetching = moving();
     const { container } = await draft();
 
@@ -2858,12 +2872,31 @@ describe("moving a saved draft to another device", () => {
 
     await waitFor(() => expect(writes(fetching, moved)).toBe(1));
 
-    for (const path of ["base", "companions", "grilling", "implementation", "review"]) {
+    for (const path of ["companions", "grilling", "implementation", "review"]) {
       expect(
         writes(fetching, at(`/conversations/${MOVED}/${path}`)),
         `nothing was written to ${path}`,
       ).toBe(0);
     }
+  });
+
+  /// And a base the target has not got is one more refusal to carry rather than
+  /// a move undone: the same wording the branch above it is refused in, and the
+  /// old draft left open with it.
+  it("carries a refused base as a refusal, and closes nothing", async () => {
+    const fetching = moving(
+      whenever(at(`/conversations/${MOVED}/base`), json("NoSuchBranch"), "POST"),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `The base branch could not be recorded: ${BASE_REFUSAL.NoSuchBranch}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
   });
 
   /// The draft here is closed once the new one is made, with the words that say

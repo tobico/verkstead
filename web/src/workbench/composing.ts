@@ -55,8 +55,9 @@
 //!
 //! **And the replay is run once more against a draft that already exists**, which
 //! is a saved draft being moved onto another device — see [`moveTo`]. The Brief,
-//! the branch name and the files are read off the draft rather than out of what
-//! this page is holding, and the draft they came off is closed at the end of it;
+//! the branch name, the base and the files are read off the draft rather than out
+//! of what this page is holding, and the draft they came off is closed at the end
+//! of it;
 //! everything between is the same sequence through the same endpoints, because a
 //! move is this page's press made about work that was already composed.
 
@@ -765,13 +766,19 @@ export type Target = {
 ///
 /// - the **Repo** is picked as part of the move, by the caller, out of the
 ///   target's own registry;
-/// - the **base** goes back to that repository's default-branch rule, which is
-///   what a Repo switch does with it anyway;
 /// - the **companions** are ids in the old device's registry and are left
 ///   behind;
 /// - and the **Pairings** are Profile ids on the old machine, so the new draft
 ///   arrives showing the target's own remembered pairings — its prefill, which
 ///   is exactly what a draft created there would have arrived showing.
+///
+/// **The base travels, because it is not one of those.** An override is a branch
+/// *name* picked out of that repository's own list rather than an id — see
+/// `BasePicker` in `Setup.tsx` — so it means what it means on whichever machine
+/// the repository is cloned on, which is the move this is nearly always: the
+/// same repository, over there. A target that has not got that branch refuses it
+/// by name, exactly as the branch above it is refused, and the rule is what a
+/// draft with no override arrives under.
 ///
 /// **The files travel**, because they are the human's own bytes: each is read
 /// back off the device the draft is on — see `readAttachment` in
@@ -824,6 +831,18 @@ export async function moveTo(
     said(
       outcome === "Renamed",
       `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+    );
+  }
+
+  // And the base the human overrode the rule with, which is a branch name and so
+  // is theirs rather than one machine's — the record carries it on
+  // `base_commit`, and `null` there is the rule itself, which is what the new
+  // Conversation already arrived under.
+  if (draft.base_commit !== null) {
+    const outcome = await setBaseBranch(to.reaching, id, draft.base_commit);
+    said(
+      outcome === "Recorded",
+      `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
     );
   }
 
