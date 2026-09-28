@@ -88,7 +88,7 @@ use tokio_stream::Stream;
 use verkstead_schema::ApiError;
 
 use crate::AppState;
-use crate::device::Unrelayed;
+use crate::device::{Devices, Unrelayed};
 use crate::ui::{refused, unavailable};
 
 /// The prefix a relayed call stands under, with the Device Id as the segment
@@ -468,7 +468,11 @@ pub(crate) async fn read_of(
 
 /// The call one of those is made with: a `GET` of `onwards` asking for JSON, on
 /// nobody's behalf.
-fn asking(onwards: String) -> Call {
+///
+/// Shared with the readings that want a **word** back rather than a body to log
+/// about — see [`word_from`], and [`crate::matching`], which asks a member for
+/// its Repos this way and is refused by name where the machine is not there.
+pub(crate) fn asking(onwards: String) -> Call {
     let mut headers = HeaderMap::new();
 
     headers.insert(
@@ -558,9 +562,17 @@ pub(crate) fn as_json() -> HeaderMap {
 /// switched off and one that has stopped being a member both come to *that
 /// machine did not take it*, and something wrong on this side of the link is a
 /// different sentence under a different status.
-pub(crate) struct Refusal {
-    pub(crate) status: StatusCode,
-    pub(crate) saying: String,
+///
+/// **Public, and re-exported at the crate root** — see [`crate::Refusal`]. It is
+/// what a reading across the link answers with when there was no answer to be
+/// had, and [`crate::matching`]'s is one a suite standing two devices up reads
+/// the sentence of: *refused naming the machine* and *nothing over there matched*
+/// are two different things to say, and a test that could not tell them apart
+/// would be no test of that.
+#[derive(Debug)]
+pub struct Refusal {
+    pub status: StatusCode,
+    pub saying: String,
 }
 
 impl Refusal {
@@ -597,18 +609,26 @@ impl Refusal {
 /// back for the caller to read a status off. What the human has to be told about
 /// a press their own hand made is *that machine did not take it*, and which of
 /// the statuses it was belongs in the sentence rather than in the shape.
+///
+/// **The cluster handle rather than the whole state**, because that is all any of
+/// this wants: the dial is the handle's, and so is the membership the machine is
+/// named off. `None` is a Verkstead stood up without a Data Directory, which
+/// invented no identity and is linked to nothing — its own trouble, and the one
+/// arm here that is not about the far end. Callers holding an [`AppState`] pass
+/// `state.devices.as_ref()`; [`crate::matching`] is asked with a handle and
+/// nothing else.
 pub(crate) async fn put_to(
-    state: &AppState,
+    devices: Option<&Devices>,
     device: &str,
     call: Call,
 ) -> Result<reqwest::Response, Refusal> {
-    let Some(devices) = state.devices.as_ref() else {
+    let Some(devices) = devices else {
         return Err(Refusal::ours(
             "this server holds no device identity to relay through".to_owned(),
         ));
     };
 
-    let named = called(state, device).await;
+    let named = called(Some(devices), device).await;
 
     match devices.relay(device, call).await {
         Ok(answered) if answered.status().is_success() => Ok(answered),
@@ -650,21 +670,21 @@ pub(crate) async fn put_to(
 /// short word, and what a bound is for is the machine that answers and then
 /// writes without stopping.
 pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
-    state: &AppState,
+    devices: Option<&Devices>,
     device: &str,
     call: Call,
     most: usize,
 ) -> Result<T, Refusal> {
-    let answered = put_to(state, device, call).await?;
+    let answered = put_to(devices, device, call).await?;
 
     let body = match bounded(answered, most).await {
         Ok(body) => body,
-        Err(why) => return Err(unreadable(state, device, format!("{why:#}")).await),
+        Err(why) => return Err(unreadable(devices, device, format!("{why:#}")).await),
     };
 
     match serde_json::from_slice(&body) {
         Ok(said) => Ok(said),
-        Err(why) => Err(unreadable(state, device, why.to_string()).await),
+        Err(why) => Err(unreadable(devices, device, why.to_string()).await),
     }
 }
 
@@ -674,10 +694,10 @@ pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
 /// The name is read here rather than carried down from [`put_to`] because this is
 /// the one path that would need it twice, and a membership read on the way to a
 /// sentence nobody usually sees is cheaper than a second one on every press.
-async fn unreadable(state: &AppState, device: &str, why: String) -> Refusal {
+async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Refusal {
     Refusal::theirs(format!(
         "{} answered in a way this device cannot read: {why}",
-        called(state, device).await,
+        called(devices, device).await,
     ))
 }
 
@@ -687,8 +707,8 @@ async fn unreadable(state: &AppState, device: &str, why: String) -> Refusal {
 /// sixteen bytes of hex and the human named the machine. The id where there is
 /// no name to be had, which is a membership that could not be read at the moment
 /// something else about it went wrong.
-pub(crate) async fn called(state: &AppState, device: &str) -> String {
-    let Some(devices) = state.devices.as_ref() else {
+pub(crate) async fn called(devices: Option<&Devices>, device: &str) -> String {
+    let Some(devices) = devices else {
         return device.to_owned();
     };
 

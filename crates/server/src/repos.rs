@@ -555,6 +555,27 @@ fn name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// The URL of the repository's `origin` remote, where it has one.
+///
+/// **Asked of git rather than kept**, which is the stance every other reading of
+/// a repository takes here — the branches, the default branch, the roadmaps. A
+/// registration records a path, a name and a default branch and no origin at
+/// all, and a remote is added, changed and taken away without Verkstead hearing
+/// about it; a stored copy would be a second opinion about the one fact two
+/// devices have to agree on when they are settling whether they hold the same
+/// repository. See [`crate::matching`], which is what asks.
+///
+/// `None` where there is no `origin` — `git remote get-url` exits non-zero on
+/// a remote that is not there — and where what it answered was blank, which a
+/// remote configured with an empty URL is. A repository with no origin is
+/// matched by name or not at all, and an empty string standing in for one would
+/// be two such repositories reading as the same one.
+pub(crate) fn origin(path: &Path) -> Option<String> {
+    git(path, &["remote", "get-url", "origin"])
+        .map(|url| url.trim().to_owned())
+        .filter(|url| !url.is_empty())
+}
+
 /// Run git in `dir` and take its stdout, or `None` if it failed.
 ///
 /// Shared with [`crate::conversations`], which asks git the two questions a

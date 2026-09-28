@@ -245,7 +245,7 @@ async fn relayed(state: &AppState, device: &str, id: i64, rank: &str) -> Result<
     .map_err(|why| Refusal::ours(format!("the rank could not be written down: {why}")))?;
 
     relaying::put_to(
-        state,
+        state.devices.as_ref(),
         device,
         Call {
             method: reqwest::Method::PUT,

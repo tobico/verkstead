@@ -40,12 +40,15 @@
 //! over what an answer holds rather than a second route to keep, which is what
 //! keeps *one router of routes* true; [`OverTheLink`] is how they know.
 //!
-//! **And one route here is a member's own rather than the viewer's**: the news a
-//! member tells its members when it has something worth a phone — see
-//! [`super::news`]. It is not in the namespace and is on no browser's router, and
-//! it is built here all the same, because what it shows the news to is the push
-//! subscriptions this state holds: a router over a second state would be pushing
-//! to a second device's phones.
+//! **And two routes here are a member's own rather than the viewer's**: the news
+//! a member tells its members when it has something worth a phone — see
+//! [`super::news`] — and this device's Repos with their origins, which is what a
+//! member matches its own repository against, see [`super::repos`]. Neither is in
+//! the namespace and neither is on any browser's router, and both are built here
+//! all the same, because each answers out of this state: what the news is shown
+//! to is the push subscriptions this state holds, and the Repos are this store's
+//! registry, and a router over a second state would be answering for a second
+//! device.
 //!
 //! **And the agents' half is not here.** A session's Conversation-scoped API
 //! answers the loopback and the named pipe, which is all a session ever dials,
@@ -101,18 +104,21 @@ pub(crate) struct OverTheLink;
 ///
 /// The state is [`crate::standing`]'s, made once and shared with the workbench's
 /// own router — see this module's own documentation, and [`crate::Routers`].
-/// And the one route on this listener that is a member's own rather than the
+/// And the two routes on this listener that are a member's own rather than the
 /// viewer's: the news a member tells its members when it has something worth a
-/// phone — see [`super::news`].
+/// phone — see [`super::news`] — and this device's Repos with their origins, see
+/// [`super::repos`].
 ///
-/// Built here because it answers out of this same state: what it shows the news
-/// to is the push subscriptions of *this* device's browsers, and a router over a
-/// second state would be pushing to a second device's phones. It is not part of
-/// the viewer's namespace and is on no browser's router — which is why it is
-/// merged here rather than added to [`crate::ui::routes`].
+/// Built here because each answers out of this same state: what the news is shown
+/// to is the push subscriptions of *this* device's browsers, and the Repos are
+/// *this* store's registry, and a router over a second state would be answering
+/// for a second device. Neither is part of the viewer's namespace and neither is
+/// on any browser's router — which is why they are merged here rather than added
+/// to [`crate::ui::routes`].
 pub(crate) fn served(state: AppState) -> Router {
     crate::ui::routes()
         .merge(super::news::route())
+        .merge(super::repos::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))
 }

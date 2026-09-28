@@ -127,6 +127,14 @@ mod investigations;
 /// keyed with.
 pub mod key;
 mod limits;
+/// Which of a member's Repos is this repository: origin URL first, then name
+/// where neither has one (ADR-0020, *Repos across devices*).
+///
+/// Public for the reason [`device`] is — which repository a path belongs to is
+/// the product's own boundary rather than an implementation detail of an
+/// endpoint, and what settles it is a reading a suite makes standing where the
+/// device that is about to sync or transfer stands.
+pub mod matching;
 /// Trying a declared MCP server as it is saved, which is the one place one is
 /// ever spoken to from here — see ADR-0021, where an unreachable server never
 /// holds a launch.
@@ -329,6 +337,14 @@ pub use github::Gh;
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
 pub use runner::Pace;
+
+/// Why something a device put to one of its members was never answered, naming
+/// the machine that did not take it — see [`relaying::Refusal`].
+///
+/// Re-exported because [`matching`] answers with one: a reading across a link
+/// has to be able to say *that machine did not take it* rather than *nothing
+/// over there matched*, and telling the two apart is what the caller acts on.
+pub use relaying::Refusal;
 
 /// Persistence lives in its own crate so the viewer's endpoints can reach it
 /// without depending on the binary that links them. It is re-exported here

@@ -405,7 +405,13 @@ pub(crate) async fn edited(
     };
 
     Ok(
-        match relaying::word_from::<ProfileSaved>(state, &at.device, call, MOST_AN_OUTCOME_IS).await
+        match relaying::word_from::<ProfileSaved>(
+            state.devices.as_ref(),
+            &at.device,
+            call,
+            MOST_AN_OUTCOME_IS,
+        )
+        .await
         {
             Ok(said) => {
                 if said == ProfileSaved::Saved {
@@ -440,8 +446,13 @@ pub(crate) async fn removed(state: &AppState, id: i64) -> Result<Pressed<Profile
     };
 
     Ok(
-        match relaying::word_from::<ProfileDeleted>(state, &at.device, call, MOST_AN_OUTCOME_IS)
-            .await
+        match relaying::word_from::<ProfileDeleted>(
+            state.devices.as_ref(),
+            &at.device,
+            call,
+            MOST_AN_OUTCOME_IS,
+        )
+        .await
         {
             Ok(said) => {
                 if said == ProfileDeleted::Removed {

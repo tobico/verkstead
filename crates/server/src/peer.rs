@@ -80,6 +80,7 @@ pub mod exchange;
 pub mod joining;
 pub mod news;
 pub mod renewing;
+pub mod repos;
 pub mod unlinking;
 pub mod workbench;
 

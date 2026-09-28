@@ -52,6 +52,24 @@ Profile, which is refused for nothing: a Repo is the directory a session is
 standing in, where a Profile is only the account the next one would have been
 launched under. Registering the same path again brings the same Repo back rather
 than making a second one.
+**And across a cluster, which of a member's Repos is this repository is a reading
+rather than a press**: a Repo is one directory on this machine and the same
+repository is another on the next, so a device that syncs what a member remembers
+of this repository, or lands a branch of it there, has first to say which of that
+machine's Repos it means. **Origin URL first** — the `origin` remote's URL, held
+against the other end's after a trailing `.git`, a trailing slash and the
+`scp`-style spelling of an SSH URL are taken out, those three and nothing else —
+**then by name where neither end has an origin**, the name being the directory's
+own. A Repo with an origin never matches one without: they are two repositories
+until something says so, and a shared name is not that something. Nothing about
+the registration is trusted for it — a registration records a path, a name and a
+default branch and no origin at all — so both ends ask git afresh, and the far
+end sends what git said while the device that asked applies the rule, which is
+what keeps two Verksteads one version apart from disagreeing about which
+repository the work is in. **No match is an answer** and the caller decides what
+to do without one; **a device that is not answering is refused by name** instead,
+those being two different things to say — one sends the human to **Open repo**
+and the other to the machine.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
