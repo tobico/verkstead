@@ -26,6 +26,7 @@
 #![cfg(unix)]
 
 use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -44,9 +45,10 @@ use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
-use verkstead_server::platform::{self, Platform};
+use verkstead_server::platform::{self, Environment, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -232,9 +234,12 @@ impl Verkstead {
             workbench,
             over_the_link,
         } = match stub {
-            None => {
-                routers_answering_devices_telling(pool.clone(), cluster.clone(), nudges.clone())
-            }
+            None => routers_answering_devices_telling(
+                pool.clone(),
+                cluster.clone(),
+                nudges.clone(),
+                probing(dir.path()),
+            ),
 
             Some(stub) => routers_running_sessions_answering_devices(
                 pool.clone(),
@@ -243,6 +248,7 @@ impl Verkstead {
                 gh_stub(NO_GITHUB),
                 cluster.clone(),
                 nudges.clone(),
+                probing(dir.path()),
             ),
         };
 
@@ -834,6 +840,40 @@ fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422)
 }
 
+/// The machine a device here is judged on: one directory on the `PATH` a
+/// session would search, holding a program for every harness.
+///
+/// **Stated rather than read off the runner.** A **mirror** whose harness is
+/// not on this device reads broken and starts nothing, which is exactly right
+/// and exactly not what this suite is about: what runs a session here is the
+/// stub the agents handle names, and whether the box this runs on happens to
+/// have `claude` installed is nothing to do with it. So every device says it
+/// has all four. The suite that asks what a device *without* one does is
+/// `tests/mirroring.rs`.
+fn probing(dir: &Path) -> Machine {
+    let bin = dir.join("probed");
+    std::fs::create_dir_all(&bin).unwrap();
+
+    for harness in ["claude", "codex", "grok", "opencode"] {
+        let at = bin.join(harness);
+
+        std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    Machine::stated(
+        Platform::Linux,
+        bin.as_os_str().to_owned(),
+        bin.as_os_str().to_owned(),
+        None,
+        None,
+        &Environment {
+            home: Some(dir.to_owned()),
+            ..Environment::default()
+        },
+    )
+}
+
 /// A, holding the account, and B, running the session — linked both ways, with B
 /// holding the streams that refresh its mirrors.
 async fn linked_up() -> (Verkstead, Verkstead, Holding) {
@@ -1197,6 +1237,7 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
         &verkstead_store::Mirror {
             device: A.to_owned(),
             id: 7,
+            login: true,
         },
         &store::ProfileFacts {
             name: Some("work".to_owned()),

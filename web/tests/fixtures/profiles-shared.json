@@ -5,9 +5,10 @@
       "claude_dir": "/srv/accounts/fable/.claude",
       "config_file": "/srv/accounts/fable/.claude.json"
     },
-    "broken": "DirMissing",
+    "broken": null,
     "device": null,
     "id": 1,
+    "login": true,
     "memory": true,
     "models": [
       "claude-fable-5"
@@ -20,9 +21,10 @@
       "claude_dir": "/srv/accounts/opus/.claude",
       "config_file": "/srv/accounts/opus/.claude.json"
     },
-    "broken": "DirMissing",
+    "broken": null,
     "device": null,
     "id": 2,
+    "login": true,
     "memory": true,
     "models": [
       "claude-opus-5"
@@ -43,6 +45,7 @@
       "reachable": true
     },
     "id": 3,
+    "login": true,
     "memory": true,
     "models": [
       "claude-opus-5"

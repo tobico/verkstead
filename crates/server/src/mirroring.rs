@@ -255,6 +255,14 @@ async fn pruned(state: &AppState, members: &[String]) {
 /// **And what it said is written whole**: every Profile upserted onto the row it
 /// already had, and the mirrors of that member it did *not* name taken away. A
 /// Profile removed at home is exactly the second of those.
+///
+/// **Including whether the account holds a login to lend**, which is the one
+/// fact on the row that is about the account rather than about the Profile. A
+/// Claude login kept in the macOS Keychain, and a sign-out at home, both leave
+/// nothing for this device to mirror — so the home device answers it as it
+/// answers the rest of the row, and a mirror with none reads as not usable away
+/// wherever it is drawn. See [`store::Mirror::login`] and
+/// [`crate::profiles::broken`].
 async fn read_member(state: &AppState, device: &str) {
     let Some(devices) = state.devices.as_ref() else {
         return;
@@ -301,6 +309,7 @@ async fn read_member(state: &AppState, device: &str) {
         let at = store::Mirror {
             device: device.to_owned(),
             id: row.id,
+            login: row.login,
         };
 
         match store::record_mirror(&state.pool, &at, &facts(row)).await {

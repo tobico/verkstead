@@ -62,7 +62,7 @@ use sqlx::SqlitePool;
 /// One word apiece, spelled out in the column so the table reads as something.
 /// A word this does not know is a database written by a Verkstead that has a
 /// backend this one does not, which is worth saying rather than guessing past.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
     Claude,
     Codex,
@@ -261,6 +261,21 @@ pub struct Mirror {
 
     /// And what it is numbered there, which is what a refresh finds it by.
     pub id: i64,
+
+    /// And whether the account holds a **login file** over there, as that
+    /// device last said.
+    ///
+    /// The one fact about a member's account that this device cannot look at
+    /// and cannot do without: a login kept somewhere that is not a file leaves
+    /// nothing to mirror, so the Profile cannot be used away from home at all —
+    /// see `Broken::NoLoginAtHome`. It travels on the row rather than being
+    /// asked for at the launch, because the row has to *say* so wherever it is
+    /// drawn, long before anybody presses anything.
+    ///
+    /// `true` for a mirror written down before this was carried, which is what
+    /// was assumed of every mirror until now; the next refresh says what is
+    /// really true.
+    pub login: bool,
 }
 
 impl Profile {
@@ -444,7 +459,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              agent_type  TEXT NOT NULL,
              memory      INTEGER NOT NULL DEFAULT 1,
              home_device TEXT,
-             home_id     INTEGER
+             home_id     INTEGER,
+             home_login  INTEGER
          ) STRICT",
     )
     .execute(pool)
@@ -452,6 +468,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("creating the profiles table")?;
 
     mirror_columns(pool).await?;
+    home_login_column(pool).await?;
 
     // The rule the column's own `UNIQUE` carried: no two Profiles of this
     // device's own called the same thing. Over the local rows alone now — what a
@@ -558,22 +575,47 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// rewrite that follows *it* asks for them again.
 pub(crate) async fn mirror_columns(pool: &SqlitePool) -> Result<()> {
     for (column, kind) in [("home_device", "TEXT"), ("home_id", "INTEGER")] {
-        let there: Option<(String,)> =
-            sqlx::query_as("SELECT name FROM pragma_table_info('profiles') WHERE name = ?")
-                .bind(column)
-                .fetch_optional(pool)
-                .await
-                .with_context(|| format!("looking for the profiles table's {column} column"))?;
+        added(pool, column, kind).await?;
+    }
 
-        if there.is_none() {
-            // Interpolated rather than bound, because a column name is not a
-            // value — and both of them are written out here rather than taken
-            // from anywhere.
-            sqlx::query(&format!("ALTER TABLE profiles ADD COLUMN {column} {kind}"))
-                .execute(pool)
-                .await
-                .with_context(|| format!("adding the profiles table's {column} column"))?;
-        }
+    Ok(())
+}
+
+/// And whether the account a mirror names holds a login file over there, added
+/// the same way and asked for in the same two places.
+///
+/// Its own function rather than a third entry in the loop above only because
+/// the rewrite in [`super::migrations`] that lets a Profile go unnamed remakes
+/// this table in a shape from before any of the three existed — so the rewrite
+/// after it asks for the two above and this one again, and then carries all
+/// three across. **Asked for rather than re-added**: a column dropped here and
+/// put back afterwards is one the pool can refuse, the pragma that looks for it
+/// and the `ALTER` that adds it being handed to whichever connections are free.
+///
+/// Null is *nobody has said*, which reads as a login being there: it is what was
+/// assumed of every mirror before the column existed, and the first refresh
+/// after this start says what is really true. See [`Mirror::login`].
+pub(crate) async fn home_login_column(pool: &SqlitePool) -> Result<()> {
+    added(pool, "home_login", "INTEGER").await
+}
+
+/// One column on the profiles table, added where it is not there already.
+async fn added(pool: &SqlitePool, column: &str, kind: &str) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('profiles') WHERE name = ?")
+            .bind(column)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("looking for the profiles table's {column} column"))?;
+
+    if there.is_none() {
+        // Interpolated rather than bound, because a column name is not a value
+        // — and every one of them is written out by a caller here rather than
+        // taken from anywhere.
+        sqlx::query(&format!("ALTER TABLE profiles ADD COLUMN {column} {kind}"))
+            .execute(pool)
+            .await
+            .with_context(|| format!("adding the profiles table's {column} column"))?;
     }
 
     Ok(())
@@ -823,7 +865,7 @@ pub async fn record_mirror(pool: &SqlitePool, at: &Mirror, facts: &ProfileFacts)
             sqlx::query(
                 "UPDATE profiles
                  SET name = ?, claude_dir = ?, config_file = ?, model = ?, agent_type = ?,
-                     memory = ?
+                     memory = ?, home_login = ?
                  WHERE id = ?",
             )
             .bind(&facts.name)
@@ -832,6 +874,7 @@ pub async fn record_mirror(pool: &SqlitePool, at: &Mirror, facts: &ProfileFacts)
             .bind(legacy_model(facts))
             .bind(facts.account.agent_type().word())
             .bind(facts.memory)
+            .bind(at.login)
             .bind(id)
             .execute(&mut *tx)
             .await
@@ -853,8 +896,8 @@ pub async fn record_mirror(pool: &SqlitePool, at: &Mirror, facts: &ProfileFacts)
             let (id,): (i64,) = sqlx::query_as(
                 "INSERT INTO profiles
                      (name, claude_dir, config_file, model, agent_type, memory,
-                      home_device, home_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                      home_device, home_id, home_login)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                  RETURNING id",
             )
             .bind(&facts.name)
@@ -865,6 +908,7 @@ pub async fn record_mirror(pool: &SqlitePool, at: &Mirror, facts: &ProfileFacts)
             .bind(facts.memory)
             .bind(&at.device)
             .bind(at.id)
+            .bind(at.login)
             .fetch_one(&mut *tx)
             .await
             .with_context(|| {
@@ -1112,6 +1156,7 @@ type Row = (
     bool,
     Option<String>,
     Option<i64>,
+    Option<bool>,
 );
 
 /// The columns every read of the table takes, in [`Row`]'s order.
@@ -1119,8 +1164,8 @@ type Row = (
 /// Written once rather than in each of the two statements that select them: the
 /// tuple they are read into is one shape, and two lists a column apart would be
 /// a mirror read as somebody else's Profile.
-const COLUMNS: &str =
-    "id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id";
+const COLUMNS: &str = "id, name, claude_dir, config_file, model, agent_type, memory, \
+                       home_device, home_id, home_login";
 
 /// One row, whatever `profile_models` holds for it, and the home in
 /// `profile_homes` where its type keeps one.
@@ -1134,7 +1179,8 @@ const COLUMNS: &str =
 /// edited by hand: refused rather than read as a home of the empty string,
 /// because an account of nowhere is a bind that would land on `/`.
 fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profile> {
-    let (id, name, claude_dir, config_file, model, agent_type, memory, device, at_home) = row;
+    let (id, name, claude_dir, config_file, model, agent_type, memory, device, at_home, login) =
+        row;
 
     let models = match (listed.is_empty(), model.is_empty()) {
         (true, false) => vec![model],
@@ -1163,8 +1209,17 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
     // Profile is over the pair, and a row with one of them is a row somebody
     // edited by hand. Refused rather than read as local, because a Profile drawn
     // as this device's own is one the human would be offered a session under.
+    //
+    // The login is read beside them rather than with them: it arrived after the
+    // pair did, so a mirror written before it says nothing, and nothing said is
+    // what was assumed of every mirror until then — an account with a login to
+    // lend. The next refresh writes what is really true.
     let mirror = match (device, at_home) {
-        (Some(device), Some(id)) => Some(Mirror { device, id }),
+        (Some(device), Some(id)) => Some(Mirror {
+            device,
+            id,
+            login: login.unwrap_or(true),
+        }),
         (None, None) => None,
         _ => bail!("Profile {id} is half a mirror: it names a device or an id there and not both"),
     };

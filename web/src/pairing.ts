@@ -13,17 +13,20 @@
 //! of the backend, the model and the profile's name. What is here is the pairing
 //! vocabulary — the rows, and the string one travels as.
 //!
-//! And one thing that reading has no way to say, because it is about the account
-//! rather than about what it runs: which machine the account is on. Every device
-//! of a cluster offers every member's accounts, so a row says the machine where
-//! that is not this one — see [`on`], which is the one rule for all four places
-//! a pairing is read.
+//! And two things that reading has no way to say, because they are about the
+//! account rather than about what it runs: which machine the account is on, and
+//! whether anything can be launched under it from here. Every device of a
+//! cluster offers every member's accounts, so a row says the machine where that
+//! is not this one — and a row nothing can be run under says so and stays where
+//! it is rather than quietly going. See [`on`], which is the one rule for all
+//! four places a pairing is read.
 //!
 //! There is no default model anywhere, which is why nothing here invents one: a
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
 
 import { briefly, reading } from "./agents";
+import { brokenBriefly } from "./broken";
 import type {
   PairingView,
   PickedView,
@@ -121,8 +124,22 @@ export function shown(
 /// A middle dot rather than the em dash the profile's own name hangs off, so
 /// that "Claude Code Fable 5 — Work · the-laptop" reads as an account and then
 /// a machine rather than as a name with a machine in it.
+///
+/// **And why it cannot be run, where it cannot.** A profile nothing can be
+/// launched under stays in every picker — a row saying why is something to go
+/// and put right, and a row quietly missing is a human looking for a profile
+/// they know they saved — so the row has to carry the why, and it carries it
+/// after the machine because that is what most of the findings are about. The
+/// words are [`brokenBriefly`](./broken.ts), which is the short form of the
+/// sentence the card and the chosen row say in full.
 function on(words: string, profile: ProfileEntry): string {
-  return profile.device ? `${words} · ${profile.device.name}` : words;
+  return [
+    words,
+    profile.device?.name ?? null,
+    profile.broken === null ? null : brokenBriefly(profile.broken),
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
 }
 
 /// What is chosen now, as [`value`] would have written it.

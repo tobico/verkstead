@@ -44,6 +44,7 @@ use verkstead_render::RelayedNews;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::dialling::Peers;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
@@ -307,7 +308,12 @@ impl Verkstead {
         let Routers {
             workbench,
             over_the_link,
-        } = routers_answering_devices_telling(pool.clone(), cluster.clone(), nudges.clone());
+        } = routers_answering_devices_telling(
+            pool.clone(),
+            cluster.clone(),
+            nudges.clone(),
+            Machine::here(),
+        );
 
         // Which is the one line of a start this suite is about: the cluster left
         // where a piece of news can find it, so that what a push tells this

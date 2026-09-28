@@ -29,6 +29,7 @@ const profile = (
   models: [],
   memory: true,
   broken: null,
+  login: true,
   /// This device's own, which is every account on a Verkstead linked to nothing.
   device: null,
 });

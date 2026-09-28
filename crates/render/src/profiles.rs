@@ -77,17 +77,41 @@ pub enum ProfileAccount {
     OpenCode { home: String },
 }
 
+impl ProfileAccount {
+    /// Which agent runs this account, which is what its shape says.
+    ///
+    /// The discriminator read as the type it is spelled in: a reader with an
+    /// account in hand and no Profile around it — a refusal naming the harness
+    /// a row could not be run on, say — should not have to match four arms to
+    /// learn what the tag already holds.
+    pub fn agent_type(&self) -> AgentType {
+        match self {
+            ProfileAccount::Claude { .. } => AgentType::Claude,
+            ProfileAccount::Codex { .. } => AgentType::Codex,
+            ProfileAccount::Grok { .. } => AgentType::Grok,
+            ProfileAccount::OpenCode { .. } => AgentType::OpenCode,
+        }
+    }
+}
+
 /// Why a saved Profile cannot be run under as things stand.
 ///
 /// Not a way of being saved: every Profile here passed the same checks when it
 /// was written down. This is what has become of its account since — the pair
 /// for a Claude Profile, and the one home for every type that keeps one.
 ///
-/// **Nothing at all for a mirror.** A Profile at home on another device names
-/// paths on that machine and is judged against none of them here: what a session
-/// away from home is given is a mirror of the account, fetched from the home
-/// device before each launch, so the row is one to run under and there is nothing
-/// about this filesystem to say about it.
+/// **And three of them are a mirror's**, which is the same question asked of a
+/// Profile whose account is on another machine. None of that machine's paths is
+/// judged here — they belong to no filesystem this device can read — so what is
+/// asked instead is the three things that would stop a launch away from home,
+/// in the order a launch would meet them: the home device answering at all, an
+/// account with a login to lend, and the harness to run it on this machine.
+///
+/// **Refused rather than hidden.** A row that says why it cannot be run is
+/// something to go and put right, and a row quietly missing is a human looking
+/// for a Profile they know they saved. So none of the three takes a row out of
+/// a picker, and a Pairing made against one goes on reading as a Pairing — with
+/// a broken Profile in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Broken {
@@ -99,6 +123,53 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
+
+    /// The device this Profile is at home on has stopped answering, so its
+    /// account cannot be fetched and no root here can be built out of it.
+    ///
+    /// The first of the three a launch away from home would meet, and the one
+    /// that makes the other two answers about a moment that has passed: what
+    /// the row says of them is what that machine last said.
+    HomeUnreachable,
+
+    /// The account at home holds no login file, so there is nothing to mirror
+    /// and the Profile cannot be used away from its own device at all.
+    ///
+    /// A Claude login kept in the macOS Keychain is the case this exists for,
+    /// and a sign-out at home comes to the same thing — the file goes, the row
+    /// says the Profile has none, and the fix is a login on the machine the
+    /// account is on.
+    NoLoginAtHome,
+
+    /// The harness this Profile runs is not on *this* machine, whatever is true
+    /// of it at home.
+    ///
+    /// The onboarding probe's own finding, asked of the program a session of
+    /// this type is launched as — so a mirror reads it in that step's own word
+    /// rather than in a second vocabulary for one fact.
+    HarnessMissing,
+}
+
+/// Why a press that would have started a session was refused over a Profile:
+/// what is wrong with it, what it runs, and the machine it is at home on.
+///
+/// **Enough to say the sentence the row says.** Every one of the readings above
+/// is drawn on the Profile's own row, and a refusal saying only *a chosen
+/// profile is broken* would be a second, vaguer account of something the human
+/// is already being told precisely. So what travels is the three facts that
+/// sentence is composed out of, and the viewer composes it once for both.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProfileTrouble {
+    /// What is wrong with it.
+    pub broken: Broken,
+
+    /// Which harness it runs, for the trouble that is about the harness.
+    pub agent_type: AgentType,
+
+    /// And the machine the account is at home on, where that is not this one —
+    /// which is what the two troubles about a home name.
+    pub device: Option<String>,
 }
 
 /// One row of the Profile list.
@@ -129,9 +200,22 @@ pub struct ProfileEntry {
     /// nothing more.
     pub models: Vec<String>,
 
-    /// `null` while the account is where it was left, which is the ordinary
-    /// case.
+    /// `null` while the account is where it was left and there is nothing in
+    /// the way of running a session under it here, which is the ordinary case.
     pub broken: Option<Broken>,
+
+    /// Whether the account this row names holds a **login file**, which is what
+    /// says the Profile can be used away from the device it is at home on.
+    ///
+    /// Answered on the row wherever it is drawn, and by the device the account
+    /// is on: a mirror carries what that machine last said, and this device's
+    /// own rows are looked at here. A login kept somewhere that is not a file —
+    /// the macOS Keychain — leaves nothing for another device to mirror, and so
+    /// does a sign-out; either way the account is still perfectly runnable on
+    /// the machine it is on, which is why this is a fact beside [`Self::broken`]
+    /// rather than a way of being it. A *mirror* with no login at home is
+    /// broken, and that is [`Broken::NoLoginAtHome`].
+    pub login: bool,
 
     /// Whether a session under this Profile shares the account's memory store,
     /// or starts with an empty one of its own. On unless the human switched it

@@ -2835,6 +2835,7 @@ async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
             &Mirror {
                 device: "0011223344556677889900aabbccddee".to_owned(),
                 id: at_home,
+                login: true,
             },
             &ProfileFacts {
                 name: name.map(str::to_owned),
@@ -2878,6 +2879,79 @@ async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
         .await
         .unwrap(),
         Err(Clash::DefaultTaken),
+    );
+}
+
+/// And whether a member's account has a login at home survives every rewrite
+/// the open puts the table through.
+///
+/// **Which is not a thing to take away and put back.** The column arrives on an
+/// old table by `ALTER`, and the rewrite that lets two devices call an account
+/// the same thing remakes the table — so it carries the column across rather
+/// than dropping it and asking for it again: the pool hands the pragma that
+/// looks for a column and the `ALTER` that adds it to whichever connections are
+/// free, and one that has not caught up with the drop refuses it as one it
+/// already has.
+///
+/// Opened twice for the reason every rewrite here is: the second open must find
+/// nothing to do.
+#[tokio::test]
+async fn a_mirrors_login_at_home_survives_the_rewrites() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_named_across_every_device(dir.path()).await;
+
+    for opening in ["it opens", "it opens again"] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let declared: Option<(String,)> = sqlx::query_as(
+            "SELECT type FROM pragma_table_info('profiles') WHERE name = 'home_login'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            declared,
+            Some(("INTEGER".to_owned(),)),
+            "the rewritten table carries the column: {opening}",
+        );
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let id = record_mirror(
+        &pool,
+        &Mirror {
+            device: "0011223344556677889900aabbccddee".to_owned(),
+            id: 7,
+            login: false,
+        },
+        &ProfileFacts {
+            name: Some("keychain".to_owned()),
+            account: claude("theirs"),
+            models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let written = profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .expect("the mirror that was just written down");
+
+    assert!(
+        !written.mirror.expect("a mirror").login,
+        "and a mirror written into it says the account at home has no login",
     );
 }
 

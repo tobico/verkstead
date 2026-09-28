@@ -125,9 +125,9 @@ import {
   listProfiles,
 } from "../api/client";
 import { AGENT_NAME, type AgentType } from "../agents";
+import { NOT_USABLE_AWAY, brokenReading } from "../broken";
 import { osIcon } from "../devices";
 import type {
-  Broken,
   ProfileAccount,
   ProfileDeleted,
   ProfileEdit,
@@ -136,7 +136,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { KNOWN_MODELS, known, prettify } from "../models";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
@@ -179,18 +179,6 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
 export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   Removed: "",
   NoSuchProfile: "That profile is gone already.",
-};
-
-/// What is wrong with a profile whose pair is no longer where it was left.
-///
-/// Every one of them is about a path on this machine. A profile of a member's is
-/// judged against none of them: its account is on that machine, and what a
-/// session here is given is a mirror of it fetched before the launch, so the row
-/// says which machine the account sits on and nothing is wrong with it.
-export const BROKEN: Record<Broken, string> = {
-  DirMissing: "Its claude directory is gone.",
-  ConfigMissing: "Its config file is gone.",
-  HomeMissing: "The home it kept its account under is gone.",
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
@@ -496,10 +484,16 @@ function ProfileCard(props: {
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
-        <Show when={props.profile.broken}>
-          {(broken) => (
-            <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>
-          )}
+        <Show when={brokenReading(props.profile)}>
+          {(why) => <ErrorLine class={styles.broken}>{why()}</ErrorLine>}
+        </Show>
+        {/* And the one thing a row says that is not a refusal: an account with
+            no login file is perfectly runnable here and cannot be lent to
+            another device, there being nothing to mirror. Said on every
+            device's row — a mirror with none is broken and says so above, and
+            this is the same account read where it lives. */}
+        <Show when={!props.profile.login && props.profile.device === null}>
+          <Note>{NOT_USABLE_AWAY}</Note>
         </Show>
       </CardButton>
     </li>

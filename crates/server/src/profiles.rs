@@ -13,11 +13,18 @@
 //! **And a Profile may be a member's**, which is the one row here nothing is
 //! judged about against this filesystem: a **mirror** names an account on
 //! another machine, and its paths belong to no filesystem here — see
-//! [`crate::mirroring`]. So it is answered first and out of the row itself,
-//! reading as a row with nothing wrong with it — what a session here is given is
-//! a mirror of that account, fetched from the machine it is on before the launch,
-//! see [`crate::mirroring::account`] — and the machine it is at home on rides out
-//! beside it for every list that draws several devices' accounts as one.
+//! [`crate::mirroring`]. So it is answered out of the row itself and out of
+//! this device, and the machine it is at home on rides out beside it for every
+//! list that draws several devices' accounts as one.
+//!
+//! **Which does not make a mirror unbreakable**, it makes it break over
+//! different things: the three that would stop a launch away from home, asked
+//! in the order a launch would meet them. Whether the home device is answering
+//! at all, whether the account over there holds a login there is anything to
+//! mirror, and whether the harness is on *this* machine. Each is named on the
+//! row and each refuses a Start by name, before a session comes up logged out
+//! with nothing saying why — see [`broken`], where the three are decided, and
+//! [`verkstead_render::Broken`], which is the vocabulary they are said in.
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
@@ -34,7 +41,7 @@ use verkstead_render::{
 };
 
 use crate::resolved::{Resolved, resolve};
-use crate::store;
+use crate::{AppState, store};
 
 /// Save a new Profile, or say why not.
 pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<ProfileSaved> {
@@ -86,14 +93,14 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted>
 /// Profile is a Profile, and which machine its account sits on is a fact on the
 /// row. What refreshes the mirrors is [`crate::mirroring`]; what this does is
 /// read them back beside this device's own.
-pub(crate) async fn listed(pool: &SqlitePool) -> Result<Vec<ProfileEntry>> {
-    entries(pool, store::profiles(pool).await?).await
+pub(crate) async fn listed(state: &AppState) -> Result<Vec<ProfileEntry>> {
+    entries(state, store::profiles(&state.pool).await?).await
 }
 
 /// The same reading for one Pairing, for the panes that show a Conversation's
 /// own choices rather than the whole list.
 pub(crate) async fn pairing(
-    pool: &SqlitePool,
+    state: &AppState,
     pairing: Option<store::Pairing>,
 ) -> Result<Option<PairingView>> {
     let Some(pairing) = pairing else {
@@ -102,7 +109,7 @@ pub(crate) async fn pairing(
 
     let model = pairing.model;
 
-    Ok(entries(pool, vec![pairing.profile])
+    Ok(entries(state, vec![pairing.profile])
         .await?
         .pop()
         .map(|profile| PairingView { profile, model }))
@@ -117,7 +124,7 @@ pub(crate) async fn pairing(
 /// hops. What it is for is the steers on a Timeline — see `crate::ui`, which
 /// reads them all before it draws any.
 pub(crate) async fn keyed(
-    pool: &SqlitePool,
+    state: &AppState,
     pairings: Vec<(i64, store::Pairing)>,
 ) -> Result<HashMap<i64, PairingView>> {
     let (keys, profiles): (Vec<i64>, Vec<store::Profile>) = pairings
@@ -129,7 +136,7 @@ pub(crate) async fn keyed(
 
     Ok(keys
         .into_iter()
-        .zip(entries(pool, profiles).await?)
+        .zip(entries(state, profiles).await?)
         .zip(models)
         .map(|((key, profile), model)| (key, PairingView { profile, model }))
         .collect())
@@ -142,11 +149,11 @@ pub(crate) async fn keyed(
 /// that runs no session stays what it is, and a Profile whose row has gone
 /// reads as nothing picked — which is what it is, since there is no account
 /// left to launch under.
-pub(crate) async fn picked(pool: &SqlitePool, picked: store::Picked) -> Result<PickedView> {
+pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<PickedView> {
     Ok(match picked {
         store::Picked::Nothing => PickedView::Nothing,
         store::Picked::Skipped => PickedView::Skipped,
-        store::Picked::Under(under) => match pairing(pool, Some(under)).await? {
+        store::Picked::Under(under) => match pairing(state, Some(under)).await? {
             Some(pairing) => PickedView::Under(pairing),
             None => PickedView::Nothing,
         },
@@ -167,23 +174,49 @@ pub(crate) async fn picked(pool: &SqlitePool, picked: store::Picked) -> Result<P
 /// exactly as a merged sidebar row's is (see [`crate::merging`]). Asked only
 /// where there is a mirror in the batch, so the ordinary installation pays
 /// nothing for it.
-async fn entries(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
-    let homes = homes_of(pool, &profiles).await?;
+///
+/// **And the machine itself goes in with them**, for the one thing a mirror is
+/// judged against here: whether the harness it runs is installed on this box —
+/// see [`broken`]. One probe for the batch and one `PATH` walk per harness in
+/// it, inside the same blocking hop the paths are resolved in.
+async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
+    let homes = homes_of(&state.pool, &profiles).await?;
+    let machine = state.onboarding.machine().clone();
 
     Ok(tokio::task::spawn_blocking(move || {
+        // Whether each harness a mirror in this batch runs is on this machine,
+        // asked once apiece: a Profiles section of a cluster draws every
+        // member's accounts, and four walks are not one per row.
+        let mut harnesses: HashMap<store::AgentType, bool> = HashMap::new();
+
+        for profile in &profiles {
+            if profile.mirror.is_some() {
+                let agent_type = profile.agent_type();
+
+                harnesses
+                    .entry(agent_type)
+                    .or_insert_with(|| machine.harness(agent_type));
+            }
+        }
+
         profiles
             .into_iter()
-            .map(|profile| ProfileEntry {
-                id: profile.id,
-                broken: broken(&profile),
-                device: profile
+            .map(|profile| {
+                let home = profile
                     .mirror
                     .as_ref()
-                    .map(|mirror| whose(&homes, &mirror.device)),
-                name: profile.name,
-                account: account(&profile.account),
-                models: profile.models,
-                memory: profile.memory,
+                    .map(|mirror| whose(&homes, &mirror.device));
+
+                ProfileEntry {
+                    id: profile.id,
+                    broken: broken(&profile, home.as_ref(), &harnesses),
+                    login: lends(&profile),
+                    device: home,
+                    name: profile.name,
+                    account: account(&profile.account),
+                    models: profile.models,
+                    memory: profile.memory,
+                }
             })
             .collect()
     })
@@ -205,6 +238,32 @@ async fn homes_of(
         .into_iter()
         .map(|member| (member.device.clone(), member))
         .collect())
+}
+
+/// Whether the account this row names holds a **login file** — the fact that
+/// says whether it can be used away from the device it is at home on at all.
+///
+/// **Answered by the device the account is on, wherever the row is drawn.** One
+/// of this device's own is looked at here, at the one path the harness keeps a
+/// login under; a mirror carries what the home device said the last time the
+/// rows were refreshed, that path being on a filesystem this box cannot read.
+/// So the answer on a row is always the answer the machine holding the account
+/// gave.
+///
+/// A login kept somewhere that is not a file — a Claude login in the macOS
+/// Keychain — reads the same as a sign-out, which is what it is from here: there
+/// is nothing to hand another machine. Neither stops a session at home, which is
+/// why this is a fact beside [`ProfileEntry::broken`] rather than a way of being
+/// it, and why the row says *cannot be used away* rather than *broken* on the
+/// machine the account is on.
+fn lends(profile: &store::Profile) -> bool {
+    match &profile.mirror {
+        Some(mirror) => mirror.login,
+        None => matches!(
+            resolve(&crate::sandbox::root::login_at(&profile.account)),
+            Resolved::At(_)
+        ),
+    }
 }
 
 /// How a mirror's home device is drawn, off that reading.
@@ -313,17 +372,61 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// a dangling symlink where the account was is a Profile that cannot be run
 /// under.
 ///
-/// **A mirror is answered before any of that and without looking at anything.**
+/// **A mirror is answered before any of that and asks three other questions.**
 /// Its paths are the home machine's, so resolving them here would be asking the
 /// wrong filesystem a question it may well answer *yes* to — two machines set up
 /// alike hold the same paths, and the account under them is somebody else's. What
 /// a session away from home is given is not those paths either: the login and the
 /// configuration a Built Root is made from are fetched into a mirror of that
-/// account under this device's Data Directory before each launch, so a mirror is a
-/// row to run under and there is nothing here to go and put right. See
+/// account under this device's Data Directory before each launch. See
 /// [`crate::mirroring::account`].
-fn broken(profile: &store::Profile) -> Option<Broken> {
+///
+/// So what is asked instead is the three things that would stop *that*, **in
+/// the order a launch would meet them**: the home device is dialled, the
+/// account is fetched out of it, and the harness is run here.
+///
+/// 1. **The home is not answering** — [`Broken::HomeUnreachable`]. Nothing can
+///    be fetched, so nothing can be built, and the two readings below are what
+///    that machine last said rather than what is true now. This device's own
+///    reading of its membership is what says so, which is the same reading the
+///    sidebar draws a member's Conversation unreachable off.
+/// 2. **The account at home holds no login file** — [`Broken::NoLoginAtHome`].
+///    There is nothing to mirror, so a session here would come up logged out;
+///    the Profile is still perfectly runnable on the machine it is on, and the
+///    fix is a login there. See [`lends`].
+/// 3. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
+///    onboarding probe's own finding, in that step's own word: a root built out
+///    of a mirrored account is no use where there is no program to run in it.
+///
+/// **And that is the whole of it for a mirror**: a row that passes all three is
+/// a row to run under, and there is nothing about this filesystem to go and put
+/// right.
+fn broken(
+    profile: &store::Profile,
+    home: Option<&RowDevice>,
+    harnesses: &HashMap<store::AgentType, bool>,
+) -> Option<Broken> {
     if profile.mirror.is_some() {
+        if home.is_some_and(|home| !home.reachable) {
+            return Some(Broken::HomeUnreachable);
+        }
+
+        if !lends(profile) {
+            return Some(Broken::NoLoginAtHome);
+        }
+
+        // Absent from the map is a batch nothing probed, which cannot happen
+        // for a row that is a mirror — [`entries`] fills it off the same rows.
+        // Read as *there* rather than as broken, a Profile refused for a probe
+        // nobody made being worse than one offered and found wanting.
+        if !harnesses
+            .get(&profile.agent_type())
+            .copied()
+            .unwrap_or(true)
+        {
+            return Some(Broken::HarnessMissing);
+        }
+
         return None;
     }
 

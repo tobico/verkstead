@@ -637,6 +637,22 @@ impl Machine {
         stood(self.reaches(program))
     }
 
+    /// And whether one harness is on this machine, which is the same probe
+    /// asked as a yes or a no.
+    ///
+    /// **The wizard's own finding, borrowed.** A **mirror** of a member's
+    /// Profile names a harness this device may simply not have, and a row that
+    /// said so in words of its own would be a second vocabulary for a fact the
+    /// dependencies step already has one for. So it is this probe, under the
+    /// name a session of that type is launched as, and the row reads in that
+    /// step's word — see `crate::profiles::broken`.
+    ///
+    /// Blocks: one `PATH` walk, which is why every caller is already off the
+    /// runtime.
+    pub(crate) fn harness(&self, agent_type: store::AgentType) -> bool {
+        present(&self.installed(sessions::binary(agent_type)))
+    }
+
     /// The `PATH` a session searches, which on the machine this server is
     /// running on is composed now rather than read off a field — see
     /// [`Machine::path`] for why that one has none held, and
@@ -1029,6 +1045,18 @@ impl Onboarding {
             mode: Arc::new(Mode::default()),
             installer: Arc::new(install::Installer::raising(escalation)),
         }
+    }
+
+    /// The machine this server probes, for the one reader of it that is not
+    /// the wizard.
+    ///
+    /// Whether a harness is on this machine is the dependencies step's own
+    /// question, and a **mirror** of a member's Profile has to ask it too — see
+    /// [`Machine::harness`], and `crate::profiles::broken`, which is where a
+    /// row of a type this device has not got is read as broken in that step's
+    /// word.
+    pub(crate) fn machine(&self) -> &Machine {
+        &self.machine
     }
 
     /// The whole of what the wizard is drawn from, read now.

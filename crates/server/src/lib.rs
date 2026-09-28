@@ -1107,10 +1107,19 @@ pub fn router_answering_devices_telling(
 ///
 /// The peer half is handed to [`peer::router`] the way [`router_over_the_link`]'s
 /// is, which is what puts the Member Gate in front of it.
+///
+/// **And `machine` is what the mirrors are judged on**, which is the one thing
+/// a clustered router probes that a lone one never does: a **mirror** of a
+/// member's Profile whose harness is not on this box reads broken in the
+/// onboarding probe's own word, so a suite about mirrors has to say what this
+/// box has rather than take whatever the runner happens to hold — see
+/// [`profiles::broken`]. A served Verkstead passes [`onboarding::Machine::here`],
+/// as every other constructor does.
 pub fn routers_answering_devices_telling(
     pool: SqlitePool,
     devices: device::Devices,
     nudges: nudge::Nudges,
+    machine: onboarding::Machine,
 ) -> Routers {
     let gate = key::Gate::open();
 
@@ -1123,7 +1132,7 @@ pub fn routers_answering_devices_telling(
         Gh::on_path(),
         tailnet(),
         &gate,
-        onboarding::Machine::here(),
+        machine,
         None,
         Some(devices),
         nudges,
@@ -1145,6 +1154,11 @@ pub fn routers_answering_devices_telling(
 /// starts (see [`mirroring::account`]), and the agent that runs is `agents`'.
 /// Every other clustered constructor here runs no session at all, which is every
 /// question about a cluster but that one.
+///
+/// And `machine` is what its mirrors are judged on, for the reason
+/// [`routers_answering_devices_telling`] takes one: a session away from home is
+/// refused where the harness it would run is not on this box, and what a suite
+/// stubs the agent with is not what the probe walks a `PATH` for.
 pub fn routers_running_sessions_answering_devices(
     pool: SqlitePool,
     data_dir: PathBuf,
@@ -1152,6 +1166,7 @@ pub fn routers_running_sessions_answering_devices(
     gh: Gh,
     devices: device::Devices,
     nudges: nudge::Nudges,
+    machine: onboarding::Machine,
 ) -> Routers {
     // Taken off the agents rather than asked for again, for
     // [`router_running_sessions`]'s reason: the binds a session gets and the
@@ -1168,7 +1183,7 @@ pub fn routers_running_sessions_answering_devices(
         gh,
         tailnet(),
         &gate,
-        onboarding::Machine::here(),
+        machine,
         None,
         Some(devices),
         nudges,

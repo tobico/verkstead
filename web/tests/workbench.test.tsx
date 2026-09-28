@@ -5673,6 +5673,7 @@ describe("a conversation's pairings", () => {
     {
       account: { agent_type: "Grok", home: "/srv/accounts/grok" },
       broken: null,
+      login: true,
       id: 9,
       memory: true,
       device: null,
@@ -7384,7 +7385,29 @@ describe("starting the work", () => {
     ["EmptyBrief", /Write the brief first/],
     ["NoBaseCommit", /nothing to branch from/],
     ["BranchExists", /branch already exists/],
-    ["ProfileBroken", /not where it was left/],
+    [
+      {
+        ProfileBroken: {
+          broken: "DirMissing",
+          agent_type: "Claude",
+          device: null,
+        },
+      },
+      /Its claude directory is gone/,
+    ],
+    // A profile of a member's that cannot be run from here says which machine
+    // to go to, the finding being about that one rather than about this — see
+    // `src/broken.ts`, which is where the one sentence is written.
+    [
+      {
+        ProfileBroken: {
+          broken: "HomeUnreachable",
+          agent_type: "Claude",
+          device: "the-workstation",
+        },
+      },
+      /the-workstation is unreachable/,
+    ],
     ["WorktreeRefused", /Git would not make the worktree/],
     ["NotDrafting", /already been started/],
   ] satisfies Array<[GrillingStarted, RegExp]>)(

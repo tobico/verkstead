@@ -3762,9 +3762,11 @@ pub enum GrillingStarted {
     /// rather than swapped underneath it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// The Brief is empty, and the Brief is what the grilling starts from.
     /// Freezing an empty one would freeze nothing worth having.
@@ -4545,9 +4547,11 @@ pub enum Adopted {
     /// which every stage after this one inherits along with the other two.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// No git author is configured, so there is nobody for Verkstead to commit
     /// the clearing of an inherited task list as — see
@@ -4718,9 +4722,11 @@ pub enum TakenUp {
     /// said on it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// Git would not fetch from the Repo's remote, so what origin holds on the
     /// head branch cannot be known. Refused rather than taken up against refs

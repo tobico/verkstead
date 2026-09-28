@@ -53,6 +53,7 @@
       "broken": null,
       "device": null,
       "id": 1,
+      "login": true,
       "memory": true,
       "models": [
         "claude-fable-5"
@@ -72,6 +73,7 @@
       "broken": null,
       "device": null,
       "id": 2,
+      "login": true,
       "memory": true,
       "models": [
         "claude-opus-5",
@@ -106,9 +108,10 @@
           "claude_dir": "/srv/accounts/sonnet/.claude",
           "config_file": "/srv/accounts/sonnet/.claude.json"
         },
-        "broken": "DirMissing",
+        "broken": null,
         "device": null,
         "id": 3,
+        "login": true,
         "memory": true,
         "models": [
           "claude-sonnet-5"

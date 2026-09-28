@@ -563,6 +563,130 @@ describe("a member's accounts", () => {
   });
 });
 
+/// The three ways a **mirror** is not usable on this device (ADR-0020, *Shared
+/// Profiles*), each named on the row where the human is looking.
+///
+/// **Refused rather than hidden**: every one of them stays on the list and in
+/// the pickers, because a row saying why it cannot be run is something to go
+/// and put right and a row quietly missing is a human looking for a Profile
+/// they know they saved. What the server decides is which of the three it is —
+/// `crates/server/tests/mirroring.rs` is where that is asked — and what is
+/// asked here is that the card says it.
+describe("a member's account that cannot be run from here", () => {
+  /// One mirror reading the way the server would answer it.
+  const troubled = (broken: ProfileEntry["broken"]): ProfileEntry[] => [
+    CLUSTER[0]!,
+    { ...MIRROR, broken },
+  ];
+
+  it("names the machine where the home has stopped answering", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([
+          CLUSTER[0]!,
+          {
+            ...MIRROR,
+            broken: "HomeUnreachable",
+            device: { ...MACHINE, reachable: false },
+          },
+        ]),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    // The word the sidebar wears for the same finding: one dial worked down
+    // that machine's addresses and reached none of them.
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(
+      `${MACHINE.name} is unreachable, so its account cannot be fetched and no session here can be built out of it.`,
+    );
+  });
+
+  /// A login kept in the macOS Keychain leaves no file for another device to
+  /// mirror, and neither does a sign-out. The fix is a login on the machine the
+  /// account is on, which is why the row names it.
+  it("names the machine to log in on where the account has no login file", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([CLUSTER[0]!, { ...MIRROR, broken: "NoLoginAtHome", login: false }]),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(
+      `Its account on ${MACHINE.name} holds no login file, so there is nothing to mirror here. Log in on that machine.`,
+    );
+  });
+
+  /// And a harness that is not on this machine reads in the onboarding probe's
+  /// own word, carrying the sentence that step shows — one vocabulary for one
+  /// fact, rather than a second invented here. See `src/broken.ts`.
+  it("says a harness that is not here in the onboarding step's own words", async () => {
+    serving(whenever("/api/ui/profiles", json(troubled("HarnessMissing"))));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(`${AGENT_NAME[MIRROR.account.agent_type]} is not on this machine.`);
+  });
+
+  /// And none of them takes the row off the list: two rows in, two rows drawn.
+  it.each(["HomeUnreachable", "NoLoginAtHome", "HarnessMissing"] as const)(
+    "leaves a row reading %s on the list",
+    async (broken) => {
+      serving(whenever("/api/ui/profiles", json(troubled(broken))));
+      mountCards();
+
+      await waitFor(() => screen.getByText(reads(MIRROR)));
+
+      expect(screen.getByText(reads(CLUSTER[0]!))).toBeTruthy();
+    },
+  );
+
+  /// And the row on the device the account *is* on says the one thing that is
+  /// true there: the Profile runs perfectly well here and cannot be lent out.
+  /// Not broken — there is nothing wrong with a login in a Keychain — which is
+  /// why it reads as a note rather than as a trouble.
+  it("says on the home device that an account with no login cannot be used away", async () => {
+    serving(
+      whenever("/api/ui/profiles", json([{ ...CLUSTER[0]!, login: false }])),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(CLUSTER[0]!)));
+
+    const card = theCard(reads(CLUSTER[0]!));
+
+    expect(card.querySelector(`.${styles.broken}`)).toBeNull();
+    expect(card.textContent).toContain(
+      "No login file in this account, so it cannot be used from another device.",
+    );
+  });
+
+  /// And nothing at all where there is a login, which is every ordinary
+  /// account: a row saying what is *not* wrong with it would be a line on every
+  /// card in the section.
+  it("says nothing of the sort about an account that is logged in", async () => {
+    theProfiles();
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    expect(document.body.textContent).not.toContain("No login file");
+  });
+});
+
 describe("the plus that adds one", () => {
   /// An `IconButton`, for the reason the gear at the head of the conversations
   /// is one: it is another thing in the pane that is selected and opened into

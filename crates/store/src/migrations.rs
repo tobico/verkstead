@@ -177,12 +177,15 @@ async fn profiles_whose_name_was_unique_everywhere(pool: &SqlitePool) -> Result<
         return Ok(());
     }
 
-    // And the two columns the rebuild carries across, which a database old
+    // And the three columns the rebuild carries across, which a database old
     // enough to have needed the rewrite above no longer has: that one remade the
-    // table in the shape it had before either of them existed, undoing what
+    // table in the shape it had before any of them existed, undoing what
     // `apply_schema` had just added. Asked for again here rather than once at
-    // the start, because this is the last hand the table passes through.
+    // the start, because this is the last hand the table passes through — so a
+    // column is added where it is missing and the rebuild below keeps it,
+    // rather than being dropped here and added again afterwards.
     super::profiles::mirror_columns(pool).await?;
+    super::profiles::home_login_column(pool).await?;
 
     let mut conn = pool
         .acquire()
@@ -262,10 +265,14 @@ async fn rebuild_profiles_for_mirrors(conn: &mut sqlx::SqliteConnection) -> Resu
     // declaration would make a database opened after the next column arrives
     // come out a different shape from one opened today.
     //
-    // The two mirror columns are in it because the declaration has them by the
-    // time this runs — `apply_schema` adds them to an old table before the
-    // migrations are reached — so leaving them out here would be taking them
-    // away again.
+    // The three mirror columns are in it because the declaration has them by
+    // the time this runs — `apply_schema` adds them to an old table before the
+    // migrations are reached, and the caller above asks for them once more
+    // after the earlier rewrite stripped them — so leaving them out here would
+    // be taking them away again. And taking one away to add it back afterwards
+    // is not the same thing: the pool hands the two statements out to whichever
+    // connections are free, and one that has not caught up with the drop would
+    // refuse the column as one it already has.
     sqlx::query(
         "CREATE TABLE profiles_named_per_device (
              id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,7 +283,8 @@ async fn rebuild_profiles_for_mirrors(conn: &mut sqlx::SqliteConnection) -> Resu
              agent_type  TEXT NOT NULL,
              memory      INTEGER NOT NULL DEFAULT 1,
              home_device TEXT,
-             home_id     INTEGER
+             home_id     INTEGER,
+             home_login  INTEGER
          ) STRICT",
     )
     .execute(&mut *tx)
@@ -285,8 +293,10 @@ async fn rebuild_profiles_for_mirrors(conn: &mut sqlx::SqliteConnection) -> Resu
 
     sqlx::query(
         "INSERT INTO profiles_named_per_device
-             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id)
-         SELECT id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id,
+              home_login)
+         SELECT id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id,
+                home_login
          FROM profiles",
     )
     .execute(&mut *tx)

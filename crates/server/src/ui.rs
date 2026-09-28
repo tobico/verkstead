@@ -1507,11 +1507,8 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(
-        &state.pool,
-        conversation.grilling_pairing,
-    )
-    .await
+    let grilling_pairing = match crate::profiles::pairing(state, conversation.grilling_pairing)
+        .await
     {
         Ok(pairing) => pairing,
         Err(error) => {
@@ -1521,7 +1518,7 @@ pub(crate) async fn conversation_view(
     };
 
     let implementation_pairing = match crate::profiles::pairing(
-        &state.pool,
+        state,
         conversation.implementation_pairing,
     )
     .await
@@ -1533,9 +1530,7 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let review_pairing = match crate::profiles::picked(&state.pool, conversation.review_pairing)
-        .await
-    {
+    let review_pairing = match crate::profiles::picked(state, conversation.review_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
@@ -2039,7 +2034,7 @@ pub(crate) async fn conversation_view(
     // A read that fails leaves the steers to draw without their Pairing rather
     // than taking the Conversation down with it: everything else about the
     // record is in hand, and a pane short one line is better than no pane.
-    let steer_pairings = match crate::profiles::keyed(&state.pool, steered(&timeline)).await {
+    let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading what a steer picked failed");
@@ -4922,7 +4917,7 @@ async fn choose_review_pairing(
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
 /// pair is still where it was left.
 async fn profiles(State(state): State<AppState>) -> HttpResponse {
-    match crate::profiles::listed(&state.pool).await {
+    match crate::profiles::listed(&state).await {
         Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Agent Profiles failed");

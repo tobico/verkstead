@@ -21,13 +21,13 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
+    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, Broken, CheckRollup,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
+    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, Registered,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
     SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
     TargetRecorded, TimelineEvent,
 };
@@ -2679,7 +2679,18 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
     assert!(!opened(&app, id).await.ready_to_grill);
-    assert_eq!(grill(&app, id).await, GrillingStarted::ProfileBroken);
+
+    // Named rather than lumped: the refusal carries what the Profile's own row
+    // carries, so the sentence at the press is the sentence the row is already
+    // showing.
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
 }
 
 /// The Brief is what the grilling starts from, and freezing an empty one would
@@ -9217,7 +9228,14 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::ProfileBroken);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
     nothing_adopted(&app, id, &repo).await;
 }
 

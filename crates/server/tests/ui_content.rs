@@ -3655,7 +3655,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, shared) = a_shared_profiles_app().await;
     write(
         "profiles-shared.json",
-        &get(&shared, "/api/ui/profiles").await,
+        &pin_health(&get(&shared, "/api/ui/profiles").await),
     );
 
     // And the list under those rows, which is the other reading that section
@@ -3890,6 +3890,7 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
         &verkstead_store::Mirror {
             device: A_MEMBER.to_owned(),
             id: 4,
+            login: true,
         },
         &store::ProfileFacts {
             name: Some("personal".to_owned()),
@@ -4332,14 +4333,19 @@ fn pin_tried(json: &str) -> String {
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    // A list of Profiles, or one Conversation carrying the two Pairings it has
-    // chosen — whose Profile half is the one the filesystem has an opinion of.
+    // A list of Profiles, or one Conversation carrying the three Pairings it
+    // has chosen — whose Profile half is the one the filesystem has an opinion
+    // of.
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
             let mut ready = payload["state"] == "Draft";
 
-            for role in ["grilling_pairing", "implementation_pairing"] {
+            for role in [
+                "grilling_pairing",
+                "implementation_pairing",
+                "review_pairing",
+            ] {
                 match payload.get_mut(role) {
                     // The row that runs no session, which the grilling role has
                     // one of: a choice made, so readiness stands, and nothing
@@ -4603,12 +4609,22 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// One Profile read as one whose account is where it was left and logged in.
+///
+/// **Both facts, because both are read off the machine writing this.** Whether
+/// the pair is there is what `broken` says of one of this device's own rows;
+/// whether the account holds a login file is `login`, and for a **mirror** it
+/// is the harness's presence on this box that decides `broken` — a `PATH` walk,
+/// which is a different answer on a developer's machine and on a runner with no
+/// `claude` installed. A fixture that moved with either would be a fixture the
+/// drift check failed on for nothing.
 fn mend(profile: &mut serde_json::Value) {
     assert!(
         profile.get("broken").is_some(),
         "no Profile here to pin:\n{profile}"
     );
     profile["broken"] = serde_json::Value::Null;
+    profile["login"] = true.into();
 }
 
 /// Pin the times a Conversation's Timeline carries, so the fixture does not

@@ -2666,6 +2666,33 @@ those.
 fetched from the machine it is on before each launch — see **Account mirror**.
 Nothing about the home machine's paths is judged here: they belong to that
 filesystem, and what a session is given is the mirror.
+**Which does not make a mirror unbreakable; it makes it break over other
+things.** Brokenness is answered per read for every Profile — a local one
+against its own paths — and for a mirror the question is the three that would
+stop a launch away from home, asked **in the order a launch would meet them**.
+**The home is not answering**, which is this device's own reading of its
+membership and reads the way that machine reads in the sidebar: nothing can be
+fetched, so nothing can be built. **The account at home holds no login file**,
+which the home device answers as the mirrors refresh and which is what a Claude
+login in the macOS Keychain comes to, and a sign-out at home with it — there is
+nothing to mirror, the fix is a login on that machine, and the Profile is
+meanwhile perfectly runnable there. **Or the harness is not on this machine**,
+which is the onboarding probe's own question answered in the onboarding probe's
+own word, rather than a second vocabulary for one fact.
+**Whether an account holds a login file is a fact on every row**, answered by
+the device the account is on: one of this device's own says *it cannot be used
+away from here*, which is a note rather than a trouble, and the same account
+read as a mirror elsewhere is broken there. Which is the difference the two
+readings are for.
+**Refused rather than hidden.** None of the three takes the row out of a picker
+or out of the Profiles section, and a Conversation paired with one reads as
+paired with a **broken** Profile rather than as one nothing was picked for: a
+row saying why it cannot be run is something to go and put right, where a row
+quietly missing is a human looking for a Profile they know they saved. What they
+do refuse is the **Start**, **by name and before anything starts** — the refusal
+carries what the row carries, so the sentence at the press is the sentence
+already on the row, and a Start refused over a machine that is not answering
+names that machine.
 **And a mirror is edited and removed from wherever it is drawn too**, and the
 press is relayed to the device the account is on: every device's Profiles
 section lists everyone's, and the form over a mirror saves. A save is put to the
@@ -2813,7 +2840,10 @@ its own — a row that is itself a mirror is an account on a third machine.
 **A home that is not answering starts no session**, and says which machine: a
 session launched under an account nothing fetched is one that comes up logged out
 with nothing on the Timeline saying why, so the refusal goes in the session's
-Capture naming the machine.
+Capture naming the machine. Which is the backstop rather than the reading: a
+mirror whose home has stopped answering is **broken** on the row long before
+anybody presses anything, and the press is refused there — see **Agent
+Profile**. This is what catches a machine that went away between the two.
 **And the login is written back as the session ends**, at
 `/api/peer/v1/profiles/<id>/account/login` on the same listener behind the same
 gate. It is the one file of a root a session genuinely changes — the harness

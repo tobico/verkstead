@@ -116,12 +116,12 @@ import type {
   RepoSwitched,
   TargetRecorded,
 } from "../api/types";
+import { brokenReading } from "../broken";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { Moving } from "./Moving";
-import { BROKEN } from "../profiles/ProfileList";
 import { keyOf, useDevice } from "../reaching";
 import type { Device } from "../reaching";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
@@ -1328,8 +1328,8 @@ function PairingPicker(props: {
       </Show>
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
-      <Show when={props.pairing?.profile.broken}>
-        {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
+      <Show when={props.pairing && brokenReading(props.pairing.profile)}>
+        {(why) => <ErrorLine class={styles.broken}>{why()}</ErrorLine>}
       </Show>
       <Show when={refused()}>
         {(outcome) => (

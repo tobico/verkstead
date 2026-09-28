@@ -45,6 +45,7 @@ use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
@@ -164,7 +165,12 @@ impl Verkstead {
         let Routers {
             workbench,
             over_the_link,
-        } = routers_answering_devices_telling(pool.clone(), cluster.clone(), nudges.clone());
+        } = routers_answering_devices_telling(
+            pool.clone(),
+            cluster.clone(),
+            nudges.clone(),
+            Machine::here(),
+        );
 
         tokio::spawn(listener.serving(peer::router(
             device.clone(),

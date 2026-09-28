@@ -17,6 +17,7 @@
 //! the one about a refresh is that the id did not move.
 
 use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use axum::Router;
@@ -31,9 +32,10 @@ use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
-use verkstead_server::platform::{self, Platform};
+use verkstead_server::platform::{self, Environment, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{Routers, open_database, routers_answering_devices_telling, store};
 use verkstead_store::{Linking, Mirror, forget_member, record_member};
@@ -102,10 +104,25 @@ impl Verkstead {
     /// Listener up — both routers over the one state, the peer half behind the
     /// Member Gate.
     async fn answering(id: &str) -> Verkstead {
+        Verkstead::standing(id, EVERY_HARNESS).await
+    }
+
+    /// And one this suite says has no harness on it at all, which is the one
+    /// thing about a **mirror** that is a fact about the device drawing it
+    /// rather than about the account.
+    async fn answering_with_no_harness(id: &str) -> Verkstead {
+        Verkstead::standing(id, &[]).await
+    }
+
+    /// Both of them, which differ in what the onboarding probe finds on the
+    /// `PATH` a session here would search.
+    async fn standing(id: &str, harnesses: &[&str]) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
             .unwrap();
+
+        let machine = probing(dir.path(), harnesses);
 
         let device = Device::stated(dir.path(), id).unwrap();
         let members = Members::recorded(pool.clone());
@@ -133,7 +150,12 @@ impl Verkstead {
         let Routers {
             workbench,
             over_the_link,
-        } = routers_answering_devices_telling(pool.clone(), cluster.clone(), nudges.clone());
+        } = routers_answering_devices_telling(
+            pool.clone(),
+            cluster.clone(),
+            nudges.clone(),
+            machine,
+        );
 
         tokio::spawn(listener.serving(peer::router(
             device.clone(),
@@ -194,7 +216,28 @@ impl Verkstead {
     /// An account on this machine for a Profile to name: the pair Claude Code
     /// keeps one as, really made, because saving a Profile is refused where the
     /// paths are not there.
+    ///
+    /// **Logged in**, which is what an account somebody uses is: the login is
+    /// the one file of it another device can be lent, so an account with none
+    /// is a Profile that cannot be used away from here at all — see
+    /// [`Verkstead::account_nobody_is_logged_in_to`], which is that case on
+    /// purpose.
     fn account(&self, name: &str) -> (PathBuf, PathBuf) {
+        let (claude_dir, config_file) = self.account_nobody_is_logged_in_to(name);
+
+        std::fs::write(
+            claude_dir.join(".credentials.json"),
+            "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-work\"}}",
+        )
+        .unwrap();
+
+        (claude_dir, config_file)
+    }
+
+    /// And the same account with no login file in it, which is what a Claude
+    /// login kept in the macOS Keychain leaves behind — and what a sign-out at
+    /// home comes to.
+    fn account_nobody_is_logged_in_to(&self, name: &str) -> (PathBuf, PathBuf) {
         let under = self.dir.path().join("accounts").join(name);
         let claude_dir = under.join(".claude");
         let config_file = under.join(".claude.json");
@@ -207,8 +250,21 @@ impl Verkstead {
 
     /// A Profile saved on this device, the way the form saves one.
     async fn saves(&self, name: &str) -> i64 {
-        let (claude_dir, config_file) = self.account(name);
+        let account = self.account(name);
 
+        self.saving(name, account).await
+    }
+
+    /// And one over an account nobody is logged in to, which is a Profile that
+    /// is perfectly runnable here and cannot be used away at all.
+    async fn saves_logged_out(&self, name: &str) -> i64 {
+        let account = self.account_nobody_is_logged_in_to(name);
+
+        self.saving(name, account).await
+    }
+
+    /// Both of them: the form's own press, over whichever account was made.
+    async fn saving(&self, name: &str, (claude_dir, config_file): (PathBuf, PathBuf)) -> i64 {
         let said = press(
             &self.workbench,
             PROFILES,
@@ -427,6 +483,42 @@ fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422)
 }
 
+/// Every harness a device in this suite is normally taken to have, named the
+/// way a session launches one.
+const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode"];
+
+/// The machine a device here is judged on: one directory on the `PATH` a
+/// session would search, holding a program for each of `harnesses`.
+///
+/// **Stated rather than read off the runner.** A **mirror** of a Profile whose
+/// harness is not on this device reads broken in the onboarding probe's own
+/// word, so what this box happens to have `claude` installed as is exactly the
+/// thing this suite must not depend on: every device says what it has, and the
+/// one test about a harness that is missing says it has none.
+fn probing(dir: &Path, harnesses: &[&str]) -> Machine {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+
+    for harness in harnesses {
+        let at = bin.join(harness);
+
+        std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    Machine::stated(
+        Platform::Linux,
+        bin.as_os_str().to_owned(),
+        bin.as_os_str().to_owned(),
+        None,
+        None,
+        &Environment {
+            home: Some(dir.to_owned()),
+            ..Environment::default()
+        },
+    )
+}
+
 /// A and B, linked both ways, with B holding the streams — which is the device
 /// every assertion here is made on.
 ///
@@ -505,6 +597,21 @@ async fn pressing(app: &Router, path: &str, saying: Option<&str>) -> (StatusCode
     let bytes = answered.into_body().collect().await.unwrap().to_bytes();
 
     (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// What the press that starts the work answers over a Profile of A's that
+/// cannot be run here, `broken` being which of the readings it is.
+///
+/// **The three facts the row's own sentence is composed out of**, which is what
+/// makes the refusal name what the human is already being shown: what is wrong,
+/// what it runs, and the machine the account is at home on. Written out rather
+/// than built with `json!`, that one sorting its keys and this being the order
+/// the field is declared in.
+fn refused_over(broken: &str) -> String {
+    format!(
+        "{{\"ProfileBroken\":{{\"broken\":\"{broken}\",\"agent_type\":\"Claude\",\
+         \"device\":\"{A_MACHINE}\"}}}}"
+    )
 }
 
 /// One row of a Profiles list, by the name on it.
@@ -688,6 +795,7 @@ async fn a_member_that_stops_answering_keeps_its_rows() {
         &Mirror {
             device: A.to_owned(),
             id: 7,
+            login: true,
         },
         &store::ProfileFacts {
             name: Some("work".to_owned()),
@@ -760,6 +868,7 @@ async fn a_members_own_profiles_are_taken_and_its_mirrors_are_not() {
         &Mirror {
             device: C.to_owned(),
             id: 3,
+            login: true,
         },
         &store::ProfileFacts {
             name: Some("the-third".to_owned()),
@@ -1022,6 +1131,7 @@ async fn with_the_home_device_away_both_presses_are_refused_naming_it() {
         &Mirror {
             device: A.to_owned(),
             id: 7,
+            login: true,
         },
         &store::ProfileFacts {
             name: Some("work".to_owned()),
@@ -1067,5 +1177,268 @@ async fn with_the_home_device_away_both_presses_are_refused_naming_it() {
         called(&rows, "work").unwrap().id,
         mirror.id,
         "on the id it had, so nothing a Pairing names has moved",
+    );
+}
+
+/// A Profile whose account at home holds no login file cannot be used away from
+/// that machine at all, and every device's row says so — including the one the
+/// account is on, where the Profile is still perfectly runnable.
+///
+/// A Claude login kept in the macOS Keychain is the case this exists for, and a
+/// sign-out at home is the same thing arrived at from the other direction. The
+/// fix is a login on the home device, which is why the row draws the machine
+/// beside the trouble.
+#[tokio::test]
+async fn a_profile_with_no_login_at_home_reads_as_not_usable_away() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves_logged_out("keychain").await;
+
+    let here = a.profiles().await;
+    let at_home = called(&here, "keychain").expect("A's own row");
+
+    assert_eq!(
+        at_home.broken, None,
+        "nothing is wrong with it where the account is: a login in the Keychain \
+         is a login, and a session at home is launched under it as ever",
+    );
+    assert!(
+        !at_home.login,
+        "and the row says it has no login file to lend, which is what it cannot \
+         be used away without",
+    );
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "keychain").is_some())
+        .await;
+    let mirror = called(&landed, "keychain").expect("the mirror of it on B");
+
+    assert_eq!(
+        mirror.broken,
+        Some(verkstead_render::Broken::NoLoginAtHome),
+        "and away from home that is the whole of why it cannot be run: there is \
+         nothing for B to mirror",
+    );
+    assert!(!mirror.login, "said the same way on both devices");
+
+    // Refused rather than hidden: the row is still on the list and still in the
+    // picker, because a row saying why it cannot be run is something to go and
+    // put right.
+    assert_eq!(names(&landed), vec!["keychain"]);
+
+    let conversation = b.drafting().await;
+    b.picks(conversation, mirror.id).await;
+
+    assert_eq!(
+        b.starts(conversation).await,
+        refused_over("NoLoginAtHome"),
+        "and Start is refused naming it, before a session comes up logged out \
+         with nothing on the Timeline saying why",
+    );
+}
+
+/// A login made at home after the fact is a mirror that stops reading broken:
+/// the fix for *no login at home* is a login on the home device, and nothing
+/// here has to be pressed for it to take.
+#[tokio::test]
+async fn a_login_at_home_puts_the_mirror_right() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves_logged_out("keychain").await;
+
+    b.profiles_saying(|rows| {
+        called(rows, "keychain")
+            .is_some_and(|row| row.broken == Some(verkstead_render::Broken::NoLoginAtHome))
+    })
+    .await;
+
+    // The login arriving, and A saying its Profiles moved — which is a `claude
+    // /login` at home followed by whatever next makes A announce. The refresh
+    // is what carries the fact, and nothing here is pressed for it.
+    a.account("keychain");
+    a.nudges.announce(Nudge::Profiles);
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "keychain").is_some_and(|row| row.login))
+        .await;
+
+    assert_eq!(
+        called(&landed, "keychain").unwrap().broken,
+        None,
+        "with a login to lend there is nothing in the way of a session here",
+    );
+}
+
+/// A mirror of a harness this device has not got reads broken **in the
+/// onboarding probe's own word**, while the same Profile on its home device is
+/// fine: whether a harness is on a machine is a fact about the machine, and the
+/// account is not on this one.
+#[tokio::test]
+async fn a_mirror_whose_harness_is_absent_here_reads_broken_here_alone() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering_with_no_harness(B).await;
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let _holding = b.holding();
+
+    a.saves("work").await;
+
+    let here = a.profiles().await;
+
+    assert_eq!(
+        called(&here, "work").expect("A's own row").broken,
+        None,
+        "A has the harness, so there is nothing wrong with it there",
+    );
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let mirror = called(&landed, "work").expect("the mirror of it on B");
+
+    assert_eq!(
+        mirror.broken,
+        Some(verkstead_render::Broken::HarnessMissing),
+        "and B has no claude to run one under, whatever the account is",
+    );
+    assert_eq!(
+        names(&landed),
+        vec!["work"],
+        "and the row stays on the list"
+    );
+
+    let conversation = b.drafting().await;
+    b.picks(conversation, mirror.id).await;
+
+    assert_eq!(
+        b.starts(conversation).await,
+        refused_over("HarnessMissing"),
+        "and Start says which harness rather than letting the launch find out",
+    );
+}
+
+/// A mirror whose home has stopped answering reads unreachable — the way that
+/// device reads in the sidebar — and Start names the machine: the account
+/// cannot be fetched, so a session launched under it would come up logged out.
+#[tokio::test]
+async fn a_mirror_whose_home_is_not_answering_reads_unreachable_and_refuses_start() {
+    let b = Verkstead::answering(B).await;
+
+    // A device that is a member and is not there: the identity is real, so the
+    // membership row is a real one, and nothing is listening at the address.
+    let away = tempfile::tempdir().unwrap();
+    let asleep = Device::stated(away.path(), A).unwrap();
+
+    b.linked_to(&asleep, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    // What A last gave, which on a running server is what the last refresh
+    // wrote down — a login and all, because what is wrong is not the account.
+    store::record_mirror(
+        &b.pool,
+        &Mirror {
+            device: A.to_owned(),
+            id: 7,
+            login: true,
+        },
+        &store::ProfileFacts {
+            name: Some("work".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
+                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
+            },
+            models: vec![MODEL.to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let _holding = b.holding();
+
+    // Every membership read again, which is the one moment a member that is
+    // switched off is dialled — and what leaves the row drawn unreachable.
+    b.nudges.announce(Nudge::Devices);
+    tokio::time::sleep(SETTLING).await;
+
+    let rows = b.profiles().await;
+    let mirror = called(&rows, "work").expect("the row A last gave");
+
+    assert_eq!(
+        mirror.broken,
+        Some(verkstead_render::Broken::HomeUnreachable),
+        "nothing can be fetched from a machine that is not answering",
+    );
+    assert!(
+        !mirror.device.as_ref().expect("it is A's").reachable,
+        "and the row draws that machine exactly as the sidebar draws it",
+    );
+    assert_eq!(names(&rows), vec!["work"], "and it stays on the list");
+
+    let conversation = b.drafting().await;
+    b.picks(conversation, mirror.id).await;
+
+    assert_eq!(
+        b.starts(conversation).await,
+        refused_over("HomeUnreachable"),
+        "and Start names the machine to go and wake up",
+    );
+}
+
+/// A Conversation already paired with a Profile that has since broken reads as
+/// paired with a broken one, rather than as one nothing was picked for.
+///
+/// Which is the whole of why none of the three takes a row out of a picker: a
+/// Pairing made yesterday is still a Pairing, and a picker that had quietly
+/// emptied itself would be a human looking for a Profile they know they chose.
+#[tokio::test]
+async fn a_pairing_against_a_broken_mirror_still_reads_as_a_pairing() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves("work").await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let here = called(&landed, "work").expect("the mirror").id;
+
+    let conversation = b.drafting().await;
+    b.picks(conversation, here).await;
+
+    // The account signs itself out at home, which is a mirror with no login to
+    // be made of it.
+    std::fs::remove_file(a.dir.path().join("accounts/work/.claude/.credentials.json")).unwrap();
+    a.nudges.announce(Nudge::Profiles);
+
+    b.profiles_saying(|rows| {
+        called(rows, "work")
+            .is_some_and(|row| row.broken == Some(verkstead_render::Broken::NoLoginAtHome))
+    })
+    .await;
+
+    let opened: ConversationView = reading(
+        &b.workbench,
+        &format!("/api/ui/conversations/{conversation}"),
+    )
+    .await;
+
+    let paired = opened
+        .implementation_pairing
+        .expect("the Pairing is still the Conversation's own");
+
+    assert_eq!(paired.profile.id, here, "the same row it was paired with");
+    assert_eq!(
+        paired.profile.broken,
+        Some(verkstead_render::Broken::NoLoginAtHome),
+        "read as paired with a broken Profile rather than as unpaired",
+    );
+    assert!(
+        !opened.ready_to_grill,
+        "and the work is not ready to start, which is the pane saying it before \
+         the press does",
     );
 }

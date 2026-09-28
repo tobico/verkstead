@@ -301,6 +301,7 @@ describe("a shared conversation", () => {
                     profile: {
                       id: 1,
                       broken: null,
+                      login: true,
                       name: "work",
                       account: {
                         agent_type: "Claude",

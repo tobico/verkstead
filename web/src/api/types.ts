@@ -107,7 +107,7 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
 /**
  * The branch that is in the way.
  */
@@ -693,13 +693,20 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  *
- * **Nothing at all for a mirror.** A Profile at home on another device names
- * paths on that machine and is judged against none of them here: what a session
- * away from home is given is a mirror of the account, fetched from the home
- * device before each launch, so the row is one to run under and there is nothing
- * about this filesystem to say about it.
+ * **And three of them are a mirror's**, which is the same question asked of a
+ * Profile whose account is on another machine. None of that machine's paths is
+ * judged here — they belong to no filesystem this device can read — so what is
+ * asked instead is the three things that would stop a launch away from home,
+ * in the order a launch would meet them: the home device answering at all, an
+ * account with a login to lend, and the harness to run it on this machine.
+ *
+ * **Refused rather than hidden.** A row that says why it cannot be run is
+ * something to go and put right, and a row quietly missing is a human looking
+ * for a Profile they know they saved. So none of the three takes a row out of
+ * a picker, and a Pairing made against one goes on reading as a Pairing — with
+ * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing";
 
 /**
  * The build cache as the human has just set it.
@@ -2751,7 +2758,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3683,10 +3690,24 @@ account: ProfileAccount,
  */
 models: Array<string>, 
 /**
- * `null` while the account is where it was left, which is the ordinary
- * case.
+ * `null` while the account is where it was left and there is nothing in
+ * the way of running a session under it here, which is the ordinary case.
  */
 broken: Broken | null, 
+/**
+ * Whether the account this row names holds a **login file**, which is what
+ * says the Profile can be used away from the device it is at home on.
+ *
+ * Answered on the row wherever it is drawn, and by the device the account
+ * is on: a mirror carries what that machine last said, and this device's
+ * own rows are looked at here. A login kept somewhere that is not a file —
+ * the macOS Keychain — leaves nothing for another device to mirror, and so
+ * does a sign-out; either way the account is still perfectly runnable on
+ * the machine it is on, which is why this is a fact beside [`Self::broken`]
+ * rather than a way of being it. A *mirror* with no login at home is
+ * broken, and that is [`Broken::NoLoginAtHome`].
+ */
+login: boolean, 
 /**
  * Whether a session under this Profile shares the account's memory store,
  * or starts with an empty one of its own. On unless the human switched it
@@ -3716,6 +3737,31 @@ device: RowDevice | null, };
  * whether or not a form was involved.
  */
 export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
+
+/**
+ * Why a press that would have started a session was refused over a Profile:
+ * what is wrong with it, what it runs, and the machine it is at home on.
+ *
+ * **Enough to say the sentence the row says.** Every one of the readings above
+ * is drawn on the Profile's own row, and a refusal saying only *a chosen
+ * profile is broken* would be a second, vaguer account of something the human
+ * is already being told precisely. So what travels is the three facts that
+ * sentence is composed out of, and the viewer composes it once for both.
+ */
+export type ProfileTrouble = { 
+/**
+ * What is wrong with it.
+ */
+broken: Broken, 
+/**
+ * Which harness it runs, for the trouble that is about the harness.
+ */
+agent_type: AgentType, 
+/**
+ * And the machine the account is at home on, where that is not this one —
+ * which is what the two troubles about a home name.
+ */
+device: string | null, };
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
@@ -5857,7 +5903,7 @@ why: string, } } | "Fork" | { "AlreadyHeld": {
 /**
  * The Conversation that has it, for the way there.
  */
-conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */

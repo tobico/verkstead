@@ -1121,6 +1121,41 @@ describe("the device the compose page is drafting onto", () => {
     ).toContain(mark(SHARED_MACHINE.os));
   });
 
+  /// And a member's account that cannot be run from here stays on the picker
+  /// and says why (ADR-0020, *Shared Profiles*): a row saying what is in the
+  /// way is something to go and put right, and a row quietly missing is a human
+  /// looking for a profile they know they saved.
+  ///
+  /// Three findings and one word apiece — the short form of the sentence the
+  /// card in the Profiles section says in full, see `src/broken.ts`.
+  it.each([
+    ["HomeUnreachable", "unreachable"],
+    ["NoLoginAtHome", "no login at home"],
+    ["HarnessMissing", "not on this machine"],
+  ] as const)("keeps a member's account reading %s on the picker", async (broken, said) => {
+    theCluster(
+      whenever(
+        "/api/ui/profiles",
+        json(SHARED.map((row) => (row.device ? { ...row, broken } : row))),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await openAgent(container);
+
+    await waitFor(() =>
+      expect(rows("Implementation")).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name} · ${said}`,
+      ),
+    );
+
+    // And this device's own, which nothing is in the way of, read as they
+    // always did.
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+  });
+
   /// The select stands left of the Repo, because the Repo is one of the picked
   /// device's: the question above *which repository* is *whose registry*.
   it("stands at the head of the setup row", async () => {

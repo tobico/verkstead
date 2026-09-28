@@ -30,7 +30,7 @@ import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
-import { companionRefusal } from "./Timeline";
+import { companionRefusal, profileRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -50,8 +50,6 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   NoGitAuthor:
     "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
   FetchFailed:
@@ -85,6 +83,10 @@ export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    }
+
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
     }
 
     return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;

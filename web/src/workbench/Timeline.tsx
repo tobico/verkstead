@@ -127,6 +127,7 @@ import type {
   PendingSteerView,
   PinnedEvent,
   ProfileEntry,
+  ProfileTrouble,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
@@ -142,6 +143,7 @@ import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
+import { troubleReading } from "../broken";
 import { deviceShown, osIcon, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
@@ -192,10 +194,7 @@ export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
 ///
 /// Every one of them is something different to go and do, which is the whole
 /// reason the server names them separately rather than saying "cannot start".
-const GRILL_REFUSAL: Record<
-  Exclude<GrillingStarted, { Companion: unknown }>,
-  string
-> = {
+const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -205,8 +204,6 @@ const GRILL_REFUSAL: Record<
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile:
     "Pick a review profile and model — or No review — first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the work starts from.",
   NoGitAuthor:
     "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
@@ -257,10 +254,24 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    return "ProfileBroken" in outcome
+      ? profileRefusal(outcome.ProfileBroken)
+      : `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];
+}
+
+/// What to say about a press refused over a chosen profile, whichever press it
+/// was.
+///
+/// **The sentence the row is already showing.** Every one of the findings is
+/// drawn on the profile's own card and in the picker it was chosen in, so the
+/// refusal says what the human is being shown rather than a vaguer second
+/// account of it — which is what makes a start refused over a member's machine
+/// name that machine. The words are [`troubleReading`](../broken.ts).
+export function profileRefusal(why: ProfileTrouble): string {
+  return `A chosen profile cannot be run: ${troubleReading(why)}`;
 }
 
 /// The state a move came *from*: the state the move before it went to, and

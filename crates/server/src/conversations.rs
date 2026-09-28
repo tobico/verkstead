@@ -44,8 +44,8 @@ use verkstead_render::{
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
     ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
-    RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp,
-    TargetRecorded, Worktree,
+    ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved,
+    Started, TakenUp, TargetRecorded, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -252,9 +252,9 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
         // the grilling picker has no row to prefill onto since *No grilling*
         // retired, so a Repo remembering one arrives exactly as a Repo with
         // nothing remembered for the role does.
-        grilling: usable(&state.pool, remembered.grilling).await?,
-        implementation: usable(&state.pool, remembered.implementation).await?,
-        review: prefilled(&state.pool, remembered.review).await?,
+        grilling: usable(state, remembered.grilling).await?,
+        implementation: usable(state, remembered.implementation).await?,
+        review: prefilled(state, remembered.review).await?,
     })
 }
 
@@ -289,32 +289,32 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: filled(&state.pool, last.grilling, &profiles, store::Role::Grilling).await?,
+        grilling: filled(state, last.grilling, &profiles, store::Role::Grilling).await?,
         implementation: filled(
-            &state.pool,
+            state,
             last.implementation,
             &profiles,
             store::Role::Implementation,
         )
         .await?,
-        review: under(filled(&state.pool, last.review, &profiles, store::Role::Review).await?),
+        review: under(filled(state, last.review, &profiles, store::Role::Review).await?),
     })
 }
 
 /// One role of [`unremembered`]: the last start's pick where it is a usable
 /// Pairing, and the platform default where it is anything else.
 async fn filled(
-    pool: &SqlitePool,
+    state: &AppState,
     copied: store::Picked,
     profiles: &[store::Profile],
     role: store::Role,
 ) -> Result<Option<PairingView>> {
-    if let Some(pairing) = usable(pool, copied).await? {
+    if let Some(pairing) = usable(state, copied).await? {
         return Ok(Some(pairing));
     }
 
     usable(
-        pool,
+        state,
         crate::pairing_defaults::platform_default(profiles, role),
     )
     .await
@@ -325,12 +325,12 @@ async fn filled(
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
 /// as itself, and everything else goes through [`usable`].
-async fn prefilled(pool: &SqlitePool, remembered: store::Picked) -> Result<PickedView> {
+async fn prefilled(state: &AppState, remembered: store::Picked) -> Result<PickedView> {
     if remembered.skipped() {
         return Ok(PickedView::Skipped);
     }
 
-    Ok(match usable(pool, remembered).await? {
+    Ok(match usable(state, remembered).await? {
         Some(pairing) => PickedView::Under(pairing),
         None => PickedView::Nothing,
     })
@@ -353,7 +353,7 @@ async fn prefilled(pool: &SqlitePool, remembered: store::Picked) -> Result<Picke
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
 /// neither of them should have to put the two together again.
-async fn usable(pool: &SqlitePool, remembered: store::Picked) -> Result<Option<PairingView>> {
+async fn usable(state: &AppState, remembered: store::Picked) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -361,7 +361,8 @@ async fn usable(pool: &SqlitePool, remembered: store::Picked) -> Result<Option<P
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(pool, remembered.pairing().cloned()).await? else {
+    let Some(pairing) = crate::profiles::pairing(state, remembered.pairing().cloned()).await?
+    else {
         return Ok(None);
     };
 
@@ -1486,10 +1487,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(pool, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // What kind of work this is, which decides three things below: which roles
     // the press waits on, where it lands the Conversation, and which session it
@@ -2310,10 +2311,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::pairing(pool, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
@@ -2765,8 +2766,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // reads them: a Profile whose pair has gone is not one to run a session
     // under, and the id alone cannot say so.
     let implementation =
-        crate::profiles::pairing(pool, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(pool, conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // And how many of them this Process waits on, which is the one thing about
     // the press its own row decides: a **Review** reads the branch under the
@@ -3755,18 +3756,36 @@ fn unready(
     [Some(grilling), Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
+}
+
+/// What is wrong with one chosen Profile, in the three facts the row's own
+/// sentence about it is composed out of — or nothing, where it is a row to run
+/// under.
+///
+/// **The same sentence, said at the press.** Every one of the readings is drawn
+/// on the Profile's row before anybody presses anything, and a refusal that
+/// said only *a chosen profile is broken* would be a second, vaguer account of
+/// it — so what goes back is what the row carries, and the viewer composes the
+/// one sentence for both. Which is what makes a Start refused over a Profile
+/// whose home has stopped answering name that machine.
+fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
+    Some(ProfileTrouble {
+        broken: profile.broken?,
+        agent_type: profile.account.agent_type(),
+        device: profile.device.as_ref().map(|device| device.name.clone()),
+    })
 }
 
 /// What is wrong with a Conversation's pair of Profiles, before it is put in
 /// the words of whichever press asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Unready {
     NoGrillingProfile,
     NoImplementationProfile,
     NoReviewProfile,
-    ProfileBroken,
+    ProfileBroken(ProfileTrouble),
 }
 
 impl Unready {
@@ -3776,7 +3795,7 @@ impl Unready {
             Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
             Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
             Unready::NoReviewProfile => GrillingStarted::NoReviewProfile,
-            Unready::ProfileBroken => GrillingStarted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => GrillingStarted::ProfileBroken(trouble),
         }
     }
 
@@ -3786,7 +3805,7 @@ impl Unready {
             Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
             Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
             Unready::NoReviewProfile => Adopted::NoReviewProfile,
-            Unready::ProfileBroken => Adopted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => Adopted::ProfileBroken(trouble),
         }
     }
 
@@ -3800,7 +3819,7 @@ impl Unready {
                 TakenUp::NoImplementationProfile
             }
             Unready::NoReviewProfile => TakenUp::NoReviewProfile,
-            Unready::ProfileBroken => TakenUp::ProfileBroken,
+            Unready::ProfileBroken(trouble) => TakenUp::ProfileBroken(trouble),
         }
     }
 }
@@ -3827,8 +3846,8 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
     [Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
 }
 
 /// And what is wrong with the one Profile an investigation runs under, or
@@ -3849,11 +3868,7 @@ fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unread
         return Some(Unready::NoImplementationProfile);
     };
 
-    implementation
-        .profile
-        .broken
-        .is_some()
-        .then_some(Unready::ProfileBroken)
+    trouble(&implementation.profile).map(Unready::ProfileBroken)
 }
 
 /// The Brief the round a Conversation is in started from.
