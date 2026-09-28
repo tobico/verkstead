@@ -34,4 +34,4 @@ platform takes its release leg, and 08 retires it only once none is left.
 - [x] 05: The Linux AppImage — [brief](05-linux-appimage.md)
 - [x] 06: The Mac — [brief](06-macos.md)
 - [x] 07: Windows — [brief](07-windows.md)
-- [ ] 08: Retiring the Rust tray — [brief](08-retiring-the-rust-tray.md)
+- [ ] 08: Retiring the Rust tray — [brief](08-retiring-the-rust-tray.md) *(in progress: `roadmaps/electron-desktop/08-retiring-the-rust-tray`)*
