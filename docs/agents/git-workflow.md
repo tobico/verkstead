@@ -15,7 +15,11 @@ Pattern: `<feature>`
    body = summary of the completed tasks (name the stage and roadmap if
    this was a roadmap stage). Return the PR URL.
 
-**Stacked branch** — created with `gh stack init`/`gh stack add`:
+**Stacked branch** — one `gh stack view` names as a branch of a stack.
+A roadmap stage with a chain under it is one even where `gh stack view`
+errors, that being a worktree whose registry is empty rather than proof of
+an unstacked branch: adopt the chain and join it first, the way
+**Stacking roadmap stages** below says, and then come back here.
 
 1. `gh stack submit --auto` — pushes every branch in the stack, opens a
    PR for each branch that lacks one, repoints the base of existing PRs,
@@ -32,41 +36,108 @@ Pattern: `<feature>`
 
 ### Stacking roadmap stages
 
-When a new roadmap stage's predecessor is finished but its PR is **not
-yet merged**, and the new stage builds directly on that work, put the new
-stage on a stacked branch. Only branch off `main`, unstacked, when the
-stage is genuinely independent of any unmerged predecessor.
+A roadmap's stages form one **chain**: each stage's branch is based on the
+one below it, and each pull request is based on that branch. A stage is
+cut from whatever was at the top of the chain when it started and
+**joins** the chain at its finish — rebased onto whatever is at the top by
+then, before its pull request opens, which is the only rebase it gets.
+Only branch off `main`, unstacked, when the stage is genuinely independent
+of any unmerged predecessor.
 
 Prerequisite: `gh extension install github/gh-stack` (skip if
-`gh stack --help` already works).
+`gh stack --help` already works). Everything below was measured against
+`gh stack` version 0.1.1 in a scratch repository rather than read off its
+documentation; re-measure after an upgrade.
 
-- **First stacked stage** — adopt the predecessor as the stack bottom:
+**The registry is per worktree.** `gh stack` keeps what it knows about a
+stack inside the checkout it was run in, and every stage is worked in a
+worktree of its own — so in a fresh one `gh stack view` exits 2 with
+*current branch "…" is not part of a stack*, whatever GitHub holds.
+Finding no stack is the normal case rather than a fault: the chain is
+adopted again in each worktree that needs it.
 
-      gh stack init <predecessor-branch> <new-branch>
+**Adopting a chain of any depth takes one `init`**, bottom branch first
+and the trunk left out — `init` infers the trunk:
 
-  `init` adopts branches that already exist and creates the ones that
-  don't, so the predecessor's history is left untouched.
+    gh stack init <bottom-branch> <next> … <top-branch>
 
-- **Stack already exists** — extend it:
+It adopts branches that already exist, so no history is rewritten by it.
+A predecessor and one new branch is the same command rather than a
+separate case:
 
-      gh stack checkout <any-branch-in-the-stack>
-      gh stack top
-      gh stack add <new-branch>
+    gh stack init <predecessor-branch> <new-branch>
 
-Both keep the branch-naming pattern. Leave the branch empty at creation
-time; the plan commit lands on it normally (`gh stack add` only commits
-when passed `-m`/`-A`/`-u`).
+Where this worktree has already adopted the chain, extend it instead:
+
+    gh stack checkout <any-branch-in-the-stack>
+    gh stack top
+    gh stack add <new-branch>
+
+Branch names are taken verbatim, so they keep the naming pattern. Leave a
+newly added branch empty at creation time; the plan commit lands on it
+normally (`gh stack add` only commits when passed `-m`/`-A`/`-u`).
+
+Where nobody told you what the chain is, read it off GitHub rather than
+off this checkout: `gh pr list` and each open PR's base, one pull
+request's base being the branch of the one below it.
+
+**Fetch, and hold every branch of the chain locally, before adopting
+anything.** Adopting a branch this checkout has not got does not refuse:
+it *creates* it, at the trunk's commit, and reports `✓ Adopted` as though
+nothing were wrong. Everything that follows force-pushes whatever was
+adopted, so a branch invented here is another stage's real work
+overwritten on origin — measured: a five-branch `init` in a checkout
+holding one of them, then a single `gh stack push`, moved four branches on
+origin back to the trunk's commit. So first:
+
+    git fetch origin
+    git branch --track <branch> origin/<branch>   # for each one not here yet
+
+**And read the adopted chain back before pushing anything.**
+`gh stack view` prints it top-first and is safe when piped;
+`gh stack view --json` is the form to parse, and the form to use if stdout
+might be a PTY, where bare `view` opens a TUI. A chain that came back
+wrong is one to stop at rather than to force-push.
+
+**Joining: a branch that exists and is not at the top.** A stage cut
+from a settled stage below the top is neither a first stacked stage nor
+an extension of the chain — it is already a branch, with commits, and it
+belongs above branches it was never based on. Adopt the chain with this
+branch named last, and let the extension move it:
+
+    gh stack init <bottom> … <top> <this-branch>
+    gh stack rebase
+
+`init` records where each branch actually sits rather than where the
+argument order implies, so a branch not yet rebased onto the top comes
+back from `gh stack view` with a `⚠` beside it and `needsRebase: true`
+in `--json`. That is what says the join has not happened yet.
+`gh stack rebase` then rebases only the branches that need it: the ones
+already at origin's commit stay at it, so the push that follows moves
+this branch alone.
+
+A conflict exits 3 and stops in it, working tree and all. Resolve the
+files, `git add` them, and `gh stack rebase --continue`;
+`gh stack rebase --abort` restores the stack. Resolving is the job — a
+conflict is two changes to reconcile, and taking one side wholesale
+throws away work somebody did.
+
+Then the **Finish sequence** above, whose `gh stack submit --auto` pushes
+the chain and opens this branch's pull request.
 
 ### Updating a stack after review
 
-Don't rebase stacked branches by hand. From any branch in the stack:
+Don't rebase stacked branches by hand — here or at the join, where
+`gh stack rebase` is what moves the joining branch. From any branch in the
+stack, and in a worktree that has adopted the chain:
 
 - `gh stack sync` — fetches, cascade-rebases each branch onto its updated
   parent, force-pushes atomically, and re-links the stack on GitHub. Use
   it after `main` moves or after an earlier PR in the stack merges. It
   never opens PRs.
 - `gh stack rebase` — resolve conflicts interactively when `sync` reports
-  one and backs out.
+  one and backs out: exit 3, then `git add` and
+  `gh stack rebase --continue`, or `gh stack rebase --abort`.
 - Re-run `gh stack submit --auto` after adding a new branch to an
   existing stack.
 
