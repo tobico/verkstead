@@ -41,13 +41,28 @@
 //! where the same two panes are handed to the same frame.
 //!
 //! **The files are the one thing on it that is not held on the device.** The
-//! paperclip at the near edge of the row the presses are at the far edge of
+//! Attach control at the near edge of the row the presses are at the far edge of
 //! picks them — as does a drop anywhere on the box, which is the same piece
 //! doing the same thing (see `src/Attaching.tsx`) — they are drawn as the same
 //! pills a draft draws them as, and they stay in the page until a press — a `File` being a handle the browser gave
 //! this page rather than text, so a reload keeps what was typed and loses what
 //! was picked. The press uploads them through the route a draft's own paperclip
 //! uses, as one more field of the replay. See `src/holding.ts`.
+//!
+//! **And the Attach control is the menu the draft's composer has**, this being
+//! the other place a Brief is written: *Attach file* first, and under it the MCP
+//! servers declared on the settings page — the composer's own rows, drawn here
+//! rather than drawn again (see `ServerRows` in `Composer.tsx`). A pick draws
+//! its chip beside the pills at once and leaves the menu, and the chip's × takes
+//! it off and puts it back.
+//!
+//! **What is picked here is held with the files rather than attached**, there
+//! being no Conversation to attach it to: nothing is recorded anywhere until
+//! Start or Save as draft, and the press puts the servers on the Conversation it
+//! makes in the same replay that gives it its files. Which is also why a page
+//! left without a press attaches nothing to anything — and why the chips go with
+//! the files on a reload, a name held for a Conversation nobody made being a
+//! reference to a declaration that may not be there next time.
 //!
 //! The one thing it reads that a saved composer has no need of is the repo's own
 //! memory of what it was last grilled with — or, for a repo nothing has grilled,
@@ -108,6 +123,7 @@ import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { ShowArchived } from "./Archived";
 import { Conversations } from "./Conversations";
+import { ServerRows } from "./Composer";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
 import { Wordmark } from "./Wordmark";
@@ -237,6 +253,18 @@ function Compose(props: {
   // `File` cannot be stored and read again, so they live for as long as this
   // page does and the press is what sends them.
   const files = holding();
+
+  // And the MCP servers picked at that same control, held beside them for as
+  // long as this page lasts: there is no Conversation to attach one to, so a
+  // pick is a chip and nothing else until a press — which puts them on the
+  // Conversation it makes, in the replay that sends the files.
+  //
+  // Held in the page rather than written to the device, though a name is text a
+  // device could write down: it is a *reference* to a declaration on the
+  // settings page, and one picked out of a menu a moment ago is one the
+  // settings still hold. A device that offered a name back a week later would
+  // be offering a reference nothing has to answer to.
+  const [servers, setServers] = createSignal<Array<string>>([]);
 
   // And written back whenever it moves. Every keystroke, which is what makes
   // this survive a reload — there is nowhere else it is being kept, and a page
@@ -409,7 +437,7 @@ function Compose(props: {
   const [gone, setGone] = createSignal(false);
 
   const make = useMutation(() => ({
-    mutationFn: (work: boolean) => create(state(), work, files),
+    mutationFn: (work: boolean) => create(state(), work, files, servers()),
     onSuccess: (outcome) => {
       if (outcome === "NoSuchRepo") {
         // Picked out of a list this page read a moment ago: the Repo was there
@@ -428,6 +456,11 @@ function Compose(props: {
       setGone(false);
       clear();
       setState(blank());
+      // The servers with it, for the same reason the held files empty
+      // themselves as they go up: they are on the Conversation now, and a name
+      // left here would be one this device offered to attach to whatever it
+      // composed next.
+      setServers([]);
       leaveRefusals(outcome.conversation, outcome.refused);
 
       void queries.invalidateQueries({ queryKey: ["conversations"] });
@@ -449,10 +482,36 @@ function Compose(props: {
         // and the files are on their way up.
         removing: make.isPending,
       })),
+    chips: () =>
+      servers().map((name) => ({
+        name,
+        // Nothing here is ever *gone*: a name held in the page was picked out
+        // of a menu drawn off the settings a moment ago, and there is no
+        // reference to outlive its declaration until one is on a Conversation.
+        remove: () => setServers((was) => was.filter((one) => one !== name)),
+        removing: make.isPending,
+      })),
     add: files.add,
     // Not offered while a roadmap is loaded: the box is locked to a card then,
     // and there is nothing being written for a file to be handed over with.
     offered: () => adopting() === null,
+    // The composer's own rows, drawn here rather than drawn again — the menu is
+    // the same menu wherever a Brief is written, and what is already on is a
+    // list of names either way. A pick lands in the page rather than on a
+    // record: there is no Conversation yet for the chip to come back off.
+    offering: (shut) => (
+      <ServerRows
+        attached={servers()}
+        attach={(name) => {
+          // The menu first, because the press has done its work: the row that
+          // was pressed is about to go, and a card still hanging under the
+          // trigger would be a list rearranging itself under the hand that had
+          // finished with it.
+          shut();
+          setServers((was) => [...was, name]);
+        }}
+      />
+    ),
   });
 
   /// A roadmap loaded into what is being composed, which creates nothing: the

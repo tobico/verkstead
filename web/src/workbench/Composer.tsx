@@ -49,14 +49,20 @@
 //! the compose page alike (see [`Attaching`](../Attaching.tsx)), with only what
 //! becomes of a chosen file different between them.
 //!
-//! **And the paperclip here is a menu**, which is the one thing about this
-//! control that is this pane's alone: *Attach file* first, and under it the MCP
-//! servers declared on the settings page. Picking one puts it on the
-//! Conversation and draws a chip for it in that same row, and the chip's × takes
-//! it off again and puts it back in the menu. With none declared it is still a
-//! menu — *Attach file*, and the way to the settings section where one is
-//! declared — because a control that changed shape with the settings would be a
-//! control the human had to find twice.
+//! **And the paperclip is a menu**, here and on the compose page alike, an
+//! answer sheet's being the one that stays a plain button: *Attach file* first,
+//! and under it the MCP servers declared on the settings page. Picking one puts
+//! it on the Conversation and draws a chip for it in that same row, and the
+//! chip's × takes it off again and puts it back in the menu. With none declared
+//! it is still a menu — *Attach file*, and the way to the settings section where
+//! one is declared — because a control that changed shape with the settings
+//! would be a control the human had to find twice. The rows are [`ServerRows`],
+//! which both pages draw.
+//!
+//! What is this pane's alone is that a pick lands on the server as it is made:
+//! there is a Conversation under this composer, so the chip comes back off the
+//! record. The compose page holds its picks until a press, having nothing yet
+//! to put them on.
 //!
 //! **What is attached is a name.** The Conversation records which servers it
 //! has, and the declaration is looked up by that name whenever it is needed, so
@@ -193,15 +199,15 @@ export function Composer(props: {
     chips: servers.chips,
     add: sending.send,
     offered: () => !props.brief.frozen,
-    // Which is what makes this control a menu rather than a button, and the one
-    // thing about it that is this pane's: the compose page and the answer sheets
-    // offer nothing at theirs and keep the plain paperclip. Passed whatever the
-    // Brief's freeze, because a frozen one draws no paperclip to open it — the
-    // adopting draft's press is the Adoption, and a round that has started has
-    // this whole pane replaced by the Brief's own.
+    // Which is what makes this control a menu rather than a button — as it is
+    // on the compose page, the other place a Brief is written; the answer
+    // sheets offer nothing at theirs and keep the plain paperclip. Passed
+    // whatever the Brief's freeze, because a frozen one draws no paperclip to
+    // open it — the adopting draft's press is the Adoption, and a round that
+    // has started has this whole pane replaced by the Brief's own.
     offering: (shut) => (
       <ServerRows
-        conversation={props.conversation}
+        attached={props.conversation.mcp_servers.map((one) => one.name)}
         attach={(name) => {
           // The menu first, because the press has done its work: the row that
           // was pressed is about to go — the server it named has a chip now —
@@ -784,8 +790,13 @@ function serversOn(what: {
   return { chips, attach, refused };
 }
 
-/// The rows the composer's Attach menu holds under *Attach file*: one per
-/// declared MCP server this Conversation has not attached.
+/// The rows an Attach menu holds under *Attach file*: one per declared MCP
+/// server that is not on already.
+///
+/// **Both pages that write a Brief draw these**, which is why what is already
+/// on arrives as a list of names rather than as the Conversation: the composer
+/// reads them off the record and the compose page off what it is holding, and
+/// the menu is the same menu either way — see [`Compose`](./Compose.tsx).
 ///
 /// The declarations are read here rather than beside the Conversation, and read
 /// when the menu opens rather than when the pane does — the rows of a menu are
@@ -801,8 +812,9 @@ function serversOn(what: {
 /// settings section where a declaration is made. A control that fell back to a
 /// plain button would be one the human had to learn twice — and the answer to
 /// an empty menu is to go and declare one, which is a thing the menu can say.
-function ServerRows(props: {
-  conversation: ConversationView;
+export function ServerRows(props: {
+  /// The names that are on already, in whatever the page holds them in.
+  attached: Array<string>;
   attach: (name: string) => void;
 }): JSX.Element {
   const settings = useReading(() => ({
@@ -811,8 +823,7 @@ function ServerRows(props: {
     freshness: { reconcile: "id" } as const,
   }));
 
-  const attached = () =>
-    new Set(props.conversation.mcp_servers.map((server) => server.name));
+  const attached = () => new Set(props.attached);
 
   /// The declarations this Conversation could still be given.
   const offerable = (): Array<McpServer> =>

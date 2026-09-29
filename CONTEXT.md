@@ -453,9 +453,20 @@ human's — while attaching a name nothing is declared by is refused, the menu i
 was picked from having been drawn a moment earlier.
 **With nothing declared the control is still a menu**: *Attach file*, and the
 way to the section where a declaration is made. A control that fell back to a
-plain button would be one the human had to learn twice. The menu is the draft's
-composer's alone — the **Answer** to a Question Set attaches files and nothing
-else.
+plain button would be one the human had to learn twice. The menu is at both
+places a Brief is written — the draft's composer and the compose page — and the
+**Answer** to a Question Set is where it is not: that one attaches files and
+nothing else.
+**On the compose page a pick is held rather than attached**, there being no
+Conversation to attach it to: the chip is drawn at once and its × takes it off,
+nothing is recorded anywhere, and **Start work** or **Save as draft** puts the
+held servers on the Conversation it makes, in the same replay that sends the
+held files. So a page left without a press attaches nothing to anything, and
+the chips go with the files on a reload — a name is a reference to a
+declaration, and one picked out of a menu a moment ago is one the settings
+still hold. Not offered while a roadmap is loaded, the box being locked to a
+card, and what was picked before one was loaded is held with the files until it
+is cleared.
 **Every session of the Conversation** is launched with it, whichever of the four
 harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,
@@ -1268,6 +1279,9 @@ the composition, are uploaded once the Conversation is made as one more field
 of the replay, and a reload before the press keeps the text and loses the
 files. A refused upload is a refusal said on the draft's composer like any
 other. Not offered while a roadmap is loaded, the box being locked to a card.
+The **MCP server**s picked at that same control are held beside them and go up
+in the same replay, attached by name once there is a Conversation to attach
+them to.
 
 **Kept through Close and Trim, and gone at Deleted.** A Steer can bring a Closed
 Conversation back, and a file cannot be made again the way a Worktree can; a

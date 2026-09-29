@@ -27,6 +27,12 @@
 //! because the Brief freezes when it starts and a file arriving after that
 //! would be refused.
 //!
+//! **And the MCP servers picked at that same control go up with them**, held in
+//! the page as they are and attached by name once there is a Conversation to
+//! attach them to — before the kickoff for the files' own reason, the servers
+//! freezing when the Brief does. See [`Compose`](./Compose.tsx) for why a name
+//! is held in the page rather than written to the device.
+//!
 //! **A roadmap loaded into the page is held the same way and creates the other
 //! kind of Conversation.** Picking one out of the Adopt dropdown writes it into
 //! what this device is holding and nothing else — see [`Adopting`] — so it
@@ -44,6 +50,7 @@ import { createSignal } from "solid-js";
 import {
   addCompanion,
   adoptRoadmap,
+  attachServer,
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
@@ -65,7 +72,7 @@ import { forget, read, write } from "../device";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
 import { adoptRefusal } from "./Adoption";
-import { ATTACH_REFUSAL } from "./Composer";
+import { ATTACH_REFUSAL, SERVER_REFUSAL } from "./Composer";
 import { PROCESS, targeted } from "./processes";
 import {
   BASE_REFUSAL,
@@ -335,14 +342,15 @@ export type Created =
 /// draft is what they can look at and fix; every other refusal on the way is
 /// still worth carrying, so the list is what decides rather than the first one.
 ///
-/// **The files this page is holding go up in the same replay**, one request
-/// apiece through the route a draft's own paperclip uses — there is a
-/// Conversation by then, so there is nothing else they could need. They go
-/// after every field and before the kickoff: what is attached freezes with the
-/// Brief, and a file arriving after the grilling started would be refused for
-/// being late rather than for anything the human did. **Except where a roadmap
-/// is loaded**, which sends none of them: the box is locked to a card, and what
-/// is held is given back when the card is cleared.
+/// **What this page is holding at its Attach control goes up in the same
+/// replay** — the MCP servers attached by name, and the files one request
+/// apiece through the route a draft's own paperclip uses. There is a
+/// Conversation by then, so there is nothing else either of them could need.
+/// They go after every field and before the kickoff: what is attached freezes
+/// with the Brief, and either arriving after the grilling started would be
+/// refused for being late rather than for anything the human did. **Except
+/// where a roadmap is loaded**, which sends neither: the box is locked to a
+/// card, and what is held is given back when the card is cleared.
 ///
 /// **A page loaded with a roadmap creates the other kind of Conversation**, and
 /// most of the replay is not asked of it: the Brief is the stage's, the branch
@@ -354,6 +362,7 @@ export async function create(
   state: Composed,
   work: boolean,
   files: Holding,
+  servers: Array<string>,
 ): Promise<Created> {
   const held = state.adopting;
   if (held === null && state.repo === null) {
@@ -466,17 +475,30 @@ export async function create(
     );
   }
 
-  // And the files, last of the fields: each is one more thing put on the
-  // Conversation, and one the server would not take is one more refusal to
-  // carry — which is what stops the kickoff, exactly as a refused branch name
-  // does.
+  // And what was put on at the Attach control, last of the fields: the MCP
+  // servers and then the files, each one more thing put on the Conversation,
+  // and one the server would not take is one more refusal to carry — which is
+  // what stops the kickoff, exactly as a refused branch name does.
   //
-  // None of them on a page that loaded a roadmap, for the reason the paperclip
+  // None of either on a page that loaded a roadmap, for the reason the control
   // is not offered on one: the box is locked to a card, so nothing was being
-  // written for a file to be handed over with — and a file picked before the
-  // roadmap was loaded is one picked for a box the roadmap has since taken
-  // over. What is held stays held, and clearing the roadmap gives it back.
+  // written for a file to be handed over with — and what was picked before the
+  // roadmap was loaded was picked for a box the roadmap has since taken over.
+  // What is held stays held, and clearing the roadmap gives it back.
   if (held === null) {
+    // By name, the way the composer attaches one: what a Conversation records
+    // is which declarations it has, and the declaration itself stays in the
+    // settings. A name nothing is declared by any more is refused here rather
+    // than dropped, the human having picked it on purpose.
+    for (const name of servers) {
+      const outcome = await attachServer(id, name);
+      if (outcome !== "Attached") {
+        refused.push(
+          `${name} could not be attached: ${SERVER_REFUSAL[outcome]}`,
+        );
+      }
+    }
+
     for (const rejected of await files.flush(id)) {
       refused.push(
         `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
