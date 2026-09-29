@@ -3534,11 +3534,14 @@ pub struct Sandbox {
     /// URL it is reached at and the headers it is spoken to with, read at the
     /// same moment and for the same reason.
     ///
-    /// Written into a Claude root's `.claude.json` copy, which is the whole of
-    /// how a session is launched with one — see [`root::config`]. Which servers
-    /// comes off the Conversation and what each of them *is* comes off the
-    /// settings, so a URL corrected there reaches the next session and a name
-    /// nothing declares any more is simply not in this list — see
+    /// Written into the Built Root, which is the whole of how a session is
+    /// launched with one — into a Claude root's `.claude.json` copy (see
+    /// [`root::config`]) and into the configuration file Verkstead writes for
+    /// each of the other three (see [`root::Root::written`]). One declaration,
+    /// in whichever form that harness reads. Which servers comes off the
+    /// Conversation and what each of them *is* comes off the settings, so a URL
+    /// corrected there reaches the next session and a name nothing declares any
+    /// more is simply not in this list — see
     /// [`crate::settings::Config::attached_among`].
     ///
     /// **The header values are in it**, which is why it is built where the
@@ -4570,6 +4573,13 @@ impl Sandbox {
     /// joined, so it is never the account's file and nothing of it is written
     /// back.
     ///
+    /// **Which is where a Codex, a Grok Build or an OpenCode session is
+    /// launched with the Conversation's MCP servers**, each in the form that
+    /// harness reads: the account's own are still left out of it, and
+    /// Verkstead's go in beside what it carries — see [`Sandbox::mcp_servers`],
+    /// read as the sandbox was built. A Claude session's go in its
+    /// `.claude.json` copy instead — see [`Sandbox::config_described`].
+    ///
     /// **And the settings page's instructions text beside it**, as the file
     /// that harness reads for global instructions — see
     /// [`root::Root::instructed`]. Written on the same terms and for the same
@@ -4588,7 +4598,7 @@ impl Sandbox {
                 surface.made(Access::Built(built.join(directory)));
             }
 
-            let (path, contents) = root.written(built);
+            let (path, contents) = root.written(built, &self.mcp_servers);
             surface.made(Access::Written { path, contents });
 
             // And the settings page's one text, as the file this harness reads

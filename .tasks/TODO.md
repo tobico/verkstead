@@ -22,6 +22,6 @@ are allowed; an unreachable server never holds a launch.
 - [x] 02: Attach a server in the draft composer — [details](02-attach-a-server-in-the-draft-composer.md)
 - [x] 03: A Claude session runs with it — [details](03-a-claude-session-runs-with-it.md)
 - [x] 04: Headers, as secrets — [details](04-headers-as-secrets.md)
-- [ ] 05: Codex, Grok and OpenCode — [details](05-codex-grok-and-opencode.md)
+- [x] 05: Codex, Grok and OpenCode — [details](05-codex-grok-and-opencode.md)
 - [ ] 06: Try a server on save — [details](06-try-a-server-on-save.md)
 - [ ] 07: The compose page — [details](07-the-compose-page.md)

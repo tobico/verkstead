@@ -461,12 +461,24 @@ harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,
 and a per-tool list is one that goes stale the first time the server adds a
 tool.
+**One declaration, written into a Built Root in the form each harness reads.**
+Claude's goes under `mcpServers` in the `.claude.json` copy, `{"type": "http",
+"url": …}`; Codex's and Grok Build's are a `[mcp_servers.<name>]` apiece in the
+`config.toml` Verkstead writes, differing only in what the headers are called —
+`http_headers` for Codex and `headers` for Grok; OpenCode's is an entry under
+`mcp` in its `opencode.json`, a remote server with its OAuth auto-detection
+turned off, there being no browser in a sandbox to finish a login in. Each read
+off the harness itself and each proved on the wire, against a server that
+recorded what it was asked. None of them needs anything said about approvals:
+the bypass every session is launched with already covers an attached server's
+tools.
 **And the prompt says so**: a neutral `# MCP servers` listing beside the
 attached files' own, naming each attached server and what that harness puts in
-front of its tool names — `mcp__<server>__<tool>` on Claude. Which is the one
-thing about a server a session cannot work out for itself; what it is *for* is
-the Brief's to say, as a file's is. No section at all where a Conversation has
-attached none, and none for a name whose declaration has since been deleted,
+front of its tool names — `mcp__<server>__<tool>` on Claude and on Codex,
+`<server>__<tool>` on Grok Build, `<server>_<tool>` on OpenCode. Which is the
+one thing about a server a session cannot work out for itself; what it is *for*
+is the Brief's to say, as a file's is. No section at all where a Conversation
+has attached none, and none for a name whose declaration has since been deleted,
 that one being nothing the session was launched with.
 **An unreachable server never holds a launch**: the session starts, and what the
 harness makes of a server that will not answer is said inside it. A declaration

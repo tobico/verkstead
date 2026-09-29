@@ -4124,6 +4124,219 @@ async fn a_request_to_an_attached_server_arrives_with_its_headers() {
     );
 }
 
+/// And a Codex session is launched with them too, in the form codex reads:
+/// a `[mcp_servers.<name>]` apiece in the `config.toml` Verkstead writes, with
+/// the headers under `http_headers`.
+///
+/// **That spelling is codex's own and the headers do arrive**: read off codex
+/// 0.155.1, driven against a server that recorded what it was asked, whose
+/// `initialize`, `tools/list` and `tools/call` each came in carrying them.
+///
+/// Beside what that file is written for — the account's provider — and with
+/// none of the account's own servers, which the allowlist leaves out as it
+/// always did.
+#[tokio::test]
+async fn a_codex_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".codex/config.toml");
+    let read: toml::Table = written.parse().expect("codex is given TOML: {written}");
+
+    assert_eq!(
+        read["mcp_servers"],
+        toml::Value::try_from(toml::toml! {
+            [docs]
+            url = "https://mcp.example.com/docs"
+            http_headers = { "Authorization" = "Bearer sk-averysecretkey", "X-Tenant" = "verkstead" }
+
+            [tickets]
+            url = "https://mcp.example.com/tickets"
+        })
+        .unwrap(),
+        "the Conversation's servers, and a server that wants no header written          the way it was before there were headers: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert_eq!(
+        read["model_provider"],
+        toml::Value::String("proxy".to_owned()),
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And a Grok Build session, whose form is the same table with the headers
+/// under the name grok gives them — the whole of the difference between the
+/// two.
+///
+/// Read off grok 1.0.34 and proved the same way: a run against the recording
+/// server connected and sent them.
+#[tokio::test]
+async fn a_grok_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".grok/config.toml");
+    let read: toml::Table = written.parse().expect("grok is given TOML: {written}");
+
+    assert_eq!(
+        read["mcp_servers"],
+        toml::Value::try_from(toml::toml! {
+            [docs]
+            url = "https://mcp.example.com/docs"
+            headers = { "Authorization" = "Bearer sk-averysecretkey", "X-Tenant" = "verkstead" }
+
+            [tickets]
+            url = "https://mcp.example.com/tickets"
+        })
+        .unwrap(),
+        "the Conversation's servers, headers and all: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert!(
+        written.contains("[model.the-proxy]"),
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And an OpenCode session, whose form is a JSON entry apiece under `mcp`:
+/// the transport opencode calls a remote server, the URL, its OAuth
+/// auto-detection turned off, and the headers beside them.
+///
+/// Read off opencode 1.18.31 and proved the same way. `oauth: false` is that
+/// schema's own way of saying a server authenticates by header: left to itself
+/// opencode would answer a `401` by starting a login no sandbox has a browser
+/// to finish.
+#[tokio::test]
+async fn an_opencode_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.opencode_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".config/opencode/opencode.json");
+    let read: serde_json::Value = serde_json::from_str(&written).expect("opencode is given JSON");
+
+    assert_eq!(
+        read["mcp"],
+        serde_json::json!({
+            "docs": {
+                "type": "remote",
+                "url": "https://mcp.example.com/docs",
+                "oauth": false,
+                "headers": {
+                    "Authorization": "Bearer sk-averysecretkey",
+                    "X-Tenant": "verkstead",
+                },
+            },
+            "tickets": {
+                "type": "remote",
+                "url": "https://mcp.example.com/tickets",
+                "oauth": false,
+            },
+        }),
+        "the Conversation's servers: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert_eq!(
+        read["provider"]["proxy"]["npm"], "@ai-sdk/openai-compatible",
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And a Conversation with nothing attached builds, for each of the three, the
+/// root it built before any of this: no key at all rather than an empty one.
+///
+/// Which is most Conversations, and every one that ran before there were
+/// servers to attach.
+#[tokio::test]
+async fn a_conversation_with_nothing_attached_builds_each_root_as_it_did() {
+    let fixture = grilling().await;
+
+    let codex = fixture.codex_profile().await;
+    let grok = fixture.grok_profile().await;
+    let opencode = fixture.opencode_profile().await;
+
+    for (profile, file, key) in [
+        (&codex, ".codex/config.toml", "mcp_servers"),
+        (&grok, ".grok/config.toml", "mcp_servers"),
+        (&opencode, ".config/opencode/opencode.json", "mcp"),
+    ] {
+        let written = config_inside(&fixture, profile, file);
+
+        assert!(
+            !written.contains(key),
+            "{file} carries no {key} for a Conversation that attached none: {written}"
+        );
+    }
+
+    assert_codex_config_carries_the_provider_alone(
+        &fixture.windows_profile().join(".codex/config.toml"),
+    );
+    assert_grok_config_carries_the_model_alone(
+        &fixture.windows_profile().join(".grok/config.toml"),
+    );
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".config/opencode/opencode.json"),
+        )
+        .unwrap(),
+    );
+}
+
+/// The two servers these declare: one spoken to with headers and one with
+/// none, which is the pair each harness's form has to say something about.
+const THE_TWO_DECLARED: [Declaring; 2] = [
+    (
+        "docs",
+        "https://mcp.example.com/docs",
+        &[
+            ("Authorization", "Bearer sk-averysecretkey"),
+            ("X-Tenant", "verkstead"),
+        ],
+    ),
+    ("tickets", "https://mcp.example.com/tickets", &[]),
+];
+
+/// What a session inside reads in the configuration file its harness was
+/// given, at `file` inside its HOME.
+///
+/// Asked of a command inside the sandbox rather than read off the host, for
+/// this module's reason: what is being settled is what the session gets. The
+/// newlines come back as a byte the probe's `key=value` lines cannot hold one
+/// of, and go back to being newlines here.
+fn config_inside(fixture: &Grilling, profile: &store::Profile, file: &str) -> String {
+    let reported = probe(
+        &fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]),
+        &format!(
+            r#"say config "$({tr} '\n' '\036' < "$HOME/{file}")""#,
+            tr = quoted(&on_the_host("tr")),
+        ),
+    );
+
+    reported["config"].replace('\u{1e}', "\n")
+}
+
 /// What a session inside reads under `mcpServers` in its own `.claude.json`.
 fn servers_inside(fixture: &Grilling) -> serde_json::Value {
     let reported = probe(

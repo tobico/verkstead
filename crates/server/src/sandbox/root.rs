@@ -252,7 +252,63 @@ const TYPE: &str = "type";
 /// the page and the wire rather than from the agent, which can read its own
 /// configuration whatever this file did — see ADR-0021. What keeps it is the
 /// root, which is no more readable than the login beside it.
+///
+/// **Three of the four harnesses spell it this way** — Claude Code here, Grok
+/// Build in its `config.toml` and OpenCode in its `opencode.json`. Codex alone
+/// spells it something else, which is the whole of what its form differs in:
+/// see [`CODEX_HEADERS`].
 const HEADERS: &str = "headers";
+
+/// Of a Codex or a Grok Build `config.toml`, the table the Conversation's
+/// servers are written under: one sub-table apiece, `[mcp_servers.<name>]`,
+/// holding the URL it is reached at and the headers it is spoken to with.
+///
+/// **The account's own key of the same name is still left out**, which is
+/// [`MCP_SERVERS`]'s rule said about these two files: it is in neither
+/// [`CODEX_CARRIED`] nor [`GROK_CARRIED`], so what a root holds under this is
+/// Verkstead's own and nothing else.
+///
+/// The two harnesses agree on the spelling — read off codex 0.155.1 and grok
+/// 1.0.34 — so the difference between their forms is the header key alone.
+const MCP_SERVERS_TOML: &str = "mcp_servers";
+
+/// What Codex calls the headers of a streamable-HTTP server, inside that table.
+///
+/// Read off codex 0.155.1, whose server configuration takes `http_headers` and
+/// nothing else for a header typed once — and **proved on the wire**, against a
+/// server that recorded what it received: `initialize`, `tools/list` and
+/// `tools/call` each arrive carrying them.
+///
+/// **And nothing is said about approvals**, which was the other thing to find
+/// out: codex has a per-server `default_tools_approval_mode`, and a session
+/// launched the way Verkstead launches one — `--dangerously-bypass-approvals-
+/// and-sandbox`, which is *YOLO mode* on its own header — called an attached
+/// server's tool with no prompt and the key absent. A key that changes nothing
+/// is a key not written.
+const CODEX_HEADERS: &str = "http_headers";
+
+/// Of an OpenCode `opencode.json`, the key the Conversation's servers are
+/// written under, one entry apiece.
+///
+/// **The account's own key of the same name is still left out**, for
+/// [`MCP_SERVERS_TOML`]'s reason: it is not [`OPENCODE_CARRIED`].
+const OPENCODE_MCP: &str = "mcp";
+
+/// What an entry under it says about a transport: OpenCode's own word for the
+/// one transport a declaration can be, read off opencode 1.18.31. [`HTTP`] is
+/// Claude's word for the same thing.
+const REMOTE: &str = "remote";
+
+/// And the key that turns OpenCode's OAuth auto-detection off, which is written
+/// `false`.
+///
+/// A declaration authenticates by header, and a session has no browser to
+/// finish a login in. Left to itself, opencode treats a server that answers
+/// `401` as one to register an OAuth client with — so the session would be
+/// waiting on a redirect that cannot arrive rather than reporting a server it
+/// could not reach. opencode 1.18.31's own schema gives this key for exactly
+/// that: *set to false to disable OAuth auto-detection*.
+const OAUTH: &str = "oauth";
 
 /// Of the account's `.claude.json`, the key its per-path entries are under.
 const PROJECTS_CONFIG: &str = "projects";
@@ -526,8 +582,17 @@ impl Root {
     /// [`toml_carrying`]. OpenCode's is an `opencode.json` — see
     /// [`opencode_config`].
     ///
+    /// **And `servers` is where the other three harnesses are launched with the
+    /// Conversation's MCP servers**, one entry apiece in the form that harness
+    /// reads — which is what a Claude root's `.claude.json` copy carries
+    /// instead, there being no such file for the other three. Empty is the
+    /// ordinary Conversation and the file this wrote before there were any.
+    ///
+    /// A Claude root takes none of it here: its servers go in the copy rather
+    /// than in the settings beside it — see [`Root::config`].
+    ///
     /// Blocking: one read, or two for OpenCode.
-    pub(crate) fn written(&self, built: &Path) -> (PathBuf, Vec<u8>) {
+    pub(crate) fn written(&self, built: &Path, servers: &[AttachedServer]) -> (PathBuf, Vec<u8>) {
         let root = built.join(self.landing());
 
         match self.harness {
@@ -542,6 +607,8 @@ impl Root {
                         .ok()
                         .as_deref(),
                     &CODEX_CARRIED,
+                    servers,
+                    CODEX_HEADERS,
                 ),
             ),
             Harness::Grok => (
@@ -551,6 +618,8 @@ impl Root {
                         .ok()
                         .as_deref(),
                     &GROK_CARRIED,
+                    servers,
+                    HEADERS,
                 ),
             ),
             Harness::OpenCode => {
@@ -558,9 +627,12 @@ impl Root {
 
                 (
                     root.join(config).join(OPENCODE_CONFIGS[0]),
-                    opencode_config(OPENCODE_CONFIGS.map(|file| {
-                        std::fs::read_to_string(self.account.join(config).join(file)).ok()
-                    })),
+                    opencode_config(
+                        OPENCODE_CONFIGS.map(|file| {
+                            std::fs::read_to_string(self.account.join(config).join(file)).ok()
+                        }),
+                        servers,
+                    ),
                 )
             }
         }
@@ -761,7 +833,14 @@ impl Root {
 /// files. A file with comments or trailing commas is read the way opencode
 /// reads it — see [`uncommented`]. An account with neither file, or none that
 /// reads as a JSON object, is given a file with no provider in it.
-fn opencode_config(account: [Option<String>; 2]) -> Vec<u8> {
+///
+/// **And `servers` under [`OPENCODE_MCP`]**, one entry apiece:
+/// `{"type": "remote", "url": …, "oauth": false}`, with the headers it is
+/// spoken to with beside them where it has any. The account's own `mcp` is not
+/// among what is carried, so what a session finds under that key is the
+/// Conversation's and nothing else. A Conversation with none attached is no key
+/// at all, which is the file as it was written before there were any.
+fn opencode_config(account: [Option<String>; 2], servers: &[AttachedServer]) -> Vec<u8> {
     let mut written = Object::new();
 
     for text in account.iter().flatten() {
@@ -779,7 +858,42 @@ fn opencode_config(account: [Option<String>; 2]) -> Vec<u8> {
         }
     }
 
+    if !servers.is_empty() {
+        let mut ours = Object::new();
+
+        for server in servers {
+            let mut entry = serde_json::json!({
+                TYPE: REMOTE,
+                URL: server.url(),
+                OAUTH: false,
+            });
+
+            if !server.headers().is_empty() {
+                entry[HEADERS] = serde_json::Value::Object(sent(server));
+            }
+
+            ours.insert(server.name().to_owned(), entry);
+        }
+
+        written.insert(OPENCODE_MCP.to_owned(), serde_json::Value::Object(ours));
+    }
+
     self::written(&serde_json::Value::Object(written))
+}
+
+/// The headers `server` is spoken to with, as a JSON object: the names its
+/// declaration carries, each with the value `secrets.yaml` keeps for it.
+///
+/// One place for the two roots written as JSON to say the same thing — the
+/// Claude copy and OpenCode's file. A harness that differs here differs in
+/// what it calls the key rather than in the object under it, which is why that
+/// is the part each of them says for itself.
+fn sent(server: &AttachedServer) -> Object {
+    server
+        .headers()
+        .iter()
+        .map(|(header, value)| (header.clone(), value.as_str().into()))
+        .collect()
 }
 
 /// `over` merged into `into`: objects key by key, all the way down, and
@@ -882,7 +996,22 @@ fn in_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, onto: &mut St
 /// that one key of the table, in a table of the same name. An account with no
 /// such file, or one that does not read as TOML, is given an empty file: a
 /// session on the vendor's own provider needs nothing said.
-fn toml_carrying(account: Option<&str>, carried: &[&str]) -> Vec<u8> {
+///
+/// **And `servers` under [`MCP_SERVERS_TOML`]**, one `[mcp_servers.<name>]`
+/// apiece holding the URL it is reached at, and the headers it is spoken to
+/// with under `headers` where it has any. That key is the one thing the two
+/// harnesses' forms differ in, which is why it is handed in rather than
+/// chosen here — `http_headers` for Codex and `headers` for Grok Build, see
+/// [`CODEX_HEADERS`].
+///
+/// A Conversation with none attached is no table at all, which is the file as
+/// it was written before there were any.
+fn toml_carrying(
+    account: Option<&str>,
+    carried: &[&str],
+    servers: &[AttachedServer],
+    headers: &str,
+) -> Vec<u8> {
     let mut written = toml::Table::new();
 
     if let Some(own) = account.and_then(|text| text.parse::<toml::Table>().ok()) {
@@ -911,6 +1040,37 @@ fn toml_carrying(account: Option<&str>, carried: &[&str]) -> Vec<u8> {
                 }
             }
         }
+    }
+
+    // And Verkstead's own servers under a table of their own. Written after
+    // the carry rather than over it, for [`config`]'s reason: what the account
+    // had cannot survive under a name the settings happen to share with it —
+    // and this table is carried by neither allowlist, so there is nothing of
+    // the account's here to survive.
+    if !servers.is_empty() {
+        let mut ours = toml::Table::new();
+
+        for server in servers {
+            let mut entry = toml::Table::new();
+            entry.insert(URL.to_owned(), server.url().into());
+
+            // Left out altogether where there are none, so a server that wants
+            // no header is written the way it was before there were headers to
+            // write.
+            if !server.headers().is_empty() {
+                let sent: toml::Table = server
+                    .headers()
+                    .iter()
+                    .map(|(header, value)| (header.clone(), value.as_str().into()))
+                    .collect();
+
+                entry.insert(headers.to_owned(), toml::Value::Table(sent));
+            }
+
+            ours.insert(server.name().to_owned(), toml::Value::Table(entry));
+        }
+
+        written.insert(MCP_SERVERS_TOML.to_owned(), toml::Value::Table(ours));
     }
 
     toml::to_string(&written)
@@ -1007,13 +1167,7 @@ fn config(account: Option<&[u8]>, trusted: &[String], servers: &[AttachedServer]
             // that wants none is written the way it was before there were
             // headers to write.
             if !server.headers().is_empty() {
-                let sent: Object = server
-                    .headers()
-                    .iter()
-                    .map(|(header, value)| (header.clone(), value.as_str().into()))
-                    .collect();
-
-                entry[HEADERS] = serde_json::Value::Object(sent);
+                entry[HEADERS] = serde_json::Value::Object(sent(server));
             }
 
             ours.insert(server.name().to_owned(), entry);
@@ -1317,6 +1471,11 @@ fn base36(mut number: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a root is written for a Conversation that attached no MCP server,
+    /// which is most of them — and what every test here that is about
+    /// something else hands in.
+    const NONE: &[AttachedServer] = &[];
 
     /// A Claude root's `projects/` entries.
     fn entries(root: &Root) -> Vec<String> {
@@ -2049,7 +2208,12 @@ mod tests {
         "#;
 
         assert_eq!(
-            table(&toml_carrying(Some(account), &CODEX_CARRIED)),
+            table(&toml_carrying(
+                Some(account),
+                &CODEX_CARRIED,
+                NONE,
+                CODEX_HEADERS
+            )),
             toml::toml! {
                 model_provider = "proxy"
 
@@ -2061,13 +2225,107 @@ mod tests {
         );
     }
 
+    /// And the Conversation's servers under a table of their own, each with the
+    /// URL it is reached at and the headers it is spoken to with — Codex
+    /// spelling those `http_headers`, which is the one thing its form and Grok
+    /// Build's differ in.
+    ///
+    /// Beside what the account's own file is carried for rather than instead of
+    /// it, and with none of the account's own servers: those are left out by
+    /// the allowlist, the same as they always were.
+    #[test]
+    fn codexs_config_carries_the_attached_servers_under_http_headers() {
+        let account = r#"
+            model_provider = "proxy"
+
+            [model_providers.proxy]
+            base_url = "https://proxy.example/v1"
+
+            [mcp_servers.the-humans]
+            command = "npx"
+        "#;
+
+        assert_eq!(
+            table(&toml_carrying(
+                Some(account),
+                &CODEX_CARRIED,
+                &[
+                    AttachedServer::of(
+                        "docs",
+                        "https://mcp.example.com/docs",
+                        &[
+                            ("Authorization", "Bearer sk-averysecretkey"),
+                            ("X-Tenant", "verkstead"),
+                        ],
+                    ),
+                    // And one that wants none, which is written the way it was
+                    // before there were headers to write.
+                    AttachedServer::of("tickets", "https://mcp.example.com/tickets", &[]),
+                ],
+                CODEX_HEADERS
+            )),
+            toml::toml! {
+                model_provider = "proxy"
+
+                [model_providers.proxy]
+                base_url = "https://proxy.example/v1"
+
+                [mcp_servers.docs]
+                url = "https://mcp.example.com/docs"
+                http_headers = { "Authorization" = "Bearer sk-averysecretkey", "X-Tenant" = "verkstead" }
+
+                [mcp_servers.tickets]
+                url = "https://mcp.example.com/tickets"
+            }
+        );
+    }
+
+    /// And Grok Build's is the same table with the headers under the name it
+    /// gives them, which is the whole of the difference.
+    #[test]
+    fn groks_config_carries_the_attached_servers_under_headers() {
+        assert_eq!(
+            table(&toml_carrying(
+                None,
+                &GROK_CARRIED,
+                &[AttachedServer::of(
+                    "docs",
+                    "https://mcp.example.com/docs",
+                    &[("Authorization", "Bearer sk-averysecretkey")],
+                )],
+                HEADERS
+            )),
+            toml::toml! {
+                [mcp_servers.docs]
+                url = "https://mcp.example.com/docs"
+                headers = { "Authorization" = "Bearer sk-averysecretkey" }
+            }
+        );
+    }
+
     /// An account with no `config.toml`, or one that does not read, is given an
     /// empty one.
     #[test]
     fn an_account_with_no_codex_config_to_read_is_given_an_empty_one() {
-        assert!(toml_carrying(None, &CODEX_CARRIED).is_empty());
-        assert!(toml_carrying(Some("model_provider = "), &CODEX_CARRIED).is_empty());
-        assert!(toml_carrying(Some("model = \"gpt-5-codex\"\n"), &CODEX_CARRIED).is_empty());
+        assert!(toml_carrying(None, &CODEX_CARRIED, NONE, CODEX_HEADERS).is_empty());
+        assert!(
+            toml_carrying(
+                Some("model_provider = "),
+                &CODEX_CARRIED,
+                NONE,
+                CODEX_HEADERS
+            )
+            .is_empty()
+        );
+        assert!(
+            toml_carrying(
+                Some("model = \"gpt-5-codex\"\n"),
+                &CODEX_CARRIED,
+                NONE,
+                CODEX_HEADERS
+            )
+            .is_empty()
+        );
     }
 
     /// A Grok Build root joins the login and its two memory directories, made
@@ -2185,7 +2443,7 @@ mod tests {
         "#;
 
         assert_eq!(
-            table(&toml_carrying(Some(account), &GROK_CARRIED)),
+            table(&toml_carrying(Some(account), &GROK_CARRIED, NONE, HEADERS)),
             toml::toml! {
                 [model.the-proxy]
                 model = "gpt-5"
@@ -2217,16 +2475,26 @@ mod tests {
     /// `endpoints` table with none of the two keys is not written at all.
     #[test]
     fn an_account_with_nothing_to_carry_into_groks_config_is_given_an_empty_one() {
-        assert!(toml_carrying(None, &GROK_CARRIED).is_empty());
-        assert!(toml_carrying(Some("[model"), &GROK_CARRIED).is_empty());
+        assert!(toml_carrying(None, &GROK_CARRIED, NONE, HEADERS).is_empty());
+        assert!(toml_carrying(Some("[model"), &GROK_CARRIED, NONE, HEADERS).is_empty());
         assert!(
             toml_carrying(
                 Some("[endpoints]\ntrace_upload_bucket = \"s3://x\"\n"),
-                &GROK_CARRIED
+                &GROK_CARRIED,
+                NONE,
+                HEADERS
             )
             .is_empty()
         );
-        assert!(toml_carrying(Some("endpoints = \"not a table\"\n"), &GROK_CARRIED).is_empty());
+        assert!(
+            toml_carrying(
+                Some("endpoints = \"not a table\"\n"),
+                &GROK_CARRIED,
+                NONE,
+                HEADERS
+            )
+            .is_empty()
+        );
     }
 
     /// An OpenCode root shares its data directory whole and builds its config
@@ -2282,7 +2550,7 @@ mod tests {
             "the data directory whole, with the login inside it"
         );
         assert_eq!(
-            remembering.written(Path::new("/built")).0,
+            remembering.written(Path::new("/built"), NONE).0,
             Path::new("/built/.config/opencode/opencode.json")
         );
 
@@ -2327,7 +2595,7 @@ mod tests {
         });
 
         assert_eq!(
-            read(&opencode_config([Some(account.to_string()), None])),
+            read(&opencode_config([Some(account.to_string()), None], NONE)),
             serde_json::json!({
                 "provider": {
                     "proxy": {
@@ -2358,10 +2626,10 @@ mod tests {
         "#;
 
         assert_eq!(
-            read(&opencode_config([
-                Some(json.to_owned()),
-                Some(jsonc.to_owned())
-            ])),
+            read(&opencode_config(
+                [Some(json.to_owned()), Some(jsonc.to_owned())],
+                NONE,
+            )),
             serde_json::json!({
                 "provider": {
                     "proxy": { "options": { "baseURL": "https://proxy.example/v1", "timeout": 5 } },
@@ -2408,19 +2676,69 @@ mod tests {
         }
     }
 
+    /// And an OpenCode root is given the Conversation's servers under `mcp`,
+    /// each as the transport opencode calls a remote server, the URL it is
+    /// reached at, the OAuth auto-detection turned off and the headers it is
+    /// spoken to with.
+    ///
+    /// Beside the provider the account is carried for, and with none of the
+    /// account's own `mcp`: that key is not carried, the same as it never was.
+    #[test]
+    fn an_opencode_config_carries_the_attached_servers_under_mcp() {
+        let account = r#"{
+            "provider": { "proxy": { "npm": "@ai-sdk/openai-compatible" } },
+            "mcp": { "the-humans": { "type": "local", "command": ["npx"] } }
+        }"#;
+
+        assert_eq!(
+            read(&opencode_config(
+                [Some(account.to_owned()), None],
+                &[
+                    AttachedServer::of(
+                        "docs",
+                        "https://mcp.example.com/docs",
+                        &[("Authorization", "Bearer sk-averysecretkey")],
+                    ),
+                    AttachedServer::of("tickets", "https://mcp.example.com/tickets", &[]),
+                ],
+            )),
+            serde_json::json!({
+                "provider": { "proxy": { "npm": "@ai-sdk/openai-compatible" } },
+                "mcp": {
+                    "docs": {
+                        "type": "remote",
+                        "url": "https://mcp.example.com/docs",
+                        "oauth": false,
+                        "headers": { "Authorization": "Bearer sk-averysecretkey" },
+                    },
+                    // And one that wants no header is written without the key,
+                    // the way it was before there were headers to write.
+                    "tickets": {
+                        "type": "remote",
+                        "url": "https://mcp.example.com/tickets",
+                        "oauth": false,
+                    },
+                },
+            })
+        );
+    }
+
     /// An account with no config, or one that does not read, is given a file
     /// with no provider in it.
     #[test]
     fn an_account_with_no_opencode_config_to_read_is_given_one_with_no_provider() {
         let empty = serde_json::json!({});
 
-        assert_eq!(read(&opencode_config([None, None])), empty);
+        assert_eq!(read(&opencode_config([None, None], NONE)), empty);
         assert_eq!(
-            read(&opencode_config([Some("{ not json".to_owned()), None])),
+            read(&opencode_config(
+                [Some("{ not json".to_owned()), None],
+                NONE
+            )),
             empty
         );
         assert_eq!(
-            read(&opencode_config([None, Some("[1, 2]".to_owned())])),
+            read(&opencode_config([None, Some("[1, 2]".to_owned())], NONE)),
             empty
         );
     }

@@ -1022,26 +1022,20 @@ pub(crate) fn attached(
 ///
 /// **And how the tools are named, which is the harness's answer.** What the
 /// agent sees in front of a server's tools is the one thing about an MCP server
-/// a session cannot work out for itself, and it differs between the four — so
-/// it is said here, by the harness this session is being launched on.
-///
-/// `None` from [`tools_named`] is a harness that is not launched with MCP
-/// servers yet, and a prompt that said it was would be telling a session
-/// something untrue: those sessions launch as they did before. See the
-/// `mcp-servers` backlog's task 05, which is where the other three get both
-/// halves.
+/// a session cannot work out for itself, and it is the one thing about this
+/// that is not the same everywhere — so it is said here, by the harness this
+/// session is being launched on. All four are launched with servers, so all
+/// four are told — see [`tools_named`].
 ///
 /// Neutral, as the two listings above it are: each server is named and nothing
 /// here says what to do with any of it. The Brief says what the work is, and
 /// the human attached the server because they had a use for it.
 pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) -> String {
-    let Some(naming) = tools_named(agent) else {
-        return prompt.to_owned();
-    };
-
     if servers.is_empty() {
         return prompt.to_owned();
     }
+
+    let naming = tools_named(agent);
 
     let listed: Vec<String> = servers.iter().map(|name| format!("- `{name}`")).collect();
 
@@ -1053,17 +1047,24 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
     )
 }
 
-/// What a harness puts in front of an MCP server's tool names, and `None`
-/// where it is not launched with any MCP servers yet.
+/// What a harness puts in front of an MCP server's tool names.
 ///
-/// Claude Code names a tool `mcp__<server>__<tool>`, read off 2.1.268. The
-/// other three are task 05 of the `mcp-servers` backlog: until then a session
-/// on one of them is launched exactly as it was, so there is no naming to
-/// describe and nothing to say about servers it has not got.
-fn tools_named(agent: store::AgentType) -> Option<&'static str> {
+/// Each read off a real run against a server that recorded what it was asked,
+/// rather than off anybody's documentation — the harness's own version in
+/// brackets:
+///
+/// - Claude Code (2.1.268) and Codex (0.155.1) both name a tool
+///   `mcp__<server>__<tool>`. Codex reaches it through a namespace of that
+///   first half rather than a flat name, which comes to the same thing from
+///   inside the session.
+/// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
+///   name its `use_tool` takes.
+/// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
+fn tools_named(agent: store::AgentType) -> &'static str {
     match agent {
-        store::AgentType::Claude => Some("mcp__<server>__<tool>"),
-        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
+        store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
+        store::AgentType::Grok => "<server>__<tool>",
+        store::AgentType::OpenCode => "<server>_<tool>",
     }
 }
 
@@ -4401,24 +4402,61 @@ mod tests {
     fn a_conversation_with_no_servers_is_started_on_the_prompt_as_it_stands() {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
-        assert_eq!(served(&prompt, &[], store::AgentType::Claude), prompt);
-    }
-
-    /// A harness that is not launched with MCP servers yet is told about none:
-    /// a session on one of the other three launches exactly as it did before,
-    /// and a prompt naming servers it has not got would be untrue. See task 05
-    /// of the `mcp-servers` backlog, which is where the three get both halves.
-    #[test]
-    fn a_harness_that_is_not_launched_with_them_is_told_about_none() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
-
         for agent in [
+            store::AgentType::Claude,
             store::AgentType::Codex,
             store::AgentType::Grok,
             store::AgentType::OpenCode,
         ] {
-            assert_eq!(served(&prompt, &["docs".to_owned()], agent), prompt);
+            assert_eq!(served(&prompt, &[], agent), prompt);
         }
+    }
+
+    /// Every harness is launched with them, so every harness is told — each in
+    /// the naming its own tools come out under, which is the one thing about
+    /// this that is not the same everywhere.
+    #[test]
+    fn each_harness_is_told_the_naming_its_own_tools_come_out_under() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+
+        for (agent, naming) in [
+            (store::AgentType::Claude, "`mcp__<server>__<tool>`"),
+            (store::AgentType::Codex, "`mcp__<server>__<tool>`"),
+            (store::AgentType::Grok, "`<server>__<tool>`"),
+            (store::AgentType::OpenCode, "`<server>_<tool>`"),
+        ] {
+            let said = served(&prompt, &["docs".to_owned()], agent);
+
+            assert!(
+                said.contains(naming),
+                "{agent:?} names its tools {naming}: {said:?}"
+            );
+            assert!(
+                said.contains("- `docs`"),
+                "and the server is named whichever harness runs it: {said:?}"
+            );
+        }
+    }
+
+    /// And the three namings are told apart rather than one standing in for
+    /// another: `<server>__<tool>` is inside `mcp__<server>__<tool>`, so a
+    /// harness given the longer one would pass a test that only looked for the
+    /// shorter.
+    #[test]
+    fn the_shorter_naming_is_not_the_longer_one_read_loosely() {
+        let prompt = served("", &["docs".to_owned()], store::AgentType::Grok);
+
+        assert!(
+            !prompt.contains("mcp__"),
+            "grok's tools carry no `mcp__` in front of them: {prompt:?}"
+        );
+
+        let prompt = served("", &["docs".to_owned()], store::AgentType::OpenCode);
+
+        assert!(
+            !prompt.contains("__"),
+            "and opencode joins the two halves with one underscore: {prompt:?}"
+        );
     }
 
     /// And it says what is there and nothing about what to do with it, as the
