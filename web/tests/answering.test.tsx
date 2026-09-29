@@ -20,6 +20,10 @@ import notices from "../src/notices.module.css";
 import submitting from "../src/set/Answering.module.css";
 import closing from "../src/set/Postscript.module.css";
 import sheet from "../src/set/Sheet.module.css";
+// And the source of it, for the half of a row's pressability that is a rule
+// rather than a handler: jsdom lays nothing out and loads no stylesheet, so a
+// declaration is asked of the file that carries it.
+import stylesheet from "../src/set/Sheet.module.css?raw";
 import { draftKey } from "../src/set/filling";
 import {
   answering,
@@ -295,6 +299,37 @@ describe("the sheet a waiting Set is answered on", () => {
 });
 
 describe("selecting an Option", () => {
+  it("selects on a press that slid over its words, not only on a still one", async () => {
+    const { page } = await answering(WAITING);
+
+    // What the browser sends when the hand moved: the row's own click, and no
+    // click on the radio. It used to reach nothing at all, and left a character
+    // of the Option highlighted in place of an answer.
+    //
+    // And it arrives once, which is what the second press proves: a gesture
+    // counted twice would select the Option and clear it again, so this one
+    // would be selecting rather than clearing.
+    slidPress(page, "Q1", 1);
+    expect(option(page, "Q1", 1).checked).toBe(true);
+
+    slidPress(page, "Q1", 1);
+    expect(
+      option(page, "Q1", 1).checked,
+      "and a second press on the row clears it, as one on the radio does",
+    ).toBe(false);
+  });
+
+  it("focuses the radio it picked, as the forwarding it replaces did", async () => {
+    const { page } = await answering(WAITING);
+
+    // What the label did for nothing until the row took the press off it, and
+    // so what the row now does by hand: the arrow keys move within the group
+    // the human just pressed into, rather than from wherever focus had been.
+    slidPress(page, "Q1", 2);
+
+    expect(document.activeElement).toBe(option(page, "Q1", 2));
+  });
+
   it("selects the one clicked, and moves with a second click", async () => {
     const { page } = await answering(WAITING);
 
@@ -327,6 +362,76 @@ describe("selecting an Option", () => {
     expect(option(page, "Q2", 2).checked).toBe(true);
   });
 });
+
+/// The rows a Set is answered by, as the stylesheet has them: every one of them
+/// is a thing to press, and a thing to press takes no selection.
+///
+/// That is the other half of `rowPress` in `Answering.tsx`. A press that slid a
+/// pixel over the words left a sliver of them highlighted, and the handler
+/// alone would answer the press and leave the sliver behind.
+describe("the rows a Set is answered by", () => {
+  const ROWS: [string, string][] = [
+    [".option label", "an Option"],
+    [
+      ".directionPick .direction label,\n.ending label",
+      "a direction, and the Nothing-else tick beside it",
+    ],
+    [".ask:not(.decided) .answerTable tbody tr", "a row of an Answer Table"],
+  ];
+
+  for (const [selectors, what] of ROWS) {
+    it(`is pressed rather than read: ${what}`, () => {
+      const rule = declares(selectors);
+
+      expect(rule, "a row is a press, so it takes no selection").toContain(
+        "user-select: none;",
+      );
+      expect(rule, "and it says as much under the pointer").toContain(
+        "cursor: pointer;",
+      );
+    });
+  }
+
+  it("leaves a settled Set's own table to be copied out of", () => {
+    expect(
+      declares(".ask.decided .answerTable tbody tr"),
+      "nothing on the record is pressed, so its words are still words",
+    ).not.toContain("user-select");
+  });
+});
+
+/// A press on an Option's words that slid before it was let go: the row's own
+/// click, with the click a label forwards to its control not happening.
+///
+/// That is the gesture at issue, and the browser's part in it is a withholding —
+/// it forwards nothing the moment the pointer moved between the press and the
+/// release. jsdom has no pointer and forwards unconditionally, so the
+/// withholding is staged here by cancelling the forwarding from outside. What
+/// the row is handed is the same either way, which is the whole of what these
+/// ask: its own click, and none on the radio.
+function slidPress(page: ParentNode, label: string, n: number): void {
+  const withhold = (event: Event) => event.preventDefault();
+
+  document.addEventListener("click", withhold, true);
+  try {
+    fireEvent.click(
+      option(page, label, n).closest("label")!.querySelector(`.${sheet.optionText}`)!,
+    );
+  } finally {
+    document.removeEventListener("click", withhold, true);
+  }
+}
+
+/// What one top-level rule of the sheet's stylesheet declares, read off the
+/// source by the selector list that carries it.
+function declares(selectors: string): string {
+  const at = stylesheet.indexOf(`\n${selectors} {\n`);
+  expect(
+    at,
+    `expected the stylesheet to hold \`${selectors}\``,
+  ).toBeGreaterThan(-1);
+  return stylesheet.slice(at, stylesheet.indexOf("\n}", at));
+}
 
 describe("a question whose Options were declared as a table", () => {
   /// The table drawn for the question named `label`.

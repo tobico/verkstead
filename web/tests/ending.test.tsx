@@ -165,6 +165,37 @@ describe("the option on an investigation's Set", () => {
 });
 
 describe("ticking it", () => {
+  /// A press on the option's words that slid before it was let go: the row's own
+  /// click, with the click a label forwards to its box not happening.
+  ///
+  /// A browser withholds that forwarding the moment the pointer moved between
+  /// the press and the release. jsdom has no pointer and forwards regardless, so
+  /// the withholding is staged by cancelling it — what the row is handed is the
+  /// same either way. `tests/answering.test.tsx` asks the same of an Option's
+  /// row, which is where the arrangement is written down.
+  function slidPress(page: ParentNode): void {
+    const withhold = (event: Event) => event.preventDefault();
+
+    document.addEventListener("click", withhold, true);
+    try {
+      fireEvent.click(page.querySelector(`.${sheet.endingName}`)!);
+    } finally {
+      document.removeEventListener("click", withhold, true);
+    }
+  }
+
+  it("ticks on a press that slid over its words, not only on a still one", async () => {
+    const { page } = await answering(FOLLOWING_UP);
+
+    slidPress(page);
+    expect(option(page).checked).toBe(true);
+
+    // And once: a gesture counted twice would tick the box and untick it again,
+    // so this press would be ticking rather than clearing.
+    slidPress(page);
+    expect(option(page).checked).toBe(false);
+  });
+
   it("ticks on a click and clears on a second", async () => {
     const { page } = await answering(FOLLOWING_UP);
 

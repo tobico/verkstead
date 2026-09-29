@@ -184,6 +184,17 @@
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
+
+  /* And it is a thing to press rather than words to sweep a caret over, so it
+     says so and takes no selection. A press that slid a pixel used to leave one
+     character of the Option highlighted — see `rowPress` in `Answering.tsx` for
+     what that cost, which is the other half of this.
+
+     Nothing is given up by it. The Option's words are the agent's, they are on
+     the record once the Set is answered, and the record draws no label: what is
+     there to copy is copied from there. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .option input {
@@ -265,9 +276,12 @@
 }
 
 /* No label to wrap the row in, so the row itself is the tap target — and it
-   says so. On the record there is nothing to tap, so it does not. */
+   says so, and takes no selection while it is one. On the record there is
+   nothing to tap, so it does neither: a comparison the human is reading rather
+   than answering is a table to copy out of like any other. */
 .ask:not(.decided) .answerTable tbody tr {
   cursor: pointer;
+  user-select: none;
 }
 
 /* The accent treatment the selected Option card takes, drawn around the whole
@@ -384,6 +398,14 @@
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
+
+  /* A press and not words to select, for the reason an Option's row is not —
+     see `.option label`, which is the same two lines about the same gesture.
+     These two rows have less to copy than an Option has: the words are the
+     viewer's own, and the note under a direction says what it means and is
+     outside the row. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .directionPick .direction input,

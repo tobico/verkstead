@@ -173,6 +173,42 @@ describe("the chooser on a Set that carries a proposal", () => {
 });
 
 describe("picking a direction", () => {
+  /// A press on a direction's name that slid before it was let go: the row's own
+  /// click, with the click a label forwards to its radio not happening.
+  ///
+  /// A browser withholds that forwarding the moment the pointer moved between
+  /// the press and the release, and a row of words is pressed by hands that are
+  /// not perfectly still. jsdom has no pointer and forwards regardless, so the
+  /// withholding is staged by cancelling it — what the row is handed is the same
+  /// either way. `tests/answering.test.tsx` asks the same of an Option's row,
+  /// which is where the arrangement is written down.
+  function slidPress(page: ParentNode, direction: Direction): void {
+    const withhold = (event: Event) => event.preventDefault();
+
+    document.addEventListener("click", withhold, true);
+    try {
+      fireEvent.click(
+        offered(page, direction)
+          .closest("label")!
+          .querySelector(`.${sheet.directionName}`)!,
+      );
+    } finally {
+      document.removeEventListener("click", withhold, true);
+    }
+  }
+
+  it("picks on a press that slid over the name, not only on a still one", async () => {
+    const { page } = await answering(PROPOSING);
+
+    slidPress(page, "roadmap");
+    expect(offered(page, "roadmap").checked).toBe(true);
+
+    // And once: a gesture counted twice would pick the direction and un-pick it
+    // again, so this press would be picking rather than clearing.
+    slidPress(page, "roadmap");
+    expect(offered(page, "roadmap").checked).toBe(false);
+  });
+
   it("picks on a click and clears on a second, as an Option does", async () => {
     const { page } = await answering(PROPOSING);
 

@@ -458,7 +458,7 @@ function Choosing(props: {
                   class={page.direction}
                   classList={{ [page.recommended!]: recommended() }}
                 >
-                  <label>
+                  <label onClick={rowPress(() => props.pick(offered))}>
                     <input
                       type="radio"
                       id={`direction-${offered}`}
@@ -467,8 +467,10 @@ function Choosing(props: {
                       checked={props.picked() === offered}
                       // Both gestures, for the reason an Option answers
                       // both: an arrow key fires a change and never a click,
-                      // and a click on what is already picked fires a click
-                      // and never a change.
+                      // and a click on the radio itself when it is already
+                      // picked fires a click and never a change. A press
+                      // anywhere else in the row is the row's own — see
+                      // [`rowPress`].
                       onChange={() => props.move(offered)}
                       onClick={() => props.pick(offered)}
                     />
@@ -509,6 +511,10 @@ function Choosing(props: {
 /// between: it is on or it is off, and a second click takes it off again — the
 /// clearing an Option needs a rule of its own for.
 ///
+/// The row is pressed the way every other row on the sheet is — see
+/// [`rowPress`] — so the tick is the row's own doing wherever the press landed,
+/// and the box's `change` answers only a press on the box.
+///
 /// And it says what ticking does, for the reason the direction chooser does:
 /// what a control means has to be on the control, rather than left to whatever
 /// the agent happened to write above it.
@@ -519,7 +525,7 @@ function NothingElse(props: {
 }): JSX.Element {
   return (
     <section class={page.ending}>
-      <label>
+      <label onClick={rowPress(() => props.tick(!props.ticked()))}>
         <input
           type="checkbox"
           id="nothing-else"
@@ -687,6 +693,8 @@ function Asking(props: {
 /// load, so an unread Recommendation cannot be submitted by accident. Clicking
 /// the selected Option clears it, which puts the question back to unanswered and
 /// so back into the warning before submit.
+///
+/// The row carries the press itself — see [`rowPress`], which is why.
 function Offered(props: {
   option: OptionView;
   group: string;
@@ -704,7 +712,7 @@ function Offered(props: {
   // it is everywhere else.
   return (
     <li class={marks(props.option)}>
-      <label>
+      <label onClick={rowPress(() => props.fields.pick(n()))}>
         <input
           type="radio"
           id={`${props.group}-${n()}`}
@@ -713,14 +721,19 @@ function Offered(props: {
           checked={props.fields.selected() === n()}
           // Both, because they answer different gestures. An arrow key moves the
           // selection and fires a change without ever firing a click; a click on
-          // the Option already selected is the other way round — the browser
-          // fires no change, because as far as it is concerned nothing changed.
+          // the radio itself — by pointer or by the space bar — is the other way
+          // round when it lands on the Option already selected, the browser
+          // firing no change because as far as it is concerned nothing changed.
           // Space is a click here too, which is what gives the keyboard the
           // clearing.
           //
           // The click runs before the change, so it still sees what the question
           // held before this gesture — which is the whole of how a second click
           // on the same Option is told from a first.
+          //
+          // A press that landed anywhere else in the row never reaches this one:
+          // the row's own handler has it, and cancels what the label would have
+          // forwarded here.
           onChange={() => props.fields.move(n())}
           onClick={() => props.fields.pick(n())}
         />
@@ -827,6 +840,50 @@ function Row(props: {
       </Show>
     </tr>
   );
+}
+
+/// The press a row of the sheet answers to: the row's own click, counted once.
+///
+/// A row that wraps its control in a `<label>` is offered as one thing to press,
+/// and the browser makes good on that by forwarding the label's click to the
+/// control — which is what a pick used to ride on. It withholds that forwarding
+/// the moment the pointer moved at all between the press and the release. So a
+/// hand that slid a pixel over an Option's words got a sliver of them selected
+/// and nothing picked: the one gesture the row has was also the one way to miss
+/// it, and a row of words is a thing people press without holding perfectly
+/// still.
+///
+/// The row answers its own click instead, which arrives whether the pointer moved
+/// or not, and cancels the forwarding so that one gesture cannot come through
+/// twice. Cancelling it takes the focus the forwarding also moved, so the control
+/// is focused by hand in its place: nothing about a press that did not slide
+/// changes, and a slid one now does the same thing.
+///
+/// A press that landed on the control itself is left alone — the control's own
+/// handlers have it, and that press is also how the keyboard picks. A forwarded
+/// click is indistinguishable from one here, both arriving from the control,
+/// which is why the forwarding is cancelled rather than told apart.
+///
+/// The other half of it is in the stylesheet: a row takes no selection, so there
+/// is no sliver left to be rid of. See `.option label` in `Sheet.module.css`.
+///
+/// The rows of an Answer Table are already pressed this way and always were —
+/// there is no label to wrap a `tr` in, so nothing was ever forwarded and there
+/// is nothing to cancel. See [`Row`].
+function rowPress(
+  act: () => void,
+): (event: MouseEvent & { currentTarget: HTMLElement }) => void {
+  return (event) => {
+    const control = event.currentTarget.querySelector("input");
+
+    if (event.target === control) {
+      return;
+    }
+
+    event.preventDefault();
+    control?.focus();
+    act();
+  };
 }
 
 /// What one Option on offer is marked as: an Option, and the one the agent
