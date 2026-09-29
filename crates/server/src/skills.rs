@@ -984,9 +984,11 @@ pub(crate) struct Link {
 /// it: its branch is left where [`crate::continuing::beside`] cut it, which is
 /// the companion of whatever this stage's own branch was cut from. That is the
 /// same branch as the top of the chain while a roadmap runs its stages one at a
-/// time, so nothing is out of place yet — and joining a companion's chain is
-/// work for the stage that first starts two side by side. See CONTEXT's
-/// **Chain**, where the deferral is written down.
+/// time, so nothing was out of place while every roadmap ran that way — and a
+/// declaring roadmap does not, so a stage that rebases onto a top above its base
+/// leaves its companion's branch behind. **Known and not yet done**, and it
+/// costs nothing until a roadmap both declares and has a companion its stages
+/// commit in. See CONTEXT's **Chain**, where the deferral is written down.
 pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
     let Some((top, under)) = chain.split_last() else {
         return prompt.to_owned();
@@ -2363,6 +2365,34 @@ mod tests {
             "and the example carries both, a declaration written away here being the \
              mixed roadmap `verkstead done` refuses: {}",
             annotated.after
+        );
+    }
+
+    /// *No other plan in flight to check for* has to stay true now that a
+    /// roadmap starts every stage whose dependencies have settled: a sibling of
+    /// this roadmap may well be being planned beside this session, and the
+    /// sentence is true for a reason it did not have before — the sibling is in
+    /// a worktree of its own and none of it is this session's to wait on.
+    #[test]
+    fn the_next_stage_fork_says_a_sibling_stage_is_not_its_to_wait_on() {
+        let said = flowed(NEXT_STAGE);
+
+        assert!(
+            said.contains("no other plan in flight to check for"),
+            "there is still nothing here to go looking for: {said}"
+        );
+        assert!(
+            said.contains(
+                "Sibling stages of this roadmap may well be being planned or built \
+                 beside you"
+            ),
+            "and what makes that true is said, rather than left to a reader who \
+             knows a roadmap now runs its stages side by side: {said}"
+        );
+        assert!(
+            said.contains("yours to wait for"),
+            "a session that waited on a sibling would idle until somebody noticed: \
+             {said}"
         );
     }
 

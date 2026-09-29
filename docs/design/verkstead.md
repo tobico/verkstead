@@ -406,7 +406,20 @@ flowchart LR
   there are **no
   per-commit review states**; commits are viewable events, and the wrap-up
   phase is where problems get raised. The next stage starts only after
-  wrap-up completes.
+  wrap-up completes. *Refined 2026-09-29, building
+  parallel-stages/04-the-scheduler*: what a settling wrap-up starts is **every
+  stage of its roadmap whose dependencies have settled**, rather than the one
+  after it — the order is no longer the schedule. A roadmap declares what each
+  stage stands on, on the stage's own line in `ROADMAP.md`, read afresh off the
+  top of its chain at every start; **a roadmap that declares nothing runs
+  strictly in order** exactly as it always did, each stage standing on the one
+  before it, so there is one scheduler rather than two. How many run together is
+  a setting — three stages of one roadmap unless somebody says otherwise — and a
+  stage waiting on the human or waiting to join takes a place. A stage that
+  halts **before it has joined** holds up only the stages that stand on it,
+  where one halted after it has joined holds up every later join. So a wrap-up
+  still starts nothing until it completes, and it is no longer the only thing a
+  stage is waiting for. See [ADR-0021](../adr/0021-parallel-stages.md).
 - **Stages always stack.** The next stage's branch stacks on the unmerged
   predecessor (`gh stack`), per the repo's stacked review process — *refined
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in
@@ -440,7 +453,13 @@ flowchart LR
   stacked on are two facts now, settled a stage apart; the block still decides
   what the session does about the pull request, and the rebase happens block or
   no block. In a roadmap run in order the top of the chain is what the stage was
-  cut from, the rebase moves nothing, and nobody sees a difference.
+  cut from, the rebase moves nothing, and nobody sees a difference. *Refined
+  2026-09-29, building parallel-stages/04-the-scheduler*: **running in order is
+  now one of the two ways a roadmap runs** rather than the way every roadmap
+  runs. It is what a roadmap that declares nothing gets, and what a declared one
+  gets wherever its declarations happen to form one line; a declared roadmap
+  running its stages side by side is the case the chain and the join were built
+  for, and it is now reachable.
 - **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,

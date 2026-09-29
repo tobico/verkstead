@@ -15,7 +15,11 @@ backlog being written when the roadmap was.
 
 You start in a worktree of the repository, on a branch of its own. The branch is
 already made and this is already the stage: there is nothing to create, nothing
-to switch to, and no other plan in flight to check for.
+to switch to, and no other plan in flight to check for. Sibling stages of this
+roadmap may well be being planned or built beside you right now, each in a
+worktree and on a branch of its own — none of it is in yours, none of it is
+yours to wait for, and what this stage stands on had settled before Verkstead
+started you.
 
 ## 1. Re-ground the brief in the code
 
