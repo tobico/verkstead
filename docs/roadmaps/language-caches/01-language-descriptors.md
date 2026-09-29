@@ -39,8 +39,12 @@ the stage turns on them.
   the obvious reading, and the stage's own grilling confirms it.
 - **The file only** — no descriptor editor. The page draws a checkbox per
   language the server lists.
-- **Variables for every session**, as Rust's are today; detection is for the
-  setup card's warning and for starting the Compile Server.
+- **Variables for every session**, as Rust's are today. **Detection is for the
+  setup card's warning alone**: the Compile Server starts wherever a language
+  naming the sccache capability is on and there is an sccache, whatever the Repo
+  holds. A Repo whose manifest is not at the root is handed `RUSTC_WRAPPER`
+  regardless, and with no server up its client starts one inside its own
+  Sandbox — which is what the server exists to stop.
 - **Settings are read at every session spawn**, as now, so a switch flipped on
   a phone applies to the next session.
 
@@ -57,8 +61,10 @@ stage's to settle.
 2. **Rust as a descriptor.** The session environment is built from the loaded
    descriptors, and Rust's says what `sandbox.rs` sets today. AC: the
    environment of a session is byte for byte what it was; the Compile Server
-   starts for a Repo with a `Cargo.toml` at its root and for no other; the
-   existing sandbox and sessions suites pass unchanged.
+   starts for any session where Rust is on and there is an sccache, a Repo with
+   no `Cargo.toml` at its root included, and on no machine without one; the
+   existing sandbox suite passes unchanged, and what changes in the sessions
+   suite is its assertions about when the server starts and nothing else.
 3. **The config key.** The new map, with `rust_build_cache` read as Rust's.
    AC: a `config.yaml` written by the released version reads as it did; a save
    from the page preserves descriptor keys the page never drew.
@@ -75,6 +81,9 @@ stage's to settle.
 
 - Assumes a session's Rust variables are still set in one place in
   `sandbox.rs`, and that the Compile Server's own surface sets its own.
+- Count what asserts today that the Compile Server does not start for a Repo
+  that is not Rust — `sessions.rs` starts it on that question — since those are
+  the assertions this stage inverts.
 - Assumes `rust_build_cache` is still carried along by several settings panes'
   saves (`held.ts` and the panes that spell it out) — count them before
   changing the shape.

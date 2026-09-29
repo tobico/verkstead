@@ -30,6 +30,10 @@ broken Maven variable, which is why the proofs are what they are.
 - **Everything each ecosystem can cache** — downloads and compiled output.
 - **C++ through CMake's launcher variables only.** `CC` and `CXX` are left
   alone.
+- **The Compile Server starts wherever an sccache language is on**, rather than
+  by detection, which is for warnings alone: a manifest that is not at the root
+  would otherwise leave a session's own sccache client starting a server inside
+  its Sandbox, which is the hazard the server exists to remove.
 - **Gradle's daemon is off in a session**; a daemon of Verkstead's own is the
   last stage and opens with a spike.
 - **Eviction by whole units**, on a timer, while no session runs. `10G` each,
