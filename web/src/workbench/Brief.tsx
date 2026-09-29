@@ -130,9 +130,21 @@ export function Brief(props: {
           Above the Configuration because that is what they are part of: what
           the work was set up with, and the half of it that came out of the
           Brief rather than out of the dropdowns. A Conversation with nothing
-          attached draws no row at all. */}
+          attached draws no row at all.
+
+          And the MCP servers it was given among them, as the chips the
+          composer drew — the other half of the one control, frozen at the same
+          moment and read here for the same reason. Names and nothing else,
+          which is what a share carries too: a chip says what the sessions were
+          given a server *called*, and where it is reached stays in this
+          installation's settings. One whose declaration has since gone says so
+          here as well, there being no × on this row to do anything about it. */}
       <Attachments
         files={props.conversation.attachments}
+        chips={props.conversation.mcp_servers.map((server) => ({
+          name: server.name,
+          gone: !server.declared,
+        }))}
         class={styles.attachments}
       />
 

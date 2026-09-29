@@ -39,7 +39,8 @@ use verkstead_schema::{
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
-    Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
+    Gh, open_database, router, router_asking_github, router_keeping, router_reading_tailscale,
+    store,
 };
 
 /// The Conversation every Set in this file is asked from.
@@ -63,6 +64,38 @@ async fn empty_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap();
 
     (dir, pool.clone(), router(pool))
+}
+
+/// The same, keeping its settings in that directory and with two MCP servers
+/// declared in them.
+///
+/// What the workbench fixtures are written over. A Conversation's chips are
+/// references *by name* to what the settings declare, and each comes back
+/// saying whether anything still answers to it — so a router with no settings
+/// file behind it would write a fixture where every chip says the server is
+/// gone, which is the rarer of the two shapes and not the one the composer is
+/// drawn against.
+///
+/// Two declarations, because the menu the chips come out of has to read as a
+/// list: one the fixture's Conversation attaches, and one it leaves for the
+/// menu to offer.
+async fn declaring_app() -> (tempfile::TempDir, SqlitePool, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "mcp_servers:\n  \
+         - name: docs\n    url: https://mcp.example.com/docs\n  \
+         - name: tickets\n    url: https://mcp.example.com/tickets\n",
+    )
+    .unwrap();
+
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
+
+    (dir, pool, app)
 }
 
 /// The same, with somewhere for a Set to be asked from — see [`ASKING_FROM`].
@@ -1972,7 +2005,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // a drafting Conversation carries. Put in through the store for the reason
     // the Repos are: going in the front way means a git repository on disk,
     // which is `conversations.rs`'s subject and not this one's.
-    let (_dir, pool, app) = empty_app().await;
+    //
+    // Over a settings file rather than over nowhere, which is the one thing
+    // these fixtures need that the Sets above do not: a Conversation's chips
+    // are references by name to the MCP servers declared there, and each one
+    // comes back saying whether it still points at anything. So the
+    // declarations are written first, and a Conversation is then given one that
+    // is there and one that is not.
+    let (_dir, pool, app) = declaring_app().await;
     let mut repos = Vec::new();
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
@@ -2070,6 +2110,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
 
+    // And two MCP servers on it, which is what the chips beside those pills are
+    // drawn from — one of each shape a chip has. `docs` is declared in the
+    // settings above and points at something; `archive` is not, which is the
+    // reference whose declaration has since been deleted, and the one thing a
+    // chip says about itself. Which leaves `tickets` declared and unattached,
+    // so the menu the chips come out of has a row to offer.
+    for name in ["docs", "archive"] {
+        assert!(
+            store::attach_mcp_server(&pool, drafting, name)
+                .await
+                .unwrap()
+        );
+    }
+
     // And the other Repo added to work alongside it, which is what a companion
     // row on the setup card is drawn from — with the defaults an added one
     // carries, because that is the shape every companion starts in.
@@ -2125,6 +2179,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+
+    // And a server attached before it started, for the same reason: the frozen
+    // Brief pane draws the chips the composer drew, with nothing left to press
+    // on one.
+    store::attach_mcp_server(&pool, grilling, "docs")
+        .await
+        .unwrap();
 
     store::start_grilling(
         &pool,
@@ -3150,11 +3211,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
             },
 
-            // And one MCP server declared, for that reason again: the
+            // And two MCP servers declared, for that reason again: the
             // declarations are the other setting sent as an action rather than a
             // value, and this is the section that owns them.
+            //
+            // The same two the workbench fixtures are written over — see
+            // [`declaring_app`] — because the viewer reads both at once: the
+            // composer's Attach menu offers what is declared here minus what the
+            // Conversation there already has, and two fixtures that disagreed
+            // would be a menu with nothing in it.
             "mcp_servers": {
-                "Set": { "servers": [{ "name": "docs", "url": "https://mcp.example.com/docs" }] }
+                "Set": { "servers": [
+                    { "name": "docs", "url": "https://mcp.example.com/docs" },
+                    { "name": "tickets", "url": "https://mcp.example.com/tickets" },
+                ] }
             },
 
             // And a text for every session, for the reason the size above is

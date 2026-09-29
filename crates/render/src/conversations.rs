@@ -776,6 +776,20 @@ pub struct ConversationView {
     /// [`AttachmentView`].
     pub attachments: Vec<AttachmentView>,
 
+    /// And the MCP servers it has attached, in the order they were attached in
+    /// — the order the chips are drawn in, beside those pills.
+    ///
+    /// Empty is the ordinary Conversation, which is nearly all of them. Beside
+    /// the files because it is the same act at the same control, and settled in
+    /// the same place and at the same moment: the composer while the Brief
+    /// drafts, frozen when the work starts.
+    ///
+    /// **Names rather than declarations**, and never a URL or a header — see
+    /// [`AttachedServerView`]. Which is what lets a share carry the chips: what
+    /// travels is what the work was given a server *called*, and everything
+    /// about reaching it stays in this installation's settings.
+    pub mcp_servers: Vec<AttachedServerView>,
+
     /// The steer somebody has started on this Conversation and not yet decided,
     /// where there is one.
     ///
@@ -1009,6 +1023,36 @@ pub enum AttachmentOrigin {
     /// Put on the answer sheet, under one Question of one Question Set —
     /// [`AttachmentView::label`] says which.
     Answer,
+}
+
+/// One MCP server a Conversation has attached, as the composer draws it: the
+/// name it was attached under, and whether anything is still declared by it.
+///
+/// **The name is the whole of what the Conversation holds** — a reference to a
+/// declaration on the settings page, looked up afresh wherever it is needed —
+/// so this is that name with one fact read beside it rather than a copy of the
+/// declaration. The URL is not here and never will be: the page has no use for
+/// it, and the headers beside it are secrets.
+///
+/// [`Self::declared`] is what tells a working chip from one whose declaration
+/// has been deleted. A chip pointing at nothing is drawn saying so rather than
+/// quietly disappearing: the human attached it on purpose, and a row that went
+/// missing on its own would be the one thing about the Conversation nobody was
+/// told had changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AttachedServerView {
+    /// What it is called, which is what it is: lowercase letters, digits and
+    /// hyphens — see `McpServer` in `crate::settings`, where one is declared.
+    pub name: String,
+
+    /// Whether the settings still declare a server of that name.
+    ///
+    /// Read at the moment the Conversation is, as everything about a
+    /// declaration is: a server deleted from the settings turns this false on
+    /// every Conversation that attached it, and declaring one of that name
+    /// again turns it back.
+    pub declared: bool,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session
@@ -3355,6 +3399,47 @@ pub enum AttachmentRemoved {
     NoSuchConversation,
 
     /// The Conversation is past drafting, for [`Attached::NotDrafting`]'s
+    /// reason: what freezes with the Brief cannot be taken off it either.
+    NotDrafting,
+}
+
+/// What became of attaching a declared MCP server to a Conversation.
+///
+/// [`Attached`]'s two refusals, and one of its own. There is no *already
+/// attached*: a server the Conversation holds already is taken out of the menu,
+/// and the state a second press asks for is the state there is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ServerAttached {
+    /// On it, and drawn as a chip beside the files.
+    Attached,
+
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, so its servers are frozen with its
+    /// Brief — see [`Attached::NotDrafting`], which is the same freeze.
+    NotDrafting,
+
+    /// Nothing of that name is declared on the settings page. The menu is drawn
+    /// from what was declared a moment ago, and a declaration deleted between
+    /// the drawing and the press is what this is for: a chip is a reference by
+    /// name, and one made against a name nothing answers to would be a chip born
+    /// pointing at nothing.
+    NoSuchServer,
+}
+
+/// And of taking one off again.
+///
+/// No *no such server*, for [`AttachmentRemoved`]'s reason twice over: a chip
+/// that is not there is the state the × asked for, and a chip whose declaration
+/// has been deleted is exactly the one the human is most likely to be pressing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ServerRemoved {
+    Removed,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, for [`ServerAttached::NotDrafting`]'s
     /// reason: what freezes with the Brief cannot be taken off it either.
     NotDrafting,
 }

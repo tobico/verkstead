@@ -44,10 +44,10 @@ use verkstead_render::{
     NewConversation, NewOrder, PairingView, Parked, PendingSteerView, Process, ProcessChoice,
     ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
     RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, ServeEdit, ServePress, ServerField, ServerRefused, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
-    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
+    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
     TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
@@ -356,6 +356,24 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/attachments/{attachment}/remove",
             post(detach),
+        )
+        // And the MCP servers the human asked the work's sessions to be given,
+        // which are the Brief's companions in the same way and freeze with it in
+        // the same breath — the other half of the one Attach control.
+        //
+        // The name in the path rather than an id, because the name is what a
+        // Conversation holds: a chip is a reference to a declaration in
+        // `config.yaml`, and there is no row of the record for one to be by.
+        .route(
+            "/api/ui/conversations/{id}/mcp-servers/{name}",
+            post(attach_server),
+        )
+        // And taking one off, by that same name and for that same reason. Named
+        // in the path rather than in the verb, as an attachment's removal and a
+        // companion's are.
+        .route(
+            "/api/ui/conversations/{id}/mcp-servers/{name}/remove",
+            post(detach_server),
         )
         // And which Repo the work is in at all, which is the first thing the
         // Repo panel asks and the one the branch and the base below it are
@@ -1749,6 +1767,22 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the MCP servers it asked its sessions to be given, which the composer
+    // draws as chips in that same row. Read beside the files because it is the
+    // same act at the same control — and read with the settings, because what
+    // the chip has to say is whether anything is still declared by that name.
+    //
+    // A read that fails reads as *none attached*, for the reason the files' does:
+    // the rows are untouched, and the next read of the Conversation draws them
+    // again.
+    let servers = match crate::conversations::attached_servers(state, id).await {
+        Ok(servers) => servers,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the MCP servers attached to a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // And the steer somebody has started on it and not yet decided, which the
     // Timeline draws as its last item and the details pane draws the form of.
     // Read the way the archive mark is: a row beside the Conversation rather
@@ -1847,6 +1881,7 @@ pub(crate) async fn conversation_view(
         trimmed,
         shared,
         attachments: attached,
+        mcp_servers: servers,
         pending_steer,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
@@ -3685,6 +3720,47 @@ async fn detach(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, attachment, "removing an attached file failed");
             unavailable("the file could not be removed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/mcp-servers/{name}` — give a Conversation a
+/// declared MCP server for its sessions to be launched with.
+///
+/// The name in the path and no body at all: what a Conversation holds is a
+/// reference to a declaration by name, so the name is the whole of the request.
+async fn attach_server(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ServerAttached::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::attach_server(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching an MCP server failed");
+            unavailable("the MCP server could not be attached")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/mcp-servers/{name}/remove` — and take one
+/// off again.
+async fn detach_server(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ServerRemoved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::detach_server(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "removing an MCP server failed");
+            unavailable("the MCP server could not be removed")
         }
     }
 }

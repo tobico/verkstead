@@ -2,6 +2,9 @@
 //! Question Sets: the upload, the removal, and every way each of them is
 //! refused.
 //!
+//! And the MCP servers put on at that same control, which are the other kind of
+//! thing attached there — see [`servers`] at the foot of this file.
+//!
 //! Asked of the *server*, through the endpoints, because both halves of an
 //! attachment are the server's: the row in the record and the file in the
 //! Conversation's own directory under the Data Directory. What these assert is
@@ -21,7 +24,8 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentOrigin, AttachmentRemoved,
-    AttachmentView, ConversationView, Registered, SetReading, Started,
+    AttachmentView, ConversationView, Registered, ServerAttached, ServerRemoved, SetReading,
+    Started,
 };
 use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
 
@@ -940,4 +944,237 @@ async fn a_record_written_before_the_columns_opens_and_reads_as_the_briefs() {
 
     assert_eq!(put.label.as_deref(), Some("Q1"));
     assert_eq!(on_the_set(&reopened, set).await, vec![put]);
+}
+
+/// And the other thing the human puts on a Conversation at that same control:
+/// an **MCP server**, which is a reference by name to a declaration on the
+/// settings page rather than bytes handed over.
+///
+/// Asked of the server for the reason the files are, with the halves the other
+/// way round: what has to hold is that the record says a name and the settings
+/// say what it means — so these check what the Conversation comes back
+/// carrying against what `config.yaml` was told, which is the one thing a test
+/// of either alone would miss.
+mod servers {
+    use super::*;
+
+    /// Declare these servers in the settings this app reads.
+    ///
+    /// Written after the router was made rather than before, which is
+    /// `config.yaml`'s own contract: the declarations are read at the moment
+    /// they are needed, so a test can move them under a running app — which is
+    /// exactly what *a declaration deleted while a Conversation holds it* is.
+    fn declaring(dir: &tempfile::TempDir, names: &[&str]) {
+        let mut yaml = String::from("mcp_servers:\n");
+        for name in names {
+            yaml.push_str(&format!(
+                "  - name: {name}\n    url: https://mcp.example.com/{name}\n"
+            ));
+        }
+
+        std::fs::write(dir.path().join("config.yaml"), yaml).unwrap();
+    }
+
+    async fn attach_server(app: &Router, id: i64, name: &str) -> ServerAttached {
+        post(
+            app,
+            &format!("/api/ui/conversations/{id}/mcp-servers/{name}"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    async fn detach_server(app: &Router, id: i64, name: &str) -> ServerRemoved {
+        post(
+            app,
+            &format!("/api/ui/conversations/{id}/mcp-servers/{name}/remove"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Every server the Conversation says it is holding, as the composer draws
+    /// them: the name, and whether anything is still declared by it.
+    async fn held(app: &Router, id: i64) -> Vec<(String, bool)> {
+        let view: ConversationView = get(app, &format!("/api/ui/conversations/{id}")).await;
+
+        view.mcp_servers
+            .into_iter()
+            .map(|server| (server.name, server.declared))
+            .collect()
+    }
+
+    /// The whole of the ordinary case: a declaration is put on, comes back on
+    /// the Conversation, and comes off again.
+    #[tokio::test]
+    async fn a_declared_server_is_attached_and_taken_off() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+
+        assert!(held(&app, id).await.is_empty());
+
+        assert_eq!(
+            attach_server(&app, id, "docs").await,
+            ServerAttached::Attached,
+        );
+        assert_eq!(held(&app, id).await, [("docs".to_owned(), true)]);
+
+        assert_eq!(
+            detach_server(&app, id, "docs").await,
+            ServerRemoved::Removed
+        );
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// In the order they were attached in, which is the order the chips are
+    /// drawn in.
+    #[tokio::test]
+    async fn they_come_back_in_the_order_they_were_attached() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets", "alerts"]);
+
+        for name in ["tickets", "alerts", "docs"] {
+            assert_eq!(
+                attach_server(&app, id, name).await,
+                ServerAttached::Attached,
+            );
+        }
+
+        assert_eq!(
+            held(&app, id)
+                .await
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>(),
+            ["tickets", "alerts", "docs"],
+        );
+    }
+
+    /// The same name twice is the state the press asked for rather than a
+    /// refusal: the menu takes an attached server out of itself, and a second
+    /// press is two tabs or a stale card.
+    #[tokio::test]
+    async fn attaching_one_twice_leaves_one_chip() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        for _ in 0..2 {
+            assert_eq!(
+                attach_server(&app, id, "docs").await,
+                ServerAttached::Attached,
+            );
+        }
+
+        assert_eq!(held(&app, id).await, [("docs".to_owned(), true)]);
+    }
+
+    /// And taking off one that is not there is the state the × asked for, for
+    /// that reason again.
+    #[tokio::test]
+    async fn taking_off_one_that_is_not_there_is_no_refusal() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        assert_eq!(
+            detach_server(&app, id, "docs").await,
+            ServerRemoved::Removed
+        );
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// A name nothing is declared by is refused, and nothing is written: the
+    /// menu is drawn from what the settings held a moment ago, and a chip born
+    /// pointing at nothing is not a reference the human made.
+    #[tokio::test]
+    async fn a_server_nothing_declares_is_refused() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        assert_eq!(
+            attach_server(&app, id, "tickets").await,
+            ServerAttached::NoSuchServer,
+        );
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// And the declaration deleted *after* it was attached is the other way
+    /// round entirely: the reference stands, and the chip is what says there is
+    /// nothing on the end of it.
+    #[tokio::test]
+    async fn a_declaration_deleted_afterwards_leaves_a_chip_that_says_so() {
+        let (_elsewhere, dir, app, _pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+
+        attach_server(&app, id, "docs").await;
+        attach_server(&app, id, "tickets").await;
+
+        declaring(&dir, &["tickets"]);
+
+        assert_eq!(
+            held(&app, id).await,
+            [("docs".to_owned(), false), ("tickets".to_owned(), true)],
+        );
+
+        // And it is still the human's to take off, which is the whole point of
+        // drawing it: a removal asks nothing about the declarations.
+        assert_eq!(
+            detach_server(&app, id, "docs").await,
+            ServerRemoved::Removed
+        );
+        assert_eq!(held(&app, id).await, [("tickets".to_owned(), true)]);
+    }
+
+    /// Once the Brief has frozen there is nothing to attach to: the servers
+    /// freeze with it, exactly as the files do.
+    #[tokio::test]
+    async fn attaching_to_a_frozen_brief_is_refused() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            attach_server(&app, id, "docs").await,
+            ServerAttached::NotDrafting,
+        );
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// And a removal is refused by the same freeze, for the same reason.
+    #[tokio::test]
+    async fn taking_one_off_a_frozen_brief_is_refused() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        attach_server(&app, id, "docs").await;
+
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            detach_server(&app, id, "docs").await,
+            ServerRemoved::NotDrafting,
+        );
+        assert_eq!(held(&app, id).await, [("docs".to_owned(), true)]);
+    }
+
+    /// And a Conversation that is not there is said by name rather than
+    /// reported as done, both ways.
+    #[tokio::test]
+    async fn a_conversation_that_is_gone_is_said_by_name() {
+        let (_elsewhere, dir, app, _pool, _id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        assert_eq!(
+            attach_server(&app, 9_999, "docs").await,
+            ServerAttached::NoSuchConversation,
+        );
+        assert_eq!(
+            detach_server(&app, 9_999, "docs").await,
+            ServerRemoved::NoSuchConversation,
+        );
+    }
 }

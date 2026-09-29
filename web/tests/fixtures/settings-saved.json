@@ -34,6 +34,10 @@
       {
         "name": "docs",
         "url": "https://mcp.example.com/docs"
+      },
+      {
+        "name": "tickets",
+        "url": "https://mcp.example.com/tickets"
       }
     ],
     "paths": {

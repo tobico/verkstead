@@ -49,8 +49,11 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
 
-/// The one declaration the told fixture carries.
+/// The first of the two declarations the told fixture carries, and the one
+/// beside it: two, because the list is a list and a page that only ever drew
+/// one would say nothing about the row below it.
 const DECLARED = TOLD.mcp_servers[0]!;
+const BESIDE = TOLD.mcp_servers[1]!;
 
 /// The rest of `config.yaml` as every save from this pane sends it: what the read
 /// said, left exactly where it was.
@@ -160,7 +163,7 @@ describe("the card", () => {
     theSettings(TOLD);
     mountCard();
 
-    const line = await waitFor(() => screen.getByText(/1 server declared/));
+    const line = await waitFor(() => screen.getByText(/2 servers declared/));
     expect(line.textContent).toContain("Attach button");
   });
 
@@ -198,6 +201,9 @@ describe("the pane", () => {
 
     await waitFor(() => expect(urlBox(0).value).toBe(DECLARED.url));
     expect(screen.getByText(DECLARED.name)).toBeTruthy();
+
+    expect(urlBox(1).value).toBe(BESIDE.url);
+    expect(screen.getByText(BESIDE.name)).toBeTruthy();
   });
 
   /// The rule this section is built around: the name of a declaration that is
@@ -284,17 +290,19 @@ describe("the pane", () => {
   /// with that one changed: the server writes the declarations as one list.
   it("sends the whole list with a rewritten URL in it", async () => {
     const moved = { name: DECLARED.name, url: "https://docs.example.com/mcp" };
-    const fetching = theSettings(TOLD, json(holding(TOLD, [moved])));
+    const fetching = theSettings(TOLD, json(holding(TOLD, [moved, BESIDE])));
     mountPane();
     await waitFor(() => urlBox(0));
 
     fireEvent.input(urlBox(0), { target: { value: moved.url } });
     save();
 
+    // The one that was typed in, and the one beside it exactly as it was read:
+    // what travels is the list as it is to stand.
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: [moved] } },
+        mcp_servers: { Set: { servers: [moved, BESIDE] } },
       }),
     );
   });
@@ -306,7 +314,17 @@ describe("the pane", () => {
     mountPane();
     await waitFor(() => urlBox(0));
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    // Every one of them, because what this is about is the list arriving empty
+    // rather than the list arriving shorter: an empty one is the human having
+    // taken the last declaration away, and it has to be told apart from a save
+    // that says nothing about them at all.
+    // One at a time and read again each time: a press takes the row it was on
+    // off the page, so a handful of them collected first would be presses on
+    // elements the page no longer holds.
+    for (let left = TOLD.mcp_servers.length; left > 0; left -= 1) {
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    }
+
     save();
 
     await waitFor(() =>
@@ -340,14 +358,14 @@ describe("the pane", () => {
     await waitFor(() => urlBox(0));
 
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
-    await waitFor(() => expect(nameBox(1)).not.toBeNull());
+    await waitFor(() => expect(nameBox(TOLD.mcp_servers.length)).not.toBeNull());
 
     save();
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: [DECLARED] } },
+        mcp_servers: { Set: { servers: TOLD.mcp_servers } },
       }),
     );
   });

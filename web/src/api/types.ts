@@ -408,6 +408,38 @@ columns: Array<string>, options: Array<OptionView>, };
 export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuchConversation" | "NotDrafting" | "TooLarge" | "NotAName";
 
 /**
+ * One MCP server a Conversation has attached, as the composer draws it: the
+ * name it was attached under, and whether anything is still declared by it.
+ *
+ * **The name is the whole of what the Conversation holds** — a reference to a
+ * declaration on the settings page, looked up afresh wherever it is needed —
+ * so this is that name with one fact read beside it rather than a copy of the
+ * declaration. The URL is not here and never will be: the page has no use for
+ * it, and the headers beside it are secrets.
+ *
+ * [`Self::declared`] is what tells a working chip from one whose declaration
+ * has been deleted. A chip pointing at nothing is drawn saying so rather than
+ * quietly disappearing: the human attached it on purpose, and a row that went
+ * missing on its own would be the one thing about the Conversation nobody was
+ * told had changed.
+ */
+export type AttachedServerView = { 
+/**
+ * What it is called, which is what it is: lowercase letters, digits and
+ * hyphens — see `McpServer` in `crate::settings`, where one is declared.
+ */
+name: string, 
+/**
+ * Whether the settings still declare a server of that name.
+ *
+ * Read at the moment the Conversation is, as everything about a
+ * declaration is: a server deleted from the settings turns this false on
+ * every Conversation that attached it, and declaring one of that name
+ * again turns it back.
+ */
+declared: boolean, };
+
+/**
  * What a file was attached to.
  *
  * The pills under a Brief are the Brief's own files and the pills under a
@@ -1706,6 +1738,21 @@ shared: ShareView | null,
  * [`AttachmentView`].
  */
 attachments: Array<AttachmentView>, 
+/**
+ * And the MCP servers it has attached, in the order they were attached in
+ * — the order the chips are drawn in, beside those pills.
+ *
+ * Empty is the ordinary Conversation, which is nearly all of them. Beside
+ * the files because it is the same act at the same control, and settled in
+ * the same place and at the same moment: the composer while the Brief
+ * drafts, frozen when the work starts.
+ *
+ * **Names rather than declarations**, and never a URL or a header — see
+ * [`AttachedServerView`]. Which is what lets a share carry the chips: what
+ * travels is what the work was given a server *called*, and everything
+ * about reaching it stays in this installation's settings.
+ */
+mcp_servers: Array<AttachedServerView>, 
 /**
  * The steer somebody has started on this Conversation and not yet decided,
  * where there is one.
@@ -3985,6 +4032,15 @@ trouble: string, } | { "press": "Trouble", trouble: string, };
 export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, } | { "serve": "Unreadable", trouble: string, };
 
 /**
+ * What became of attaching a declared MCP server to a Conversation.
+ *
+ * [`Attached`]'s two refusals, and one of its own. There is no *already
+ * attached*: a server the Conversation holds already is taken out of the menu,
+ * and the state a second press asks for is the state there is.
+ */
+export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer";
+
+/**
  * Which of a declaration's two halves something is about.
  */
 export type ServerField = "Name" | "Url";
@@ -4012,6 +4068,15 @@ field: ServerField,
  * Why, in words to put on the row.
  */
 why: string, };
+
+/**
+ * And of taking one off again.
+ *
+ * No *no such server*, for [`AttachmentRemoved`]'s reason twice over: a chip
+ * that is not there is the state the × asked for, and a chip whose declaration
+ * has been deleted is exactly the one the human is most likely to be pressing.
+ */
+export type ServerRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
  * One stored Question Set as the browser receives it: the document where this

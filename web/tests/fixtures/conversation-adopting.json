@@ -22,6 +22,7 @@
   "grilling_pairing": null,
   "id": 1,
   "implementation_pairing": null,
+  "mcp_servers": [],
   "naming": false,
   "parked": null,
   "pending_steer": null,

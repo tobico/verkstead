@@ -75,6 +75,16 @@
       "name": "opus"
     }
   },
+  "mcp_servers": [
+    {
+      "declared": true,
+      "name": "docs"
+    },
+    {
+      "declared": false,
+      "name": "archive"
+    }
+  ],
   "naming": false,
   "parked": null,
   "pending_steer": null,

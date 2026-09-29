@@ -434,7 +434,18 @@ about them and cannot be turned down by one.
 files. A reference rather than a copy, read afresh at each launch, and it
 freezes when the Brief does — attached and removed while the round drafts, fixed
 once the work starts, and a read-only row afterwards, exactly as an
-**Attachment** is.
+**Attachment** is. What holds them is the Conversation rather than the round, so
+a later drafting round draws the ones it already had — attached, and still the
+human's to take off.
+**A chip whose declaration has been deleted says the server is gone** rather
+than disappearing — the reference was made on purpose, and taking it off is the
+human's — while attaching a name nothing is declared by is refused, the menu it
+was picked from having been drawn a moment earlier.
+**With nothing declared the control is still a menu**: *Attach file*, and the
+way to the section where a declaration is made. A control that fell back to a
+plain button would be one the human had to learn twice. The menu is the draft's
+composer's alone — the **Answer** to a Question Set attaches files and nothing
+else.
 **Every session of the Conversation** is launched with it, whichever of the four
 harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,

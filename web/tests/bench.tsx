@@ -18,6 +18,7 @@ import type {
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
+  SettingsView,
   ShowingArchived,
 } from "../src/api/types";
 import { Moved, Shell } from "../src/App";
@@ -31,11 +32,18 @@ import conversations from "./fixtures/conversations.json" with { type: "json" };
 import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import settings from "./fixtures/settings.json" with { type: "json" };
 
 /// The sidebar, and the Conversation the fixtures open — the second row of it,
 /// still drafting.
 export const SIDEBAR = conversations as ConversationEntry[];
 export const OPEN = conversation as ConversationView;
+
+/// And the settings, which the workbench reads one thing out of: the MCP
+/// servers declared, which are the rows the composer's Attach menu offers under
+/// *Attach file*. The whole of the settings because that is the one endpoint
+/// they come from — the same read the settings page itself makes.
+export const SETTINGS = settings as SettingsView;
 
 /// The two lists the pickers on the page are drawn from.
 export const REPOS = repos as RepoEntry[];
@@ -198,6 +206,9 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
       whenever(`/api/ui/repos/${repo.id}/pairings`, json(NO_PAIRINGS)),
     ),
     whenever("/api/ui/abandoned-roadmaps", json([])),
+    // And what is declared, for the one menu on this page that is drawn from the
+    // settings rather than from the record — see [`SETTINGS`].
+    whenever("/api/ui/settings", json(SETTINGS)),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,
   );
