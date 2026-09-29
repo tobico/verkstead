@@ -171,7 +171,10 @@ person's. The documentation says so.
 ## How it is proven
 
 Two layers: assertions on the environment a session is given, and a real
-install per tool inside a Sandbox, skipped where the tool is missing. The dev
+install per tool inside a Sandbox, skipped where the tool is missing. Of the two
+installs each of those does, the second is **denied its registry**, so that
+using the store is what makes it succeed rather than something asserted about it
+afterwards. The dev
 shell and CI on Linux gain the tools. The other two platforms are proven by the
 assertions alone — a real install per tool on all three was the option turned
 down, for what it would do to CI.

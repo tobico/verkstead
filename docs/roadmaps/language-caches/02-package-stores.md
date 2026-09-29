@@ -28,8 +28,16 @@ From [ADR-0021](../../adr/0021-language-descriptors.md).
   tool that ignores its variable would be found by a stranger.
 - **The real install is what catches a tool ignoring its variable, and two
   sessions colliding.** So each proof installs twice, from two Sandboxes, and
-  the second is asserted to have fetched nothing — or, where a tool offers no
-  way to tell, to have found the store populated.
+  **the second install cannot reach its registry** — an offline flag where the
+  tool has one (`npm --offline`, `pip --no-index`, `uv --offline`,
+  `GOPROXY=off`, `deno --cached-only`), and a source pointed somewhere
+  unreachable where it has none. An install that succeeds with nothing to fetch
+  from succeeded out of the store, and one that reached past the store fails.
+  *Found the store populated* is not the fallback: the store is populated
+  because the first install populated it, so that assertion holds whether the
+  second install read one byte of it or fetched the lot. This is the one proof
+  the stage rests its case on, and a branch of it that passes whatever the tool
+  does is where a tool quietly ignoring its variable would get through.
 - **Accepted: one session can plant a package another installs.** The adoption
   doc says so in this stage, since this is where it becomes true of more than
   Rust.
@@ -47,8 +55,8 @@ stage starts and then proven by the real install.
    Sandbox on Linux; a proof whose tool is missing is skipped and says so;
    CI's time is measured before and after.
 2. **Go.** The first descriptor, because its store is the simplest and it has
-   both halves. AC: a second Sandbox's build fetches nothing; two at once leave
-   a store a third can use.
+   both halves. AC: a second Sandbox's build succeeds with `GOPROXY=off`, so it
+   fetched nothing; two at once leave a store a third can use.
 3. **Node: npm, pnpm, yarn, deno, bun.** AC as Go's, per tool; a Repo pinning
    its own store location in its own config still wins.
 4. **Python: pip, uv, poetry, pipenv.** AC as Go's, per tool; virtual
@@ -63,7 +71,9 @@ stage starts and then proven by the real install.
   test with no change to the loader. If it is not, that is stage 01's gap to
   close first.
 - Check each tool's current documentation for the variable that moves its
-  store, and for whether the store is safe for concurrent writers.
+  store, for whether the store is safe for concurrent writers, and for how an
+  install is denied its registry — the offline flag it documents, or a source
+  pointed nowhere — since that last is what every proof here turns on.
 - Check which tools keep more than a store under the directory the variable
   names — configuration, credentials — since a shared one must hold nothing
   that is a session's own.
