@@ -24,6 +24,6 @@ Roadmap stage: [05: The server-wide limit](docs/roadmaps/parallel-stages/05-the-
 
 - [x] 01: The places on the server — [details](01-the-places-on-the-server.md)
 - [x] 02: Starting what waited — [details](02-starting-what-waited.md)
-- [ ] 03: Which one goes first — [details](03-which-one-goes-first.md)
+- [x] 03: Which one goes first — [details](03-which-one-goes-first.md)
 - [ ] 04: The setting — [details](04-the-setting.md)
 - [ ] 05: The words — [details](05-the-words.md)

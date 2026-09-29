@@ -116,7 +116,28 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
 ///
 /// **Nothing at all while the places are full**, which is the ordinary answer on
 /// a busy server and costs two register reads to reach. Every roadmap below it
-/// would be read only to be told the same thing.
+/// would be read only to be told the same thing. Which is also what makes a
+/// stage held for a place inside a look worth saying out loud — see
+/// [`crate::continuing::Brought::held`]: the first roadmap read always has a
+/// place to give, so a later one finding none means a stage started in this very
+/// look.
+///
+/// **Oldest roadmap first**, which is the order the free places are handed out
+/// in. A roadmap's age is the age of the Conversation that wrote it rather than
+/// how long any stage of it has been waiting — see
+/// [`store::driven_roadmaps`], which is where the order comes from and why
+/// nothing about the waiting is stored for it. Within a roadmap the order is the
+/// roadmap's own: [`crate::stages::ready`] answers lowest-numbered first, and a
+/// place is spent by a stage that starts and by nothing else.
+///
+/// **A roadmap already at its own limit is passed over**, however long it has
+/// been waiting and however many places the server has free. The two limits are
+/// both in force and the roadmap's is the stricter one there, so nothing of it
+/// starts — and because a place is spent by a stage that starts, the place it
+/// could not use is still free for the next roadmap below it rather than
+/// standing empty. Which is the whole of why nothing is carried between the
+/// readings here: each of them counts the places itself, so what an earlier
+/// roadmap took is gone and what it could not take is not.
 ///
 /// Nothing is refused for and nothing is returned. This runs unattended with
 /// nobody watching, and what it has to say it says on a Timeline when it starts
@@ -141,6 +162,8 @@ async fn look(state: &AppState) {
         }
     };
 
+    // Oldest roadmap first, which is the order the free places go out in — the
+    // read comes back that way, and what walks it in that order is this loop.
     for driven in driving {
         // The foot of this roadmap's chain, which is what a start with no settle
         // behind it inherits from. A roadmap with none is one whose own

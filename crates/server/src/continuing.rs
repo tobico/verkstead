@@ -199,7 +199,9 @@ impl Brought {
     /// is said there once.
     ///
     /// Which leaves nothing unreported: the look says nothing the settle before
-    /// it has not already said, and what it does say is that a stage started.
+    /// it has not already said, and what it does say is that a stage started —
+    /// beside the one sentence it says about a stage that did not, which is
+    /// [`Brought::held`]'s.
     ///
     /// In the log at **debug** for the same reason it is off the Timeline: a line
     /// per driven roadmap per look, for the years a server is up, is not
@@ -211,6 +213,44 @@ impl Brought {
                 conversation_id,
                 said = markdown,
                 "a look for a free place started nothing, and says so in the log alone",
+            ),
+        }
+    }
+
+    /// And one ready stage that did not start, which is the one thing a look is
+    /// not silent about: **a stage waiting for a place on the server**.
+    ///
+    /// The exception the rule above was always written around — a look is silent
+    /// unless it starts something, and a stage held for want of a place on the
+    /// server is a stage the look has just watched somebody else take the place
+    /// of. The places run out mid-list: with one free and three roadmaps wanting
+    /// it, the oldest starts a stage and the other two are told they are still
+    /// waiting, in the same breath and each on its own roadmap's Timeline. A
+    /// roadmap passed over in silence reads as a roadmap forgotten.
+    ///
+    /// **And it cannot repeat for nothing.** A look stops before it reads any
+    /// roadmap at all while the places are full — see [`crate::places`] — so the
+    /// first roadmap it reads always has one to give, and the only way a later
+    /// one finds none is that a stage started in this very look. One round of
+    /// these sentences per place that changes hands, which is the pace whole
+    /// Conversations finish at.
+    ///
+    /// The other two waits stay off a Timeline. A stage held by its **own**
+    /// roadmap's limit waits on that roadmap settling, which is the settle that
+    /// will say so; and a stage halted for a brief nobody wrote waits on the
+    /// human, who was told at the settle and would be told again every half
+    /// minute until they got to it. See [`stages::Held`], where the three part
+    /// company.
+    async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held) {
+        match (self, held) {
+            (Self::Settle, _) | (Self::Look, stages::Held::Server(_)) => {
+                say(state, conversation_id, held.said()).await;
+            }
+            (Self::Look, _) => tracing::debug!(
+                conversation_id,
+                said = held.said(),
+                "a look held a stage back for something no place coming free would fix, and \
+                 says so in the log alone",
             ),
         }
     }
@@ -542,7 +582,7 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
     // Timeline reads in the order things happened, and a stage waits for a place
     // because the stages above it took theirs.
     for notice in held {
-        brought.not_started(&state, conversation_id, &notice).await;
+        brought.held(&state, conversation_id, &notice).await;
     }
 }
 

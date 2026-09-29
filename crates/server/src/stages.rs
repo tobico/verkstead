@@ -369,19 +369,14 @@ pub(crate) enum Next {
         /// The stages to start, lowest number first.
         starting: Vec<Stage>,
 
-        /// One sentence per ready stage that does not start: one that waited for
-        /// a place on its roadmap, one that waited for a place on the server, one
-        /// whose brief is not there to prime it from.
-        ///
-        /// The two waits are told apart because they are waits on different
-        /// things — see [`CONVERSATIONS_AT_ONCE`], which is the second limit, and
-        /// [`next_stage`], where both are spent.
+        /// One sentence per ready stage that does not start, and what each of
+        /// them is waiting on — see [`Held`].
         ///
         /// Said on the settled Conversation's Timeline as they stand, so that a
         /// roadmap which has gone quiet says why it went quiet — a stage waiting
         /// for a place is indistinguishable, from the sidebar, from a scheduler
         /// that forgot about it.
-        held: Vec<String>,
+        held: Vec<Held>,
     },
 
     /// Every stage of it is done. The roadmap finished, and its directory stays
@@ -419,6 +414,47 @@ pub(crate) enum Next {
         /// Why, in the words the Timeline says it in.
         why: String,
     },
+}
+
+/// One ready stage that did not start, in the words the Timeline says it in and
+/// under what it is waiting on.
+///
+/// Three of them, and they are told apart because a reader's next move is
+/// different for each: a stage waiting on its own roadmap waits on that
+/// roadmap's own work, a stage waiting on the server waits on whatever else the
+/// machine is running, and a stage that halted for its own brief waits on the
+/// human writing one. See [`CONVERSATIONS_AT_ONCE`] for the second limit and
+/// [`next_stage`], where all three are decided.
+///
+/// **And on which of them a look says out loud.** A settle says every one of
+/// them, being the one reading that happens once. A look runs every
+/// [`crate::Pace::places`] for as long as the server is up, so it says only the
+/// wait that is about the thing it has just moved: a place on the server
+/// changing hands — see [`crate::continuing::Brought`], where that is decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Held {
+    /// Waiting for a place on **its own roadmap**: the stages of it already in
+    /// flight have taken them, and one of them settling is what frees one.
+    Roadmap(String),
+
+    /// Waiting for a place **on the server**: the Conversations Verkstead is
+    /// running have taken them all, whatever roadmap or Process they belong to,
+    /// and nothing about this roadmap will free one.
+    Server(String),
+
+    /// Not waiting at all — **halted for itself**: its line names no brief, or
+    /// the brief it names is not there to prime it from. The human's to fix, and
+    /// it holds up no other stage.
+    Halted(String),
+}
+
+impl Held {
+    /// What it says, which is what goes on a Timeline.
+    pub(crate) fn said(&self) -> &str {
+        match self {
+            Self::Roadmap(said) | Self::Server(said) | Self::Halted(said) => said,
+        }
+    }
 }
 
 /// One stage of a roadmap, as the Conversation that runs it is started from.
@@ -727,14 +763,14 @@ pub(crate) fn next_stage(
             // How many are in flight is deliberately not said: three of them may
             // have started a moment ago, in this very reading, and the record the
             // count came off was read before any of that.
-            held.push(format!(
+            held.push(Held::Roadmap(format!(
                 "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place: \
                  this roadmap runs {} at a time, and its places are taken. It starts when one of \
                  them settles.",
                 entry.label,
                 entry.title,
                 how_many_places(at_once),
-            ));
+            )));
 
             continue;
         }
@@ -754,13 +790,13 @@ pub(crate) fn next_stage(
             // stages in flight are not: the registers were read before any of
             // this, and a Conversation may have finished since. What says the
             // number as of the moment it is asked is the settings pane.
-            held.push(format!(
+            held.push(Held::Server(format!(
                 "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place \
                  on the server: the Conversations Verkstead is running have taken them all, \
                  whatever roadmap or Process they belong to. It starts when one of them comes \
                  free.",
                 entry.label, entry.title,
-            ));
+            )));
 
             continue;
         }
@@ -769,11 +805,11 @@ pub(crate) fn next_stage(
         // rather than a path to go and read: `<commit>:docs/roadmaps/<name>/` is
         // the roadmap's own directory, and git would hand back a listing of it.
         if entry.link.is_empty() {
-            held.push(format!(
+            held.push(Held::Halted(format!(
                 "Stage {} of the `{roadmap}` roadmap was ready and could not be started: its \
                  line names no brief to start it from.",
                 entry.label,
-            ));
+            )));
 
             continue;
         }
@@ -781,11 +817,11 @@ pub(crate) fn next_stage(
         let brief_path = format!("{ROADMAPS}/{roadmap}/{}", entry.link);
 
         let Some(markdown) = at(repo, read.commit, &brief_path) else {
-            held.push(format!(
+            held.push(Held::Halted(format!(
                 "Stage {} of the `{roadmap}` roadmap was ready and could not be started: it \
                  names the brief `{brief_path}`, and there is nothing there to read on `{}`.",
                 entry.label, read.branch,
-            ));
+            )));
 
             continue;
         };
@@ -2165,8 +2201,22 @@ mod tests {
     /// What a reading holds back, which is a sentence per ready stage that does
     /// not start: one waiting for a place on its roadmap, one waiting for a place
     /// on the server, one whose brief is not there.
+    ///
+    /// The sentences alone, which is what most of these ask about. See
+    /// [`waits_on`] for the tests that are about which of the three each one is.
     #[track_caller]
     fn holding(next: Next) -> Vec<String> {
+        waits_on(next)
+            .iter()
+            .map(|held| held.said().to_owned())
+            .collect()
+    }
+
+    /// And the same with what each of them is waiting on kept — see [`Held`],
+    /// which is what a **look** says one of and keeps the other two off a
+    /// Timeline.
+    #[track_caller]
+    fn waits_on(next: Next) -> Vec<Held> {
         match next {
             Next::Stages { held, .. } => held,
             other => panic!("nothing of this roadmap was read as ready: {other:?}"),
@@ -3708,6 +3758,137 @@ Turns this askance clone into Verkstead.
             held[1].contains("04") && held[1].contains("waiting for a place on the server"),
             "and 04 for the place 03 took: {held:?}",
         );
+    }
+
+    /// The one free place on the server goes to the **lowest-numbered ready
+    /// stage**, whatever else the roadmap is holding.
+    ///
+    /// Within a roadmap the order is the roadmap's own and it survives the second
+    /// limit: the ready stages come back lowest-numbered first and the place is
+    /// spent by the first of them, so nothing about how many places there are
+    /// reorders them. *Lowest-numbered ready* rather than lowest-numbered — 01 is
+    /// settled here and 02 is somebody's, so the roadmap's own order picks 03 out
+    /// of what is left.
+    ///
+    /// Nothing is stored about which of them was held first, and that is the
+    /// point: the answer is read afresh off the roadmap's own list every time,
+    /// so the order two stages were held back in cannot come to disagree with it.
+    #[test]
+    fn the_one_free_place_goes_to_the_lowest_numbered_ready_stage() {
+        let repo = four_roots();
+
+        // Four places of its own with one already spent, so the roadmap's limit
+        // is never what decides between 03 and 04 — and one place on the server.
+        let next = repo.next_on_a_server(
+            "mvp",
+            &record([
+                ("mvp", "01", store::StageStanding::Settled),
+                ("mvp", "02", store::StageStanding::InFlight),
+            ]),
+            4,
+            1,
+        );
+
+        assert_eq!(
+            starting(&next),
+            ["03"],
+            "the lowest-numbered stage that is ready takes the place",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 04 is the one that waits: {held:?}");
+        assert!(
+            held[0].contains("04") && held[0].contains("waiting for a place on the server"),
+            "told which place it is waiting for: {held:?}",
+        );
+    }
+
+    /// A roadmap **already at its own limit** spends no place on the server,
+    /// however many are free: it starts nothing, so it takes nothing, and the
+    /// place is still there for the roadmap the look reads after it.
+    ///
+    /// The two limits are both in force and the roadmap's is the stricter one
+    /// here. A place is spent by a stage that starts and by nothing else — see
+    /// [`crate::places`], where each roadmap's reading counts the places itself
+    /// for exactly this reason — so a roadmap passed over leaves the place behind
+    /// it rather than standing on it.
+    #[test]
+    fn a_roadmap_at_its_own_limit_spends_no_place_on_the_server() {
+        let repo = four_roots();
+
+        // Three of it in flight against its limit of three, and a place free on
+        // the server.
+        let next = repo.next_on_a_server(
+            "mvp",
+            &record([
+                ("mvp", "01", store::StageStanding::InFlight),
+                ("mvp", "02", store::StageStanding::InFlight),
+                ("mvp", "03", store::StageStanding::InFlight),
+            ]),
+            AT_ONCE,
+            1,
+        );
+
+        assert!(
+            starting(&next).is_empty(),
+            "its own three places are taken, so nothing of it starts: {next:?}",
+        );
+
+        let held = waits_on(next);
+
+        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
+        assert!(
+            matches!(&held[0], Held::Roadmap(said) if said.contains("04")
+                && said.contains("this roadmap runs")
+                && !said.contains("on the server")),
+            "waiting on its own roadmap rather than on the machine: {held:?}",
+        );
+    }
+
+    /// And what each held stage is waiting on comes back beside the sentence,
+    /// which is what a **look** tells them apart by — see
+    /// [`crate::continuing::Brought`].
+    ///
+    /// Two of the three in one reading, which is as many as one can hold: 02's
+    /// brief is missing, so it halts for itself and leaves its place; 01 and 03
+    /// take the two places the server has; and 04 waits on the server. The third
+    /// is the roadmap's own, and a reading holds either that one or the server's
+    /// — whichever of the two limits bites first — never both. See
+    /// [`a_roadmap_at_its_own_limit_spends_no_place_on_the_server`] for it.
+    ///
+    /// Which of the two a stage is waiting on is what a look decides by, so it
+    /// cannot be a matter of reading the sentence back.
+    #[test]
+    fn a_held_stage_comes_back_under_what_it_is_waiting_on() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_ROOTS);
+
+        // Every brief but 02's, which is the entry that halts itself.
+        for (label, slug) in [
+            ("01", "workbench"),
+            ("03", "implementation"),
+            ("04", "wrap-up"),
+        ] {
+            repo.brief(
+                "mvp",
+                &format!("{label}-{slug}.md"),
+                &format!("# {label}. {slug}\n"),
+            );
+        }
+
+        let held = waits_on(repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2));
+
+        assert!(
+            matches!(&held[0], Held::Halted(said) if said.contains("02")),
+            "02 halted for the brief nobody wrote, which no place coming free would fix: \
+             {held:?}",
+        );
+        assert!(
+            matches!(&held[1], Held::Server(said) if said.contains("04")),
+            "and 04 waiting on the server, 01 and 03 having taken its two places: {held:?}",
+        );
+        assert_eq!(held.len(), 2, "and nothing else was held: {held:?}");
     }
 
     /// A stage that halts holds up only the stages that stand on it: 04 stands on

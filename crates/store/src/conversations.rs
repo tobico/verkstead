@@ -6130,16 +6130,38 @@ pub struct Driven {
 /// stage it started unasked is new work — see [`registered_repos`], which is
 /// where the same flag keeps it off every other list.
 ///
-/// One row per roadmap rather than per Conversation, and in no order worth
-/// relying on: which of several waiting roadmaps is served first is the
-/// caller's question, and this only answers which of them there are.
+/// One row per roadmap rather than per Conversation, **oldest roadmap first**.
+/// Where more places are wanted than there are free, the order this comes back
+/// in is the order they are handed out in: the effort begun first is served
+/// before the one begun after it, so a roadmap somebody started weeks ago does
+/// not wait behind one started this morning for as long as the new one has
+/// something ready.
+///
+/// **A roadmap's age is its own Conversation's**, rather than how long any stage
+/// of it has been waiting. The lowest Conversation id anything of it is recorded
+/// against, which for a roadmap somebody planned is the Conversation that wrote
+/// it: that row is written as the roadmap lands on its branch, before any stage
+/// of it exists — see [`record_roadmap`] and [`start_stage`], which are the two
+/// writes. For a roadmap adopted stage by stage it is the first stage adopted,
+/// there being no planning Conversation to ask. The id rather than a timestamp
+/// because it is `AUTOINCREMENT`: the order the rows were made in, without a
+/// clock's resolution coming into it.
+///
+/// **Nothing is stored for the ordering**, which is what keeps it from going
+/// stale. A timestamp saying when a stage was first held back would be a second
+/// record beside a readiness that is worked out afresh at every look, and the
+/// two would disagree the moment a dependency settled under it.
+///
+/// Within a roadmap the order is the roadmap's own rather than this reading's —
+/// see the server's `stages::ready`, which answers lowest-numbered first.
 pub async fn driven_roadmaps(pool: &SqlitePool) -> Result<Vec<Driven>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT DISTINCT c.repo_id, r.roadmap
+        "SELECT c.repo_id, r.roadmap
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
          WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
-         ORDER BY c.repo_id, r.roadmap",
+         GROUP BY c.repo_id, r.roadmap
+         ORDER BY MIN(r.conversation_id)",
     )
     .fetch_all(pool)
     .await

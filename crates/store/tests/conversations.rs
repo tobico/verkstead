@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Joined, Lifecycle,
-    Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState, StageOf,
-    StageStanding, Staged, Steer, Switched, Unarchiving, add_companion, adopted_pull_request,
-    adopting, any_archived, archive_conversation, archived, close_conversation,
-    conversation_branch, conversations, create_profile, follow_branch, hold_pull_request,
-    join_queue, load_conversation, open_database, pick_direction, queue_to_join,
-    record_another_pull_request, record_pull_request, record_roadmap, register_repo,
+    Account, AdoptedPullRequest, Archiving, Closing, Driven, Edited, Event, Grilling, Joined,
+    Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState,
+    StageOf, StageStanding, Staged, Steer, Switched, Unarchiving, add_companion,
+    adopted_pull_request, adopting, any_archived, archive_conversation, archived,
+    close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
+    follow_branch, hold_pull_request, join_queue, load_conversation, open_database, pick_direction,
+    queue_to_join, record_another_pull_request, record_pull_request, record_roadmap, register_repo,
     reinvent_branch, rename_branch, roadmap_planner, save_brief, set_base_commit,
     set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
     stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
@@ -2437,5 +2437,69 @@ async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
             .map(|planned| planned.branch)
             .as_deref(),
         Some("roadmaps/the-mvp"),
+    );
+}
+
+/// The roadmaps being driven come back **oldest first**, which is the order the
+/// free places on the server are handed out in.
+///
+/// Oldest is the roadmap's own age — the Conversation that wrote it — rather
+/// than its name, the Repo it is in or how long any stage of it has been
+/// waiting. So the order here is deliberately none of the three the rows would
+/// otherwise fall into: the younger roadmap is in the Repo registered first and
+/// is named first alphabetically, and it still comes second.
+#[tokio::test]
+async fn the_roadmaps_being_driven_come_back_oldest_first() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    // The older of the two, and the one that would sort last on every other
+    // reading: its Repo was registered second and its name begins with an `r`.
+    let older = directed(&pool, theirs, "roadmaps/rate-limiting", Direction::Roadmap).await;
+    record_roadmap(&pool, older, Some("rate-limiting"))
+        .await
+        .unwrap();
+
+    // The younger, planned after it. Two stages of it as well, which say nothing
+    // about its age: what a roadmap is aged off is the Conversation that wrote
+    // it, and a stage started this morning does not make the roadmap young.
+    let younger = directed(&pool, ours, "roadmaps/brain-chat", Direction::Roadmap).await;
+    record_roadmap(&pool, younger, Some("brain-chat"))
+        .await
+        .unwrap();
+
+    stage(&pool, ours, "brain-chat", "01").await;
+    stage(&pool, ours, "brain-chat", "02").await;
+
+    assert_eq!(
+        driven_roadmaps(&pool).await.unwrap(),
+        vec![
+            Driven {
+                repo_id: theirs,
+                roadmap: "rate-limiting".to_owned(),
+            },
+            Driven {
+                repo_id: ours,
+                roadmap: "brain-chat".to_owned(),
+            },
+        ],
+        "the roadmap written first is served first, whatever the names and the Repos are",
+    );
+
+    // And a roadmap nobody planned ages off the first stage of it anybody
+    // adopted, there being no planning Conversation to ask. Adopted now, so it
+    // is the youngest of the three.
+    stage(&pool, ours, "public-release", "07").await;
+
+    assert_eq!(
+        driven_roadmaps(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|driven| driven.roadmap)
+            .collect::<Vec<_>>(),
+        ["rate-limiting", "brain-chat", "public-release"],
+        "a roadmap adopted stage by stage is as old as the stage that adopted it",
     );
 }
