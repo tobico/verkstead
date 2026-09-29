@@ -309,6 +309,122 @@ impl Attachments {
             ),
         }
     }
+
+    /// Where a directory being written over is held while the replacement lands.
+    ///
+    /// Beside the real one rather than inside it, and under a name no
+    /// Conversation's directory can take: [`Self::directory`] names one by an id,
+    /// which is digits and nothing else. Which also means the start's own sweep
+    /// takes one left behind by a process that died mid-landing — see
+    /// [`sweeping`], where anything this root holds that no Conversation names is
+    /// an orphan by definition.
+    fn aside(&self, conversation_id: i64) -> PathBuf {
+        self.root.join(format!("{conversation_id}.arriving"))
+    }
+
+    /// Move a Conversation's whole directory aside, so that a record arriving from
+    /// another device lands on an empty one and what was here can be put back.
+    ///
+    /// **Which is what a transfer back needs** (ADR-0020, *Transfer*). A
+    /// Conversation coming home lands over the copy this device kept, and each
+    /// arriving file has to keep the name its row says it was stored under — so
+    /// the directory in front of it has to be empty, or [`Self::keep`] would count
+    /// every name up past the copy of itself already there. And the landing may
+    /// still fail, in which case the copy here goes on being the record of this
+    /// work that this device holds: a directory *deleted* in front of it would
+    /// leave every one of its rows naming a file that is not there, with nothing
+    /// anywhere to put them back. See [`Self::put_back`], and
+    /// [`Self::let_go_of`].
+    ///
+    /// `None` is a Conversation with no directory, which is every ordinary
+    /// arrival: the row was numbered a moment ago and nothing has been attached
+    /// to it.
+    ///
+    /// `Err` is a directory that is there and would not move, which is the one
+    /// case that must not be read as *nothing to hold*: what follows a yes is
+    /// files written over the top of somebody's own.
+    pub(crate) fn set_aside(&self, conversation_id: i64) -> Result<Option<PathBuf>> {
+        let held = self.aside(conversation_id);
+
+        // A leftover from a landing nothing ever finished. What it holds is a copy
+        // of work whose rows have since been written one way or the other, and the
+        // directory it was being held for is the one about to be replaced again.
+        match std::fs::remove_dir_all(&held) {
+            Ok(()) => tracing::warn!(
+                conversation_id,
+                path = %held.display(),
+                "an attachments directory held for a landing nobody finished was let go of",
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "letting go of the attachments directory held at {}",
+                        held.display(),
+                    )
+                });
+            }
+        }
+
+        let directory = self.directory(conversation_id);
+
+        if !directory.exists() {
+            return Ok(None);
+        }
+
+        std::fs::rename(&directory, &held)
+            .with_context(|| {
+                format!(
+                    "holding the attachments directory of Conversation {conversation_id} aside \
+                     at {}",
+                    held.display(),
+                )
+            })
+            .map(|()| Some(held))
+    }
+
+    /// Put back what [`Self::set_aside`] held, the landing having failed.
+    ///
+    /// Whatever the landing wrote goes first: those are the files of a record that
+    /// is not going to be written, and the rows that named them went with the
+    /// transaction that rolled back.
+    ///
+    /// Nothing to refuse with, for [`Self::remove`]'s reason: this follows a
+    /// failure that is already being reported, and a directory that will not move
+    /// back is a line in the log rather than a second refusal.
+    pub(crate) fn put_back(&self, conversation_id: i64, held: &Path) {
+        self.remove(conversation_id);
+
+        let directory = self.directory(conversation_id);
+
+        if let Err(error) = std::fs::rename(held, &directory) {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                path = %held.display(),
+                "the attachments directory held for a landing that failed could not be put \
+                 back, so it is where it was held",
+            );
+        }
+    }
+
+    /// And let go of it, the landing having committed.
+    ///
+    /// What it holds is the attached files of a copy that has just been written
+    /// over, which nothing names any more.
+    pub(crate) fn let_go_of(&self, conversation_id: i64, held: &Path) {
+        match std::fs::remove_dir_all(held) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                path = %held.display(),
+                "the attachments directory of a copy that has been written over could not be \
+                 removed, so it was left where it was held",
+            ),
+        }
+    }
 }
 
 /// One row as the wire carries it.

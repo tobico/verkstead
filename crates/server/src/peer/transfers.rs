@@ -267,9 +267,18 @@ async fn back(state: &AppState, id: i64, arrival: &store::Arrival) -> Result<i64
 /// **And the record lands over whatever was here**, which is what a Conversation
 /// coming home does to the copy this device kept: the rows go in the very
 /// transaction the new ones land in — see [`store::land`] — and the directory
-/// their files are in is taken back first, so each file keeps the name its row
+/// their files are in is moved aside first, so each file keeps the name its row
 /// says it was stored under rather than being counted up past the copy of itself
 /// that was already there.
+///
+/// **Aside rather than away, because a return that fails leaves the copy here
+/// standing.** What the sending device sweeps on a failure is a copy that has only
+/// ever been arriving; a copy that was here before the move began is this device's
+/// own row from the first time the work was here, and it keeps it — see
+/// [`sweep`]. So a directory *deleted* in front of a landing that then failed
+/// would leave every attachment row of that copy naming a file nothing could put
+/// back. It goes back where it was instead, and is only let go of once the record
+/// has landed over it — see [`Attachments::set_aside`].
 pub(crate) async fn written(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -285,10 +294,35 @@ pub(crate) async fn written(
         profiles,
     };
 
-    Attachments::under(&state.data_dir).remove(id);
+    let directories = Attachments::under(&state.data_dir);
+
+    let aside = match directories.set_aside(id) {
+        Ok(aside) => aside,
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "the files of the copy a Conversation a member is transferring here would land over could not be held aside");
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the attached files already here could not be held aside\n",
+            )
+                .into_response();
+        }
+    };
+
+    // Whatever this landing wrote taken back, and the copy that was here put back
+    // where it was — which is the one thing every failure below does. A fresh
+    // arrival held nothing aside, so what it gives back is the files this landing
+    // wrote and nothing else.
+    let given_back = || match &aside {
+        Some(held) => directories.put_back(id, held),
+        None => directories.remove(id),
+    };
 
     if let Err(why) = kept(&state, id, &record.files).await {
         tracing::error!(error = ?why, conversation_id = id, "the files on a Conversation a member is transferring here could not be written");
+
+        given_back();
 
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -299,6 +333,12 @@ pub(crate) async fn written(
 
     match store::land(&state.pool, id, &record.slice, &renaming).await {
         Ok(()) => {
+            // The record has landed over the old one, so what was held aside is
+            // the attached files of a copy nothing names any more.
+            if let Some(held) = &aside {
+                directories.let_go_of(id, held);
+            }
+
             tracing::info!(
                 conversation_id = id,
                 tables = record.slice.tables.len(),
@@ -322,7 +362,7 @@ pub(crate) async fn written(
         Err(why) => {
             tracing::error!(error = ?why, conversation_id = id, "the record of a Conversation a member is transferring here could not be written down");
 
-            Attachments::under(&state.data_dir).remove(id);
+            given_back();
 
             (StatusCode::BAD_REQUEST, format!("{why:#}\n")).into_response()
         }
