@@ -171,6 +171,34 @@ impl Languages {
         )]))
     }
 
+    /// And the entries the settings page has just written: the two keys it
+    /// draws, per language it was given.
+    ///
+    /// Written over the file rather than replacing it — see
+    /// [`Languages::under_the_page`], which is what a save goes through — so
+    /// what an installer wrote beside those two keys survives a save. A size
+    /// that is blank is *nothing configured* rather than a size of nothing,
+    /// which is what clearing the field on the page means and what puts the
+    /// default back; a language with no size field at all sends that same
+    /// blank, there being no size to send.
+    pub fn of_page(written: impl IntoIterator<Item = (String, bool, String)>) -> Languages {
+        Languages(Ordered(
+            written
+                .into_iter()
+                .map(|(name, enabled, size)| {
+                    (
+                        name,
+                        Descriptor {
+                            enabled: Some(enabled),
+                            size: crate::settings::blank_is_nothing(size),
+                            ..Descriptor::default()
+                        },
+                    )
+                })
+                .collect(),
+        ))
+    }
+
     /// Whether there is nothing here at all, which is what a `config.yaml`
     /// nobody has written a descriptor in says.
     pub fn is_empty(&self) -> bool {
@@ -189,6 +217,27 @@ impl Languages {
     /// replacing a built-in whole (ADR-0021).
     pub fn merged(&self, over: &Languages) -> Languages {
         Languages(self.0.merged(&over.0, Descriptor::merged))
+    }
+
+    /// And this with what the settings page has just sent written over it.
+    ///
+    /// Not [`Languages::merged`], which is one grammar's entries over
+    /// another's. That one keeps a key the override does not give, because a
+    /// key an installer did not write is a key they said nothing about — and
+    /// the page is the other way round: it draws `enabled` and `size` every
+    /// time it saves, so a key it did not send is one somebody **cleared**.
+    /// Clearing the size field is how the default is asked for back, and a
+    /// merge that kept the old value would be a field that could not be
+    /// emptied.
+    ///
+    /// Everything else in an entry is kept from this one, which is what a save
+    /// from a page with no descriptor editor on it must not be able to touch —
+    /// see [`crate::settings::Config::keeping_what_the_page_never_drew`], the
+    /// one caller. An entry the page never sent stays as it stands, and one
+    /// naming a language this file has never heard of is taken on as written,
+    /// which is what saves an installer's own.
+    pub fn under_the_page(&self, page: &Languages) -> Languages {
+        Languages(self.0.merged(&page.0, Descriptor::with_the_pages_keys))
     }
 
     /// The descriptor of `name`, where there is one.
@@ -268,12 +317,7 @@ impl Languages {
     /// is the hazard the Compile Server exists to remove.
     pub fn wanting(&self, capability: &str) -> Option<&str> {
         self.iter().find_map(|(_, descriptor)| {
-            let names = descriptor
-                .capabilities
-                .iter()
-                .any(|(named, _)| named == capability);
-
-            (descriptor.enabled() && names).then(|| descriptor.size())
+            (descriptor.enabled() && descriptor.names(capability)).then(|| descriptor.size())
         })
     }
 
@@ -365,6 +409,22 @@ impl Descriptor {
         self.size.as_deref().unwrap_or(crate::build_cache::SIZE)
     }
 
+    /// The size exactly as it is written down, and `None` where nobody has
+    /// written one: what the settings page draws as a placeholder rather than
+    /// as a value somebody chose.
+    pub fn size_configured(&self) -> Option<&str> {
+        self.size.as_deref()
+    }
+
+    /// Whether this descriptor names `capability`, whatever this machine can
+    /// offer — which is what says the settings page has a size to draw under
+    /// its box, and what [`Languages::wanting`] asks of a switched-on one.
+    pub fn names(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|(named, _)| named == capability)
+    }
+
     /// `over` written over this, key by key.
     ///
     /// A key `over` does not give is this one's as it stands, which is what
@@ -391,6 +451,17 @@ impl Descriptor {
             capabilities: self
                 .capabilities
                 .merged(&over.capabilities, Capability::merged),
+        }
+    }
+
+    /// This with the two keys the settings page draws taken from `page`,
+    /// absence included, and every other key left exactly as it is — see
+    /// [`Languages::under_the_page`], which says why that is not a merge.
+    fn with_the_pages_keys(&self, page: &Descriptor) -> Descriptor {
+        Descriptor {
+            enabled: page.enabled,
+            size: page.size.clone(),
+            ..self.clone()
         }
     }
 

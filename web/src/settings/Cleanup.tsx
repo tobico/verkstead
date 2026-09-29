@@ -70,7 +70,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldInstructions, heldPaths } from "./held";
+import { heldCleanup, heldInstructions, heldLanguages, heldPaths } from "./held";
 import styles from "./Cleanup.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them — the
@@ -224,15 +224,10 @@ export function CleanupPane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        // And the build cache as it stands, which is the section above this
-        // one: a save says what the file holds afterwards, so a value left out
-        // would be a value unset.
-        rust_build_cache: {
-          enabled: told()?.rust_build_cache.enabled ?? true,
-          size: told()?.rust_build_cache.size_configured
-            ? (told()?.rust_build_cache.size ?? "")
-            : "",
-        },
+        // And the languages as they stand, which is the section above this one:
+        // a save says what the file holds afterwards, so a list left out would
+        // be a list emptied — see [`heldLanguages`].
+        ...heldLanguages(told()),
         cleanup: edit,
         // And how a conflict is resolved, and whether Done shares the record to
         // the pull request, for that reason again.

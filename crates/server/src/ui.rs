@@ -32,30 +32,30 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved, Author,
-    BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView,
-    CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    CompilingView, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked, PendingSteerView,
-    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked,
+    PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
+    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
-use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
+use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -5053,12 +5053,16 @@ async fn save_settings(
         settings.save_config(
             &Config::of(
                 GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
-                // The size as it was typed, and an empty field as nothing
-                // configured: clearing it is how the human asks for the default
-                // back, and a size of nothing is not a size.
-                RustBuildCache::of(
-                    edit.rust_build_cache.enabled,
-                    Some(edit.rust_build_cache.size),
+                // The two keys the page writes, per language it drew: the
+                // switch as it stands, and the size as it was typed with an
+                // empty field meaning nothing configured — clearing it is how
+                // the human asks for the default back, and a size of nothing is
+                // not a size. Everything else in a descriptor is an installer's
+                // and is kept from the file below.
+                crate::languages::Languages::of_page(
+                    edit.languages
+                        .into_iter()
+                        .map(|language| (language.name, language.enabled, language.size)),
                 ),
                 // And the Cleanup's two rows, each a switch and a duration as it
                 // was typed — an empty field is the default asked for back, and so
@@ -5263,6 +5267,46 @@ fn compile_caching(cached: bool) -> CompileCaching {
     }
 }
 
+/// Every loaded descriptor as the settings page draws it, in the order the
+/// descriptors were written.
+///
+/// What is drawn of one is the three things a page can say about a language it
+/// has never heard of — what to call it, whether it is on, and the size of the
+/// store an sccache bounds — because that is exactly what a descriptor is:
+/// there is no editor here, and an installer who wants more writes
+/// `config.yaml`.
+///
+/// The label falls back to the name the file keys it by, so the page always has
+/// a word to draw. The size hangs off the language whose descriptor names the
+/// sccache capability rather than standing beside the list, because it is that
+/// descriptor's own `size` — and `cached` rides along inside it for the reason
+/// it always did: it is the server's own environment, which is the same answer
+/// for every language that asks.
+fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec<LanguageView> {
+    loaded
+        .iter()
+        .map(|(name, descriptor)| LanguageView {
+            name: name.to_owned(),
+            label: descriptor.label().unwrap_or(name).to_owned(),
+            enabled: descriptor.enabled(),
+            compiling: descriptor
+                .names(crate::languages::SCCACHE)
+                .then(|| CompilingView {
+                    // The default where nobody has typed one, with the flag
+                    // beside it saying which of the two this is — a field
+                    // showing a value nobody chose should say so, and it says
+                    // so as a placeholder.
+                    size: descriptor.size().to_owned(),
+                    size_configured: descriptor.size_configured().is_some(),
+                    // Not out of the files at all: this is the server's own
+                    // environment and its own platform, and the one thing on
+                    // this page the human cannot set.
+                    cached: compile_caching(caches_compiles),
+                }),
+        })
+        .collect()
+}
+
 /// The stored word for a resolution as the settings page receives it, and back
 /// again for what a save of that page sends.
 ///
@@ -5299,7 +5343,6 @@ fn as_told(
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
-    let cache = config.rust_build_cache();
     let cleanup = config.cleanup();
 
     SettingsView {
@@ -5307,18 +5350,13 @@ fn as_told(
             name: author.name().unwrap_or_default().to_owned(),
             email: author.email().unwrap_or_default().to_owned(),
         },
-        rust_build_cache: BuildCacheView {
-            enabled: cache.enabled(),
-            // The default where nobody has typed one, with the flag beside it
-            // saying which of the two this is — a field showing a value nobody
-            // chose should say so, and it says so as a placeholder.
-            size: cache.size().to_owned(),
-            size_configured: cache.size_configured().is_some(),
-            // Not out of the files at all: this is the server's own environment
-            // and its own platform, and the one thing on this page the human
-            // cannot set.
-            compiles: compile_caching(caches_compiles),
-        },
+        // Every descriptor this installation loaded, in the order they were
+        // written: the ones embedded in the binary with what `config.yaml` says
+        // merged over them, which is what the next session will be built from —
+        // see [`crate::languages::configured`]. So a language an installer
+        // wrote a descriptor for has a box on this page without anything here
+        // knowing its name.
+        languages: languages(&crate::languages::configured(&config), caches_compiles),
         // And the Cleanup's two rows, each read the way the size above is: the
         // days configured where somebody typed them, and the fallback with the
         // flag beside it saying so, because a value nobody chose should be

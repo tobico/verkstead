@@ -1,19 +1,31 @@
-//! Which languages a session gets build support for, on the settings page:
-//! today that is Rust, and what it means is the shared build cache every
-//! sandbox is given and how big its compiled half may grow.
+//! Which languages a session gets build support for, on the settings page: one
+//! box per **descriptor** the server loaded, and — on the one whose store an
+//! sccache bounds — how big that store may grow.
+//!
+//! **The page is drawn from the descriptors rather than from a list it holds.**
+//! A language is data: the server loads the descriptors embedded in its binary,
+//! merges what `config.yaml` says over them, and hands the lot over with a
+//! label each. So a language an installer wrote a descriptor for has a box here
+//! without a line of this file knowing its name, and there is nothing here that
+//! would have to be edited to add one.
+//!
+//! **The file only.** There is no descriptor editor: the two keys of an entry
+//! this page writes are the switch and the size, and an installer who wants a
+//! variable, a manifest or a label edits `config.yaml`.
 //!
 //! One of two things on this page that are about a **Sandbox** rather than about
 //! who Verkstead is — the Sandbox binds section is the other — and the only one
 //! of the two that is on with nothing configured. Every path that section adds
-//! is a hole somebody typed on purpose; this one is Verkstead's own directory,
-//! holding nothing but build output, so it can be opened for a human who never
-//! asked and the only control over it here is the one that *closes* it.
+//! is a hole somebody typed on purpose; what a language opens is Verkstead's own
+//! directory, holding nothing but build output, so it can be opened for a human
+//! who never asked and the only control over it here is the one that *closes*
+//! it.
 //!
 //! It is on with nothing configured, which is the whole shape of the feature: a
 //! human should not have a slower machine for never having found this section.
-//! So the checkbox says where it stands rather than whether anybody has touched
-//! it, and the size field shows the default as a placeholder rather than as a
-//! value somebody chose.
+//! So a checkbox says where its language stands rather than whether anybody has
+//! touched it, and the size field shows the default as a placeholder rather than
+//! as a value somebody chose.
 //!
 //! Two halves in two panes, which is what the settings page is: a card in the
 //! middle pane naming the languages that have build support on, and the controls
@@ -26,43 +38,59 @@
 //! read: one payload holds both files, and a read apiece would be two opinions
 //! about what is saved.
 //!
-//! Two ways to save, because there are two kinds of control. The checkbox saves
+//! Two ways to save, because there are two kinds of control. A checkbox saves
 //! itself the moment it is ticked — a box that needed a second press to mean
-//! anything is not a box. The size is typed, so it saves on a press of its own;
+//! anything is not a box. A size is typed, so it saves on a press of its own;
 //! nothing is committed while somebody is still halfway through writing `30`.
 //!
-//! Which is why **a tick sends the size the server last gave it** rather than
-//! what the field holds. One request writes the whole file, so a tick has to
-//! say something about the size, and saying what is in the box would commit a
-//! number nobody pressed Save on — the `5` of a `50` somebody was halfway
-//! through and then thought better of the whole thing and unticked. What was
-//! typed stays typed: the tick did not save it, so the field goes on holding it
-//! and its own Save is still what commits it. The Cleanup pane's two durations
-//! are the same rule for the same reason.
+//! Which is why **a tick sends the sizes the server last gave it** rather than
+//! what the fields hold. One request writes the whole file, so a tick has to say
+//! something about every size, and saying what is in a box would commit a number
+//! nobody pressed Save on — the `5` of a `50` somebody was halfway through and
+//! then thought better of the whole thing and unticked. What was typed stays
+//! typed: the tick did not save it, so the field goes on holding it and its own
+//! Save is still what commits it. The Cleanup pane's two durations are the same
+//! rule for the same reason.
 //!
-//! The size hangs off the checkbox, which is the page's one pattern for
-//! configuration that only means something while something else is on: indented
-//! under the box it belongs to, and disabled while that box is off — see
-//! [`Nested`]. It is disabled for a second reason here as well, and the reason
-//! is the warning above it: the size is sccache's own, so a server with no
-//! sccache has nothing to read it.
+//! A size hangs off the checkbox it belongs to, which is the page's one pattern
+//! for configuration that only means something while something else is on:
+//! indented under that box, and disabled while it is off — see [`Nested`]. It is
+//! disabled for a second reason as well, and the reason is the warning above it:
+//! the size is sccache's own, so a server with no sccache has nothing to read it.
 //!
-//! Both go through the one settings endpoint, which writes both files: the
-//! author rides along as it stands and the token is left alone, so saving a
-//! cache size cannot lose either.
+//! Everything goes through the one settings endpoint, which writes both files:
+//! the author rides along as it stands and the token is left alone, so saving a
+//! store size cannot lose either.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch as Choose,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
-import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
+import type {
+  LanguageEdit,
+  LanguageView,
+  SettingsSaved,
+  SettingsView,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCache, heldCleanup, heldInstructions, heldPaths } from "./held";
+import {
+  heldCleanup,
+  heldInstructions,
+  heldLanguages,
+  heldPaths,
+} from "./held";
 import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -89,7 +117,7 @@ function useSettings() {
 /// both: said where somebody would otherwise wonder why nothing got faster. Not
 /// an error — the downloads are still shared, and the builds still work.
 ///
-/// **And it is something to go and do**, which it was not always. `compiles`
+/// **And it is something to go and do**, which it was not always. `cached`
 /// carried a third answer for a while: a Windows server was a machine where no
 /// session could reach a compile server at all, because the AppContainer a
 /// session ran in was refused the loopback the client talks to its server over,
@@ -101,44 +129,52 @@ function uncompiled(): JSX.Element {
   return (
     <p class={styles.warning}>
       No sccache is installed where the server can see it, so dependency{" "}
-      <em>compiles</em> are not cached — only the crate downloads. Install
-      sccache on the server to cache the compiling too.
+      <em>compiles</em> are not cached — only the downloads. Install sccache on
+      the server to cache the compiling too.
     </p>
   );
 }
 
 /// Whether the warning above is worth drawing at all.
 ///
-/// Only while the cache is on, because the rest of it is only true then:
-/// switched off, nothing is cached at all, and a line saying the downloads still
-/// are would be wrong exactly where somebody has just turned it off.
+/// Only for a language that is switched on, because the rest of it is only true
+/// then: switched off, nothing of that language is cached at all, and a line
+/// saying the downloads still are would be wrong exactly where somebody has just
+/// turned it off.
 ///
 /// The setup card's own warning is gated on more than this: it is drawn only
 /// for a Repo that builds Rust, because that is a note above a press rather
 /// than a page about the machine — see `ConversationView::compiles_uncached`,
 /// which the server works out with the switch already in hand.
-function warned(cache: BuildCacheView): boolean {
-  return cache.enabled && cache.compiles !== "Cached";
+function warned(told: SettingsView | undefined): boolean {
+  return (told?.languages ?? []).some(
+    (language) =>
+      language.enabled &&
+      language.compiling !== null &&
+      language.compiling.cached !== "Cached",
+  );
 }
 
-/// Whether the size hanging off the checkbox means anything.
+/// Whether the size hanging off a checkbox means anything.
 ///
 /// The checkbox being on and an sccache being there to read it: the size is
 /// sccache's own word, so a server without one has nowhere to put it. Both are
 /// the group's *off*, and the group is drawn greyed rather than taken away —
 /// a field that vanished would say the setting had, and it has not.
-function sizeable(cache: BuildCacheView): boolean {
-  return cache.enabled && cache.compiles === "Cached";
+function sizeable(language: LanguageView): boolean {
+  return language.enabled && language.compiling?.cached === "Cached";
 }
 
 /// What has build support switched on, in the words the card names them by.
 ///
-/// One language today, and the cache's switch is the whole of whether it is on.
-/// A list rather than a sentence, because that is what the card says: the
-/// languages a session can build, and nothing under the heading where there are
-/// none.
-function languages(cache: BuildCacheView): string[] {
-  return cache.enabled ? ["Rust"] : [];
+/// The labels the server gave, which for a language an installer wrote is the
+/// one in their file. A list rather than a sentence, because that is what the
+/// card says: the languages a session can build, and nothing under the heading
+/// where there are none.
+function standing(told: SettingsView | undefined): string[] {
+  return (told?.languages ?? [])
+    .filter((language) => language.enabled)
+    .map((language) => language.label);
 }
 
 /// What has build support, as the card that opens it.
@@ -164,8 +200,8 @@ export function LanguagesCard(props: {
           Could not read the settings: {settings.error?.message}
         </ErrorLine>
       </Match>
-      <Match when={settings.data?.rust_build_cache}>
-        {(cache) => (
+      <Match when={settings.data}>
+        {(told) => (
           <CardButton
             as="article"
             class={styles.languagesCard}
@@ -174,10 +210,10 @@ export function LanguagesCard(props: {
           >
             <h2>{TITLE}</h2>
 
-            <Show when={warned(cache())}>{uncompiled()}</Show>
+            <Show when={warned(told())}>{uncompiled()}</Show>
 
-            <Show when={languages(cache()).length > 0}>
-              <p class={styles.standing}>{languages(cache()).join(", ")}</p>
+            <Show when={standing(told()).length > 0}>
+              <p class={styles.standing}>{standing(told()).join(", ")}</p>
             </Show>
           </CardButton>
         )}
@@ -186,10 +222,10 @@ export function LanguagesCard(props: {
   );
 }
 
-/// And the controls that change it, which is the details pane the card opens.
+/// And the controls that change them, which is the details pane the card opens.
 ///
-/// There is no Save over the whole of it and no Cancel: the checkbox is its own
-/// press and the size has one of its own, and a details pane is left by opening
+/// There is no Save over the whole of it and no Cancel: a checkbox is its own
+/// press and a size has one of its own, and a details pane is left by opening
 /// something else or by the way back a narrow window draws.
 export function LanguagesPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
@@ -198,27 +234,28 @@ export function LanguagesPane(props: {
   const queries = useQueryClient();
   const settings = useSettings();
 
-  // What has been typed in the size field, or `null` while nothing has — the
-  // field follows the server until somebody touches it, as the author fields do.
-  const [typed, setTyped] = createSignal<string | null>(null);
+  // What has been typed in a size field, by the language it belongs to — a
+  // language with nothing typed is one whose field follows the server, as the
+  // author fields do.
+  const [typed, setTyped] = createSignal<Record<string, string>>({});
 
   const told = (): SettingsView | undefined => settings.data;
-  const cache = () => told()?.rust_build_cache;
 
-  /// What the field holds: what was typed, else the size somebody configured,
+  /// What a field holds: what was typed, else the size somebody configured,
   /// else nothing at all — because an unconfigured size is drawn as the
   /// placeholder underneath rather than as text in the box.
-  const size = () =>
-    typed() ?? (cache()?.size_configured ? (cache()?.size ?? "") : "");
+  const size = (language: LanguageView) =>
+    typed()[language.name] ??
+    (language.compiling?.size_configured ? language.compiling.size : "");
 
-  /// What a save is asked to do: the cache as it is to stand, and whether the
-  /// size in it is one the human pressed Save on.
+  /// What a save is asked to do: every language as it is to stand, and the one
+  /// whose size was just pressed Save on, where one was.
   ///
-  /// The second half is what says whether the field should let go of what was
-  /// typed and follow the server again. A tick's save carries the size the
-  /// server holds, so it commits nothing anybody typed and leaves the box
+  /// The second half is what says whether that field should let go of what was
+  /// typed and follow the server again. A tick's save carries the sizes the
+  /// server holds, so it commits nothing anybody typed and leaves the boxes
   /// alone — the same shape, and the same reason, as the Cleanup pane's.
-  type Asked = { edit: { enabled: boolean; size: string }; committed: boolean };
+  type Asked = { edit: LanguageEdit[]; committed: string | null };
 
   const save = useMutation(() => ({
     mutationFn: ({ edit }: Asked) => {
@@ -230,7 +267,7 @@ export function LanguagesPane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        rust_build_cache: edit,
+        languages: edit,
         // And what becomes of an archived Conversation, likewise — see
         // [`heldCleanup`].
         cleanup: heldCleanup(told()),
@@ -262,10 +299,14 @@ export function LanguagesPane(props: {
     },
     onSuccess: (saved: SettingsSaved, asked: Asked) => {
       // What was typed goes, because the answer is now what the field follows —
-      // and only where this save was the one that committed it. A tick's was
-      // not, so what somebody is halfway through writing is still theirs.
-      if (asked.committed) {
-        setTyped(null);
+      // and only for the language this save committed. A tick commits none, so
+      // what somebody is halfway through writing is still theirs.
+      if (asked.committed !== null) {
+        const language = asked.committed;
+        setTyped((held) => {
+          const { [language]: _committed, ...rest } = held;
+          return rest;
+        });
       }
 
       // The save's answer *is* a fresh read of both files, so a second read
@@ -274,21 +315,28 @@ export function LanguagesPane(props: {
     },
   }));
 
-  /// The box ticked, which saves itself: the switch takes the new answer and
-  /// the size rides along as the *server* holds it — see [`heldCache`], and
-  /// this module's header for why it is not what the field holds.
-  const flip = (enabled: boolean) =>
+  /// Every language as a save puts it back, with one entry's key replaced —
+  /// which is what either press sends. The sizes are the *server's*, so a press
+  /// that is not about a size commits none of them: see [`heldLanguages`], and
+  /// this module's header for why a tick does not send what the field holds.
+  const writing = (name: string, key: Partial<LanguageEdit>): LanguageEdit[] =>
+    heldLanguages(told()).languages.map((language) =>
+      language.name === name ? { ...language, ...key } : language,
+    );
+
+  /// A box ticked, which saves itself.
+  const flip = (language: LanguageView, enabled: boolean) =>
     save.mutate({
-      edit: { ...heldCache(told()), enabled },
-      committed: false,
+      edit: writing(language.name, { enabled }),
+      committed: null,
     });
 
-  /// And the size pressed, which sends the field.
-  const commit = (ev: SubmitEvent) => {
+  /// And a size pressed, which sends that language's field.
+  const commit = (ev: SubmitEvent, language: LanguageView) => {
     ev.preventDefault();
     save.mutate({
-      edit: { enabled: cache()?.enabled ?? true, size: size() },
-      committed: true,
+      edit: writing(language.name, { size: size(language) }),
+      committed: language.name,
     });
   };
 
@@ -307,44 +355,62 @@ export function LanguagesPane(props: {
             Could not read the settings: {settings.error?.message}
           </ErrorLine>
         </Match>
-        <Match when={cache()}>
+        <Match when={told()}>
           {(set) => (
             <div class={styles.languages}>
-              <Check
-                label="Rust"
-                on={set().enabled}
-                disabled={save.isPending}
-                flip={flip}
-              />
+              <For each={set().languages}>
+                {(language) => (
+                  <>
+                    <Check
+                      label={language.label}
+                      on={language.enabled}
+                      disabled={save.isPending}
+                      flip={(enabled) => flip(language, enabled)}
+                    />
+
+                    {/* The size is sccache's, so the group is off where there
+                        is no sccache to read it as well as where the box is
+                        unticked. A language whose store nothing bounds has no
+                        group at all — there is no size to draw. */}
+                    <Show when={language.compiling}>
+                      <Nested on={sizeable(language)}>
+                        <form
+                          class={styles.sizing}
+                          onSubmit={(ev) => commit(ev, language)}
+                        >
+                          <label for={`language-size-${language.name}`}>
+                            How large the compiled half may grow
+                          </label>
+                          <div class={styles.field}>
+                            <input
+                              id={`language-size-${language.name}`}
+                              type="text"
+                              autocapitalize="off"
+                              autocorrect="off"
+                              spellcheck={false}
+                              // The default, so an empty box reads as the size
+                              // nobody has chosen rather than as no size at all.
+                              placeholder={language.compiling?.size}
+                              value={size(language)}
+                              onInput={(ev) =>
+                                setTyped((held) => ({
+                                  ...held,
+                                  [language.name]: ev.currentTarget.value,
+                                }))
+                              }
+                            />
+                            <button type="submit" disabled={save.isPending}>
+                              Save
+                            </button>
+                          </div>
+                        </form>
+                      </Nested>
+                    </Show>
+                  </>
+                )}
+              </For>
 
               <Show when={warned(set())}>{uncompiled()}</Show>
-
-              {/* The size is sccache's, so the group is off where there is no
-                  sccache to read it as well as where the box is unticked. */}
-              <Nested on={sizeable(set())}>
-                <form class={styles.sizing} onSubmit={commit}>
-                  <label for="build-cache-size">
-                    How large the compiled half may grow
-                  </label>
-                  <div class={styles.field}>
-                    <input
-                      id="build-cache-size"
-                      type="text"
-                      autocapitalize="off"
-                      autocorrect="off"
-                      spellcheck={false}
-                      // The default, so an empty box reads as the size nobody
-                      // has chosen rather than as no size at all.
-                      placeholder={set().size}
-                      value={size()}
-                      onInput={(ev) => setTyped(ev.currentTarget.value)}
-                    />
-                    <button type="submit" disabled={save.isPending}>
-                      Save
-                    </button>
-                  </div>
-                </form>
-              </Nested>
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>

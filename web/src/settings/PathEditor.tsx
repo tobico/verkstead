@@ -46,7 +46,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty } from "../notices";
-import { heldCleanup, heldInstructions, heldPaths } from "./held";
+import { heldCleanup, heldInstructions, heldLanguages, heldPaths } from "./held";
 import styles from "./PathEditor.module.css";
 
 /// The settings as they stand, read once for every pane that draws them — the
@@ -101,7 +101,7 @@ export function without(entries: string[], at: number): string[] {
 ///
 /// One request writes the whole of `config.yaml`, so a save carries every value
 /// in it and the caller rewrites the binds it is about — `writeBinds` is that.
-/// The author, the token, the build cache and the share-on-Done switch ride
+/// The author, the token, the languages and the share-on-Done switch ride
 /// along the same way: what is sent is what the file holds afterwards, so a
 /// list or a value left out would be one emptied.
 export function useWritingPaths() {
@@ -122,12 +122,8 @@ export function useWritingPaths() {
         // and a paths editor has no business with any of it.
         git_author: standing?.git_author ?? { name: "", email: "" },
         github_token: "Keep",
-        rust_build_cache: {
-          enabled: standing?.rust_build_cache.enabled ?? true,
-          size: standing?.rust_build_cache.size_configured
-            ? (standing?.rust_build_cache.size ?? "")
-            : "",
-        },
+        // And the languages as they stand — see [`heldLanguages`].
+        ...heldLanguages(standing),
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(standing),
         conflict_resolution: standing?.conflict_resolution ?? "Merge",

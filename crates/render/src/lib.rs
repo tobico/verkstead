@@ -81,9 +81,9 @@ pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
-    CleanupStepView, CleanupView, CompileCaching, ConflictResolution, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
+    Author, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching,
+    CompilingView, ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageEdit,
+    LanguageView, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
     PathResolution, PathSource, PathsView, RuleField, RuleRefused, ServerField, ServerRefused,
     ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Tried, Verified,
 };

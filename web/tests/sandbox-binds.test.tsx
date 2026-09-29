@@ -64,6 +64,18 @@ const UNSET = unset as SettingsView;
 const BIND = "/var/cache/verkstead-node";
 const BESIDE = "/var/cache/verkstead-cargo";
 
+/// The languages the fixture holds, as a save puts them back on the wire: the
+/// two keys the page writes, per language the read listed — the installer's own
+/// beside the built-in. Carried by every section for the reason the paths are:
+/// one request writes the whole of `config.yaml`, so a list left out would be a
+/// list emptied. See [`heldLanguages`].
+const LANGUAGES = {
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "gleam", enabled: true, size: "" },
+  ],
+};
+
 /// The rest of the settings as every save from this pane sends them: the author
 /// as it stands, the token untouched, and what the sections above own.
 const REST = {
@@ -73,10 +85,7 @@ const REST = {
   // form does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
   mcp_servers: "Keep",
-  rust_build_cache: {
-    enabled: TOLD.rust_build_cache.enabled,
-    size: TOLD.rust_build_cache.size,
-  },
+  ...LANGUAGES,
   // And the Cleanup as the read left it, each duration as the string a form
   // holds — see [`heldCleanup`].
   cleanup: {

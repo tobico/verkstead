@@ -2,10 +2,10 @@
 //! front of the human is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
-//! every value in it — the author, the build cache, the share-on-Done switch,
-//! the sandbox binds and the text every session is given. A section that left
-//! one out would be a section that emptied it: what is sent is what the file
-//! holds afterwards.
+//! every value in it — the author, the languages, the share-on-Done switch, the
+//! sandbox binds and the text every session is given. A section that left one
+//! out would be a section that emptied it: what is sent is what the file holds
+//! afterwards.
 //!
 //! Only the settings' own go back. The installation's entries come back on every
 //! read labelled as the unit's word, they were never in this file, and sending
@@ -22,6 +22,7 @@ import type {
   CleanupEdit,
   CleanupStepEdit,
   CleanupStepView,
+  LanguageEdit,
   SettingsView,
 } from "../api/types";
 
@@ -37,7 +38,7 @@ import type {
 /// anything, which is what the moment before the read has landed is.
 export function heldConfig(told: SettingsView | undefined) {
   return {
-    rust_build_cache: heldCache(told),
+    ...heldLanguages(told),
     // And what becomes of an archived Conversation, likewise.
     cleanup: heldCleanup(told),
     // And how a conflicted pull request is resolved, which is one of two words
@@ -68,28 +69,38 @@ export function heldInstructions(told: SettingsView | undefined): {
   return { instructions: told?.instructions ?? "" };
 }
 
-/// And the build cache as it stands, ready to be sent by a section that is not
-/// about it — or by the checkbox on the section that is.
+/// And the languages as they stand, ready to be spread into a save by a section
+/// that is not about them — or by a checkbox on the section that is.
+///
+/// One entry per language the last read listed, carrying the two keys the page
+/// writes. An empty list where the read has not landed, which is the one thing
+/// a form can honestly say about languages it has never been told: the server
+/// keeps what the file already holds under whatever a save sends, so an entry
+/// nobody sent is an entry nobody changed.
 ///
 /// A size nobody typed goes back as the empty string rather than as the default
 /// it is being shown as — see [`heldCleanup`], which says the same about a
-/// duration.
+/// duration — and so does a language with no size of its own, there being no
+/// size to send.
 ///
 /// **The size here is the server's rather than the field's**, which is what the
-/// Rust checkbox wants of it. A box saves itself the moment it is ticked, so it
-/// has to say something about the size beside it; saying what is in the box
-/// would commit a number nobody pressed Save on — the `5` of a `50` somebody
-/// was halfway through and thought better of. The size's own Save is what
-/// commits the size, and this is what a tick sends instead.
-export function heldCache(told: SettingsView | undefined): {
-  enabled: boolean;
-  size: string;
+/// language checkboxes want of it. A box saves itself the moment it is ticked,
+/// so it has to say something about the size beside it; saying what is in the
+/// box would commit a number nobody pressed Save on — the `5` of a `50`
+/// somebody was halfway through and thought better of. The size's own Save is
+/// what commits the size, and this is what a tick sends instead.
+export function heldLanguages(told: SettingsView | undefined): {
+  languages: LanguageEdit[];
 } {
+  return { languages: (told?.languages ?? []).map(asEdit) };
+}
+
+/// One of them, as a save puts it back.
+function asEdit(language: SettingsView["languages"][number]): LanguageEdit {
   return {
-    enabled: told?.rust_build_cache.enabled ?? true,
-    size: told?.rust_build_cache.size_configured
-      ? (told?.rust_build_cache.size ?? "")
-      : "",
+    name: language.name,
+    enabled: language.enabled,
+    size: language.compiling?.size_configured ? language.compiling.size : "",
   };
 }
 

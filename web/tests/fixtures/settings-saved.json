@@ -30,6 +30,24 @@
       }
     ],
     "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
+    "languages": [
+      {
+        "compiling": {
+          "cached": "NoSccache",
+          "size": "50G",
+          "size_configured": true
+        },
+        "enabled": true,
+        "label": "Rust",
+        "name": "rust"
+      },
+      {
+        "compiling": null,
+        "enabled": true,
+        "label": "Gleam",
+        "name": "gleam"
+      }
+    ],
     "mcp_servers": [
       {
         "headers": [
@@ -72,12 +90,6 @@
           "source": "Settings"
         }
       ]
-    },
-    "rust_build_cache": {
-      "compiles": "NoSccache",
-      "enabled": true,
-      "size": "50G",
-      "size_configured": true
     },
     "share_on_done": true
   },

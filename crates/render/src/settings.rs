@@ -1,7 +1,7 @@
-//! What Verkstead has been told — the GitHub token, the git author, the shared
-//! Rust build cache and whether a Conversation is shared to its pull request
-//! when it settles to Done — as the viewer receives it, and what it sends to
-//! change any of them.
+//! What Verkstead has been told — the GitHub token, the git author, the
+//! languages a session gets build support for and whether a Conversation is
+//! shared to its pull request when it settles to Done — as the viewer receives
+//! it, and what it sends to change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -17,17 +17,21 @@
 //! looking at the page then. The save itself happens either way — see
 //! [`SettingsSaved`].
 //!
-//! The build cache is the plain half of all this: a switch and a size, both
-//! values, both readable back. It is the one thing about a Sandbox here that
-//! nobody has to configure — it is on with nothing said, and the switch is the
-//! one that takes it away, where the paths below are holes somebody typed. One
-//! fact about it travels one way only: whether a session's compiling is cached
-//! as well as its downloads and, where it is not, why not — which is the
-//! server's own environment and its own platform, and nobody's setting.
+//! The languages are the plain half of all this: a switch each and, on the one
+//! whose store an sccache bounds, a size — all of them values, all of them
+//! readable back. They are the one thing about a Sandbox here that nobody has
+//! to configure: a language is on with nothing said, and the switch is the one
+//! that takes it away, where the paths below are holes somebody typed. What
+//! they are drawn from is the descriptors the server loaded, so a language an
+//! installer wrote into `config.yaml` has a box here without a line of this
+//! crate knowing its name. One fact travels one way only: whether a session's
+//! compiling is cached as well as its downloads and, where it is not, why not —
+//! which is the server's own environment and its own platform, and nobody's
+//! setting.
 //!
-//! The Cleanup is the build cache's shape twice over: two rows, each a switch
-//! and a duration, each read back with the flag that says whether the duration
-//! is one somebody typed. What is different is that the two rows fall back the
+//! The Cleanup is that shape twice over: two rows, each a switch and a
+//! duration, each read back with the flag that says whether the duration is one
+//! somebody typed. What is different is that the two rows fall back the
 //! two different ways — the trim is on with nothing configured and the delete
 //! is off — and that neither is ever refused: a delete sooner than a trim is
 //! two independent clocks doing exactly what they were told.
@@ -124,8 +128,14 @@ pub struct SettingsView {
     /// none — which is what a Verkstead nobody has told anything looks like.
     pub github_token: Option<TokenSaved>,
 
-    /// And how the shared Rust build cache stands.
-    pub rust_build_cache: BuildCacheView,
+    /// And the languages a session is given build support for, one per
+    /// descriptor the server loaded — the ones Verkstead ships with whatever
+    /// `config.yaml` says merged over them.
+    ///
+    /// In the order the descriptors were written, which is the order the pane
+    /// draws them in: the built-ins first and an installer's own after them.
+    /// Never empty, Rust being built into the binary.
+    pub languages: Vec<LanguageView>,
 
     /// And what the Cleanup does to an archived Conversation, and how long
     /// after the archiving it does it.
@@ -134,7 +144,7 @@ pub struct SettingsView {
     /// And how a conflicted pull request is resolved in every Repo that has not
     /// said otherwise.
     ///
-    /// Never null, the way the build cache's switch is never null: nothing
+    /// Never null, the way a language's switch is never null: nothing
     /// configured is a merge, so what comes back is where the setting sits
     /// rather than whether anybody has been here. A Repo's own override is on
     /// the Repo — see [`crate::RepoView::conflict_resolution`].
@@ -267,8 +277,9 @@ pub enum PathResolution {
     Unresolved { why: String },
 }
 
-/// The shared Rust build cache as the settings page draws it: the switch, the
-/// size, and the one thing about it the human cannot set.
+/// One language as the settings page draws it: what to call it, whether
+/// sessions get it, and — for the one whose store an sccache bounds — how big
+/// that store may grow.
 ///
 /// The switch is never null. Nothing configured is on, so what comes back is
 /// where the switch *sits* rather than whether anybody has touched it — a page
@@ -276,13 +287,38 @@ pub enum PathResolution {
 /// distinction the server does not make.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct BuildCacheView {
-    /// Whether sessions get one at all.
+pub struct LanguageView {
+    /// The name `config.yaml` keys it by — `rust` — which is what a save names
+    /// it back and what nothing on the page ever shows.
+    pub name: String,
+
+    /// And what to call it where somebody reads it: the descriptor's `label`,
+    /// or the name above where the file gave none. Always a word to draw, so
+    /// the page never has to decide what an unlabelled language is called.
+    pub label: String,
+
+    /// Whether sessions get it at all.
     pub enabled: bool,
 
-    /// How big its compiled half may grow, in sccache's own words — `30G`,
-    /// `500M`. Always a value: the default is what an untouched setting means,
-    /// and the field shows it rather than standing empty.
+    /// The store an sccache bounds, for the language whose descriptor names
+    /// that capability — null for every other, which is what says there is no
+    /// size to draw under its box.
+    ///
+    /// Hung off the language rather than standing beside the list, because it
+    /// is the language's: it is that descriptor's own `size`, and the server
+    /// runs one Compile Server sized by whichever switched-on language asks
+    /// for it.
+    pub compiling: Option<CompilingView>,
+}
+
+/// How big a language's compiled store may grow, and whether a session's
+/// compiling is being cached at all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompilingView {
+    /// How big it may grow, in sccache's own words — `30G`, `500M`. Always a
+    /// value: the default is what an untouched setting means, and the field
+    /// shows it rather than standing empty.
     pub size: String,
 
     /// Whether that size is one somebody typed, rather than the default being
@@ -295,10 +331,10 @@ pub struct BuildCacheView {
     ///
     /// Read-only, and the one fact here nobody can set from a page: it is the
     /// server's own environment and its own platform. Anything but
-    /// [`CompileCaching::Cached`] means a session's crate downloads are still
-    /// shared and its dependencies are compiled every time, which is a slow
-    /// build rather than a broken one.
-    pub compiles: CompileCaching,
+    /// [`CompileCaching::Cached`] means a session's downloads are still shared
+    /// and its dependencies are compiled every time, which is a slow build
+    /// rather than a broken one.
+    pub cached: CompileCaching,
 }
 
 /// Whether a session's compiling is cached, and where it is not, what would
@@ -352,7 +388,7 @@ pub struct CleanupView {
 
 /// One of those two: whether it happens, and how long after the archiving.
 ///
-/// The switch is never null, the way the build cache's is not: what comes back
+/// The switch is never null, the way a language's is not: what comes back
 /// is where the switch *sits* rather than whether anybody has touched it. The
 /// days are always a number for the same reason, with the flag beside them
 /// saying whether it is one somebody chose — which is what lets the field draw
@@ -433,10 +469,15 @@ pub struct SettingsEdit {
     pub git_author: Author,
     pub github_token: TokenEdit,
 
-    /// The build cache switch and size, as values rather than as an action:
-    /// there is nothing secret about either, so a save says where they are to
-    /// stand and the server writes that down.
-    pub rust_build_cache: BuildCacheEdit,
+    /// The languages as the page has just left them, as values rather than as
+    /// an action: there is nothing secret about a switch or a size, so a save
+    /// says where each of them is to stand and the server writes it down.
+    ///
+    /// One entry per language the page was given, carrying the two keys it
+    /// draws and no others — see [`LanguageEdit`]. The rest of a descriptor is
+    /// an installer's and is never sent, so a save from this page cannot take a
+    /// language off the machine.
+    pub languages: Vec<LanguageEdit>,
 
     /// And what the Cleanup is to do after an archiving, as values for that
     /// reason again: two switches and two durations, and a save says where each
@@ -473,7 +514,7 @@ pub struct SettingsEdit {
     /// The token's half is an action because it is write-only. This one is
     /// because it is the only setting a save can be *refused* over: a pattern
     /// that will not compile is turned down, and a section that rode the rules
-    /// along as values would have the build cache's switch refused over a
+    /// along as values would have a language's switch refused over a
     /// pattern somebody hand-edited into the file weeks ago. So a save that is
     /// not about the rules says nothing about them, and the ones on disk are
     /// left exactly where they are.
@@ -501,18 +542,25 @@ pub struct SettingsEdit {
     pub instructions: String,
 }
 
-/// The build cache as the human has just set it.
+/// One language as the human has just left it: the two keys of its entry the
+/// settings page writes, and nothing else.
 ///
 /// The size is a string because it is sccache's own word for one, and an empty
 /// one is *no size configured* rather than a size of nothing — which is what
-/// clearing the field means and what puts the default back.
+/// clearing the field means and what puts the default back. A language with no
+/// size field of its own sends the empty string, which is the same nothing.
 ///
 /// Whether compiling is cached is not here. It is the server's own
 /// circumstance rather than anything a page can decide, so it travels one way
-/// only — see [`BuildCacheView::compiles`].
+/// only — see [`CompilingView::cached`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct BuildCacheEdit {
+pub struct LanguageEdit {
+    /// Which language this is about, by the name `config.yaml` keys it by — a
+    /// name the server has never heard of is an entry written into that file
+    /// under it, which is how an installer's own language is saved.
+    pub name: String,
+
     pub enabled: bool,
     pub size: String,
 }

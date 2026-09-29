@@ -92,6 +92,17 @@ const PATHS = {
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
+/// And the languages as a save puts them back: the two keys the page writes,
+/// per language the read listed — the installer's own beside the built-in.
+/// Carried by every section for the reason the paths are — see
+/// [`heldLanguages`].
+const LANGUAGES = {
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "gleam", enabled: true, size: "" },
+  ],
+};
+
 /// And the Cleanup as a save puts it back: the switches where the read left
 /// them, and each duration as the string a form holds. Carried by every
 /// section for the reason the paths are — see [`heldCleanup`].
@@ -481,13 +492,10 @@ describe("saving", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        // The build cache rides along as it stands, because the endpoint
-        // writes the whole of `config.yaml` and this form only means to
-        // change the author.
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        // The languages ride along as they stand, because the endpoint writes
+        // the whole of `config.yaml` and this form only means to change the
+        // author.
+        ...LANGUAGES,
         cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
@@ -726,7 +734,7 @@ describe("replacing and clearing the token", () => {
         github_token: null,
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
-        rust_build_cache: TOLD.rust_build_cache,
+        languages: TOLD.languages,
         cleanup: TOLD.cleanup,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
@@ -754,10 +762,7 @@ describe("replacing and clearing the token", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
@@ -1160,10 +1165,7 @@ describe("sharing on Done", () => {
         // And everything else in the file as it stands, because one request
         // writes the whole of it — the resolution the select beside it owns
         // included.
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
@@ -1282,10 +1284,7 @@ describe("how a conflict is resolved", () => {
         // And everything else in the file as it stands, the checkbox below it
         // included.
         share_on_done: TOLD.share_on_done,
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the

@@ -1,18 +1,25 @@
 //! Language support on the settings page: which languages the card names, what
-//! the checkbox in its pane puts on the wire, and the size that hangs off it.
+//! the checkboxes in its pane put on the wire, and the size that hangs off the
+//! one whose store an sccache bounds.
 //!
 //! Two halves mounted apart, because that is what they are: a card in the middle
 //! pane naming the languages that have build support on, and the controls that
 //! change them in the details pane it opens. Each is mounted on its own, and the
 //! pair together only where the round trip is what is being asked about.
 //!
-//! Two saves and one endpoint. The checkbox is its own press, because a box that
+//! **The page is drawn from what the server loaded**, so the fixture carries two
+//! languages: the built-in one and a descriptor an installer wrote into
+//! `config.yaml`. A box under a label nothing in the viewer knows is the whole
+//! of what this section is for, and a suite that only ever saw Rust would prove
+//! only that the page can draw the language it was written around.
+//!
+//! Two saves and one endpoint. A checkbox is its own press, because a box that
 //! needed a second one is not a box; the size is typed, so it waits for a Save.
 //! Both send the whole of the settings edit — the author as it stands and the
 //! token untouched — because the server writes both files in one request, and
 //! that is what these check is not lost.
 //!
-//! And the size is nested under the checkbox, which is the page's pattern for
+//! And the size is nested under its checkbox, which is the page's pattern for
 //! configuration that only means something while something else is on: it is
 //! greyed and refuses input while the box is unticked, and again while there is
 //! no sccache to read it. Both of those are here, because the second is the one
@@ -36,6 +43,12 @@ import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
+const UNSET = unset as SettingsView;
+
+/// The built-in descriptor, and the one an installer wrote — by the names
+/// `config.yaml` keys them under, which is what a save names back.
+const RUST = "rust";
+const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
 /// settings' own entries, each as the path it names. Every section's save
@@ -52,7 +65,6 @@ const CLEANUP = {
   trim: { enabled: true, days: "5" },
   delete: { enabled: true, days: "90" },
 };
-const UNSET = unset as SettingsView;
 
 /// The same settings with an sccache the server did find, which no fixture
 /// carries: the routers those are written from run no sessions, so they have
@@ -60,15 +72,22 @@ const UNSET = unset as SettingsView;
 function compiling(standing: SettingsView): SettingsView {
   return {
     ...standing,
-    rust_build_cache: { ...standing.rust_build_cache, compiles: "Cached" },
+    languages: standing.languages.map((language) => ({
+      ...language,
+      compiling: language.compiling
+        ? { ...language.compiling, cached: "Cached" }
+        : null,
+    })),
   };
 }
 
-/// And the same settings with the cache switched off.
-function off(standing: SettingsView): SettingsView {
+/// And the same settings with one language switched off.
+function off(standing: SettingsView, name = RUST): SettingsView {
   return {
     ...standing,
-    rust_build_cache: { ...standing.rust_build_cache, enabled: false },
+    languages: standing.languages.map((language) =>
+      language.name === name ? { ...language, enabled: false } : language,
+    ),
   };
 }
 
@@ -131,6 +150,12 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
   return JSON.parse(String(written![1]?.body));
 }
 
+/// The languages a save carried, which is what every press on this pane sends.
+function languagesSent(fetching: ReturnType<typeof serving>) {
+  return (sent(fetching) as { languages: Array<Record<string, unknown>> })
+    .languages;
+}
+
 /// The card itself, once it is drawn — waited for, because it stands on a read.
 async function theCard(container: ParentNode): Promise<HTMLElement> {
   return await waitFor(() => {
@@ -142,12 +167,13 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
-/// The one checkbox on the pane, which is the language itself.
-function theCheck(): HTMLInputElement {
-  return screen.getByRole("checkbox", { name: "Rust" }) as HTMLInputElement;
+/// One of the boxes on the pane, by the label the server gave its language.
+function theCheck(label = "Rust"): HTMLInputElement {
+  return screen.getByRole("checkbox", { name: label }) as HTMLInputElement;
 }
 
-/// And the group hanging off it, which holds the size.
+/// And the group hanging off one, which holds the size. There is one on this
+/// fixture, which is Rust's: nothing bounds the installer's own store.
 function theGroup(container: ParentNode): HTMLFieldSetElement {
   const group = container.querySelector<HTMLFieldSetElement>(
     `.${check.nested}`,
@@ -157,23 +183,36 @@ function theGroup(container: ParentNode): HTMLFieldSetElement {
 }
 
 describe("the card", () => {
-  /// The summary is the list of languages that have build support on, which
-  /// today is the one word.
-  it("names Rust while the cache is on", async () => {
-    theSettings(compiling(UNSET));
+  /// The summary is the list of languages that have build support on, in the
+  /// labels the descriptors gave them.
+  it("names every language that is on", async () => {
+    theSettings(compiling(TOLD));
     const { container } = mountCard();
 
     await waitFor(() =>
-      expect(
-        container.querySelector(`.${styles.standing}`)?.textContent,
-      ).toBe("Rust"),
+      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+        "Rust, Gleam",
+      ),
+    );
+  });
+
+  /// And the one an installer wrote goes when it is switched off, the same way
+  /// the built-in does: there is nothing about either that the card knows.
+  it("drops a language that is switched off", async () => {
+    theSettings(compiling(off(TOLD, GLEAM)));
+    const { container } = mountCard();
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+        "Rust",
+      ),
     );
   });
 
   /// And nothing at all under the heading where none are: a card saying a
   /// machine builds nothing would be a line nobody needs.
-  it("says nothing under the heading while it is off", async () => {
-    theSettings(off(TOLD));
+  it("says nothing under the heading while they are all off", async () => {
+    theSettings(off(off(TOLD), GLEAM));
     const { container } = mountCard();
 
     const face = await theCard(container);
@@ -193,10 +232,10 @@ describe("the card", () => {
     expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
   });
 
-  /// And nothing about it while the cache is switched off, because the half of
-  /// that warning that says the downloads are still shared is only true while
-  /// there is a cache to share them.
-  it("says nothing about sccache while the cache is switched off", async () => {
+  /// And nothing about it while the language that wanted one is switched off,
+  /// because the half of that warning that says the downloads are still shared
+  /// is only true while there is a cache to share them.
+  it("says nothing about sccache while the language that wants one is off", async () => {
     theSettings(off(UNSET));
     const { container } = mountCard();
 
@@ -244,8 +283,20 @@ describe("the card", () => {
 });
 
 describe("the languages as the pane draws them", () => {
-  /// The box says where the cache stands rather than whether anybody has
-  /// touched it, which is what an unconfigured cache being on means.
+  /// A box per descriptor the server loaded, under the label it gave — the one
+  /// an installer wrote included, which is the whole of what *the file only*
+  /// comes to: they write `config.yaml` and the box is here next time.
+  it("draws a checkbox per language the server lists", async () => {
+    theSettings(TOLD);
+    mountPane();
+
+    await waitFor(() => expect(theCheck("Rust").checked).toBe(true));
+    expect(theCheck("Gleam").checked).toBe(true);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+  });
+
+  /// The box says where its language stands rather than whether anybody has
+  /// touched it, which is what an unconfigured language being on means.
   it("reads as on where nothing has been configured", async () => {
     theSettings(UNSET);
     mountPane();
@@ -310,7 +361,22 @@ describe("the languages as the pane draws them", () => {
     expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(false);
   });
 
-  it("says nothing about sccache while the cache is switched off", async () => {
+  /// And a language whose store nothing bounds has no size at all — there is
+  /// one field on this pane, which is the one the sccache belongs to.
+  it("draws no size under a language whose store nothing bounds", async () => {
+    theSettings(compiling(TOLD));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck("Gleam").checked).toBe(true));
+
+    expect(
+      container.querySelectorAll(`.${check.nested}`),
+      "one group, which is the one with an sccache behind it",
+    ).toHaveLength(1);
+    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
+  });
+
+  it("says nothing about sccache while the language is switched off", async () => {
     theSettings(off(UNSET));
     mountPane();
 
@@ -342,7 +408,7 @@ describe("the languages as the pane draws them", () => {
       screen.getByLabelText(/How large/),
     )) as HTMLInputElement;
 
-    expect(field.value).toBe(TOLD.rust_build_cache.size);
+    expect(field.value).toBe("50G");
   });
 });
 
@@ -365,10 +431,12 @@ describe("changing the languages", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        rust_build_cache: {
-          enabled: false,
-          size: TOLD.rust_build_cache.size,
-        },
+        // Every language, because one request writes the whole file — the one
+        // that was pressed as it is now to stand, and the rest as they were.
+        languages: [
+          { name: RUST, enabled: false, size: "50G" },
+          { name: GLEAM, enabled: true, size: "" },
+        ],
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         cleanup: CLEANUP,
@@ -385,11 +453,28 @@ describe("changing the languages", () => {
     await waitFor(() => expect(theCheck().checked).toBe(false));
   });
 
-  /// A tick has to say something about the size, because one request writes the
-  /// whole file — and what it says is what the server holds rather than what is
-  /// in the box. Otherwise unticking the box mid-edit writes the `5` of a `50`
-  /// as the cache size, which is a number nobody pressed Save on. The Cleanup
-  /// pane's two durations hold the same rule.
+  /// And a box the installer's own language draws saves the same way: the
+  /// entry it names is the one that moves, and the built-in stands.
+  it("saves an installer's own language under its own name", async () => {
+    const fetching = theSettings(TOLD, json(answering(off(TOLD, GLEAM))));
+    mountPane();
+
+    await waitFor(() => expect(theCheck("Gleam").checked).toBe(true));
+    fireEvent.click(theCheck("Gleam"));
+
+    await waitFor(() =>
+      expect(languagesSent(fetching)).toEqual([
+        { name: RUST, enabled: true, size: "50G" },
+        { name: GLEAM, enabled: false, size: "" },
+      ]),
+    );
+  });
+
+  /// A tick has to say something about the sizes, because one request writes
+  /// the whole file — and what it says is what the server holds rather than
+  /// what is in the box. Otherwise unticking the box mid-edit writes the `5` of
+  /// a `50` as the store size, which is a number nobody pressed Save on. The
+  /// Cleanup pane's two durations hold the same rule.
   it("sends the server's size when the box is ticked, not what is typed", async () => {
     const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
     mountPane();
@@ -400,31 +485,21 @@ describe("changing the languages", () => {
     fireEvent.click(theCheck());
 
     await waitFor(() =>
-      expect(
-        (sent(fetching) as { rust_build_cache: { size: string } })
-          .rust_build_cache.size,
-      ).toBe(TOLD.rust_build_cache.size),
+      expect(languagesSent(fetching)[0]?.size).toBe("50G"),
     );
 
     // And what was typed is still there to finish typing: the tick did not
     // commit it, so the field did not let go of it either.
     await waitFor(() => expect(theCheck().checked).toBe(false));
-    expect(
-      (screen.getByLabelText(/How large/) as HTMLInputElement).value,
-    ).toBe("5");
+    expect((screen.getByLabelText(/How large/) as HTMLInputElement).value).toBe(
+      "5",
+    );
   });
 
   /// The size is typed, so it waits for a press: nothing is committed while
   /// somebody is halfway through writing `30`.
   it("sends a size only when it is saved", async () => {
-    const bigger: SettingsView = {
-      ...compiling(TOLD),
-      rust_build_cache: {
-        ...compiling(TOLD).rust_build_cache,
-        size: "80G",
-        size_configured: true,
-      },
-    };
+    const bigger = compiling(TOLD);
     const fetching = theSettings(compiling(TOLD), json(answering(bigger)));
     mountPane();
 
@@ -446,7 +521,10 @@ describe("changing the languages", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        rust_build_cache: { enabled: true, size: "80G" },
+        languages: [
+          { name: RUST, enabled: true, size: "80G" },
+          { name: GLEAM, enabled: true, size: "" },
+        ],
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         cleanup: CLEANUP,
@@ -473,17 +551,12 @@ describe("changing the languages", () => {
     fireEvent.input(field, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(
-        (sent(fetching) as { rust_build_cache: { size: string } })
-          .rust_build_cache.size,
-      ).toBe(""),
-    );
+    await waitFor(() => expect(languagesSent(fetching)[0]?.size).toBe(""));
   });
 
   /// What the pane saved is what the card goes back to saying, because the
   /// answer is a fresh read of the files that both halves are drawn from.
-  it("takes Rust off the card when the pane unticks it", async () => {
+  it("takes a language off the card when the pane unticks it", async () => {
     theSettings(TOLD, json(answering(off(TOLD))));
     const { container } = mounting(() => (
       <>
@@ -494,25 +567,25 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust",
+      "Rust, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)).toBeNull(),
+      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+        "Gleam",
+      ),
     );
   });
 
   /// A save that would not land keeps the page honest about it: a settings page
   /// that quietly saved nothing is how a machine ends up not being what it says.
   it("says so when the save fails", async () => {
-    serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      () =>
-        Promise.resolve(
-          new Response("nope", { status: 503, statusText: "Service Unavailable" }),
-        ),
+    serving(whenever("/api/ui/settings", json(TOLD)), () =>
+      Promise.resolve(
+        new Response("nope", { status: 503, statusText: "Service Unavailable" }),
+      ),
     );
     mountPane();
 

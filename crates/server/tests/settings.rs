@@ -1,5 +1,5 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
-//! the presence of a GitHub token, how the shared Rust build cache is set, what
+//! the presence of a GitHub token, how the languages are set, what
 //! the Cleanup does to an archived Conversation, whether Done shares the record
 //! to the pull request, what paths it has been given and the one text every
 //! session is given, and writing any of them.
@@ -46,8 +46,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, IgnoreRule, McpHeader, McpServer, PathResolution,
-    PathSource, RuleField, ServerField, SettingsSaved, SettingsView, Verified,
+    CompileCaching, CompilingView, ConflictResolution, IgnoreRule, LanguageView, McpHeader,
+    McpServer, PathResolution, PathSource, RuleField, ServerField, SettingsSaved, SettingsView,
+    Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -130,7 +131,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": name, "email": email },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -151,7 +152,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -170,7 +171,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Clear",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -181,6 +182,22 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         }),
     )
     .await
+}
+
+/// The languages as a save that is not about them sends them: every one the
+/// last read listed, with its switch where the read left it and no size typed.
+///
+/// Which is Rust alone here, that being the only descriptor embedded in the
+/// binary — the page sends one entry per language the server gave it, so a
+/// machine with an installer's own descriptor sends that one too.
+fn languages_unset() -> serde_json::Value {
+    serde_json::json!([{ "name": "rust", "enabled": true, "size": "" }])
+}
+
+/// And one language as a save about it sends it, which is the checkbox's own
+/// press and the size's.
+fn rust(enabled: bool, size: &str) -> serde_json::Value {
+    serde_json::json!([{ "name": "rust", "enabled": enabled, "size": size }])
 }
 
 /// The Cleanup as a save that is not about it sends it: both rows where nobody
@@ -206,7 +223,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": {
                 "trim": { "enabled": trim.0, "days": trim.1 },
                 "delete": { "enabled": delete.0, "days": delete.1 },
@@ -332,7 +349,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
         &serde_json::json!({
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -560,7 +577,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
         &serde_json::json!({
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -599,27 +616,53 @@ async fn a_token_that_is_nothing_but_whitespace_configures_nothing() {
     );
 }
 
-/// The build cache the human has said nothing about: on, at the default size,
-/// with the size marked as nobody's choice so the page can draw it as a
-/// placeholder.
+/// Rust as the settings page is given it, which every read lists: the
+/// descriptor is embedded in the binary, so there is no machine without one.
+fn rust_told(settings: &SettingsView) -> &LanguageView {
+    settings
+        .languages
+        .iter()
+        .find(|language| language.name == "rust")
+        .unwrap_or_else(|| panic!("Rust is built in, so every read lists it: {settings:?}"))
+}
+
+/// And the store an sccache bounds under it, which is what hangs the size off
+/// Rust's box rather than off the section.
+fn rust_store(settings: &SettingsView) -> &CompilingView {
+    rust_told(settings)
+        .compiling
+        .as_ref()
+        .expect("Rust's descriptor names the sccache capability")
+}
+
+/// The one language every machine has, said the way the page reads it: on, at
+/// the default size, with the size marked as nobody's choice so the page can
+/// draw it as a placeholder.
 ///
 /// The whole point of the shape — a fresh install should not be the one paying
 /// for every dependency to be compiled twice, and nothing here asks the human to
 /// find a setting first.
 #[tokio::test]
-async fn a_build_cache_nobody_has_configured_is_on_at_the_default_size() {
+async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
     let (_dir, app) = app().await;
 
-    let cache = settings(&app).await.rust_build_cache;
+    let told = settings(&app).await;
+    let rust = rust_told(&told);
 
-    assert!(cache.enabled, "on is what an untouched setting means");
-    assert_eq!(cache.size, "30G");
+    assert_eq!(
+        rust.label, "Rust",
+        "the label the built-in descriptor gives"
+    );
+    assert!(rust.enabled, "on is what an untouched setting means");
+
+    let store = rust_store(&told);
+    assert_eq!(store.size, "30G");
     assert!(
-        !cache.size_configured,
+        !store.size_configured,
         "the default is shown rather than chosen"
     );
     assert_ne!(
-        cache.compiles,
+        store.cached,
         CompileCaching::Cached,
         "this router runs no sessions, so it has no sccache to hand any"
     );
@@ -628,7 +671,7 @@ async fn a_build_cache_nobody_has_configured_is_on_at_the_default_size() {
 /// And what a save of it says: both halves come back off the file, and the
 /// switch is what the next session is built against.
 #[tokio::test]
-async fn the_build_cache_switch_and_size_go_in_and_come_back() {
+async fn a_languages_switch_and_size_go_in_and_come_back() {
     let (dir, app) = app().await;
 
     let saved = save(
@@ -636,7 +679,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": false, "size": "5G" },
+            "languages": rust(false, "5G"),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -648,20 +691,138 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
     )
     .await;
 
-    assert!(!saved.settings.rust_build_cache.enabled);
-    assert_eq!(saved.settings.rust_build_cache.size, "5G");
-    assert!(saved.settings.rust_build_cache.size_configured);
+    assert!(!rust_told(&saved.settings).enabled);
+    assert_eq!(rust_store(&saved.settings).size, "5G");
+    assert!(rust_store(&saved.settings).size_configured);
 
-    // In the file the next session reads, rather than only in the answer.
+    // In the file the next session reads, rather than only in the answer — and
+    // under the map the page writes now rather than under the key it replaced.
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
-        written.contains("enabled: false") && written.contains("5G"),
-        "the switch and the size are in config.yaml: {written}"
+        written.contains("languages")
+            && written.contains("rust")
+            && written.contains("enabled: false")
+            && written.contains("5G"),
+        "the switch and the size are Rust's entry in config.yaml: {written}"
     );
 
-    let read_back = settings(&app).await.rust_build_cache;
-    assert!(!read_back.enabled);
-    assert_eq!(read_back.size, "5G");
+    let read_back = settings(&app).await;
+    assert!(!rust_told(&read_back).enabled);
+    assert_eq!(rust_store(&read_back).size, "5G");
+}
+
+/// A language an installer wrote a descriptor for is on the page, under the
+/// label they gave it — which is the whole of what *the page draws what the
+/// server loaded* comes to.
+///
+/// Nothing in the viewer or in the render crate knows the name: the page is
+/// drawn from the descriptors, so a language Verkstead has never heard of has a
+/// checkbox without a line of either being edited.
+#[tokio::test]
+async fn a_language_an_installer_wrote_is_on_the_page_under_its_own_label() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "languages:\n  gleam:\n    label: Gleam\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
+    );
+
+    let told = settings(&app).await;
+
+    let gleam = told
+        .languages
+        .iter()
+        .find(|language| language.name == "gleam")
+        .unwrap_or_else(|| panic!("the descriptor in the file is on the page: {told:?}"));
+
+    assert_eq!(gleam.label, "Gleam");
+    assert!(gleam.enabled, "a language nobody switched off is on");
+    assert!(
+        gleam.compiling.is_none(),
+        "it names no sccache, so there is no size to draw under its box"
+    );
+
+    // And the built-in is still there beside it, which is what merging over
+    // rather than replacing means.
+    assert_eq!(rust_told(&told).label, "Rust");
+}
+
+/// And a language with no label of its own is drawn under the name the file
+/// keys it by, so the page always has a word for it.
+#[tokio::test]
+async fn a_language_with_no_label_is_drawn_under_its_own_name() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "languages:\n  zig:\n    env:\n      ZIG_GLOBAL_CACHE_DIR: \"{cache}/zig\"\n",
+    );
+
+    let told = settings(&app).await;
+    let zig = told
+        .languages
+        .iter()
+        .find(|language| language.name == "zig")
+        .unwrap_or_else(|| panic!("the descriptor in the file is on the page: {told:?}"));
+
+    assert_eq!(zig.label, "zig");
+}
+
+/// The key the map replaced is read where it is written, and a save carries
+/// what it said into the map and leaves it out of the file.
+///
+/// Which is the migration, done by the one press that was always going to
+/// rewrite the file: a `config.yaml` written by the released version says what
+/// it always said until somebody presses something, and says it in the new
+/// place afterwards. Leaving both would leave two opinions about Rust's switch
+/// in one file.
+#[tokio::test]
+async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "rust_build_cache:\n  enabled: false\n  size: 5G\n",
+    );
+
+    // Read as Rust's two before anything is saved, which is the compatibility
+    // rule: an install that wrote one keeps exactly what it said.
+    let told = settings(&app).await;
+    assert!(!rust_told(&told).enabled);
+    assert_eq!(rust_store(&told).size, "5G");
+
+    // And the page saves what it was just given, the way every pane does.
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "languages": rust(false, "5G"),
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert!(!rust_told(&saved.settings).enabled, "nothing changed");
+    assert_eq!(rust_store(&saved.settings).size, "5G");
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        !written.contains("rust_build_cache"),
+        "the key the map replaced is out of the file: {written}"
+    );
+    assert!(
+        written.contains("languages") && written.contains("5G"),
+        "and what it said is Rust's entry: {written}"
+    );
 }
 
 /// What the Cleanup does where nobody has said: it trims at three days and
@@ -769,14 +930,14 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
 
     save_cleanup(&app, (false, "5"), (true, "90")).await;
 
-    // The build cache section's own save, which is about the size and carries
+    // The Language support section's own save, which is about a size and carries
     // the Cleanup exactly as the page last read it.
     let saved = save(
         &app,
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "languages": rust(true, "5G"),
             "cleanup": {
                 "trim": { "enabled": false, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
@@ -791,7 +952,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert_eq!(rust_store(&saved.settings).size, "5G");
     assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
     assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
 }
@@ -799,7 +960,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
 /// How a conflict is resolved where nobody has said: a merge, which is the half
 /// of the choice that rewrites nothing.
 ///
-/// The whole point of the shape, as it is for the build cache above: a human who
+/// The whole point of the shape, as it is for the languages above: a human who
 /// has never found this section should not have a branch force-pushed under
 /// whoever was reading it.
 #[tokio::test]
@@ -823,7 +984,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Rebase",
             "share_on_done": false,
@@ -860,7 +1021,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -903,7 +1064,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
@@ -945,7 +1106,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
@@ -957,14 +1118,14 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     )
     .await;
 
-    // The build cache section's own save, which is about the size and carries
+    // The Language support section's own save, which is about a size and carries
     // everything else as the page read it.
     let saved = save(
         &app,
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
@@ -976,7 +1137,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert_eq!(rust_store(&saved.settings).size, "5G");
     assert!(saved.settings.share_on_done, "the switch stands");
 }
 
@@ -1057,14 +1218,14 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
 
     save_instructions(&app, "Prefer the smallest change.").await;
 
-    // The build cache section's own save, which is about the size and carries
+    // The Language support section's own save, which is about a size and carries
     // everything else as the page last read it.
     let saved = save(
         &app,
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1076,7 +1237,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     )
     .await;
 
-    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert_eq!(rust_store(&saved.settings).size, "5G");
     assert_eq!(
         saved.settings.instructions, "Prefer the smallest change.",
         "the text stands",
@@ -1133,7 +1294,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1175,7 +1336,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1192,7 +1353,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "  " },
+            "languages": rust(true, "  "),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1204,8 +1365,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     )
     .await;
 
-    assert_eq!(saved.settings.rust_build_cache.size, "30G");
-    assert!(!saved.settings.rust_build_cache.size_configured);
+    assert_eq!(rust_store(&saved.settings).size, "30G");
+    assert!(!rust_store(&saved.settings).size_configured);
 }
 
 /// The Sandbox binds half of the page: every Sandbox Configuration bind, from
@@ -1244,7 +1405,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1474,7 +1635,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -1638,7 +1799,7 @@ async fn a_refused_save_writes_nothing_at_all() {
         &serde_json::json!({
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,

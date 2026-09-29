@@ -19,15 +19,21 @@
   "github_token": null,
   "ignored_comments": [],
   "instructions": "",
+  "languages": [
+    {
+      "compiling": {
+        "cached": "NoSccache",
+        "size": "30G",
+        "size_configured": false
+      },
+      "enabled": true,
+      "label": "Rust",
+      "name": "rust"
+    }
+  ],
   "mcp_servers": [],
   "paths": {
     "binds": []
-  },
-  "rust_build_cache": {
-    "compiles": "NoSccache",
-    "enabled": true,
-    "size": "30G",
-    "size_configured": false
   },
   "share_on_done": false
 }

@@ -659,57 +659,6 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
 
 /**
- * The build cache as the human has just set it.
- *
- * The size is a string because it is sccache's own word for one, and an empty
- * one is *no size configured* rather than a size of nothing — which is what
- * clearing the field means and what puts the default back.
- *
- * Whether compiling is cached is not here. It is the server's own
- * circumstance rather than anything a page can decide, so it travels one way
- * only — see [`BuildCacheView::compiles`].
- */
-export type BuildCacheEdit = { enabled: boolean, size: string, };
-
-/**
- * The shared Rust build cache as the settings page draws it: the switch, the
- * size, and the one thing about it the human cannot set.
- *
- * The switch is never null. Nothing configured is on, so what comes back is
- * where the switch *sits* rather than whether anybody has touched it — a page
- * that drew a third state would be asking the human to understand a
- * distinction the server does not make.
- */
-export type BuildCacheView = { 
-/**
- * Whether sessions get one at all.
- */
-enabled: boolean, 
-/**
- * How big its compiled half may grow, in sccache's own words — `30G`,
- * `500M`. Always a value: the default is what an untouched setting means,
- * and the field shows it rather than standing empty.
- */
-size: string, 
-/**
- * Whether that size is one somebody typed, rather than the default being
- * shown. What lets the field draw the default as a placeholder — a value
- * nobody chose should not look like a choice.
- */
-size_configured: boolean, 
-/**
- * Whether a session's *compiling* is cached as well as its downloads, and
- * where it is not, why not.
- *
- * Read-only, and the one fact here nobody can set from a page: it is the
- * server's own environment and its own platform. Anything but
- * [`CompileCaching::Cached`] means a session's crate downloads are still
- * shared and its dependencies are compiled every time, which is a slow
- * build rather than a broken one.
- */
-compiles: CompileCaching, };
-
-/**
  * One session's Capture, whole, as the details pane receives it.
  *
  * Byte for byte, control sequences and all: what a terminal was sent is what a
@@ -764,7 +713,7 @@ export type CleanupStepEdit = { enabled: boolean, days: string, };
 /**
  * One of those two: whether it happens, and how long after the archiving.
  *
- * The switch is never null, the way the build cache's is not: what comes back
+ * The switch is never null, the way a language's is not: what comes back
  * is where the switch *sits* rather than whether anybody has touched it. The
  * days are always a number for the same reason, with the flag beside them
  * saying whether it is one somebody chose — which is what lets the field draw
@@ -1105,6 +1054,35 @@ base_commit: string | null, };
  * one place a platform's answer is said.
  */
 export type CompileCaching = "Cached" | "NoSccache";
+
+/**
+ * How big a language's compiled store may grow, and whether a session's
+ * compiling is being cached at all.
+ */
+export type CompilingView = { 
+/**
+ * How big it may grow, in sccache's own words — `30G`, `500M`. Always a
+ * value: the default is what an untouched setting means, and the field
+ * shows it rather than standing empty.
+ */
+size: string, 
+/**
+ * Whether that size is one somebody typed, rather than the default being
+ * shown. What lets the field draw the default as a placeholder — a value
+ * nobody chose should not look like a choice.
+ */
+size_configured: boolean, 
+/**
+ * Whether a session's *compiling* is cached as well as its downloads, and
+ * where it is not, why not.
+ *
+ * Read-only, and the one fact here nobody can set from a page: it is the
+ * server's own environment and its own platform. Anything but
+ * [`CompileCaching::Cached`] means a session's downloads are still shared
+ * and its dependencies are compiled every time, which is a slow build
+ * rather than a broken one.
+ */
+cached: CompileCaching, };
 
 /**
  * How a merge conflict between a pull request and its base branch is resolved.
@@ -2518,6 +2496,65 @@ export type InstallState = { "install": "Idle" } | { "install": "Installing" } |
  * rather than run.
  */
 why: string, };
+
+/**
+ * One language as the human has just left it: the two keys of its entry the
+ * settings page writes, and nothing else.
+ *
+ * The size is a string because it is sccache's own word for one, and an empty
+ * one is *no size configured* rather than a size of nothing — which is what
+ * clearing the field means and what puts the default back. A language with no
+ * size field of its own sends the empty string, which is the same nothing.
+ *
+ * Whether compiling is cached is not here. It is the server's own
+ * circumstance rather than anything a page can decide, so it travels one way
+ * only — see [`CompilingView::cached`].
+ */
+export type LanguageEdit = { 
+/**
+ * Which language this is about, by the name `config.yaml` keys it by — a
+ * name the server has never heard of is an entry written into that file
+ * under it, which is how an installer's own language is saved.
+ */
+name: string, enabled: boolean, size: string, };
+
+/**
+ * One language as the settings page draws it: what to call it, whether
+ * sessions get it, and — for the one whose store an sccache bounds — how big
+ * that store may grow.
+ *
+ * The switch is never null. Nothing configured is on, so what comes back is
+ * where the switch *sits* rather than whether anybody has touched it — a page
+ * that drew a third state would be asking the human to understand a
+ * distinction the server does not make.
+ */
+export type LanguageView = { 
+/**
+ * The name `config.yaml` keys it by — `rust` — which is what a save names
+ * it back and what nothing on the page ever shows.
+ */
+name: string, 
+/**
+ * And what to call it where somebody reads it: the descriptor's `label`,
+ * or the name above where the file gave none. Always a word to draw, so
+ * the page never has to decide what an unlabelled language is called.
+ */
+label: string, 
+/**
+ * Whether sessions get it at all.
+ */
+enabled: boolean, 
+/**
+ * The store an sccache bounds, for the language whose descriptor names
+ * that capability — null for every other, which is what says there is no
+ * size to draw under its box.
+ *
+ * Hung off the language rather than standing beside the list, because it
+ * is the language's: it is that descriptor's own `size`, and the server
+ * runs one Compile Server sized by whichever switched-on language asks
+ * for it.
+ */
+compiling: CompilingView | null, };
 
 /**
  * Where a Conversation has got to.
@@ -4303,11 +4340,16 @@ attachments: Array<AttachmentView>, };
  */
 export type SettingsEdit = { git_author: Author, github_token: TokenEdit, 
 /**
- * The build cache switch and size, as values rather than as an action:
- * there is nothing secret about either, so a save says where they are to
- * stand and the server writes that down.
+ * The languages as the page has just left them, as values rather than as
+ * an action: there is nothing secret about a switch or a size, so a save
+ * says where each of them is to stand and the server writes it down.
+ *
+ * One entry per language the page was given, carrying the two keys it
+ * draws and no others — see [`LanguageEdit`]. The rest of a descriptor is
+ * an installer's and is never sent, so a save from this page cannot take a
+ * language off the machine.
  */
-rust_build_cache: BuildCacheEdit, 
+languages: Array<LanguageEdit>, 
 /**
  * And what the Cleanup is to do after an archiving, as values for that
  * reason again: two switches and two durations, and a save says where each
@@ -4348,7 +4390,7 @@ sandbox_binds: Array<string>,
  * The token's half is an action because it is write-only. This one is
  * because it is the only setting a save can be *refused* over: a pattern
  * that will not compile is turned down, and a section that rode the rules
- * along as values would have the build cache's switch refused over a
+ * along as values would have a language's switch refused over a
  * pattern somebody hand-edited into the file weeks ago. So a save that is
  * not about the rules says nothing about them, and the ones on disk are
  * left exactly where they are.
@@ -4447,9 +4489,15 @@ export type SettingsView = { git_author: Author,
  */
 github_token: TokenSaved | null, 
 /**
- * And how the shared Rust build cache stands.
+ * And the languages a session is given build support for, one per
+ * descriptor the server loaded — the ones Verkstead ships with whatever
+ * `config.yaml` says merged over them.
+ *
+ * In the order the descriptors were written, which is the order the pane
+ * draws them in: the built-ins first and an installer's own after them.
+ * Never empty, Rust being built into the binary.
  */
-rust_build_cache: BuildCacheView, 
+languages: Array<LanguageView>, 
 /**
  * And what the Cleanup does to an archived Conversation, and how long
  * after the archiving it does it.
@@ -4459,7 +4507,7 @@ cleanup: CleanupView,
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.
  *
- * Never null, the way the build cache's switch is never null: nothing
+ * Never null, the way a language's switch is never null: nothing
  * configured is a merge, so what comes back is where the setting sits
  * rather than whether anybody has been here. A Repo's own override is on
  * the Repo — see [`crate::RepoView::conflict_resolution`].

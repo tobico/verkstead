@@ -49,6 +49,18 @@ const PATHS = {
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
+/// The languages the fixture holds, as a save puts them back on the wire: the
+/// two keys the page writes, per language the read listed — the installer's own
+/// beside the built-in. Carried by every section for the reason the paths are:
+/// one request writes the whole of `config.yaml`, so a list left out would be a
+/// list emptied. See [`heldLanguages`].
+const LANGUAGES = {
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "gleam", enabled: true, size: "" },
+  ],
+};
+
 /// The rest of `config.yaml` as every save from this pane sends it: what the
 /// read said, left exactly where it was.
 const REST = {
@@ -58,10 +70,7 @@ const REST = {
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
   mcp_servers: "Keep",
-  rust_build_cache: {
-    enabled: TOLD.rust_build_cache.enabled,
-    size: TOLD.rust_build_cache.size,
-  },
+  ...LANGUAGES,
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
   ...PATHS,
