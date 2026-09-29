@@ -10705,7 +10705,9 @@ async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() 
 ///
 /// Which is the other half of the rule: asking on every start would be a question
 /// with one answer nearly every time. A holder whose Worktree directory has gone
-/// is the same case reached the other way — there is nothing left in it to lose.
+/// is the same case reached the other way — there is nothing left in it to lose,
+/// and a directory that is *there* and unreadable is not that case at all: see
+/// [`a_finished_holder_whose_checkout_git_will_not_read_stops_the_press`].
 #[cfg(unix)]
 #[tokio::test]
 async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_question() {
@@ -10749,6 +10751,98 @@ async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_qu
         assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
         assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
     }
+}
+
+/// And a Done holder whose checkout is still on disk but which git will not read
+/// stops the press too, rather than being closed over.
+///
+/// The close takes the directory by force, so what decides whether there is
+/// anything to ask about is whether the directory is *there* — not whether git
+/// answered about it. A Worktree that has gone holds nothing; one that is sitting
+/// there while `git status` fails holds work nobody can read, which is the one
+/// thing a close cannot give back. `verkstead done` refuses a signal over the same
+/// reading rather than accepting it.
+///
+/// Reached here by breaking the `.git` file the way a pruned registration does.
+/// What matters is that the directory and its contents are untouched and git will
+/// not answer: exactly what the human would find if they went and looked.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let left = left_uncommitted(&app, first, Change::Modified).await;
+    let worktree = opened(&app, first).await.worktree.expect("Done keeps it");
+
+    // The link out of the checkout, pointed nowhere — which is what a registration
+    // pruned from under a live directory leaves behind. The work is all still
+    // there; nothing can read it.
+    std::fs::write(
+        Path::new(&worktree.path).join(".git"),
+        "gitdir: /nowhere-at-all\n",
+    )
+    .unwrap();
+
+    // The premise, said out loud: git refuses the question rather than answering
+    // that the directory is clean. Run straight rather than through [`git`], which
+    // panics on exactly the exit code this is looking for.
+    let asked = std::process::Command::new("git")
+        .current_dir(&worktree.path)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !asked.status.success(),
+        "git would answer about it, so this test is not about what it says it is",
+    );
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+        "a directory nobody can read is a directory to ask about, not one to close over",
+    );
+
+    assert_eq!(
+        opened(&app, first).await.state,
+        Lifecycle::Done,
+        "and nothing was closed",
+    );
+    assert!(
+        Path::new(&worktree.path).join(&left).exists(),
+        "and what was left uncommitted is still on disk",
+    );
+
+    // And the press that says to go ahead anyway does, which is the human having
+    // been given the chance to look.
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
 }
 
 /// A kind of uncommitted change to leave in a checkout, which is the reading a

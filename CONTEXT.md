@@ -2171,8 +2171,14 @@ under it then reads *Start anyway*, and that one closes and takes up. The
 checkouts are read again on that second press rather than trusted from the first,
 so a Conversation the confirmation does not name and that is holding something
 stops it all over again with the list as it stands. A clean holder is closed with
-no question, a worktree whose directory has gone holds nothing, and asking on
-every start was rejected as a question with one answer nearly every time.
+no question and asking on every start was rejected as a question with one answer
+nearly every time — but a checkout that has *gone* and one git merely will not
+answer about are two different things, and the difference is the directory: the
+first holds nothing, and the second is work nobody can read sitting in a
+directory the close takes by force, so it is named and asked about like any
+other. Which is the way round `verkstead done` reads it too, and the safe way
+round of it: reading a checkout as holding something costs one more press, and
+reading it as clean costs the work.
 *Holds* means the pull request that
 Conversation was pointed at or its finish step opened, rather than one it records
 beside that to watch, which is what a stack's neighbours are; asked which

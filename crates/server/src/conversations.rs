@@ -3105,11 +3105,20 @@ pub(crate) async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> 
 /// [`crate::diffs::writable`] and [`crate::diffs::changed`]. What a session may
 /// write in is what is asked about, here as there.
 ///
-/// **A checkout git will not answer about holds nothing.** The ordinary way to
-/// reach that is a Worktree whose directory has gone, which is exactly a
-/// Conversation with nothing left to lose. It is the safe way round of it too:
-/// what stands behind a misread here is the close itself, which takes a directory
-/// git has already disowned.
+/// **A checkout that has gone holds nothing, and one git merely will not answer
+/// about holds something.** Those are two different things and the difference is
+/// the directory: a Worktree that is not there any more is a Conversation with
+/// nothing left to lose, and one that is there while `git status` fails — an
+/// `index.lock` something else is holding, a registration pruned out from under
+/// it — is a directory with work in it that nobody can read. The close takes it
+/// by force either way, so the unreadable one is named and asked about rather
+/// than passed over. Which is the way round `verkstead done` reads it too, and
+/// the safe way round here: reading a checkout as holding something costs one
+/// more press, and reading it as clean costs the work.
+///
+/// **And the same where the reading itself could not be run**, which is a worker
+/// that went down under it: nothing was read, so nothing can be said to be clean,
+/// and every Conversation about to be closed is named.
 ///
 /// **`discarding` says which Conversations may lose something rather than which
 /// do.** The press that was stopped named them, the press that confirms sends
@@ -3133,23 +3142,43 @@ pub(crate) async fn to_lose(
         })
         .collect::<Vec<_>>();
 
+    // Whatever the reading turns out to be, this is the list to fall back to: a
+    // worker that went down read nothing, and nothing read is nothing anybody may
+    // say is clean.
+    let every = || {
+        giving_way
+            .iter()
+            .map(|holder| Uncommitted {
+                conversation: holder.id,
+                branch: holder.branch.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+
     let holding = tokio::task::spawn_blocking(move || {
         asking
             .into_iter()
-            .filter(|(_, _, readings)| {
-                readings.iter().any(|reading| {
-                    crate::diffs::changed(&reading.worktree)
-                        .is_some_and(|changes| !changes.is_empty())
-                })
-            })
+            .filter(|(_, _, readings)| readings.iter().any(|reading| holds(&reading.worktree)))
             .map(|(conversation, branch, _)| Uncommitted {
                 conversation,
                 branch,
             })
             .collect::<Vec<_>>()
     })
-    .await
-    .unwrap_or_default();
+    .await;
+
+    let holding = match holding {
+        Ok(holding) => holding,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "reading what a close would discard failed, so every Conversation about to be \
+                 closed is named as holding something",
+            );
+
+            every()
+        }
+    };
 
     // Every one of them where any of them is unconfirmed, rather than the
     // unconfirmed ones alone: what the press sends back is the list it was shown,
@@ -3163,6 +3192,29 @@ pub(crate) async fn to_lose(
     }
 
     holding
+}
+
+/// Whether closing a Conversation would throw away what is in this checkout.
+///
+/// Three answers from git, and two of them are yes. Something changed is
+/// obviously something to lose; nothing changed is nothing to lose; and *git
+/// would not say* is something to lose, because the close removes the directory
+/// by force and a directory nobody could read is not a directory anybody has
+/// established is empty. The one no in that last case is the directory being gone
+/// — the Worktree a human deleted by hand, which really does hold nothing.
+///
+/// [`crate::done`] takes the same reading of the same worktrees before it accepts
+/// a signal, and refuses over the one it cannot read for the same reason.
+///
+/// Blocking, so it is called from the worker [`to_lose`] spawns.
+fn holds(worktree: &std::path::Path) -> bool {
+    match crate::diffs::changed(worktree) {
+        Some(changes) => !changes.is_empty(),
+        // `exists` rather than a second question of git: what is being told apart
+        // here is a directory that has gone from one git will not answer about,
+        // and git answers neither.
+        None => worktree.exists(),
+    }
 }
 
 /// Close a Conversation that has finished with a pull request, to make way for a
