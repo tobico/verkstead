@@ -24,6 +24,13 @@
 //! [`super::slices`] — and the **checkout**, which is the branch and the working
 //! changes. What the checkout leaves here is [`arrived_checkout`].
 //!
+//! **And a copy coming back lands on the row it left.** Where this device already
+//! holds a Conversation under the arriving **birth key**, what arrives is the work
+//! it handed on coming home, and the copy it kept is written over rather than a
+//! second Conversation being made beside it — under the id that copy already has,
+//! which is the id every link anybody saved still names. See [`replace`], and
+//! [`super::born_as`], which is the lookup in front of it.
+//!
 //! **Nothing here is refused for the state it is in.** Which states may be moved
 //! is the sending device's rule, asked before the press was allowed at all; what
 //! this end is looking at is a message from a member, and a Conversation that
@@ -156,6 +163,156 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
     // transaction.
     super::births::stamp(&mut tx, id, &arriving.born).await?;
 
+    settled(&mut tx, id, arriving).await?;
+
+    tx.commit().await.context("taking a Conversation in")?;
+
+    Ok(Some(id))
+}
+
+/// What became of writing an arriving Conversation over the copy this device
+/// already held of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Replacing {
+    /// The copy is the arriving Conversation now, under the id it already had.
+    Replaced,
+
+    /// There is no Conversation here with that id — one deleted between the
+    /// lookup by birth key and this.
+    NoSuchConversation,
+
+    /// The Repo the move named is not on this registry any more, which is
+    /// [`arrive`]'s `None` said as a word.
+    NoSuchRepo,
+}
+
+/// Write an arriving Conversation over the copy this device already holds of it,
+/// **under the id that copy already has** (ADR-0020, *Transfer*).
+///
+/// **Which is what a transfer back is.** The birth key says the two are one piece
+/// of work — see [`super::born_as`], which is the lookup in front of this — and
+/// what the sending device holds is the live record while what is here is a stale
+/// copy of it. So nothing is merged and nothing is reconciled: the stale one is
+/// written over, and the id it is written over is the one the human's links, the
+/// Timeline references and the Answers to a Set asked months ago all name.
+///
+/// **The row and nothing under it.** What this writes is what [`arrive`] writes
+/// into a row it has just made: the Repo this device's registry matched, the
+/// branch, the state, the Rank and the birth key verbatim, and the three
+/// Pairings as ids of this database's own. The **record** lands in the leg after
+/// it and takes the old one with it — see [`super::land`] — and the **checkout**
+/// in the leg after that, into the Worktree this device cut the first time.
+///
+/// **And the mark is left exactly where it is.** A copy that has been handed on
+/// wears one saying where the live record is, and through every leg of a return
+/// that is still true: the sending device has not marked its own copy yet, so a
+/// move that falls over here leaves a tombstone pointing at the machine still
+/// doing the work rather than an empty Conversation claiming to be it. What takes
+/// it off is the word that the move is over — see [`super::live_here`].
+///
+/// One transaction, for the reason [`arrive`] is one.
+pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<Replacing> {
+    let mut tx = super::writing(pool, "taking a Conversation back in").await?;
+
+    let known: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("looking for the copy of Conversation {id} held here"))?;
+
+    if known.is_none() {
+        return Ok(Replacing::NoSuchConversation);
+    }
+
+    // Read the way the create reads it, and refused for its reason: the id was
+    // matched against this registry a moment ago, and a Repo unregistered since
+    // is one no work may be put in.
+    let registered: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM repos
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
+    )
+    .bind(arriving.repo_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "looking for Repo {repo} to take a Conversation back into",
+            repo = arriving.repo_id,
+        )
+    })?;
+
+    if registered.is_none() {
+        return Ok(Replacing::NoSuchRepo);
+    }
+
+    // Everything the row says about the work, and the three Pairings emptied
+    // behind it: what was picked here is what was picked when the work left, and
+    // what arrives is what has been picked since.
+    //
+    // **`created_at` is not among them**, that being when this device first wrote
+    // a row for this work rather than anything about the work: what the record
+    // says it started is the Timeline's to say, and the Timeline arrives in the
+    // leg after this one.
+    //
+    // **And the base goes with the checkout.** It is a fact about the work rather
+    // than about a machine, but it crosses in the checkout's own leg — so it is
+    // let go of here and written there, rather than left saying what the branch
+    // was cut from a transfer ago.
+    sqlx::query(
+        "UPDATE conversations
+         SET repo_id = ?,
+             branch = ?,
+             named_branch = ?,
+             naming = ?,
+             state = ?,
+             rank = ?,
+             base_commit = NULL,
+             base_ref = NULL,
+             stop_asked_at = NULL,
+             grilling_profile_id = NULL,
+             implementation_profile_id = NULL,
+             review_profile_id = NULL
+         WHERE id = ?",
+    )
+    .bind(arriving.repo_id)
+    .bind(&arriving.branch)
+    .bind(arriving.branch_named.then(|| arriving.branch.clone()))
+    .bind(arriving.naming)
+    .bind(arriving.state.stored())
+    .bind(&arriving.rank)
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("writing the arriving Conversation over the copy held as {id}"))?;
+
+    // The key it came with, over the one this row has. The same key either way —
+    // a copy that is coming home was born under it and so was the row it is
+    // landing on — and written rather than trusted, because what says a piece of
+    // work is one thing is not this device's to hold an opinion about.
+    super::births::stamp_over(&mut tx, id, &arriving.born).await?;
+
+    for table in ["pairing_models", "skipped_roles"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE conversation_id = ?"))
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("letting go of the {table} of Conversation {id}"))?;
+    }
+
+    settled(&mut tx, id, arriving).await?;
+
+    tx.commit().await.context("taking a Conversation back in")?;
+
+    Ok(Replacing::Replaced)
+}
+
+/// What each role arrived having settled, written against the row.
+///
+/// The one thing [`arrive`] and [`replace`] do the same way, and the reason they
+/// do: a Pairing is three writes over two tables and a column, and a copy that
+/// landed having lost one of them would be a Conversation refusing to start or
+/// starting a session the human said there was to be none of.
+async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -> Result<()> {
     for (role, picked) in [
         (Role::Grilling, &arriving.grilling),
         (Role::Implementation, &arriving.implementation),
@@ -211,9 +368,7 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
         }
     }
 
-    tx.commit().await.context("taking a Conversation in")?;
-
-    Ok(Some(id))
+    Ok(())
 }
 
 /// Where the work that arrived was checked out here, its Companions' checkouts

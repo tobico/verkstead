@@ -161,6 +161,19 @@ pub(crate) async fn stamp(
 /// piece of work, and nothing here does: what this writes is the key that came
 /// with it.
 pub async fn record_birth(pool: &SqlitePool, conversation_id: i64, born: &Birth) -> Result<()> {
+    let mut held = pool.acquire().await.context("writing a birth key")?;
+
+    stamp_over(&mut held, conversation_id, born).await
+}
+
+/// The same write inside a transaction, which is where a Conversation coming back
+/// to a device that already holds a copy of it has its key written — see
+/// [`super::replace`].
+pub(crate) async fn stamp_over(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    born: &Birth,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO births (conversation_id, device, born_as)
          VALUES (?, ?, ?)
@@ -170,7 +183,7 @@ pub async fn record_birth(pool: &SqlitePool, conversation_id: i64, born: &Birth)
     .bind(conversation_id)
     .bind(&born.device)
     .bind(born.id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| {
         format!("writing the key Conversation {conversation_id} came here having been born under")
@@ -192,6 +205,36 @@ pub async fn birth(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Bir
             })?;
 
     Ok(row.map(|(device, id)| Birth { device, id }))
+}
+
+/// Which Conversation of this database was born under that key, where one was.
+///
+/// **What a copy arriving asks before it writes anything**, and the whole of what
+/// makes a transfer back a return rather than a second Conversation: the key is
+/// the cluster's name for one piece of work, so a row already carrying it is this
+/// device's own copy of the very work that is arriving — the one it kept when the
+/// work left, under the id every link anybody saved still names. See
+/// [`super::replace`], which is what the answer is acted on by.
+///
+/// The lookup the `births_key` index is there for. At most one row can answer: a
+/// key names one Conversation on one device, and a copy that arrives twice
+/// replaces the copy it landed as the first time.
+pub async fn born_as(pool: &SqlitePool, born: &Birth) -> Result<Option<i64>> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM births WHERE device = ? AND born_as = ?")
+            .bind(&born.device)
+            .bind(born.id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "looking for the Conversation born on {device} as {id}",
+                    device = born.device,
+                    id = born.id,
+                )
+            })?;
+
+    Ok(row.map(|(id,)| id))
 }
 
 /// Mark a Conversation transferred away: the live record is on `to`'s device,
@@ -221,6 +264,33 @@ pub async fn transfer_away(
     .execute(pool)
     .await
     .with_context(|| format!("marking Conversation {conversation_id} transferred away"))?;
+
+    Ok(())
+}
+
+/// Take the mark off again: the work has come back, and this copy is the record.
+///
+/// **The last thing a transfer back does at this end** (ADR-0020, *Transfer*).
+/// The copy wore the mark for as long as the work was somewhere else, and it goes
+/// on wearing it through every leg of the return — the row rewritten, the record
+/// landed, the Worktree brought up to date — because every one of those is in
+/// front of the sending device's commit point and may still be taken back. What
+/// clears it is the word that the move is over, which is the one thing this end
+/// may act on: see the server's `peer::transfers::arrived`.
+///
+/// Which also leaves a return that fell over as what it was before it started: a
+/// tombstone pointing at the device still doing the work, whose URL leads there
+/// and which the Merged List does not draw.
+///
+/// Nothing to take off is the ordinary Conversation, and no reason to say so.
+pub async fn live_here(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM transferred WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!("recording that the live record of Conversation {conversation_id} is here")
+        })?;
 
     Ok(())
 }

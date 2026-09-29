@@ -78,17 +78,19 @@ pub use archives::{
     Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
     showing_archived, unarchive_conversation,
 };
-pub use arrivals::{Arrival, ArrivingPicked, arrive, arrived_checkout};
+pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout, replace};
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
-pub use births::{Birth, Transferred, birth, record_birth, transfer_away, transferred};
+pub use births::{
+    Birth, Transferred, birth, born_as, live_here, record_birth, transfer_away, transferred,
+};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
-    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, sweep_arrival,
-    trim_conversation, trimmable, trimmed,
+    Deletion, Trimming, cleared_tables, deletable, delete_conversation, deleted_tables, reclaim,
+    sweep_arrival, trim_conversation, trimmable, trimmed,
 };
 pub use commits::{
     Commit, commit, commit_repo, commits_landed, forget_commit, record_commit, recorded_commits,

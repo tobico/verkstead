@@ -37,6 +37,15 @@
 //! nothing for a second pass to compare against, because what a delete leaves
 //! behind is no Conversation at all.
 //!
+//! **And the same walk, stopped short, is what a record landing lands over.** A
+//! Conversation coming back to a device that already holds a copy of it replaces
+//! that copy wholesale, and what has to go first is the record under it — the
+//! tables a slice carries and no others, the row and the Worktree and the keys
+//! left standing. It is here because it is this walk rather than because it is a
+//! cleanup: forgetting is not what it is for, and nothing authorises it but the
+//! record arriving in the same transaction. See [`cleared`], and
+//! `super::slices::land`.
+//!
 //! **And what a delete never touches is what is not the store's**: the branch
 //! the work is on, which belongs to the repository and which closing already
 //! chose to keep, and a published Share, which is a file somebody put somewhere
@@ -491,9 +500,57 @@ async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<De
         }
     }
 
+    walked(&mut tx, id, Taking::Everything).await?;
+
+    erase(&mut tx, id, "conversations", "id = ?").await?;
+
+    tx.commit().await.context("deleting a Conversation")?;
+
+    Ok(Deletion::Deleted)
+}
+
+/// Every row of one Conversation's **record** taken out, with the row itself and
+/// everything that is this device's own left standing (ADR-0020, *Transfer*).
+///
+/// **What a record arriving from another device lands over.** A Conversation
+/// coming back to a device that already holds a copy replaces that copy
+/// wholesale: what the sending device has is the live record and what is here is
+/// a stale copy of it, so there is nothing to merge and nothing to reconcile. See
+/// [`super::slices::land`], which is the one caller and which does this inside
+/// the transaction the new record lands in — a record half taken out and half
+/// written is the one state this must never leave behind.
+///
+/// **Exactly the tables a slice carries**, which is what makes the two halves one
+/// statement: what crosses is what goes, and what stays behind stays — the
+/// Worktree this device cut, the key the work was born under, the mark saying
+/// where the live record is, and the Conversation's own row. Held against
+/// [`super::carried_tables`] by a test rather than by a second list.
+///
+/// A no-op on a Conversation that has no record, which is every ordinary
+/// arrival: the walk runs, empties nothing, and costs a handful of statements
+/// against a row written a moment ago.
+pub(crate) async fn cleared(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<()> {
+    walked(tx, id, Taking::TheRecord).await
+}
+
+/// The walk both of them make, and the one thing that differs: whether the
+/// tables that stay behind on a move are emptied with the rest.
+///
+/// **Child before parent all the way down.** Foreign keys are on, so the order is
+/// not a tidiness: a parent emptied while something still points at it is a
+/// failure rather than a mess left behind, and the walk is written to be one
+/// SQLite would refuse if it were wrong. The Events go last, everything else
+/// hanging off one of them or off the Conversation.
+///
+/// **And the one column pointing the other way is nulled first.** A stop names
+/// the Notice it wrote on the Timeline, so `conversations` references
+/// `timeline_events` and `timeline_events` references `conversations`; there is
+/// no order that empties both, and the way through it is to let go of the Notice
+/// before deleting the Event it names.
+async fn walked(tx: &mut sqlx::SqliteConnection, id: i64, taking: Taking) -> Result<()> {
     for table in EVENT_KEYED {
         erase(
-            &mut tx,
+            tx,
             id,
             table,
             "event_id IN (SELECT id FROM timeline_events WHERE conversation_id = ?)",
@@ -512,7 +569,7 @@ async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<De
     // still points at it is a delete SQLite refuses, and it would take the whole
     // Conversation's with it. The Brief's own rows name no Set and would not
     // have minded either way.
-    erase(&mut tx, id, "attachments", "conversation_id = ?").await?;
+    erase(tx, id, "attachments", "conversation_id = ?").await?;
 
     // Read before anything else is taken, because the pairing that says which
     // Sets are this Conversation's is itself one of the rows going: a Set found
@@ -529,15 +586,15 @@ async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<De
 
     for (set,) in sets {
         for table in SET_KEYED {
-            forget(&mut tx, set, table, "set_id = ?").await?;
+            forget(tx, set, table, "set_id = ?").await?;
         }
 
-        forget(&mut tx, set, "set_events", "set_id = ?").await?;
-        forget(&mut tx, set, "question_sets", "id = ?").await?;
+        forget(tx, set, "set_events", "set_id = ?").await?;
+        forget(tx, set, "question_sets", "id = ?").await?;
     }
 
-    for table in CONVERSATION_KEYED {
-        erase(&mut tx, id, table, "conversation_id = ?").await?;
+    for table in taking.conversation_keyed() {
+        erase(tx, id, table, "conversation_id = ?").await?;
     }
 
     // And the two tables a Verkstead of before kept a stopped Conversation in,
@@ -546,8 +603,8 @@ async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<De
     // but a row left in one is still a row naming this Conversation, and on a
     // database that enforces its keys it is a row nothing could delete around.
     for table in super::stops::CARRIED {
-        if there(&mut tx, table).await? {
-            erase(&mut tx, id, table, "conversation_id = ?").await?;
+        if there(tx, table).await? {
+            erase(tx, id, table, "conversation_id = ?").await?;
         }
     }
 
@@ -561,12 +618,60 @@ async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<De
         format!("letting go of the stop and escalation Notices of Conversation {id}")
     })?;
 
-    erase(&mut tx, id, "timeline_events", "conversation_id = ?").await?;
-    erase(&mut tx, id, "conversations", "id = ?").await?;
+    erase(tx, id, "timeline_events", "conversation_id = ?").await?;
 
-    tx.commit().await.context("deleting a Conversation")?;
+    Ok(())
+}
 
-    Ok(Deletion::Deleted)
+/// How much of a Conversation the walk takes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Taking {
+    /// Every row there is of it, the Conversation's own going last of all.
+    Everything,
+
+    /// Its **record** alone: the tables a slice carries, with the ones that stay
+    /// behind on a move left exactly where they are.
+    TheRecord,
+}
+
+impl Taking {
+    /// The conversation-keyed tables this one empties.
+    ///
+    /// The whole list for a delete, and for a record the list less what
+    /// [`super::STAYS_BEHIND`] names — which is the store's one statement of what
+    /// a move leaves on the device it was made from, read here from the other
+    /// side: what does not travel is what a record landing here may not take.
+    fn conversation_keyed(self) -> Vec<&'static str> {
+        CONVERSATION_KEYED
+            .iter()
+            .filter(|table| match self {
+                Taking::Everything => true,
+                Taking::TheRecord => !super::STAYS_BEHIND.contains(*table),
+            })
+            .copied()
+            .collect()
+    }
+}
+
+/// Every table [`cleared`] empties, said as a value.
+///
+/// [`deleted_tables`]'s sibling and public for its reason, against a list that is
+/// not this one's own: the test holds it against [`super::carried_tables`], so a
+/// table added to a slice next year is a failure here until the clearing carries
+/// it too.
+pub fn cleared_tables() -> Vec<&'static str> {
+    EVENT_KEYED
+        .iter()
+        .chain(SET_KEYED)
+        .copied()
+        .chain(Taking::TheRecord.conversation_keyed())
+        .chain([
+            "attachments",
+            "set_events",
+            "question_sets",
+            "timeline_events",
+        ])
+        .collect()
 }
 
 /// One table emptied of the rows naming Conversation `id`, `by` saying how they

@@ -2972,6 +2972,373 @@ async fn the_account_is_home_before_the_work_leaves_and_the_far_end_runs_under_i
     );
 }
 
+/// **A transfer back lands on the copy the source kept, under the id it already
+/// had** — which is the ordinary second move: drafted on one machine, worked on
+/// the other, and coming home.
+///
+/// So every link anybody kept goes on working. A bookmark, a Timeline reference,
+/// the URL in a Question Set answered months ago all name the id this device
+/// issued before the work ever left, and what comes back lands on it — carrying
+/// everything the other machine added while it held the work: its Timeline, the
+/// Sets asked from it, and the commits on the branch.
+///
+/// **And the merged list draws the work once the whole way through.** Sampled
+/// rather than read at the end, because that is what the promise is about: for
+/// the length of a return there is a row on each machine, and at no moment may
+/// both be drawn. Which of them stands in the instant between two writes is not
+/// worth a second opinion about — see `server::merging` — but two is the failure
+/// the birth key exists to prevent.
+#[tokio::test]
+async fn a_transfer_back_lands_on_the_id_the_work_left_under() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding_there, conversation) =
+        ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    // A holds its own streams too, so that its sidebar is the cluster's rather
+    // than its own rows alone — which is what the merged list is.
+    let _holding_here = a.holding();
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+    let was_saying = a.view(conversation).await.timeline.len();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    // What B does with the work while it has it: a Question Set of its own, and a
+    // commit on the branch. Both are things A has never seen, and both are what
+    // the link to A's own id has to show once the work is home.
+    came_home(&b, there).await;
+
+    b.asks(there, ASKED).await;
+
+    let over_there = b.worktree(there).await;
+
+    std::fs::write(over_there.join("counter.md"), "in Redis\n").unwrap();
+    git(&over_there, &["add", "-A"]);
+    git(&over_there, &["commit", "-m", "the counter goes in Redis"]);
+
+    // And the list watched for the length of the return, which is the *whole* of
+    // it: the press, the three legs and the word that the move is over.
+    let most = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let watching = tokio::spawn({
+        let most = most.clone();
+        let sidebar = a.workbench.clone();
+
+        async move {
+            loop {
+                let rows: Vec<ConversationEntry> = reading(&sidebar, SIDEBAR).await;
+
+                most.fetch_max(rows.len(), std::sync::atomic::Ordering::Relaxed);
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        }
+    });
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+
+    let home = came_home(&a, conversation).await;
+
+    watching.abort();
+
+    assert!(
+        most.load(std::sync::atomic::Ordering::Relaxed) <= 1,
+        "the work was drawn twice at some point in the return: the merged list \
+         got to {} rows",
+        most.load(std::sync::atomic::Ordering::Relaxed),
+    );
+
+    // The id is the whole point: the row the links name is the row the work came
+    // back to, rather than a second Conversation beside it.
+    let rows = a.own_rows().await;
+
+    assert_eq!(
+        rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![conversation],
+        "one Conversation on this device, which is the one that was always here",
+    );
+
+    assert!(
+        home.timeline.len() > was_saying,
+        "and it draws everything the other machine added: {} cards where it had \
+         {was_saying}",
+        home.timeline.len(),
+    );
+    assert_eq!(
+        a.sets_on(conversation).await.len(),
+        1,
+        "the Set asked over there is answerable here, under an id of this \
+         device's own",
+    );
+    assert_eq!(
+        git_says(&worktree, &["log", "-1", "--format=%s"]),
+        "the counter goes in Redis",
+        "and the commit made over there is on the branch in the checkout that \
+         was already here",
+    );
+    assert_eq!(
+        a.worktree(conversation).await,
+        worktree,
+        "which is the Worktree this device cut before the work ever left",
+    );
+
+    // And the direction is simply reversed: the machine the work left keeps the
+    // tombstone now, and its URL leads here.
+    let left = b.view(there).await.transferred.expect("B kept a copy");
+
+    assert_eq!(
+        left.device, A,
+        "B's copy says the record is on this machine"
+    );
+    assert_eq!(left.id, conversation, "under the id it has always had here");
+
+    let drawn = a
+        .sidebar_saying(|rows| rows.iter().any(|row| ours(row, conversation)))
+        .await;
+
+    assert_eq!(drawn.len(), 1, "the work is drawn once: {drawn:#?}");
+
+    let theirs = b
+        .sidebar_saying(|rows| {
+            rows.iter().any(|row| {
+                row.id == conversation
+                    && row.device.as_ref().and_then(|whose| whose.id.as_deref()) == Some(A)
+            })
+        })
+        .await;
+
+    assert_eq!(
+        theirs.len(),
+        1,
+        "and B draws it once too, as the row of the machine holding it: {theirs:#?}",
+    );
+}
+
+/// **A second round trip lands on the same two ids as the first**, and on the
+/// checkouts that were already cut at each end.
+///
+/// Which is what makes the pair of machines a pair rather than a chain: work
+/// moved four times has two rows in two databases, not four, and two directories,
+/// not four. What that buys the human is on the disk — the ignored files their
+/// machine built for itself never travel, so a checkout taken away and cut again
+/// would cost them an hour of compiling every time the work came home.
+#[tokio::test]
+async fn a_second_round_trip_lands_on_the_same_two_ids_and_the_checkouts_already_cut() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let here = a.worktree(conversation).await;
+
+    // What this machine builds for itself, behind a rule that says so: an
+    // ignored file stays behind on a move in both directions, so what it is
+    // really a test of is the checkout not being taken away and made again.
+    std::fs::write(here.join(".gitignore"), "built/\n").unwrap();
+    git(&here, &["add", "-A"]);
+    git(&here, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(here.join("built")).unwrap();
+    std::fs::write(here.join("built/cache.bin"), "hours of compiling\n").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    let over_there = b.worktree(there).await;
+
+    // Home again, into the checkout that was here all along.
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.worktree(conversation).await,
+        here,
+        "the work comes back to the Worktree it left from",
+    );
+    assert_eq!(
+        std::fs::read_to_string(here.join("built/cache.bin")).unwrap(),
+        "hours of compiling\n",
+        "with everything this machine built for itself still in it, none of \
+         which ever travelled",
+    );
+
+    // And out again, which is the third leg: the same id over there and the same
+    // directory under it.
+    let again = handed_on(&a, conversation, B).await;
+
+    assert_eq!(
+        again, there,
+        "the far end's copy is the one it already had rather than a new one",
+    );
+
+    came_home(&b, again).await;
+
+    assert_eq!(
+        b.worktree(again).await,
+        over_there,
+        "and it is checked out where it was checked out the first time",
+    );
+    assert_eq!(
+        b.own_rows().await.len(),
+        1,
+        "one row over there through all of it",
+    );
+
+    // And home once more.
+    assert_eq!(b.transfers(again, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.own_rows()
+            .await
+            .iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        vec![conversation],
+        "one row here through all of it, under the id the work started on",
+    );
+    assert_eq!(
+        a.worktree(conversation).await,
+        here,
+        "in the Worktree it has always been worked in",
+    );
+}
+
+/// **A Companion comes home to the checkout beside the one the Conversation
+/// comes home to**, and the working changes made over there land in it.
+///
+/// Companions travel the way the Conversation's own work does, and they come back
+/// the same way: the directory this device cut for that repository is the one the
+/// branch goes back into, with everything the machine built for itself still in
+/// it.
+#[tokio::test]
+async fn a_companion_comes_home_to_the_checkout_it_left() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    std::fs::write(beside.join(".gitignore"), "built/\n").unwrap();
+    git(&beside, &["add", "-A"]);
+    git(&beside, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(beside.join("built")).unwrap();
+    std::fs::write(beside.join("built/cache.bin"), "hours of compiling\n").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    // Work left in the companion over there, uncommitted, which is what a turn
+    // ends with in a repository a session commits in.
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    std::fs::write(alongside.join("notes.md"), "from the other machine\n").unwrap();
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.companion_worktree(conversation, COMPANION).await,
+        beside,
+        "the companion comes back to the checkout it left from",
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside.join("notes.md")).unwrap(),
+        "from the other machine\n",
+        "with what was left uncommitted in it over there",
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside.join("built/cache.bin")).unwrap(),
+        "hours of compiling\n",
+        "and with everything this machine built for itself still in it",
+    );
+}
+
+/// **And a read-only Companion comes home detached at the commit it is standing
+/// at**, into the directory it left from.
+///
+/// It holds no branch, so there is nothing to fetch and nothing to apply: what
+/// the return does to it is put the checkout that is already there back to the
+/// commit the record says it is at.
+#[tokio::test]
+async fn a_read_only_companion_comes_home_detached_where_it_was() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadOnly).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+    let at = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.companion_worktree(conversation, COMPANION).await,
+        beside,
+        "the read-only companion comes back to the directory it left from",
+    );
+    assert!(
+        detached(&beside),
+        "holding no branch, which is what a repository nothing commits in holds",
+    );
+    assert_eq!(
+        git_says(&beside, &["rev-parse", "HEAD"]),
+        at,
+        "at the commit the record says it stands at",
+    );
+    assert!(
+        git_says(&beside, &["status", "--porcelain"]).is_empty(),
+        "and with nothing applied to it, a patch to a read-only companion being \
+         changes no session could have made",
+    );
+}
+
+/// Press *Transfer to…* for `device` and wait for the mark that says the far end
+/// has it, answering with the id it goes by over there.
+async fn handed_on(from: &Verkstead, conversation: i64, device: &str) -> i64 {
+    assert_eq!(
+        from.transfers(conversation, device).await,
+        "\"Transferring\"",
+    );
+
+    from.view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id
+}
+
+/// And wait at the other end for the work to be *here*: the mark off, which is
+/// the last thing a move does and the one thing that says every leg of it landed.
+async fn came_home(to: &Verkstead, conversation: i64) -> ConversationView {
+    to.view_saying(conversation, |drawn| drawn.transferred.is_none())
+        .await
+}
+
 /// The Set every test here asks, which asks one thing so that there is an Answer
 /// to give it.
 const ASKED: &str = r#"

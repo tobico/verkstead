@@ -463,6 +463,35 @@ what a relaunched grilling does to the Sets the gone session was idling on, it d
 here too — it locks them unanswered, the reader being on a machine the work has
 left, and asks again what it still needs. A **Deferred Ask** had nobody behind it
 to begin with and lands open, answerable where the work now is.
+**And a Conversation that has been on a device before comes home rather than
+arriving.** The second time work moves it is usually coming back — drafted on the
+laptop, worked on the desktop, home again — and the **Birth Key** is what says
+the arriving Conversation and the copy the receiving device kept are one piece of
+work. So that copy is written over wholesale, **under the id it already has**:
+what the sending device holds is the live record and what is here is a stale copy
+of it, so nothing is merged and nothing is reconciled. The id is the whole point
+of doing it that way — a bookmark, a Timeline reference on another Conversation,
+the URL in a Question Set answered months ago all name it, and a second
+Conversation beside the first would leave every one of them pointing at a copy of
+work that had come back. The record lands over the old one in the very
+transaction that takes it out, the attached files with it; and the **Worktree**
+that device cut the first time is the one the branch goes back into, rather than
+a second one beside it. Its branch is brought up to date from the inside — git
+refuses to fetch into a ref one of its own checkouts is standing on, so the
+bundle lands under a holding ref and the branch and the tree are moved together —
+the tree is forced onto the arriving commit, what the superseded copy left lying
+about untracked is swept, and the **ignored files stay exactly where they are**,
+which is what the directory was kept for: they never travelled, and a checkout
+taken away and cut again would cost an hour of somebody's compiling every time
+the work came home. Companions come home the same way, each to the checkout
+beside the one the Conversation comes home to. The copy goes on wearing its mark
+through every leg of the return, every one of those being in front of the
+commit point, so a return that falls over leaves the tombstone it started as,
+still pointing at the machine still doing the work; what takes the mark off is
+the word that the move is over. From there the direction is simply reversed — the
+device the work left keeps the copy, its URL redirects, and the merged list draws
+one row — and a third leg lands on the same two ids and the same two checkouts
+again.
 **Before any of it, the account goes home.** A session away from home keeps a
 mirror of its account's login and of this Repo's memory entries and writes both
 back to the device they are at home on as it ends — and the move runs at the turn's
@@ -486,7 +515,10 @@ Conversation keeps the one it has; where the directory has gone, one is checked
 out again on the branch that was worked, which is one of the three times a
 Worktree is made without a branch being made with it — a read-only companion's,
 checked out detached, is the second, and the one a **Transfer** cuts on arrival
-is the third, its branch having come over in the bundle.
+is the third, its branch having come over in the bundle. Where that device has
+held the work before, nothing is cut at all: the checkout it made the first time
+is the one the branch goes back into, with everything the machine built for
+itself still in it.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
 hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they

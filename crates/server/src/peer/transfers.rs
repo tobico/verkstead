@@ -9,6 +9,19 @@
 //! carrying the two things that are the cluster's rather than anybody's — the
 //! **Rank** and the **birth key**.
 //!
+//! **And a copy coming home lands on the row it left.** The second time work
+//! moves it is very often coming back — drafted on the laptop, worked on the
+//! desktop, and home again — and the birth key is what says the arriving
+//! Conversation and the copy this device kept are one piece of work. So the copy
+//! is written over, under the id it already has: what the sending device holds is
+//! the live record and what is here is a stale copy of it, so nothing is merged
+//! and nothing is reconciled. The id is the whole point of doing it that way —
+//! every bookmark, Timeline reference and Answer to a Set asked months ago names
+//! it, and a second Conversation beside the first would leave all of them
+//! pointing at a copy of work that had come back. The record lands over the old
+//! one and the Worktree this device cut the first time is the one the branch is
+//! brought back into — see [`super::checkouts`].
+//!
 //! **And the answer is the commit point of the whole move.** The id this device
 //! numbered its copy is what the sending device writes on its own copy as the
 //! mark saying where the live record now is; until that answer arrives nothing
@@ -73,6 +86,14 @@ pub const ONE_TRANSFERS_ARRIVAL: &str = "/api/peer/v1/transfers/{id}/arrival";
 /// `POST /api/peer/v1/transfers` — write the arriving Conversation down, and
 /// answer with the id it goes by here.
 ///
+/// **Or the id it already went by**, where this device holds a copy of the very
+/// work that is arriving: a Conversation drafted on the laptop, worked on the
+/// desktop and coming home is one piece of work whichever way it is travelling,
+/// and what says so is the **birth key** it carries. The copy kept here when the
+/// work left is written over rather than a second Conversation being made beside
+/// it — see [`store::replace`], and this module's own header. Which is the whole
+/// of what a transfer back is at this end: every leg after it is the same leg.
+///
 /// The Repo is refused where this registry no longer holds it and each Pairing
 /// where no Profile here is the one it names — both by name, because both are
 /// the sending device acting on a reading that has gone stale and both are worth
@@ -92,7 +113,7 @@ pub(crate) async fn take(
     };
 
     let arrival = store::Arrival {
-        born,
+        born: born.clone(),
         repo_id: arriving.repo,
         branch: arriving.branch.clone(),
         branch_named: arriving.branch_named,
@@ -104,43 +125,120 @@ pub(crate) async fn take(
         review,
     };
 
-    match store::arrive(&state.pool, &arrival).await {
-        Ok(Some(id)) => {
-            tracing::info!(
-                conversation_id = id,
-                born = arriving.born.id,
-                on = arriving.born.device,
-                "a Conversation transferred from a member landed here",
-            );
+    // Whether this device already holds a copy of this work, asked before
+    // anything is written: the answer is the difference between a Conversation
+    // arriving and one coming back.
+    let held = match store::born_as(&state.pool, &born).await {
+        Ok(held) => held,
 
-            // The sidebar of every browser open on this device, and of every
-            // member holding this device's list: there is a Conversation here
-            // that was not here a moment ago.
-            state
-                .nudges
-                .announce(verkstead_schema::Nudge::Conversations);
+        Err(why) => {
+            tracing::error!(error = ?why, "looking for the copy a Conversation a member is transferring here would replace failed");
 
-            Json(Arrived { id }).into_response()
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not look for its own copy of the work\n",
+            )
+                .into_response();
         }
+    };
 
-        Ok(None) => (
+    let written = match held {
+        Some(id) => back(&state, id, &arrival).await,
+        None => fresh(&state, &arrival).await,
+    };
+
+    let id = match written {
+        Ok(id) => id,
+        Err(refusal) => return refusal,
+    };
+
+    tracing::info!(
+        conversation_id = id,
+        born = arriving.born.id,
+        on = arriving.born.device,
+        back = held.is_some(),
+        "a Conversation transferred from a member landed here",
+    );
+
+    // The sidebar of every browser open on this device, and of every member
+    // holding this device's list: there is a Conversation here that was not here
+    // a moment ago, or one that is about to be the live copy again.
+    state
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversations);
+
+    Json(Arrived { id }).into_response()
+}
+
+/// A Conversation this device has never held: a row of its own, and the id it
+/// was given.
+async fn fresh(state: &AppState, arrival: &store::Arrival) -> Result<i64, Response> {
+    match store::arrive(&state.pool, arrival).await {
+        Ok(Some(id)) => Ok(id),
+
+        Ok(None) => Err((
             StatusCode::BAD_REQUEST,
             format!(
                 "no repository is registered on this device under the id {repo} the transfer \
                  named\n",
-                repo = arriving.repo,
+                repo = arrival.repo_id,
             ),
         )
-            .into_response(),
+            .into_response()),
 
         Err(why) => {
             tracing::error!(error = ?why, "a Conversation a member is transferring here could not be written down");
 
-            (
+            Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "the Conversation could not be written down on this device\n",
             )
-                .into_response()
+                .into_response())
+        }
+    }
+}
+
+/// And one coming home: the copy held here written over, under the id it already
+/// has.
+///
+/// **The id is the whole point.** A bookmark, a Timeline reference on another
+/// Conversation, a URL in a Question Set answered months ago — all of them name
+/// the id this device issued the first time the work landed, and all of them go
+/// on working because the return lands on it. A second Conversation beside the
+/// first would leave every one of them pointing at a stale copy of work that had
+/// come back.
+async fn back(state: &AppState, id: i64, arrival: &store::Arrival) -> Result<i64, Response> {
+    match store::replace(&state.pool, id, arrival).await {
+        Ok(store::Replacing::Replaced) => Ok(id),
+
+        Ok(store::Replacing::NoSuchRepo) => Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "no repository is registered on this device under the id {repo} the transfer \
+                 named\n",
+                repo = arrival.repo_id,
+            ),
+        )
+            .into_response()),
+
+        // The copy was deleted between the lookup and the write, which is a
+        // human clearing out a machine at the moment the work came back to it.
+        // Refused rather than written afresh: the sending device reads this as
+        // the move not happening, and the work stays where it is.
+        Ok(store::Replacing::NoSuchConversation) => Err((
+            StatusCode::BAD_REQUEST,
+            "the copy of this Conversation held on this device is no longer here\n",
+        )
+            .into_response()),
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "a Conversation a member is transferring back here could not be written down");
+
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the Conversation could not be written down on this device\n",
+            )
+                .into_response())
         }
     }
 }
@@ -165,6 +263,13 @@ pub(crate) async fn take(
 /// be a moment in which a session on this device could be told about a path that
 /// is not there yet. A landing that then fails takes the directory back with it,
 /// the copy being one the sending device is about to sweep.
+///
+/// **And the record lands over whatever was here**, which is what a Conversation
+/// coming home does to the copy this device kept: the rows go in the very
+/// transaction the new ones land in — see [`store::land`] — and the directory
+/// their files are in is taken back first, so each file keeps the name its row
+/// says it was stored under rather than being counted up past the copy of itself
+/// that was already there.
 pub(crate) async fn written(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -179,6 +284,8 @@ pub(crate) async fn written(
         repos: record.repos.iter().copied().collect(),
         profiles,
     };
+
+    Attachments::under(&state.data_dir).remove(id);
 
     if let Err(why) = kept(&state, id, &record.files).await {
         tracing::error!(error = ?why, conversation_id = id, "the files on a Conversation a member is transferring here could not be written");
@@ -243,6 +350,20 @@ pub(crate) async fn written(
 /// question a Conversation that has just arrived poses. See
 /// [`crate::resume::on_arrival`], where the refusals are written down.
 ///
+/// **And where the work has come home, this is where it stops being a copy.** A
+/// Conversation this device had handed on wears the mark saying where the live
+/// record is, and it goes on wearing it through every leg of the return — each of
+/// those being in front of the commit point, so a return that falls over leaves
+/// the tombstone it started as, still pointing at the machine still doing the
+/// work. The word that the move is over is what takes it off: see
+/// [`store::live_here`]. Nothing to take off is the ordinary arrival, which never
+/// wore one.
+///
+/// **In that order, too.** A Conversation wearing the mark is one nothing may be
+/// launched in — see [`crate::transfers::going`] — so the mark comes off before
+/// the Resume below, or the press this device makes for itself would be refused
+/// on the grounds that the work is somewhere else.
+///
 /// **`Ok` whatever the Resume decided**, because there is nothing the sending
 /// device could do with the answer: its copy is already the tombstone and the
 /// work is already here. What a refusal leaves is a stop on this device's own
@@ -267,6 +388,16 @@ pub(crate) async fn arrived(
         device = from.device,
         "a member says the Conversation it moved here has finished arriving",
     );
+
+    if let Err(error) = store::live_here(&state.pool, id).await {
+        tracing::error!(error = ?error, conversation_id = id, "recording that the work is on this device again failed");
+
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this device could not record that the work is here\n",
+        )
+            .into_response();
+    }
 
     let noted = store::note(
         &state.pool,
@@ -371,9 +502,47 @@ async fn kept(state: &AppState, id: i64, files: &[AttachedFile]) -> anyhow::Resu
 /// arriving was never the human's to look at, and the alternative to sweeping it
 /// is a Conversation nobody can account for.
 ///
+/// **Except a copy that was here before the move began**, which is a transfer
+/// back whose move fell over: what the sender is taking back is the arriving
+/// record, and the row under it is this device's own from the first time the work
+/// was here — the id every link anybody kept still names. So it keeps the row and
+/// goes on wearing the mark it never took off, which leaves exactly the tombstone
+/// it was before the return started: its URL leads to the machine still doing the
+/// work, and the Merged List draws that machine's copy. What tells the two cases
+/// apart is the mark — a copy that has only ever been arriving never wore one.
+///
 /// An id naming nothing answers as well as one naming something: the sender is
 /// asking for this not to be here, and it is not here.
 pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+    match store::transferred(&state.pool, id).await {
+        Ok(Some(live)) => {
+            tracing::info!(
+                conversation_id = id,
+                device = live.device,
+                "a member took back a Conversation it was moving back here, so the copy this \
+                 device kept stays as the tombstone it was",
+            );
+
+            state
+                .nudges
+                .announce(verkstead_schema::Nudge::Conversations);
+
+            return StatusCode::OK.into_response();
+        }
+
+        Ok(None) => {}
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "reading whether a half-transferred Conversation was a copy this device already held failed");
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not tell what it holds of that Conversation\n",
+            )
+                .into_response();
+        }
+    }
+
     // Where its checkout went, read before the rows that name it are taken away:
     // a directory nothing points at is one nobody would ever find again. Nothing
     // is there for a copy swept before the git leg ran, which is most of them.

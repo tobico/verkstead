@@ -86,6 +86,21 @@ async fn every_table_of_a_conversations_is_carried_or_named_as_staying() {
              something this suite never sees happen",
         );
     }
+
+    // And the clearing a landing record does in front of itself is over exactly
+    // those tables: a record lands over whatever was here, so a table a slice
+    // carries and the clearing does not would be rows of the old copy left
+    // under the new one — and one the clearing takes and a slice does not would
+    // be a device's own emptied by somebody else's move.
+    let cleared: BTreeSet<String> = verkstead_store::cleared_tables()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+    assert_eq!(
+        cleared, carried,
+        "what a record landing takes out is what a record carries",
+    );
 }
 
 /// The whole record crosses, renumbered: every table lands with what it held,
@@ -170,6 +185,60 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
     assert!(
         landed(&moved.there.pool).await.contains(&notice),
         "and its Notice names an Event of this database's own",
+    );
+}
+
+/// **And a record lands over the one that was already here**, which is what makes
+/// a Conversation coming home one Conversation rather than two records in one.
+///
+/// The copy a device kept when it handed the work on is stale by the time the
+/// work comes back, and the record arriving is the live one: there is nothing to
+/// merge and nothing to reconcile, so what was here goes in the very transaction
+/// the new rows land in. Landed twice over, the far end would hold two of every
+/// card on the Timeline and two of every Set behind them.
+#[tokio::test]
+async fn a_record_landing_again_takes_the_one_that_was_here_with_it() {
+    let moved = moved("rate-limiting").await;
+
+    let first = landed(&moved.there.pool).await;
+
+    // The same record again, which is what a return is: the device the work went
+    // to sending it back to the one it came from, against the row that is
+    // already there.
+    let read = slice(&moved.here.pool, moved.worked.id).await.unwrap();
+
+    let renaming = Renaming {
+        repos: repos(&moved.here.pool)
+            .await
+            .into_iter()
+            .zip(repos(&moved.there.pool).await)
+            .collect(),
+        ..Renaming::default()
+    };
+
+    land(&moved.there.pool, moved.to, &read, &renaming)
+        .await
+        .unwrap();
+
+    for table in carried_tables() {
+        assert_eq!(
+            rows(&moved.there.pool, table).await,
+            rows(&moved.here.pool, table).await,
+            "{table} holds what the record holds rather than two landings of it",
+        );
+    }
+
+    assert_eq!(
+        events(&moved.there.pool).await,
+        events(&moved.here.pool).await,
+        "and the Timeline reads once through rather than twice",
+    );
+
+    let second = landed(&moved.there.pool).await;
+
+    assert!(
+        second.iter().all(|event| !first.contains(event)),
+        "every Event on it is one this landing wrote: {second:?} against {first:?}",
     );
 }
 

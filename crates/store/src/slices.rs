@@ -907,6 +907,15 @@ impl Slice {
 /// land at all — foreign keys are on, so the walk is one SQLite refuses if it is
 /// wrong.
 ///
+/// **And it lands over whatever was here**, which is what makes a transfer back
+/// one Conversation rather than two records in one (ADR-0020, *Transfer*). A copy
+/// coming home to a device that already holds one is the live record arriving
+/// over a stale copy of itself: what is here goes first, in this same
+/// transaction, and what lands is the whole of what this Conversation has. See
+/// [`super::cleanup::cleared`], which empties exactly the tables this writes.
+/// Nothing to take out is the ordinary arrival, and it costs a walk over empty
+/// tables.
+///
 /// `Err` says what could not be written, which is what the sending device turns
 /// into the Notice on the Conversation it still has: a move that falls over here
 /// is swept and the work stays where it was.
@@ -917,6 +926,9 @@ pub async fn land(
     renaming: &Renaming,
 ) -> Result<()> {
     let mut tx = super::writing(pool, "taking a Conversation's record in").await?;
+
+    super::cleanup::cleared(&mut tx, conversation_id).await?;
+
     let mut landing = Landing {
         conversation_id,
         renaming,

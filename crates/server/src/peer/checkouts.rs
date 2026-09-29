@@ -214,14 +214,22 @@ pub(crate) async fn cut(
         }
     };
 
-    // The path this device would have cut that work in, named off its own Data
-    // Directory and its own Repo's name — never off anything that arrived.
-    let worktree = crate::worktrees::worktree_path(
-        &state.data_dir,
-        id,
-        &conversation.repo.name,
-        &arriving.branch,
-    );
+    // The checkout this device already has of this work, where it has one: a
+    // Conversation coming home is one whose Worktree was cut the first time it
+    // was here, and the branch goes back into that directory rather than into a
+    // second one beside it — see [`standing`].
+    let held = standing(&conversation.repo.path, conversation.worktree.as_deref());
+
+    // Or the path this device would have cut that work in, named off its own
+    // Data Directory and its own Repo's name — never off anything that arrived.
+    let worktree = held.clone().unwrap_or_else(|| {
+        crate::worktrees::worktree_path(
+            &state.data_dir,
+            id,
+            &conversation.repo.name,
+            &arriving.branch,
+        )
+    });
 
     let mut making = vec![Making {
         repo: conversation.repo.path.clone(),
@@ -229,6 +237,7 @@ pub(crate) async fn cut(
         branch: Some(arriving.branch.clone()),
         companion: None,
         base_commit: None,
+        standing: held.is_some(),
         carried,
     }];
 
@@ -368,6 +377,17 @@ struct Making {
     /// Worktree — which is recorded on the row the store keeps one of per
     /// Conversation rather than beside the Companions.
     companion: Option<i64>,
+
+    /// Whether the directory is one this device already had: the checkout it cut
+    /// the last time this work was here, which a Conversation coming home is put
+    /// back into rather than given a second one beside (ADR-0020, *Transfer*).
+    ///
+    /// Two things turn on it. The branch cannot be **fetched** into a ref a
+    /// checkout is standing on, so a standing one is brought onto the arriving
+    /// commit from the inside — see [`again`]. And a move that falls over may not
+    /// **take it back**: it was here before this move and holds everything this
+    /// machine built for itself, which never travels.
+    standing: bool,
 
     /// What it was cut from, where the record that came over knows — carried
     /// through to the row rather than looked up again, a Companion's base being
@@ -541,18 +561,26 @@ fn beside(
 
         let claimed: Vec<PathBuf> = making.iter().map(|made| made.path.clone()).collect();
 
+        // The one this device cut for that Companion the last time the work was
+        // here, where it still has it — the Conversation's own rule, and the same
+        // reason: a returning Companion goes back into its own directory.
+        let held = standing(&companion.repo.path, companion.worktree.as_deref());
+
         making.push(Making {
             repo: companion.repo.path.clone(),
-            path: crate::worktrees::unclaimed_path(
-                &state.data_dir,
-                id,
-                &companion.repo.name,
-                &holding,
-                &claimed,
-            ),
+            path: held.clone().unwrap_or_else(|| {
+                crate::worktrees::unclaimed_path(
+                    &state.data_dir,
+                    id,
+                    &companion.repo.name,
+                    &holding,
+                    &claimed,
+                )
+            }),
             branch: carried.branch,
             companion: Some(companion.repo.id),
             base_commit: carried.base_commit,
+            standing: held.is_some(),
             carried: carried.carried,
         });
     }
@@ -651,12 +679,49 @@ fn landed(making: &[Making]) -> Result<(), String> {
 /// became of the move, and one that was already here was never this device's to
 /// take away. What goes is the directory, which is the thing that was made for a
 /// move that did not finish.
+///
+/// **And a standing one is not that.** A checkout this device already had is one
+/// it cut the last time the work was here, and removing it over a move that fell
+/// over would cost the human everything in it that never travels — the ignored
+/// files their machine builds for itself. What a failed return leaves there is a
+/// checkout part way onto the arriving commit, beside a row that is a tombstone
+/// again: the next attempt puts it right, and the work is on the other machine
+/// meanwhile.
 fn taken_back(made: &[Making]) {
     for done in made.iter().rev() {
-        if done.path.exists() {
+        if !done.standing && done.path.exists() {
             crate::worktrees::remove(&done.repo, &done.path);
         }
     }
+}
+
+/// The checkout this device already holds at `recorded`, where it holds one.
+///
+/// **What makes a transfer back go into the directory that is already there**
+/// (ADR-0020, *Transfer*). The record says where this device put the work the
+/// last time it had it, and a directory git still reads as a worktree of *this*
+/// repository is one the branch can be brought back into — everything the machine
+/// built for itself still in it, which is exactly what never crosses a link.
+///
+/// **Anything short of a clear yes is a no**, which is
+/// [`crate::worktrees::healthy`]'s rule turned around: what follows a no here is
+/// a checkout cut afresh, and what would follow a wrong yes is a patch applied to
+/// a directory belonging to something else. So the path has to be there, git has
+/// to answer inside it, and what answers has to be this Repo.
+fn standing(repo: &Path, recorded: Option<&Path>) -> Option<PathBuf> {
+    let recorded = recorded?;
+
+    if !recorded.exists() {
+        return None;
+    }
+
+    let inside = crate::worktrees::common_git_dir(recorded)?;
+
+    if crate::worktrees::common_git_dir(repo).is_some_and(|ours| ours != inside) {
+        return None;
+    }
+
+    Some(recorded.to_owned())
 }
 
 /// One checkout: the branch onto this repository, the directory cut, and the
@@ -672,6 +737,10 @@ fn taken_back(made: &[Making]) {
 /// Nothing is applied to it either — a patch to a directory bound read-only would
 /// be changes a session was never able to make.
 fn one(made: &Making) -> Result<(), String> {
+    if made.standing {
+        return again(made);
+    }
+
     let Making {
         repo,
         path,
@@ -723,6 +792,141 @@ fn one(made: &Making) -> Result<(), String> {
     }
 
     working(path, carried)
+}
+
+/// The same into a checkout this device already has: the branch brought up to
+/// date inside it, rather than a second directory cut beside it.
+///
+/// **Which is what a Conversation coming home is checked out into** (ADR-0020,
+/// *Transfer*). The device the work is returning to still has the directory it
+/// cut the first time, standing on the branch at whatever commit the work was at
+/// when it left — so what this does is move that checkout onto the commit the
+/// work is at now.
+///
+/// **The bundle lands beside the branch rather than on it.** Git refuses to fetch
+/// into a ref one of its worktrees is standing on, which this branch is by
+/// construction: the commits come in under a holding ref of Verkstead's own and
+/// the branch is moved from inside the checkout, where moving the ref and the
+/// tree together is the one thing that is allowed. The holding ref goes again
+/// whichever way this ends — what keeps the commits is the branch.
+///
+/// **And the tree is put back to what arrived, not merged with what was here.**
+/// The record that came is the live one and this copy is the stale one, so the
+/// checkout is forced onto the commit, the untracked files of the copy being
+/// superseded are swept, and the working changes that arrived are applied over
+/// the top. The ignored files stay exactly where they are — they never travelled,
+/// and they are what this whole directory was kept for.
+fn again(made: &Making) -> Result<(), String> {
+    let Making {
+        repo,
+        path,
+        branch,
+        carried,
+        ..
+    } = made;
+
+    let Some(branch) = branch else {
+        if crate::worktrees::resolve(repo, &carried.commit).is_none() {
+            return Err(format!(
+                "this device does not hold the commit {commit} a read-only companion stands at",
+                commit = carried.commit,
+            ));
+        }
+
+        if !crate::worktrees::onto_detached(path, &carried.commit) {
+            return Err(format!(
+                "the checkout already here could not be put back to {commit}",
+                commit = carried.commit,
+            ));
+        }
+
+        crate::worktrees::tidied(path);
+
+        return Ok(());
+    };
+
+    // Standing in some *other* directory of this repository, which is work of
+    // somebody else's this device is not about to move out from under them.
+    if let Some(elsewhere) = crate::worktrees::checked_out_at(repo, branch)
+        && elsewhere != *path
+    {
+        return Err(format!(
+            "{branch} is checked out on this device at {at}, which is not where this \
+             Conversation's work is",
+            at = elsewhere.display(),
+        ));
+    }
+
+    beside_it(repo, &format!("refs/heads/{branch}"), carried)?;
+
+    let put = crate::worktrees::onto(path, branch, &carried.commit);
+
+    // The holding ref either way: what keeps the commits from here on is the
+    // branch that was just moved onto them, and a ref of Verkstead's own left in
+    // somebody's repository is litter.
+    let _ = repos::run(repo, &["update-ref", "-d", HOLDING]);
+
+    if !put {
+        return Err(format!(
+            "{branch} could not be put onto {commit} in the checkout already here",
+            commit = carried.commit,
+        ));
+    }
+
+    // What the copy being superseded left lying about untracked. The ignored
+    // files are not among them — see [`crate::worktrees::tidied`] — and the
+    // untracked files that arrived are written after this.
+    crate::worktrees::tidied(path);
+
+    working(path, carried)
+}
+
+/// Where the commits of a bundle land when the branch they are for is checked out
+/// here: a ref of Verkstead's own, taken away again as soon as the branch has
+/// been moved onto them.
+const HOLDING: &str = "refs/verkstead/arriving";
+
+/// The bundle unpacked under that holding ref, for a checkout that is already
+/// standing on the branch.
+///
+/// A far end with nothing to pack sends no bundle, and then the only question is
+/// whether this device really holds the commit it says it is standing on —
+/// [`fetched`]'s question, asked here for its reason.
+fn beside_it(repo: &Path, named: &str, carried: &Carried) -> Result<(), String> {
+    let Some(bundle) = &carried.bundle else {
+        if crate::worktrees::resolve(repo, &carried.commit).is_none() {
+            return Err(format!(
+                "this device does not hold the commit {commit} the branch stands at, and no \
+                 bundle came with it",
+                commit = carried.commit,
+            ));
+        }
+
+        return Ok(());
+    };
+
+    let held = tempfile::Builder::new()
+        .prefix("verkstead-bundle")
+        .tempdir()
+        .map_err(|why| format!("this device could not make room for the bundle: {why}"))?;
+
+    let file = held.path().join("arriving.bundle");
+
+    std::fs::write(&file, bundle)
+        .map_err(|why| format!("the bundle could not be written down here: {why}"))?;
+
+    repos::run(
+        repo,
+        &[
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--end-of-options",
+            &file.display().to_string(),
+            &format!("+{named}:{HOLDING}"),
+        ],
+    )
+    .map_err(|why| format!("the branch could not be fetched out of the bundle: {why}"))
 }
 
 /// The branch onto this repository: out of the bundle where one came, and off

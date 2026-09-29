@@ -15,6 +15,13 @@
 //! role runs under is a Profile row here, a mirror being one like any other, and
 //! a role picked away is a choice rather than an empty picker.
 //!
+//! And a copy **coming home**, which is the ordinary shape of the second move:
+//! the birth key says the arriving work and the copy this device kept are one
+//! thing, so the copy is written over under the id it already has rather than a
+//! second Conversation being made beside it. What the row keeps through it is
+//! this device's own — the Worktree it cut, and the mark saying where the live
+//! record is until the move is over.
+//!
 //! And the **checkout**, which lands in a leg of its own after the row and is
 //! the other place the two devices' worlds have to be kept apart: the Worktree
 //! is a path of *this* machine's and is in nothing that crossed, while the base
@@ -31,9 +38,9 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle, Picked,
-    ProfileFacts, arrive, birth, conversation_rank, conversations, create_profile,
-    delete_conversation, load_conversation, open_database, register_repo, start_conversation,
-    sweep_arrival,
+    ProfileFacts, Replacing, Transferred, arrive, birth, born_as, conversation_rank, conversations,
+    create_profile, delete_conversation, load_conversation, open_database, register_repo, replace,
+    start_conversation, sweep_arrival, transfer_away, transferred,
 };
 
 /// The device this database belongs to.
@@ -386,6 +393,214 @@ async fn the_companions_checkouts_land_with_the_conversations_own() {
             Some(BASE.to_owned()),
         )],
         "the companion is checked out where this device put it, off what it came from",
+    );
+}
+
+/// **A Conversation coming home lands on the row it left**, under the id that row
+/// already has rather than as a second Conversation beside it.
+///
+/// Which is what the **birth key** is for from this side: the work was drafted
+/// here, handed on, and is coming back, and the key is the one thing every copy
+/// of it says the same. So the lookup finds the copy this device kept and the
+/// arriving Conversation is written over it — every link anybody saved naming an
+/// id that is still the work's.
+///
+/// What is written over is everything the row says about the work. What is
+/// **not** is the Worktree, which is this device's own directory and the one the
+/// branch is going back into; and the mark saying where the live record is, which
+/// stays on until the sending device says the move is over — see
+/// `births::live_here`.
+#[tokio::test]
+async fn a_conversation_coming_home_lands_on_the_row_it_left() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let profile = profile(&pool, "work").await;
+
+    // Drafted here and handed on: the row this device kept, the directory it cut
+    // for the work, and the mark saying the record is on the other machine.
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    let cut = Path::new("/here/data/worktrees/verkstead-rate-limiting");
+
+    verkstead_store::arrived_checkout(&pool, ours, cut, Some(BASE), Some("main"), &[])
+        .await
+        .unwrap();
+
+    transfer_away(
+        &pool,
+        ours,
+        &Transferred {
+            device: THE_OTHER_DEVICE.to_owned(),
+            id: 12,
+        },
+    )
+    .await
+    .unwrap();
+
+    // And coming back, under the key it was born under — which is this device's
+    // own id for it, the work having been drafted here.
+    let born = Birth {
+        device: THIS_DEVICE.to_owned(),
+        id: ours,
+    };
+
+    let coming_home = Arrival {
+        born: born.clone(),
+        state: Lifecycle::Implementing,
+        branch: "rate-limiting-again".to_owned(),
+        ..arriving(repo, profile)
+    };
+
+    assert_eq!(
+        born_as(&pool, &born).await.unwrap(),
+        Some(ours),
+        "the key says the arriving work and the copy held here are one thing",
+    );
+
+    assert_eq!(
+        replace(&pool, ours, &coming_home).await.unwrap(),
+        Replacing::Replaced,
+    );
+
+    let held = load_conversation(&pool, ours)
+        .await
+        .unwrap()
+        .expect("the copy that was here is the Conversation that came back");
+
+    assert_eq!(
+        conversations(&pool, true).await.unwrap().len(),
+        1,
+        "one Conversation, which is the one that was already here",
+    );
+
+    assert_eq!(
+        held.state,
+        Lifecycle::Implementing,
+        "in the state the work is in now rather than the one it left in",
+    );
+    assert_eq!(
+        held.branch, "rate-limiting-again",
+        "on the branch it is on now",
+    );
+    assert_eq!(
+        held.grilling_pairing.as_ref().map(|under| under.profile.id),
+        Some(profile),
+        "under the Pairings that came with it",
+    );
+    assert_eq!(
+        held.review_pairing,
+        Picked::Skipped,
+        "the role picked away among them",
+    );
+
+    assert_eq!(
+        conversation_rank(&pool, ours).await.unwrap(),
+        Some(RANK.to_owned()),
+        "at the Rank the work sits at, which is the cluster's rather than \
+         either machine's",
+    );
+    assert_eq!(
+        birth(&pool, ours).await.unwrap(),
+        Some(born),
+        "still answering to the key it was born under",
+    );
+
+    assert_eq!(
+        held.worktree.as_deref(),
+        Some(cut),
+        "and the directory this device cut for the work the first time is still \
+         where the work goes",
+    );
+    assert_eq!(
+        transferred(&pool, ours).await.unwrap().map(|live| live.id),
+        Some(12),
+        "and the mark stays on until the sending device says the move is over: \
+         a return that fell over here is the tombstone it started as",
+    );
+}
+
+/// And a return refuses what an arrival refuses: a Repo unregistered since the
+/// match settled it is no repository to put work in.
+#[tokio::test]
+async fn a_conversation_coming_home_to_a_repo_that_has_gone_is_refused() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let profile = profile(&pool, "work").await;
+
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    let coming_home = Arrival {
+        born: Birth {
+            device: THIS_DEVICE.to_owned(),
+            id: ours,
+        },
+        ..arriving(404, profile)
+    };
+
+    assert_eq!(
+        replace(&pool, ours, &coming_home).await.unwrap(),
+        Replacing::NoSuchRepo,
+    );
+
+    let held = load_conversation(&pool, ours)
+        .await
+        .unwrap()
+        .expect("the copy that was here is still here");
+
+    assert_eq!(
+        held.repo.id, repo,
+        "and nothing of the row was written: a move that is refused is a move \
+         that did not happen",
+    );
+    assert_eq!(held.branch, "rate-limiting");
+}
+
+/// **Nothing that never left is found by a key of somebody else's.** Two devices
+/// number their own rows and collide by construction, so the lookup is by the
+/// pair rather than by the id — a Conversation of this device's own that happened
+/// to be numbered 7 is not the one another machine drafted as 7.
+#[tokio::test]
+async fn a_key_of_another_devices_finds_nothing_here() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    assert_eq!(
+        born_as(
+            &pool,
+            &Birth {
+                device: THE_OTHER_DEVICE.to_owned(),
+                id: ours,
+            },
+        )
+        .await
+        .unwrap(),
+        None,
+        "same id, another device: two pieces of work",
+    );
+
+    assert_eq!(
+        born_as(
+            &pool,
+            &Birth {
+                device: THIS_DEVICE.to_owned(),
+                id: ours,
+            },
+        )
+        .await
+        .unwrap(),
+        Some(ours),
+        "and this device's own id for it is the key it was born under",
     );
 }
 
