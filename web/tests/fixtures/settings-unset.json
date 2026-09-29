@@ -28,7 +28,8 @@
       },
       "enabled": true,
       "label": "Rust",
-      "name": "rust"
+      "name": "rust",
+      "unread": null
     }
   ],
   "mcp_servers": [],

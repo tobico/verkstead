@@ -39,13 +39,15 @@
         },
         "enabled": true,
         "label": "Rust",
-        "name": "rust"
+        "name": "rust",
+        "unread": null
       },
       {
         "compiling": null,
         "enabled": true,
         "label": "Gleam",
-        "name": "gleam"
+        "name": "gleam",
+        "unread": null
       }
     ],
     "mcp_servers": [

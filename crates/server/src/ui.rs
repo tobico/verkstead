@@ -44,13 +44,13 @@ use verkstead_render::{
     MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked,
     PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
     ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, RunningOn, ServeEdit,
+    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
+    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -5282,6 +5282,13 @@ fn compile_caching(cached: bool) -> CompileCaching {
 /// descriptor's own `size` — and `cached` rides along inside it for the reason
 /// it always did: it is the server's own environment, which is the same answer
 /// for every language that asks.
+///
+/// And a language whose entry in `config.yaml` would not load is on the list
+/// like any other, carrying the reason and what it is running on instead — see
+/// [`UnreadEntry`]. On the list rather than left off it, because the language is
+/// still there: it is running on the descriptor Verkstead ships, or off until
+/// the entry is fixed, and either is something for whoever wrote that file to
+/// see.
 fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec<LanguageView> {
     loaded
         .iter()
@@ -5303,6 +5310,19 @@ fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec
                     // this page the human cannot set.
                     cached: compile_caching(caches_compiles),
                 }),
+            // And why this language's entry in `config.yaml` was not used,
+            // where it was not — with what it is running on meanwhile, which is
+            // whether anything is actually broken. Asked of the built-ins
+            // rather than carried along from the merge: what says a language
+            // has something to fall back to is that Verkstead ships a
+            // descriptor of that name, and that is the list.
+            unread: descriptor.unread().map(|why| UnreadEntry {
+                why: why.to_owned(),
+                running_on: match crate::languages::built_in().get(name).is_some() {
+                    true => RunningOn::BuiltIn,
+                    false => RunningOn::Nothing,
+                },
+            }),
         })
         .collect()
 }

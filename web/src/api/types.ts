@@ -2554,7 +2554,18 @@ enabled: boolean,
  * runs one Compile Server sized by whichever switched-on language asks
  * for it.
  */
-compiling: CompilingView | null, };
+compiling: CompilingView | null, 
+/**
+ * And why this language's entry in `config.yaml` was not used, where it
+ * was not — null for the ordinary case, which is every language on a
+ * machine whose file reads.
+ *
+ * Read-only, like the one fact inside `compiling` is: what it reports is
+ * the file rather than a setting, and the fix is in the file. Which is
+ * what makes it the one thing on this page that turns a language's
+ * controls off — see [`UnreadEntry`].
+ */
+unread: UnreadEntry | null, };
 
 /**
  * Where a Conversation has got to.
@@ -4024,6 +4035,11 @@ total: number,
  * press and the run reaching that point.
  */
 cancelling: boolean, };
+
+/**
+ * Which of the two happened to a language whose entry would not load.
+ */
+export type RunningOn = "BuiltIn" | "Nothing";
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.
@@ -5719,6 +5735,39 @@ export type Unread = {
  * The turn's place in the conversation, counted from 1.
  */
 id: number, line: string, };
+
+/**
+ * What became of a language whose entry in `config.yaml` could not be read.
+ *
+ * **Both halves are drawn**, because they are two different things to do. The
+ * reason is what there is to fix — and where a variable is what was refused it
+ * names the variable, that being the whole of the fix. What it is running on
+ * meanwhile is whether anything is broken right now: a language that fell back
+ * to the descriptor Verkstead ships is one whose cache is working exactly as it
+ * did before the entry was written, and a language with nothing to fall back to
+ * is off until somebody goes and looks.
+ *
+ * And while it is here the page draws that language's controls disabled. The
+ * two keys they write go into the entry this reports on, and an entry nothing
+ * could read is one nothing can be written into: a box that sprang back the
+ * moment it was ticked would be a worse answer than a box that says why it
+ * cannot be.
+ */
+export type UnreadEntry = { 
+/**
+ * Why, as a clause the page puts the words *its entry in `config.yaml`* in
+ * front of — `sets PATH, which is a variable the Sandbox sets itself`, or
+ * `could not be read: …` in the reader's own words.
+ *
+ * The server's sentence rather than a code the page turns into one: what
+ * goes wrong in a file somebody hand-wrote is open-ended, and a viewer
+ * holding the vocabulary would be a release that could not add a reason.
+ */
+why: string, 
+/**
+ * And what the language is running on meanwhile.
+ */
+running_on: RunningOn, };
 
 /**
  * A stored Set this build cannot deserialize, as the browser receives it: the

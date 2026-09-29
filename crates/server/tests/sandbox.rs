@@ -1564,6 +1564,28 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "and the one name both platforms read is the profile Verkstead made for \
          this Conversation rather than the server's own"
     );
+
+    // And every one of them is a name a language descriptor is refused for
+    // setting — see `verkstead::sandbox::sets_itself`, which is the union of all
+    // three platforms' and is asked here of the platform that has the most of
+    // them. Two lists, both hand-written, and this is what keeps them in step:
+    // a name added to the rendering above and not to that one is a descriptor
+    // that could quietly replace it, which for `PATH` is a session that cannot
+    // find `verkstead`.
+    //
+    // The whole of `reported` rather than the set written out again, because
+    // this fixture's Conversation has no Build Cache: what a descriptor is
+    // *entitled* to set — `CARGO_HOME` and the sccache's three — is exactly what
+    // is not in here.
+    let unrefused: Vec<&String> = reported
+        .keys()
+        .filter(|name| !verkstead_server::sandbox::sets_itself(name))
+        .collect();
+
+    assert!(
+        unrefused.is_empty(),
+        "a session is given these, and a descriptor could set them: {unrefused:?}",
+    );
     // Which leads with where the running image really is, this being the
     // platform that binds nothing and links nothing: what a session asks with
     // is the build serving it, said as the path that build is at rather than as

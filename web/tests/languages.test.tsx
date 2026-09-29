@@ -91,6 +91,32 @@ function off(standing: SettingsView, name = RUST): SettingsView {
   };
 }
 
+/// And the same settings with one language's entry in `config.yaml` one the
+/// server could not read.
+///
+/// `running_on` is the server's answer rather than this helper's arithmetic:
+/// what says a language has something to fall back to is that Verkstead ships a
+/// descriptor of that name, which is a fact about the binary.
+function unread(
+  standing: SettingsView,
+  name: string,
+  running_on: "BuiltIn" | "Nothing",
+  why = "sets RUSTUP_HOME, which is a variable the Sandbox sets itself",
+): SettingsView {
+  return {
+    ...standing,
+    languages: standing.languages.map((language) =>
+      language.name === name
+        ? {
+            ...language,
+            enabled: running_on === "BuiltIn",
+            unread: { why, running_on },
+          }
+        : language,
+    ),
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -251,6 +277,20 @@ describe("the card", () => {
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
+  /// And a language whose entry the server could not read, said here too: the
+  /// card is what somebody scanning the page sees, and a file that wants
+  /// editing is exactly the sort of thing they would want telling about.
+  it("names a language whose entry could not be read", async () => {
+    theSettings(unread(compiling(TOLD), GLEAM, "Nothing"));
+    const { container } = mountCard();
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${styles.warning}`)?.textContent).toBe(
+        "Verkstead could not read what config.yaml says about Gleam.",
+      ),
+    );
+  });
+
   it("opens the pane when it is pressed", async () => {
     theSettings(TOLD);
     const { container, press } = mountCard();
@@ -332,6 +372,49 @@ describe("the languages as the pane draws them", () => {
 
     expect(theGroup(container).disabled).toBe(true);
     expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(true);
+  });
+
+  /// A language whose entry would not load says so, with the reason the server
+  /// gave and what it is running on meanwhile — and its controls are off, the
+  /// two keys they write being keys of the entry nothing could read.
+  it("says why a language's entry was not used and what it is running on", async () => {
+    theSettings(unread(compiling(TOLD), RUST, "BuiltIn"));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.warning}`)?.textContent,
+      ).toContain(
+        "Its entry in config.yaml sets RUSTUP_HOME, which is a variable the " +
+          "Sandbox sets itself. Verkstead is using the descriptor it ships",
+      ),
+    );
+
+    expect(theCheck().matches(":disabled")).toBe(true);
+    expect(theGroup(container).disabled).toBe(true);
+  });
+
+  /// And where there is no built-in of that name, the other half of the
+  /// sentence: the language is off until the entry is fixed, which is a
+  /// different thing to know from a cache still working.
+  it("says a language with nothing behind it is off until the entry is fixed", async () => {
+    theSettings(unread(compiling(TOLD), GLEAM, "Nothing"));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.warning}`)?.textContent,
+      ).toContain(
+        "Verkstead ships no descriptor of that name, so this language is off",
+      ),
+    );
+
+    expect(theCheck("Gleam").checked).toBe(false);
+    expect(theCheck("Gleam").matches(":disabled")).toBe(true);
+    expect(
+      theCheck("Rust").matches(":disabled"),
+      "while the language beside it is left alone",
+    ).toBe(false);
   });
 
   /// A greyed group refuses input rather than only looking as though it would:

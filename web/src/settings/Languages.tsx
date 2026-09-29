@@ -13,6 +13,14 @@
 //! this page writes are the switch and the size, and an installer who wants a
 //! variable, a manifest or a label edits `config.yaml`.
 //!
+//! Which is why a language whose entry in that file would not load is drawn
+//! with its controls off and a sentence saying why: the two keys they write go
+//! into that entry, and the server writes it back exactly as it was typed. What
+//! the sentence says is the reason — the variable, where a variable is what was
+//! refused — and whether the language is running on the descriptor Verkstead
+//! ships or off altogether. A language is never dropped from the list over it:
+//! it is still there, and which of the two happened is the thing to know.
+//!
 //! One of two things on this page that are about a **Sandbox** rather than about
 //! who Verkstead is — the Sandbox binds section is the other — and the only one
 //! of the two that is on with nothing configured. Every path that section adds
@@ -81,6 +89,7 @@ import type {
   LanguageView,
   SettingsSaved,
   SettingsView,
+  UnreadEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -157,12 +166,62 @@ function warned(told: SettingsView | undefined): boolean {
 
 /// Whether the size hanging off a checkbox means anything.
 ///
-/// The checkbox being on and an sccache being there to read it: the size is
-/// sccache's own word, so a server without one has nowhere to put it. Both are
-/// the group's *off*, and the group is drawn greyed rather than taken away —
-/// a field that vanished would say the setting had, and it has not.
+/// The checkbox being on, an sccache being there to read it, and the entry this
+/// would be written into being one the server could read: the size is sccache's
+/// own word, so a server without one has nowhere to put it, and an entry that
+/// would not load is one nothing can be written into. All three are the group's
+/// *off*, and the group is drawn greyed rather than taken away — a field that
+/// vanished would say the setting had, and it has not.
 function sizeable(language: LanguageView): boolean {
-  return language.enabled && language.compiling?.cached === "Cached";
+  return (
+    language.enabled &&
+    language.compiling?.cached === "Cached" &&
+    language.unread === null
+  );
+}
+
+/// What is said under a language whose entry in `config.yaml` was not used.
+///
+/// The reason first, because it is what there is to fix, and it is the server's
+/// own sentence: what goes wrong in a file somebody hand-wrote is open-ended,
+/// and a viewer holding the vocabulary would be a release that could not add a
+/// reason. Then what the language is running on meanwhile, which is the other
+/// thing to know and the one this page can word for itself — the difference
+/// between a cache working exactly as it did before that entry was written and
+/// a language that is off until somebody goes and looks.
+///
+/// Drawn where `uncompiled` is and greying the controls beside it, for the
+/// reason that one does not: the two keys those controls write go into this
+/// entry, and a box that sprang back the moment it was ticked would be a worse
+/// answer than a box that says why it cannot be.
+function unreadable(entry: UnreadEntry): JSX.Element {
+  return (
+    <p class={styles.warning}>
+      Its entry in <code>config.yaml</code> {entry.why}.{" "}
+      <Choose>
+        <Match when={entry.running_on === "BuiltIn"}>
+          Verkstead is using the descriptor it ships, which is what this
+          language had before that entry was written.
+        </Match>
+        <Match when={entry.running_on === "Nothing"}>
+          Verkstead ships no descriptor of that name, so this language is off
+          until the entry is fixed.
+        </Match>
+      </Choose>
+    </p>
+  );
+}
+
+/// And which languages those are, in the words the card names them by.
+///
+/// On the card as well as in the pane, the way the sccache warning is and for
+/// the same reason: whoever needs to read it is precisely whoever is not
+/// editing. What it cannot say there is the reason — that is a sentence each,
+/// and the card is a line.
+function unread(told: SettingsView | undefined): string[] {
+  return (told?.languages ?? [])
+    .filter((language) => language.unread !== null)
+    .map((language) => language.label);
 }
 
 /// What has build support switched on, in the words the card names them by.
@@ -211,6 +270,13 @@ export function LanguagesCard(props: {
             <h2>{TITLE}</h2>
 
             <Show when={warned(told())}>{uncompiled()}</Show>
+
+            <Show when={unread(told()).length > 0}>
+              <p class={styles.warning}>
+                Verkstead could not read what <code>config.yaml</code> says
+                about {unread(told()).join(", ")}.
+              </p>
+            </Show>
 
             <Show when={standing(told()).length > 0}>
               <p class={styles.standing}>{standing(told()).join(", ")}</p>
@@ -364,7 +430,11 @@ export function LanguagesPane(props: {
                     <Check
                       label={language.label}
                       on={language.enabled}
-                      disabled={save.isPending}
+                      // And off for a language whose entry would not load: the
+                      // switch is a key of that entry, and there is nothing
+                      // readable there to write it into — see [`unreadable`],
+                      // which is the sentence underneath saying so.
+                      disabled={save.isPending || language.unread !== null}
                       flip={(enabled) => flip(language, enabled)}
                     />
 
@@ -405,6 +475,12 @@ export function LanguagesPane(props: {
                           </div>
                         </form>
                       </Nested>
+                    </Show>
+
+                    {/* And why nothing above it can be changed, where the
+                        entry those two keys go into would not load. */}
+                    <Show when={language.unread}>
+                      {(entry) => unreadable(entry())}
                     </Show>
                   </>
                 )}

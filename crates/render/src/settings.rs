@@ -309,6 +309,60 @@ pub struct LanguageView {
     /// runs one Compile Server sized by whichever switched-on language asks
     /// for it.
     pub compiling: Option<CompilingView>,
+
+    /// And why this language's entry in `config.yaml` was not used, where it
+    /// was not — null for the ordinary case, which is every language on a
+    /// machine whose file reads.
+    ///
+    /// Read-only, like the one fact inside `compiling` is: what it reports is
+    /// the file rather than a setting, and the fix is in the file. Which is
+    /// what makes it the one thing on this page that turns a language's
+    /// controls off — see [`UnreadEntry`].
+    pub unread: Option<UnreadEntry>,
+}
+
+/// What became of a language whose entry in `config.yaml` could not be read.
+///
+/// **Both halves are drawn**, because they are two different things to do. The
+/// reason is what there is to fix — and where a variable is what was refused it
+/// names the variable, that being the whole of the fix. What it is running on
+/// meanwhile is whether anything is broken right now: a language that fell back
+/// to the descriptor Verkstead ships is one whose cache is working exactly as it
+/// did before the entry was written, and a language with nothing to fall back to
+/// is off until somebody goes and looks.
+///
+/// And while it is here the page draws that language's controls disabled. The
+/// two keys they write go into the entry this reports on, and an entry nothing
+/// could read is one nothing can be written into: a box that sprang back the
+/// moment it was ticked would be a worse answer than a box that says why it
+/// cannot be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct UnreadEntry {
+    /// Why, as a clause the page puts the words *its entry in `config.yaml`* in
+    /// front of — `sets PATH, which is a variable the Sandbox sets itself`, or
+    /// `could not be read: …` in the reader's own words.
+    ///
+    /// The server's sentence rather than a code the page turns into one: what
+    /// goes wrong in a file somebody hand-wrote is open-ended, and a viewer
+    /// holding the vocabulary would be a release that could not add a reason.
+    pub why: String,
+
+    /// And what the language is running on meanwhile.
+    pub running_on: RunningOn,
+}
+
+/// Which of the two happened to a language whose entry would not load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum RunningOn {
+    /// The descriptor Verkstead ships, which is what this language had before
+    /// that entry was written. Nothing is broken; the entry is.
+    BuiltIn,
+
+    /// Nothing — there is no built-in of that name — so the language is off
+    /// until the entry is fixed.
+    Nothing,
 }
 
 /// How big a language's compiled store may grow, and whether a session's

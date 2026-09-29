@@ -86,7 +86,10 @@
 //! [`crate::build_cache`] for what Rust's entry switches.
 //!
 //! `enabled` and `size` are keys of the same entry and the only two the
-//! settings page ever writes, so an installer's own keys survive a save.
+//! settings page ever writes, so an installer's own keys survive a save. And an
+//! entry nothing here could read survives one too, as the text it was written
+//! in: the language falls back to the descriptor Verkstead ships, the settings
+//! page says why, and the file is still the installer's to fix.
 //!
 //! `rust_build_cache` is where Rust's two used to be said, and it is **read
 //! and never written**: a `config.yaml` from before the map says exactly what
@@ -1016,7 +1019,10 @@ impl Config {
     ///   they were written, and leaves an entry the page never drew at all
     ///   untouched. Written over rather than merged, because the page's two
     ///   keys are the page's word even when it sends neither: see
-    ///   [`Languages::under_the_page`].
+    ///   [`Languages::under_the_page`]. An entry nothing could read is the
+    ///   furthest case of the same rule — it goes back as the text it was
+    ///   written in, that being the whole of what is left of it once it did not
+    ///   load, and it is still what the installer is about to go and fix.
     pub fn keeping_what_the_page_never_drew(mut self, kept: &Config) -> Config {
         self.session_path = kept.session_path.clone();
         self.languages = kept.languages.under_the_page(&self.languages);
@@ -3292,6 +3298,74 @@ mod tests {
                 .unwrap()
                 .contains("GLEAM_CACHE"),
             "and its variables, written back into the file",
+        );
+    }
+
+    /// And an entry nothing could read goes back into the file the way it was
+    /// written, which is the same rule one step further on.
+    ///
+    /// A save writes the whole of `config.yaml`, and an entry that will not
+    /// load is still text the installer typed and is about to fix. So it is
+    /// kept the way the descriptor keys the page never drew are — including
+    /// the very key that stopped it loading, because taking that out would be
+    /// Verkstead editing somebody's file to make its own complaint go away.
+    #[test]
+    fn a_save_leaves_an_entry_nothing_could_read_as_it_was_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "languages:\n  rust:\n    env:\n      RUSTUP_HOME: \"{cache}/toolchains\"\n  \
+             gleam:\n    label: Gleam\n",
+        )
+        .unwrap();
+
+        let page = Config::of(
+            GitAuthor::default(),
+            crate::languages::Languages::of_page([
+                (crate::languages::RUST.to_owned(), false, String::new()),
+                ("gleam".to_owned(), true, String::new()),
+            ]),
+            Cleanup::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            vec![],
+            String::new(),
+        );
+
+        settings
+            .save_config(&page.keeping_what_the_page_never_drew(&settings.config()))
+            .unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            written.contains("RUSTUP_HOME"),
+            "the entry the page could not be drawn from is still the installer's \
+             own to fix: {written}",
+        );
+        assert!(
+            !written.contains("enabled: false"),
+            "and nothing the page sent was written into it, there being no entry \
+             there that could be read to write it into: {written}",
+        );
+
+        let languages = crate::languages::configured(&settings.config());
+
+        assert!(
+            languages
+                .get(crate::languages::RUST)
+                .unwrap()
+                .unread()
+                .is_some(),
+            "so it reads back exactly as it did before the save",
+        );
+        assert!(
+            languages.get("gleam").unwrap().enabled(),
+            "while the language beside it took what the page sent",
         );
     }
 

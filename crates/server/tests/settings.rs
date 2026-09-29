@@ -47,8 +47,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     CompileCaching, CompilingView, ConflictResolution, IgnoreRule, LanguageView, McpHeader,
-    McpServer, PathResolution, PathSource, RuleField, ServerField, SettingsSaved, SettingsView,
-    Verified,
+    McpServer, PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved,
+    SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -768,6 +768,86 @@ async fn a_language_with_no_label_is_drawn_under_its_own_name() {
         .unwrap_or_else(|| panic!("the descriptor in the file is on the page: {told:?}"));
 
     assert_eq!(zig.label, "zig");
+}
+
+/// And a language whose entry the server could not read reaches the page with
+/// the reason and what it is running on — and a save leaves that entry in the
+/// file as it was written.
+///
+/// The whole of what *falls back to the built-in* comes to, end to end: the
+/// built-in is what the language runs on, the page says which of the two
+/// happened and why, and the text the installer is about to fix is still theirs
+/// after somebody has been to the settings page and pressed something.
+#[tokio::test]
+async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "languages:\n  rust:\n    env:\n      RUSTUP_HOME: \"{cache}/toolchains\"\n  \
+         gleam:\n    label: Gleam\n    detect: 7\n",
+    );
+
+    let told = settings(&app).await;
+    let rust = rust_told(&told);
+    let unread = rust
+        .unread
+        .as_ref()
+        .unwrap_or_else(|| panic!("the entry was refused, so the page says so: {told:?}"));
+
+    assert_eq!(
+        unread.why, "sets RUSTUP_HOME, which is a variable the Sandbox sets itself",
+        "the reason names the variable, because that is what there is to fix",
+    );
+    assert!(
+        matches!(unread.running_on, RunningOn::BuiltIn),
+        "and Rust is running on the descriptor Verkstead ships",
+    );
+    assert!(rust.enabled, "which is what it was running on before");
+
+    let gleam = told
+        .languages
+        .iter()
+        .find(|language| language.name == "gleam")
+        .unwrap_or_else(|| panic!("and the language beside it is still listed: {told:?}"));
+
+    assert!(
+        matches!(
+            gleam.unread.as_ref().map(|unread| &unread.running_on),
+            Some(RunningOn::Nothing)
+        ),
+        "with nothing to fall back to, this one being nobody's built-in",
+    );
+    assert!(!gleam.enabled, "so it is off rather than on at nothing");
+
+    // And a save from the page — which draws two keys and writes two keys —
+    // puts both entries back the way the installer typed them.
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "languages": [
+                { "name": "rust", "enabled": true, "size": "" },
+                { "name": "gleam", "enabled": false, "size": "" },
+            ],
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(
+        written.contains("RUSTUP_HOME") && written.contains("detect"),
+        "both entries are still the installer's own to fix: {written}"
+    );
 }
 
 /// The key the map replaced is read where it is written, and a save carries

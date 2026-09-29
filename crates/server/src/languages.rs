@@ -49,6 +49,24 @@
 //! placeholder's directory is granted to a session only where a loaded
 //! descriptor names it, so the one beside the Worktrees grants nothing while
 //! Rust is the only language built in.
+//!
+//! **And an entry that will not load falls back to the built-in of that name.**
+//! Two ways one fails and one answer to both: an entry naming a variable the
+//! Sandbox sets itself is refused — see [`crate::sandbox::sets_itself`], which
+//! is the union of all three platforms' names — and an entry nothing can parse
+//! is refused the same way. Either way what is left is the descriptor Verkstead
+//! ships, which is the cache the installer already had; a language with no
+//! built-in behind it goes **off** rather than on at nothing; every other
+//! language loads; and the server comes up. Losing Rust's build cache to one
+//! mistyped variable is the worse experience for not having checked, which is
+//! the same reason the merge is key by key in the first place.
+//!
+//! **What was written stays written.** The entry is kept exactly as the file
+//! had it — see [`Raw`] — because a save from the settings page writes the
+//! whole of `config.yaml`, and an entry nothing could read is still text the
+//! installer typed and is about to fix. It goes back the way the descriptor
+//! keys the page never drew do. And the page says why: [`Descriptor::unread`]
+//! is the reason, in the words it is logged in.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -96,13 +114,29 @@ const SCCACHE_AT: &str = "{sccache}";
 
 /// The descriptors Verkstead ships, parsed once.
 ///
-/// An `expect` because the file is embedded: it cannot vary between machines,
-/// so a file that will not parse is a build that should never have shipped, and
-/// the suite reads it — see `the_built_ins_are_in_the_grammar_an_installer_writes`.
+/// A panic because the file is embedded: it cannot vary between machines, so a
+/// file that will not parse is a build that should never have shipped, and the
+/// suite reads it — see `the_built_ins_are_in_the_grammar_an_installer_writes`.
+///
+/// **Both halves of that are checked here**, because only one of them is an
+/// error: an entry of an installer's that will not load is a language falling
+/// back to its built-in, and an entry *of the built-ins* that will not load has
+/// nothing behind it to fall back to. So the leniency [`Languages::read`] gives
+/// `config.yaml` is spent here on a clearer panic rather than on shipping a
+/// language that quietly does nothing.
 pub fn built_in() -> &'static Languages {
     static BUILT_IN: LazyLock<Languages> = LazyLock::new(|| {
-        Languages::read(BUILT_IN_YAML)
-            .expect("the descriptors embedded in this binary are in the grammar the loader reads")
+        let languages = Languages::read(BUILT_IN_YAML)
+            .expect("the descriptors embedded in this binary are in the grammar the loader reads");
+
+        if let Some((name, why)) = languages
+            .iter()
+            .find_map(|(name, descriptor)| Some((name, descriptor.unread()?)))
+        {
+            panic!("the descriptor embedded for {name} {why}");
+        }
+
+        languages
     });
 
     &BUILT_IN
@@ -131,7 +165,12 @@ pub fn configured(config: &crate::settings::Config) -> Languages {
 /// Order is kept rather than sorted because it is what a session's environment
 /// is built in, and an environment that reordered itself between releases would
 /// be one nothing could be asserted about byte for byte.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+///
+/// Read and written by hand rather than derived, because an entry that will not
+/// load is neither an error nor a loss: it is read as a [`Descriptor`] saying
+/// nothing with the reason and the text-as-written on it, and it is written
+/// back out as that text — see [`Descriptor::read`], and this module's header.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Languages(Ordered<Descriptor>);
 
 /// A whole descriptor file: the map under its one `languages:` key.
@@ -215,8 +254,16 @@ impl Languages {
     /// override of one variable still gets every later fix to the others —
     /// which is the whole reason the merge is key by key rather than an entry
     /// replacing a built-in whole (ADR-0021).
+    ///
+    /// And an entry that would not load is a descriptor saying nothing, so what
+    /// comes out of the first case is the built-in exactly as it stands — see
+    /// [`Descriptor::read`]. The second case is where the reason is spent: a
+    /// language with nothing behind it goes off — see [`Descriptor::alone`].
     pub fn merged(&self, over: &Languages) -> Languages {
-        Languages(self.0.merged(&over.0, Descriptor::merged))
+        Languages(
+            self.0
+                .merged(&over.0, Descriptor::merged, Descriptor::alone),
+        )
     }
 
     /// And this with what the settings page has just sent written over it.
@@ -236,8 +283,16 @@ impl Languages {
     /// one caller. An entry the page never sent stays as it stands, and one
     /// naming a language this file has never heard of is taken on as written,
     /// which is what saves an installer's own.
+    ///
+    /// An entry nothing could read keeps its text here like any other key the
+    /// page never drew, and goes back into the file as it was written: it is
+    /// still what the installer typed and is about to fix — see [`Languages`]'s
+    /// own serialisation, which is where that is done.
     pub fn under_the_page(&self, page: &Languages) -> Languages {
-        Languages(self.0.merged(&page.0, Descriptor::with_the_pages_keys))
+        Languages(
+            self.0
+                .merged(&page.0, Descriptor::with_the_pages_keys, Descriptor::clone),
+        )
     }
 
     /// The descriptor of `name`, where there is one.
@@ -359,7 +414,7 @@ impl Languages {
 /// Written away when it is absent, every field of it, so that a save from the
 /// settings page rewrites `config.yaml` with the keys the human put there and
 /// no others — see [`crate::settings::Config::keeping_what_the_page_never_drew`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Descriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
@@ -381,9 +436,133 @@ pub struct Descriptor {
 
     #[serde(default, skip_serializing_if = "Ordered::is_empty")]
     capabilities: Ordered<Capability>,
+
+    /// And why nothing above was taken from the file, where this entry would
+    /// not load — with what the file said, so it can go back as written.
+    ///
+    /// Never read off a file and never written to one: it is what the loader
+    /// makes of an entry it refused, and every field above it is left at its
+    /// default in that case, so that the entry merges into the built-in without
+    /// changing a thing — see [`Descriptor::read`].
+    #[serde(skip)]
+    unread: Option<Box<Unread>>,
+}
+
+/// Why an entry in `config.yaml` was not used, and what it said.
+///
+/// The text is kept because a save from the settings page writes the whole of
+/// the file: an entry nothing could read is still what the installer typed and
+/// is about to fix, and a save that quietly dropped it would be the one outcome
+/// worse than not loading it.
+#[derive(Debug, Clone, PartialEq)]
+struct Unread {
+    /// In the words the page says and the log carries, as a clause that follows
+    /// *its entry in `config.yaml`* — see [`Descriptor::read`].
+    why: String,
+
+    /// And the entry as the file had it.
+    written: Raw,
 }
 
 impl Descriptor {
+    /// One entry of `config.yaml`, as written — or, where it will not load, a
+    /// descriptor saying **nothing**, carrying the reason and the text.
+    ///
+    /// Two ways it fails and one answer to both: an entry naming a variable the
+    /// Sandbox sets itself, and an entry nothing can parse. A descriptor saying
+    /// nothing is what makes the answer the same in both cases and in every
+    /// place downstream — it merges into the built-in of that name without
+    /// changing a key of it, which is that language running on exactly what it
+    /// ran on before the file was written. What it does *not* blank is
+    /// `rust_build_cache`, which is a key of its own, read into Rust's entry
+    /// underneath this one and never part of what was refused.
+    ///
+    /// An entry with nothing under it at all is an entry saying nothing on
+    /// purpose, and is read as one rather than refused: `rust:` and no keys is
+    /// a line somebody wrote to have somewhere to add a key.
+    ///
+    /// The reason is a clause, so that whoever draws it can put the language in
+    /// front of it — see [`crate::ui`], and the pane it reaches.
+    fn read(written: Raw) -> Descriptor {
+        let why = match Descriptor::parsed(&written) {
+            Ok(descriptor) => match descriptor.refuses() {
+                Some(name) => {
+                    format!("sets {name}, which is a variable the Sandbox sets itself")
+                }
+                None => return descriptor,
+            },
+            Err(why) => why,
+        };
+
+        Descriptor {
+            unread: Some(Box::new(Unread { why, written })),
+            ..Descriptor::default()
+        }
+    }
+
+    /// What `written` says, read as a descriptor — or why it could not be.
+    ///
+    /// Through the grammar's own text rather than through a second reader over
+    /// the value: what is wanted is the answer `serde_saphyr` would have given
+    /// the whole file, entry by entry, and the way to get exactly that answer is
+    /// to ask it. The cost is one small document written and read per entry of
+    /// a file that holds a handful, at the moment a session is spawned.
+    fn parsed(written: &Raw) -> Result<Descriptor, String> {
+        if matches!(written, Raw::Nothing) {
+            return Ok(Descriptor::default());
+        }
+
+        let text =
+            serde_saphyr::to_string(written).map_err(|why| format!("could not be read: {why}"))?;
+
+        serde_saphyr::from_str::<Descriptor>(&text)
+            .map_err(|why| format!("could not be read: {why}"))
+    }
+
+    /// The first variable this entry names that the Sandbox sets itself, where
+    /// it names one — see [`crate::sandbox::sets_itself`].
+    ///
+    /// A capability's variables are asked the same question as the descriptor's
+    /// own, because they reach the same environment. And a name set to `null`
+    /// is refused like any other: taking `PATH` out of a session breaks it
+    /// exactly as thoroughly as replacing it.
+    fn refuses(&self) -> Option<&str> {
+        self.env
+            .iter()
+            .chain(
+                self.capabilities
+                    .iter()
+                    .flat_map(|(_, entry)| entry.env.iter()),
+            )
+            .map(|(name, _)| name)
+            .find(|name| crate::sandbox::sets_itself(name))
+    }
+
+    /// Why this language's entry in `config.yaml` was not used, where it was
+    /// not — a clause, in the words the page says.
+    pub fn unread(&self) -> Option<&str> {
+        self.unread.as_ref().map(|unread| unread.why.as_str())
+    }
+
+    /// An override entry with no built-in of that name behind it, which is
+    /// ordinarily a descriptor in its own right — an installer's own language,
+    /// taken on as it stands.
+    ///
+    /// Except where nothing could read it, and then it is a language **off**:
+    /// what a descriptor saying nothing comes to with nothing underneath it is
+    /// a name with no variables, and a box on the settings page that turns on a
+    /// language that does not exist would be worse than the language being
+    /// plainly off until the entry is fixed.
+    fn alone(&self) -> Descriptor {
+        match self.unread.is_some() {
+            true => Descriptor {
+                enabled: Some(false),
+                ..self.clone()
+            },
+            false => self.clone(),
+        }
+    }
+
     /// What the settings page calls this language, where the file said.
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
@@ -444,13 +623,22 @@ impl Descriptor {
             // A variable in both is the override's, `null` included: what a
             // `null` leaves behind is an entry with no value, which is a
             // variable no session is given.
-            env: self.env.merged(&over.env, |_, over| over.clone()),
+            env: self
+                .env
+                .merged(&over.env, |_, over| over.clone(), Clone::clone),
             // And a capability in both is merged in its turn rather than
             // replaced, so that overriding one of the sccache's three variables
             // keeps the other two.
-            capabilities: self
-                .capabilities
-                .merged(&over.capabilities, Capability::merged),
+            capabilities: self.capabilities.merged(
+                &over.capabilities,
+                Capability::merged,
+                Capability::clone,
+            ),
+            // And why the override said nothing, where it said nothing because
+            // it would not load. Carried rather than merged into: what it is
+            // about is the entry in the file, and the built-in underneath it is
+            // exactly what it is falling back *to*.
+            unread: over.unread.clone().or_else(|| self.unread.clone()),
         }
     }
 
@@ -501,7 +689,9 @@ impl Capability {
     /// descriptor's own are — see [`Descriptor::merged`].
     fn merged(&self, over: &Capability) -> Capability {
         Capability {
-            env: self.env.merged(&over.env, |_, over| over.clone()),
+            env: self
+                .env
+                .merged(&over.env, |_, over| over.clone(), Clone::clone),
         }
     }
 }
@@ -711,19 +901,26 @@ impl<V> Ordered<V> {
 
 impl<V: Clone> Ordered<V> {
     /// `over` merged into this key by key: a key in both is what `merging`
-    /// makes of the pair, and a key in only one of them is carried as it
-    /// stands.
+    /// makes of the pair, and a key only `over` has is what `alone` makes of it
+    /// — ordinarily itself, and for a language descriptor the one place the
+    /// answer turns on there being nothing underneath — see
+    /// [`Descriptor::alone`].
     ///
     /// The order is this one's, with whatever `over` adds on the end — which is
     /// what keeps a session's environment in the built-in file's order however
     /// an installer's own entries are written.
-    fn merged(&self, over: &Ordered<V>, merging: impl Fn(&V, &V) -> V) -> Ordered<V> {
+    fn merged(
+        &self,
+        over: &Ordered<V>,
+        merging: impl Fn(&V, &V) -> V,
+        alone: impl Fn(&V) -> V,
+    ) -> Ordered<V> {
         let mut merged = self.0.clone();
 
         for (key, value) in over.iter() {
             match merged.iter_mut().find(|(name, _)| name == key) {
                 Some((_, held)) => *held = merging(held, value),
-                None => merged.push((key.to_owned(), value.clone())),
+                None => merged.push((key.to_owned(), alone(value))),
             }
         }
 
@@ -773,6 +970,168 @@ impl<'de, V: Deserialize<'de>> Visitor<'de> for Pairs<V> {
         }
 
         Ok(Ordered(pairs))
+    }
+}
+
+impl Serialize for Languages {
+    /// Every entry as the file had it: a descriptor as its keys, and an entry
+    /// nothing could read as the text it was written in.
+    ///
+    /// Which is why this is not the derive. A save from the settings page writes
+    /// the whole of `config.yaml`, and the whole of it includes the entry the
+    /// installer is about to go and fix — see [`Languages::under_the_page`],
+    /// which is what carries it this far.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(self.0.0.len()))?;
+
+        for (name, descriptor) in self.iter() {
+            match &descriptor.unread {
+                Some(unread) => map.serialize_entry(name, &unread.written)?,
+                None => map.serialize_entry(name, descriptor)?,
+            }
+        }
+
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Languages {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Languages, D::Error> {
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+/// The visitor behind it: every entry read on its own, so that one that will
+/// not load is one language rather than the file.
+///
+/// The value is taken as a [`Raw`] first, which cannot fail, and read as a
+/// descriptor from there — see [`Descriptor::read`]. Reading the map straight
+/// into descriptors would be a single mistyped variable somewhere in
+/// `config.yaml` costing every language its entry, and there is no recovering
+/// from a failed `next_value` to do it any other way.
+struct Entries;
+
+impl<'de> Visitor<'de> for Entries {
+    type Value = Languages;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a mapping of language descriptors")
+    }
+
+    fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Languages, M::Error> {
+        let mut entries = Vec::with_capacity(map.size_hint().unwrap_or_default());
+
+        while let Some(name) = map.next_key::<String>()? {
+            let descriptor = Descriptor::read(map.next_value::<Raw>()?);
+
+            if let Some(why) = descriptor.unread() {
+                // Said once, where the name is: the file the human wrote and
+                // Verkstead cannot read is the one thing in the settings they
+                // would want telling about, and the page says the same sentence
+                // to whoever is looking at it instead.
+                tracing::warn!(
+                    language = name,
+                    why,
+                    "a language's entry in config.yaml was not used, so it falls back to the \
+                     descriptor Verkstead ships",
+                );
+            }
+
+            entries.push((name, descriptor));
+        }
+
+        Ok(Languages(Ordered(entries)))
+    }
+}
+
+/// A YAML value kept exactly as the file had it.
+///
+/// What an entry nothing could read is held as. Every shape a document can
+/// hold, and no opinion about any of them: it is read through `deserialize_any`
+/// and written back out as itself, which is the whole of what it is for.
+///
+/// Numbers are the one place it is not quite the source text — `1.50` comes
+/// back `1.5` — which is what keeps it a value rather than a span, and is why
+/// nothing here is `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+enum Raw {
+    /// A `null`, a `~`, and a key with nothing under it.
+    Nothing,
+    Yes(bool),
+    Whole(i64),
+    Counted(u64),
+    Fractional(f64),
+    Text(String),
+    List(Vec<Raw>),
+    Mapping(Ordered<Raw>),
+}
+
+impl<'de> Deserialize<'de> for Raw {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Raw, D::Error> {
+        deserializer.deserialize_any(Anything)
+    }
+}
+
+/// The visitor behind it: whatever the document holds, in the shape it holds
+/// it.
+struct Anything;
+
+impl<'de> Visitor<'de> for Anything {
+    type Value = Raw;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any value")
+    }
+
+    fn visit_unit<E>(self) -> Result<Raw, E> {
+        Ok(Raw::Nothing)
+    }
+
+    fn visit_none<E>(self) -> Result<Raw, E> {
+        Ok(Raw::Nothing)
+    }
+
+    fn visit_some<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Raw, D::Error> {
+        Raw::deserialize(deserializer)
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Raw, E> {
+        Ok(Raw::Yes(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Raw, E> {
+        Ok(Raw::Whole(value))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Raw, E> {
+        Ok(Raw::Counted(value))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Raw, E> {
+        Ok(Raw::Fractional(value))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Raw, E> {
+        Ok(Raw::Text(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Raw, E> {
+        Ok(Raw::Text(value))
+    }
+
+    fn visit_seq<S: serde::de::SeqAccess<'de>>(self, mut seq: S) -> Result<Raw, S::Error> {
+        let mut items = Vec::with_capacity(seq.size_hint().unwrap_or_default());
+
+        while let Some(item) = seq.next_element::<Raw>()? {
+            items.push(item);
+        }
+
+        Ok(Raw::List(items))
+    }
+
+    fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<Raw, M::Error> {
+        Pairs(PhantomData).visit_map(map).map(Raw::Mapping)
     }
 }
 
@@ -1000,6 +1359,184 @@ mod tests {
         std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();
 
         assert!(rust.detected(dir.path()));
+    }
+
+    /// A variable the Sandbox sets itself is refused, and what is left is the
+    /// descriptor Verkstead ships — the cache the installer already had.
+    #[test]
+    fn an_entry_naming_a_variable_the_sandbox_sets_falls_back_to_the_built_in() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    env:\n      CARGO_HOME: \"{cache}/mine\"\n      \
+             RUSTUP_HOME: \"{cache}/toolchains\"\n  gleam:\n    label: Gleam\n    env:\n      \
+             GLEAM_CACHE: \"{cache}/gleam\"\n",
+        ));
+
+        let rust = loaded.get(RUST).unwrap();
+
+        assert_eq!(
+            rust.unread(),
+            Some("sets RUSTUP_HOME, which is a variable the Sandbox sets itself"),
+            "the reason names the variable, because that is what there is to fix",
+        );
+        let given = loaded.given(&machine(true));
+        let (rusts, gleams) = given
+            .env()
+            .split_at(built_in().given(&machine(true)).env().len());
+
+        assert_eq!(
+            rusts,
+            built_in().given(&machine(true)).env(),
+            "and nothing else in the entry landed either — `CARGO_HOME` included: \
+             a session has exactly the variables it had before that file was written",
+        );
+        assert_eq!(
+            gleams,
+            [(
+                String::from("GLEAM_CACHE"),
+                String::from("/var/cache/verkstead/gleam")
+            )],
+            "while the language beside it is given what its own entry says",
+        );
+        assert!(
+            rust.enabled(),
+            "the language is still on, running on the built-in"
+        );
+
+        let gleam = loaded
+            .get("gleam")
+            .expect("every other language still loads");
+
+        assert_eq!(gleam.unread(), None);
+        assert_eq!(gleam.label(), Some("Gleam"));
+    }
+
+    /// The name is refused whatever case it is written in, because Windows
+    /// reads its environment that way.
+    #[test]
+    fn a_refused_name_is_refused_however_it_is_spelled() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    env:\n      Path: /opt/bin\n",
+        ));
+
+        assert_eq!(
+            loaded.get(RUST).unwrap().unread(),
+            Some("sets Path, which is a variable the Sandbox sets itself"),
+        );
+    }
+
+    /// And so is one of the numbered pair git's configuration goes into.
+    #[test]
+    fn the_numbered_names_git_is_configured_through_are_refused_too() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    env:\n      GIT_CONFIG_KEY_0: user.name\n",
+        ));
+
+        assert_eq!(
+            loaded.get(RUST).unwrap().unread(),
+            Some("sets GIT_CONFIG_KEY_0, which is a variable the Sandbox sets itself"),
+        );
+    }
+
+    /// A capability's variables are asked the same question as a descriptor's
+    /// own, because they reach the same environment.
+    #[test]
+    fn a_capabilitys_variables_are_refused_by_the_same_names() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    capabilities:\n      sccache:\n        env:\n          \
+             HOME: /tmp\n",
+        ));
+
+        assert_eq!(
+            loaded.get(RUST).unwrap().unread(),
+            Some("sets HOME, which is a variable the Sandbox sets itself"),
+        );
+    }
+
+    /// An entry nothing can parse goes the same way, and the file around it
+    /// still loads.
+    #[test]
+    fn an_entry_that_will_not_parse_falls_back_the_same_way() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    detect: 7\n  gleam:\n    label: Gleam\n",
+        ));
+
+        let why = loaded
+            .get(RUST)
+            .unwrap()
+            .unread()
+            .expect("an entry that will not parse is one that was not used");
+
+        assert!(
+            why.starts_with("could not be read:"),
+            "the reason is what the reader said: {why}",
+        );
+        assert_eq!(
+            loaded.given(&machine(true)).env(),
+            built_in().given(&machine(true)).env(),
+        );
+        assert!(
+            loaded
+                .get("gleam")
+                .is_some_and(|gleam| gleam.unread().is_none()),
+            "and every other language still loads",
+        );
+    }
+
+    /// A key with nothing under it is an entry saying nothing on purpose rather
+    /// than one that will not load.
+    #[test]
+    fn an_entry_with_nothing_under_it_is_an_entry_saying_nothing() {
+        let loaded = built_in().merged(&written("languages:\n  rust:\n"));
+
+        assert_eq!(loaded.get(RUST).unwrap().unread(), None);
+        assert_eq!(
+            loaded.given(&machine(true)).env(),
+            built_in().given(&machine(true)).env(),
+        );
+    }
+
+    /// And where there is no built-in to fall back to, the language is off
+    /// rather than on at nothing.
+    #[test]
+    fn an_entry_with_no_built_in_behind_it_that_will_not_load_is_off() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  gleam:\n    label: Gleam\n    env:\n      PATH: /opt/gleam/bin\n",
+        ));
+
+        let gleam = loaded.get("gleam").expect("the entry is still on the list");
+
+        assert!(
+            !gleam.enabled(),
+            "on at nothing would be a box that turns on a language that is not there",
+        );
+        assert_eq!(
+            gleam.unread(),
+            Some("sets PATH, which is a variable the Sandbox sets itself"),
+        );
+        assert!(
+            loaded.given(&machine(true)).env() == built_in().given(&machine(true)).env(),
+            "and a session gets nothing of it",
+        );
+    }
+
+    /// `rust_build_cache` is a key of its own, so a refused `languages` entry
+    /// does not take the switch and the size down with it.
+    #[test]
+    fn a_refused_entry_does_not_take_the_key_it_replaced_with_it() {
+        let config = crate::settings::Config::read(
+            "rust_build_cache:\n  enabled: false\n  size: 5G\nlanguages:\n  rust:\n    \
+             env:\n      PATH: /opt/bin\n",
+        )
+        .unwrap();
+
+        let rust = configured(&config).get(RUST).unwrap().clone();
+
+        assert!(
+            !rust.enabled(),
+            "the old key is still read as Rust's switch"
+        );
+        assert_eq!(rust.size_configured(), Some("5G"));
+        assert!(rust.unread().is_some());
     }
 
     /// The order a file is written in is the order a session's environment is

@@ -2182,6 +2182,77 @@ pub(crate) fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
     named
 }
 
+/// Every variable a Sandbox sets for itself, which is what a language
+/// descriptor is refused for naming — see [`crate::languages`].
+///
+/// **The union of all three platforms', on every platform.** Windows tells a
+/// session five names for its profile and four for the machine that the two
+/// Unixes have no equivalent of, and a `config.yaml` that loaded on a Mac and
+/// broke the same install on a Windows box would be worse than a refusal the
+/// installer sees wherever they wrote it.
+///
+/// Refused rather than quietly overridden, and not because the file is not the
+/// installer's own — they can already open binds with it. What is being stopped
+/// is the accident: a descriptor that replaced `PATH` would be a session that
+/// cannot find `verkstead`, and one that replaced `HOME` would be a session
+/// whose agent has no login. Either is a build cache entry breaking the thing it
+/// was written to speed up.
+///
+/// Every name here is one of the `set` calls in the surface a session is
+/// rendered onto, and
+/// `the_open_rendering_hands_a_session_the_environment_it_was_described_with`
+/// in the sandbox suite is what keeps the two lists in step: what that test
+/// reads off a started process is every name a session is given, and it asks of
+/// each one that it be refused here.
+const SANDBOX_NAMES: &[&str] = &[
+    "HOME",
+    PATH,
+    "SHELL",
+    "TERM",
+    "VERKSTEAD_SERVER",
+    AGENT_TYPE,
+    NIXOS_ENVIRONMENT_DONE,
+    DISABLE_AUTOUPDATER,
+    OPENCODE_DB,
+    OPENCODE_BASH_DEFAULT_TIMEOUT,
+    RUSTUP_HOME,
+    "GH_TOKEN",
+    "GIT_CONFIG_COUNT",
+    "GIT_TERMINAL_PROMPT",
+    // And the Windows profile, which is where that platform reads what `HOME`
+    // is read for — see [`windows_names`].
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "TEMP",
+    "TMP",
+];
+
+/// And the two the Sandbox numbers, which are names rather than a name: git's
+/// whole configuration goes into the environment, and how many pairs that comes
+/// to is that configuration's own business.
+const SANDBOX_PREFIXES: &[&str] = &["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
+
+/// Whether `name` is one a Sandbox sets itself, whatever case it is written in.
+///
+/// [`MACHINE_NAMES`] are read here beside the list above rather than written
+/// into it, they being the same four names — a Windows machine's own, read off
+/// the server's environment rather than made.
+///
+/// Case-insensitively, because Windows reads its environment that way: a `Path`
+/// in a descriptor is the `PATH` a Windows session would lose, and a rule that
+/// held on two platforms and not the third is exactly what the union above
+/// exists to avoid.
+pub fn sets_itself(name: &str) -> bool {
+    SANDBOX_NAMES
+        .iter()
+        .chain(MACHINE_NAMES.iter())
+        .any(|set| set.eq_ignore_ascii_case(name))
+        || SANDBOX_PREFIXES.iter().any(|prefix| {
+            name.len() > prefix.len() && name[..prefix.len()].eq_ignore_ascii_case(prefix)
+        })
+}
+
 /// Where each shape of account is joined into a session's HOME: what the
 /// Profile names on the host, and what it is called inside.
 ///
