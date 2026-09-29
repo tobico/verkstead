@@ -64,6 +64,7 @@ use verkstead_render::{
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::languages;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::sandbox::account::Logon;
 use verkstead_server::sandbox::account::machine::Account;
@@ -792,7 +793,8 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) ->
         .collect();
 
     let build_cache = match cache {
-        Some(dir) => BuildCache::resolve(Some(dir), state.path()).expect("a cache to resolve"),
+        Some(dir) => BuildCache::resolve(Some(dir), state.path(), languages::built_in())
+            .expect("a cache to resolve"),
         None => BuildCache::none(),
     };
 
@@ -2077,8 +2079,8 @@ async fn a_compile_server_comes_up_as_the_session_account() {
         )
     });
 
-    let build_cache =
-        BuildCache::resolve(Some(cache.path()), state.path()).expect("a cache to resolve");
+    let build_cache = BuildCache::resolve(Some(cache.path()), state.path(), languages::built_in())
+        .expect("a cache to resolve");
 
     assert!(
         build_cache.caches_compiles(),
@@ -2090,7 +2092,7 @@ async fn a_compile_server_comes_up_as_the_session_account() {
     let settings = Settings::in_data_dir(state.path()).config();
     let running_as = the_machines_account();
 
-    build_cache.compiling(settings.rust_build_cache(), Some(&running_as));
+    build_cache.compiling(&settings, Some(&running_as));
 
     // Long enough that one which was going to come up has: `compiling` starts
     // the process before it returns, so anything after that moment is slack

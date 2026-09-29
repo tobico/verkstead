@@ -3859,7 +3859,7 @@ impl Sandbox {
             // sccache there is, and where a session on this platform reaches it
             // — see [`sccache_inside`], which is read off the same executable
             // the `PATH` above leads with.
-            build_cache: cache.shared(config.rust_build_cache(), homes.platform(), verkstead.bin()),
+            build_cache: cache.shared(config, homes.platform(), verkstead.bin()),
             platform: homes.platform(),
             conversation: conversation.id,
             data_dir: homes.data.clone(),

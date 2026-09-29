@@ -10,6 +10,25 @@
 //! installer writes — `crates/server/languages.yaml`, which is this module's
 //! documentation as well as its data.
 //!
+//! **And what an installer writes is merged over them, key by key.** The map
+//! under `languages:` in `config.yaml` is read as a [`Languages`] of its own
+//! and written over the built-ins — see [`configured`], which is what every
+//! session is actually built from, and [`Languages::merged`] for what merging
+//! one entry into another comes to. Key by key rather than an entry replacing
+//! a built-in whole, so that changing one variable still gets every later fix
+//! to the rest; a variable set to `null` is taken out; and an entry naming a
+//! language nothing here has ever heard of is a descriptor in its own right,
+//! on by default, with its variables in the next session and its checkbox on
+//! the settings page.
+//!
+//! **`enabled` and `size` are keys of the same entry**, beside the ones only a
+//! file ever holds, and they are the only two the settings page writes — which
+//! is what lets one request write the whole of `config.yaml` without a save
+//! taking an installer's descriptor away. `rust_build_cache`, which is where
+//! Rust's switch and size used to be said, is still read as Rust's two, and
+//! the map wins where both are written: see
+//! [`crate::settings::Config::languages`], where the two are put together.
+//!
 //! **A descriptor cannot say a command to run.** It says a label, the manifests
 //! that detect the language in a Repo, the variables a session is given, and
 //! the **capabilities** it names — and a capability is behaviour built into the
@@ -36,8 +55,9 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use serde::Deserialize;
 use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize};
 
 /// The descriptors Verkstead ships, as an installer would have written them.
 ///
@@ -88,49 +108,118 @@ pub fn built_in() -> &'static Languages {
     &BUILT_IN
 }
 
+/// The descriptors this installation has: the ones Verkstead ships, with what
+/// `config.yaml` says merged over them.
+///
+/// Built at the moment it is asked for rather than held from startup, like
+/// everything else a session is made out of — see
+/// [`crate::settings::Config::languages`]. A language switched off from a phone
+/// applies to the next session, and so does a descriptor a hand-edit added an
+/// hour ago.
+pub fn configured(config: &crate::settings::Config) -> Languages {
+    built_in().merged(&config.languages())
+}
+
 /// A map of descriptors keyed by language, in the order they were written.
+///
+/// One type for both halves of the grammar — the file embedded in the binary
+/// and the map under `languages:` in `config.yaml` — because they are one
+/// grammar: what an installer writes is what Verkstead ships, and a second
+/// shape for the overrides would be a second thing to document and a second
+/// thing to keep in step.
 ///
 /// Order is kept rather than sorted because it is what a session's environment
 /// is built in, and an environment that reordered itself between releases would
 /// be one nothing could be asserted about byte for byte.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-pub struct Languages {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Languages(Ordered<Descriptor>);
+
+/// A whole descriptor file: the map under its one `languages:` key.
+///
+/// The embedded file is written with that key so that it is the fragment of
+/// `config.yaml` an installer would paste, rather than a shape of its own —
+/// see [`Languages::read`], which is the only thing that goes through this.
+#[derive(Debug, Deserialize)]
+struct File {
     #[serde(default)]
-    languages: Ordered<Descriptor>,
+    languages: Languages,
 }
 
 impl Languages {
     /// What `text` says, or what went wrong reading it.
     pub fn read(text: &str) -> Result<Languages, serde_saphyr::Error> {
-        serde_saphyr::from_str(text)
+        serde_saphyr::from_str::<File>(text).map(|file| file.languages)
+    }
+
+    /// Rust's entry as `rust_build_cache` says it, which is what an install
+    /// that wrote one keeps — see [`crate::settings::Config::languages`].
+    ///
+    /// Only what is actually written down: two `None`s are an entry saying
+    /// nothing, which merges into the built-in without changing it. What that
+    /// buys is the whole of the compatibility rule in one place — the old key
+    /// is a descriptor merged *under* the new map, so the map wins wherever
+    /// both are written, and nothing downstream has to ask which of the two a
+    /// value came from.
+    pub fn of_rust(enabled: Option<bool>, size: Option<String>) -> Languages {
+        Languages(Ordered(vec![(
+            RUST.to_owned(),
+            Descriptor {
+                enabled,
+                size,
+                ..Descriptor::default()
+            },
+        )]))
+    }
+
+    /// Whether there is nothing here at all, which is what a `config.yaml`
+    /// nobody has written a descriptor in says.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// `over` merged into this, entry by entry and then key by key within an
+    /// entry — see [`Descriptor::merged`].
+    ///
+    /// An entry naming a language that is not here is a descriptor of its own,
+    /// taken on as it stands: that is how an installer adds a language
+    /// Verkstead has never heard of. An entry naming one that *is* here changes
+    /// the keys it gives and leaves the rest as the built-in says, so an
+    /// override of one variable still gets every later fix to the others —
+    /// which is the whole reason the merge is key by key rather than an entry
+    /// replacing a built-in whole (ADR-0021).
+    pub fn merged(&self, over: &Languages) -> Languages {
+        Languages(self.0.merged(&over.0, Descriptor::merged))
     }
 
     /// The descriptor of `name`, where there is one.
     pub fn get(&self, name: &str) -> Option<&Descriptor> {
-        self.languages.get(name)
+        self.0.get(name)
     }
 
     /// Every one of them, in the order they were written.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Descriptor)> {
-        self.languages.iter()
+        self.0.iter()
     }
 
     /// What every switched-on descriptor gives one session: the variables, and
     /// the directories that have to be open for them to mean anything.
     ///
-    /// `switched` is what the settings say about a language — the size where it
-    /// is on, and `None` where it is off. Read at every session spawn rather
-    /// than held from startup, like everything else a session is built from, so
-    /// a switch flipped on a phone applies to the next session.
-    pub fn given(&self, machine: &Machine, switched: impl Fn(&str) -> Option<String>) -> Given {
+    /// The switch and the size are the descriptor's own — `enabled` and `size`,
+    /// which are the two keys of an entry the settings page writes and the only
+    /// two it ever does. They are read at every session spawn rather than held
+    /// from startup, like everything else a session is built from, so a switch
+    /// flipped on a phone applies to the next session.
+    pub fn given(&self, machine: &Machine) -> Given {
         let mut given = Given::default();
 
         for (name, descriptor) in self.iter() {
-            let Some(size) = switched(name) else {
+            if !descriptor.enabled() {
                 continue;
-            };
+            }
 
-            given.taking(name, machine, &size, descriptor.env.iter());
+            let size = descriptor.size();
+
+            given.taking(name, machine, size, descriptor.env.iter());
 
             for (capability, entry) in descriptor.capabilities.iter() {
                 // A capability this server does not have is a descriptor asking
@@ -153,15 +242,23 @@ impl Languages {
                     given.sccache = true;
                 }
 
-                given.taking(name, machine, &size, entry.env.iter());
+                given.taking(name, machine, size, entry.env.iter());
             }
         }
 
         given
     }
 
-    /// Whether any switched-on descriptor names `capability` — which is what
-    /// says the behaviour behind it is wanted on this machine.
+    /// The store size asked for by the first switched-on descriptor naming
+    /// `capability`, and `None` where none of them does — which is what says
+    /// whether the behaviour behind it is wanted on this machine at all.
+    ///
+    /// The size comes back with the answer because the one capability there is
+    /// wants one: the Compile Server is started with a size, and that size is a
+    /// switched-on language's rather than a number the server holds. Where two
+    /// of them name it — C++ beside Rust, when it comes — the first written is
+    /// the one that sizes the store, because there is one store and one server
+    /// for the machine.
     ///
     /// Asked of the switch rather than of a Repo. The Compile Server comes up
     /// wherever a language naming [`SCCACHE`] is enabled and there is an sccache
@@ -169,13 +266,14 @@ impl Languages {
     /// root is handed the wrapper variable all the same, and with no server of
     /// Verkstead's up the client inside starts one in its own Sandbox — which
     /// is the hazard the Compile Server exists to remove.
-    pub fn naming(&self, capability: &str, switched: impl Fn(&str) -> Option<String>) -> bool {
-        self.iter().any(|(name, descriptor)| {
-            switched(name).is_some()
-                && descriptor
-                    .capabilities
-                    .iter()
-                    .any(|(named, _)| named == capability)
+    pub fn wanting(&self, capability: &str) -> Option<&str> {
+        self.iter().find_map(|(_, descriptor)| {
+            let names = descriptor
+                .capabilities
+                .iter()
+                .any(|(named, _)| named == capability);
+
+            (descriptor.enabled() && names).then(|| descriptor.size())
         })
     }
 
@@ -197,7 +295,7 @@ impl Languages {
                         .iter()
                         .flat_map(|(_, entry)| entry.env.iter()),
                 )
-                .any(|(_, value)| value.contains(STORES))
+                .any(|(_, value)| value.as_deref().is_some_and(|value| value.contains(STORES)))
         })
     }
 }
@@ -207,18 +305,37 @@ impl Languages {
 /// Every field optional, because every one of them is a thing a language may
 /// not have: a store with no manifest to detect it by, a language whose whole
 /// descriptor is two variables, one that is nothing but a capability.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+///
+/// **`enabled` and `size` are keys of this same entry**, beside the ones only
+/// a file ever holds, and they are the only two the settings page ever writes.
+/// One entry per language rather than a switch in one place and a descriptor in
+/// another, because a human reading `config.yaml` should find everything it
+/// says about a language in the one block under its name.
+///
+/// Written away when it is absent, every field of it, so that a save from the
+/// settings page rewrites `config.yaml` with the keys the human put there and
+/// no others — see [`crate::settings::Config::keeping_what_the_page_never_drew`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Descriptor {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     label: Option<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     detect: Vec<String>,
 
-    #[serde(default)]
-    env: Ordered<String>,
+    /// The variables, where a `None` is a `null` in the file: a variable taken
+    /// **out** rather than set to nothing — see [`Descriptor::merged`], and
+    /// [`Given::taking`], which is what leaves it out of a session.
+    #[serde(default, skip_serializing_if = "Ordered::is_empty")]
+    env: Ordered<Option<String>>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Ordered::is_empty")]
     capabilities: Ordered<Capability>,
 }
 
@@ -226,6 +343,55 @@ impl Descriptor {
     /// What the settings page calls this language, where the file said.
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    /// Whether sessions get this language at all. Nothing written down is
+    /// **on**, which is the rule every default in the settings follows: a human
+    /// should never have a worse experience for not having been to the settings
+    /// page, and a language that came switched off would be one nobody knew to
+    /// turn on.
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
+    /// And how big this language's store may grow, which is the `{size}`
+    /// placeholder's value — [`crate::build_cache::SIZE`] where nobody has
+    /// said.
+    ///
+    /// The human's own word rather than a number of bytes, and nothing here
+    /// parses it: what it reaches is the tool that reads it, and a parser here
+    /// would be a second opinion about the one thing the value is for.
+    pub fn size(&self) -> &str {
+        self.size.as_deref().unwrap_or(crate::build_cache::SIZE)
+    }
+
+    /// `over` written over this, key by key.
+    ///
+    /// A key `over` does not give is this one's as it stands, which is what
+    /// lets an installer change one variable and still get every later fix to
+    /// the rest. `detect` is the one list here and a list is replaced whole:
+    /// half a set of manifests is not a set of manifests, and there is nothing
+    /// a `null` could mean in the middle of one.
+    fn merged(&self, over: &Descriptor) -> Descriptor {
+        Descriptor {
+            enabled: over.enabled.or(self.enabled),
+            size: over.size.clone().or_else(|| self.size.clone()),
+            label: over.label.clone().or_else(|| self.label.clone()),
+            detect: match over.detect.is_empty() {
+                true => self.detect.clone(),
+                false => over.detect.clone(),
+            },
+            // A variable in both is the override's, `null` included: what a
+            // `null` leaves behind is an entry with no value, which is a
+            // variable no session is given.
+            env: self.env.merged(&over.env, |_, over| over.clone()),
+            // And a capability in both is merged in its turn rather than
+            // replaced, so that overriding one of the sccache's three variables
+            // keeps the other two.
+            capabilities: self
+                .capabilities
+                .merged(&over.capabilities, Capability::merged),
+        }
     }
 
     /// Whether a Repo at `path` is one a session would build this language in:
@@ -253,10 +419,20 @@ impl Descriptor {
 /// `RUSTC_WRAPPER`; C++'s, when it comes, is CMake's two launcher variables
 /// pointed at the same binary — one capability, two descriptors, and nothing in
 /// the server that knows which language asked.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Capability {
-    #[serde(default)]
-    env: Ordered<String>,
+    #[serde(default, skip_serializing_if = "Ordered::is_empty")]
+    env: Ordered<Option<String>>,
+}
+
+impl Capability {
+    /// `over` written over this, which is its variables merged the way a
+    /// descriptor's own are — see [`Descriptor::merged`].
+    fn merged(&self, over: &Capability) -> Capability {
+        Capability {
+            env: self.env.merged(&over.env, |_, over| over.clone()),
+        }
+    }
 }
 
 /// What this machine can put behind the placeholders, and which capabilities it
@@ -388,9 +564,17 @@ impl Given {
         language: &str,
         machine: &Machine,
         size: &str,
-        env: impl Iterator<Item = (&'a str, &'a String)>,
+        env: impl Iterator<Item = (&'a str, &'a Option<String>)>,
     ) {
         for (name, value) in env {
+            // A variable a `null` took out, which is an entry with no value —
+            // see [`Descriptor::merged`]. Nothing is set and nothing is
+            // unset: what the session gets is what the built-in would have
+            // given it minus this one name.
+            let Some(value) = value else {
+                continue;
+            };
+
             let mut used = self.used;
 
             match machine.filled(value, size, &mut used) {
@@ -446,6 +630,52 @@ impl<V> Ordered<V> {
     fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
         self.0.iter().map(|(name, value)| (name.as_str(), value))
     }
+
+    /// Whether there is nothing in it, which is what says a key is written
+    /// away rather than written empty.
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<V: Clone> Ordered<V> {
+    /// `over` merged into this key by key: a key in both is what `merging`
+    /// makes of the pair, and a key in only one of them is carried as it
+    /// stands.
+    ///
+    /// The order is this one's, with whatever `over` adds on the end — which is
+    /// what keeps a session's environment in the built-in file's order however
+    /// an installer's own entries are written.
+    fn merged(&self, over: &Ordered<V>, merging: impl Fn(&V, &V) -> V) -> Ordered<V> {
+        let mut merged = self.0.clone();
+
+        for (key, value) in over.iter() {
+            match merged.iter_mut().find(|(name, _)| name == key) {
+                Some((_, held)) => *held = merging(held, value),
+                None => merged.push((key.to_owned(), value.clone())),
+            }
+        }
+
+        Ordered(merged)
+    }
+}
+
+impl<V: Serialize> Serialize for Ordered<V> {
+    /// Back out as the mapping it was read as, in the order it was read in.
+    ///
+    /// Written by hand for the reason the reading half is: what goes back into
+    /// `config.yaml` is what an installer wrote there, and a map that sorted
+    /// itself on the way out would rewrite their file every time somebody
+    /// saved the settings page.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+
+        for (key, value) in &self.0 {
+            map.serialize_entry(key, value)?;
+        }
+
+        map.end()
+    }
 }
 
 impl<'de, V: Deserialize<'de>> Deserialize<'de> for Ordered<V> {
@@ -489,9 +719,9 @@ mod tests {
         )
     }
 
-    /// Everything on, at the size nobody configured.
-    fn on(_: &str) -> Option<String> {
-        Some(String::from("30G"))
+    /// A descriptor file as an installer would have written it.
+    fn written(yaml: &str) -> Languages {
+        Languages::read(yaml).expect("a descriptor an installer could have written")
     }
 
     /// The built-ins parse, and what Rust's says is what a session gets today.
@@ -507,9 +737,11 @@ mod tests {
 
         assert_eq!(rust.label(), Some("Rust"));
         assert_eq!(rust.detect, vec![String::from("Cargo.toml")]);
-        assert!(
-            built_in().naming(SCCACHE, on),
-            "Rust's descriptor is what asks for the Compile Server"
+        assert_eq!(
+            built_in().wanting(SCCACHE),
+            Some(crate::build_cache::SIZE),
+            "Rust's descriptor is what asks for the Compile Server, at the size \
+             nobody has configured",
         );
     }
 
@@ -517,7 +749,7 @@ mod tests {
     /// had, in the order it has always had them, and the cache open underneath.
     #[test]
     fn a_session_is_given_what_rust_has_always_been_given() {
-        let given = built_in().given(&machine(true), on);
+        let given = built_in().given(&machine(true));
 
         assert_eq!(
             given.env(),
@@ -550,7 +782,7 @@ mod tests {
     /// points at a compile server that is not there.
     #[test]
     fn without_an_sccache_the_capabilitys_variables_are_left_out() {
-        let given = built_in().given(&machine(false), on);
+        let given = built_in().given(&machine(false));
 
         assert_eq!(
             given.env(),
@@ -567,14 +799,15 @@ mod tests {
     /// closes the hole rather than leaving it open and unused.
     #[test]
     fn a_language_switched_off_gives_a_session_nothing() {
-        let given = built_in().given(&machine(true), |_| None);
+        let off = built_in().merged(&written("languages:\n  rust:\n    enabled: false\n"));
+        let given = off.given(&machine(true));
 
         assert!(given.is_empty());
         assert!(given.env().is_empty());
         assert!(given.dirs().is_empty());
         assert!(!given.sccache());
         assert!(
-            !built_in().naming(SCCACHE, |_| None),
+            off.wanting(SCCACHE).is_none(),
             "and nothing wants a Compile Server up"
         );
     }
@@ -582,12 +815,18 @@ mod tests {
     /// The size is the human's, and it reaches the variable that reads it.
     #[test]
     fn the_size_a_human_configured_is_what_the_store_is_given() {
-        let given = built_in().given(&machine(true), |_| Some(String::from("5G")));
+        let sized = built_in().merged(&written("languages:\n  rust:\n    size: 5G\n"));
+        let given = sized.given(&machine(true));
 
         assert!(
             given
                 .env()
                 .contains(&(String::from("SCCACHE_CACHE_SIZE"), String::from("5G"))),
+        );
+        assert_eq!(
+            sized.wanting(SCCACHE),
+            Some("5G"),
+            "and the Compile Server is started at it"
         );
     }
 
@@ -601,15 +840,14 @@ mod tests {
             "Rust's store is under the Build Cache"
         );
 
-        let hardlinking = Languages::read(
+        let hardlinking = written(
             "languages:\n  node:\n    label: Node\n    env:\n      \
              PNPM_HOME: \"{stores}/pnpm\"\n",
-        )
-        .expect("a descriptor an installer could have written");
+        );
 
         assert!(hardlinking.names_stores());
 
-        let given = hardlinking.given(&machine(true), on);
+        let given = hardlinking.given(&machine(true));
 
         assert_eq!(
             given.env(),
@@ -630,14 +868,13 @@ mod tests {
     /// order however the descriptors are written.
     #[test]
     fn a_language_naming_both_is_opened_onto_both() {
-        let languages = Languages::read(
+        let languages = written(
             "languages:\n  python:\n    env:\n      UV_LINK_DIR: \"{stores}/uv\"\n      \
              UV_CACHE_DIR: \"{cache}/uv\"\n",
-        )
-        .unwrap();
+        );
 
         assert_eq!(
-            languages.given(&machine(true), on).dirs(),
+            languages.given(&machine(true)).dirs(),
             [
                 PathBuf::from("/var/cache/verkstead"),
                 PathBuf::from("/var/lib/verkstead/stores"),
@@ -650,13 +887,12 @@ mod tests {
     /// rather than a file that will not load.
     #[test]
     fn a_capability_this_server_has_not_got_contributes_nothing() {
-        let languages = Languages::read(
+        let languages = written(
             "languages:\n  java:\n    env:\n      GRADLE_USER_HOME: \"{cache}/gradle\"\n    \
              capabilities:\n      daemon:\n        env:\n          GRADLE_OPTS: \"-Dx\"\n",
-        )
-        .unwrap();
+        );
 
-        let given = languages.given(&machine(true), on);
+        let given = languages.given(&machine(true));
 
         assert_eq!(
             given.env(),
@@ -666,7 +902,7 @@ mod tests {
             )],
         );
         assert!(
-            !languages.naming(SCCACHE, on),
+            languages.wanting(SCCACHE).is_none(),
             "and it is not what starts a Compile Server"
         );
     }
@@ -699,15 +935,14 @@ mod tests {
     /// set in, whatever the keys sort as.
     #[test]
     fn a_mapping_is_kept_in_the_order_it_was_written() {
-        let languages = Languages::read(
+        let languages = written(
             "languages:\n  zed:\n    env:\n      ZZZ: one\n      AAA: two\n  abel:\n    \
              env:\n      MMM: three\n",
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             languages
-                .given(&machine(true), on)
+                .given(&machine(true))
                 .env()
                 .iter()
                 .map(|(name, _)| name.as_str())

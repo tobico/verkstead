@@ -1523,10 +1523,18 @@ pub(crate) async fn conversation_view(
     // missing and there is nothing for the human to go and do — see
     // [`crate::build_cache::compiles_through_an_sccache`]. That is a standing
     // fact about the machine, and the settings page is where it is said.
+    // The switch is Rust's descriptor's now rather than the key that used to
+    // hold it — see [`crate::languages`] — because what a session is given is
+    // what the descriptors say, and a card warning about a language nobody has
+    // switched on would be warning about compiles that never happen.
+    let languages = crate::languages::configured(&state.settings.config());
+
     let compiles_uncached = !state.sessions.caches_compiles()
         && crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE)
-        && state.settings.config().rust_build_cache().enabled()
-        && crate::build_cache::builds_rust(&conversation.repo.path);
+        && languages
+            .get(crate::languages::RUST)
+            .is_some_and(crate::languages::Descriptor::enabled)
+        && crate::build_cache::builds_rust(&languages, &conversation.repo.path);
 
     // Which Brief is still being written, where one is. A Brief freezes when its
     // round's grilling starts, so the one open is the newest — and only while the
@@ -5087,10 +5095,12 @@ async fn save_settings(
                 edit.instructions,
             )
             // On what the file already holds, for the reason the secrets below are
-            // written that way: `session_path` is the one key in this file the page
-            // has no field for — an install writes it and a hand-edit changes it —
-            // and a save built out of what the page sent would take it away.
-            .keeping_session_path(&settings.config()),
+            // written that way. `session_path` is a key in this file the page has
+            // no field for at all — an install writes it and a hand-edit changes
+            // it — and the descriptor half of every `languages` entry is an
+            // installer's, of which the page draws two keys: a save built out of
+            // what the page sent would take either away.
+            .keeping_what_the_page_never_drew(&settings.config()),
         )?;
 
         // On what the file already holds rather than on nothing: a save writes

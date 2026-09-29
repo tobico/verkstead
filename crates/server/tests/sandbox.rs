@@ -37,7 +37,7 @@ use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
-use verkstead_server::settings::{RustBuildCache, Settings};
+use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
@@ -5685,7 +5685,7 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
     fixture.attach("wireframe.png", b"PNG");
 
     let cache = fixture.cache(true);
-    cache.compiling(&RustBuildCache::default(), None);
+    cache.compiling(&fixture.settings.config(), None);
 
     let reported = compile_server_report(&fixture);
 
@@ -5751,7 +5751,7 @@ async fn a_second_session_asking_for_a_compile_server_gets_the_one_already_up() 
     let fixture = grilling().await;
     let cache = fixture.cache(true);
 
-    cache.compiling(&RustBuildCache::default(), None);
+    cache.compiling(&fixture.settings.config(), None);
 
     let first = compile_server_report(&fixture);
     let started = std::fs::metadata(fixture.cache_dir().join(COMPILE_SERVER_REPORT))
@@ -5761,7 +5761,7 @@ async fn a_second_session_asking_for_a_compile_server_gets_the_one_already_up() 
 
     // The clone a session's spawn is handed, which is the one that would start a
     // second server if this were held per session rather than per machine.
-    cache.clone().compiling(&RustBuildCache::default(), None);
+    cache.clone().compiling(&fixture.settings.config(), None);
 
     assert_eq!(
         std::fs::metadata(fixture.cache_dir().join(COMPILE_SERVER_REPORT))
@@ -5781,11 +5781,12 @@ async fn a_size_the_human_changed_starts_the_compile_server_again() {
     let fixture = grilling().await;
     let cache = fixture.cache(true);
 
-    cache.compiling(&RustBuildCache::default(), None);
+    cache.compiling(&fixture.settings.config(), None);
     assert_eq!(compile_server_report(&fixture)["size"], "30G");
 
     std::fs::remove_file(fixture.cache_dir().join(COMPILE_SERVER_REPORT)).unwrap();
-    cache.compiling(&RustBuildCache::of(true, Some("5G".to_owned())), None);
+    fixture.configure("rust_build_cache:\n  size: 5G\n");
+    cache.compiling(&fixture.settings.config(), None);
 
     assert_eq!(
         compile_server_report(&fixture)["size"],

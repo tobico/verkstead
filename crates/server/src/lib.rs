@@ -1395,6 +1395,17 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And where the credentials are read from, which is the same directory
+    // again — both the ones a session runs with and the one the server's own
+    // `gh` authenticates as. Nothing is read here: the files are read as each
+    // session is spawned and as each `gh` is run, so what the human saves
+    // through the settings page applies without a restart — see [`settings`].
+    //
+    // Before the build cache below, which wants the descriptors this
+    // installation has: whether anything names a store beside the Worktrees is
+    // what says whether there is a directory to make.
+    let settings = settings::Settings::in_data_dir(&data_dir);
+
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see
     // [`build_cache::BuildCache::resolve`] for why this one directory is
@@ -1403,7 +1414,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // given, and a bind of nothing will not start. An sccache that could not be
     // found is not a failure: what is left still shares the downloads, and the
     // log line says so.
-    let cache = build_cache::BuildCache::resolve(config.build_cache_dir.as_deref(), &data_dir)?;
+    let cache = build_cache::BuildCache::resolve(
+        config.build_cache_dir.as_deref(),
+        &data_dir,
+        &languages::configured(&settings.config()),
+    )?;
 
     // And the executable every sandbox asks with, which is this one: `verkstead
     // serve` and `verkstead ask` are two verbs of one binary, so a session's CLI
@@ -1437,13 +1452,6 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // as its first file lands in it, and read-only inside every session it has
     // after that — see [`attachments`].
     let attachments = attachments::Attachments::under(&data_dir);
-
-    // And where the credentials are read from, which is the same directory
-    // again — both the ones a session runs with and the one the server's own
-    // `gh` authenticates as. Nothing is read here: the files are read as each
-    // session is spawned and as each `gh` is run, so what the human saves
-    // through the settings page applies without a restart — see [`settings`].
-    let settings = settings::Settings::in_data_dir(&data_dir);
 
     // With one exception, read here and held for the run: the directories
     // Verkstead has installed into, which a session's `PATH` leads with. It is

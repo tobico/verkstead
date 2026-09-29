@@ -59,11 +59,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use crate::languages;
+use crate::languages::Languages;
 use crate::platform::Platform;
 use crate::sandbox::account::Logon;
 use crate::sandbox::outliving;
 use crate::sandbox::{self, Access, Reach, Rendering};
-use crate::settings::RustBuildCache;
+use crate::settings::Config;
 
 /// What is looked for on the server's own `PATH`, and the name it is found
 /// under inside a sandbox: in the directory of Verkstead's own that the binary
@@ -347,7 +348,11 @@ impl BuildCache {
     /// what is left is still worth having — the downloads are still shared —
     /// so this says so in the log and carries on: a machine without sccache
     /// installed is a slower machine, never a broken one.
-    pub fn resolve(configured: Option<&Path>, data_dir: &Path) -> anyhow::Result<BuildCache> {
+    pub fn resolve(
+        configured: Option<&Path>,
+        data_dir: &Path,
+        languages: &Languages,
+    ) -> anyhow::Result<BuildCache> {
         let dir = match configured {
             Some(dir) => dir.to_owned(),
             None => crate::platform::cache_dir().ok_or_else(|| {
@@ -408,14 +413,18 @@ impl BuildCache {
 
         // And the directory beside it, **only where a loaded descriptor names
         // it** — see [`crate::languages`], and the `{stores}` placeholder in
-        // the file this reads. With Rust the only language built in, nothing
+        // the descriptors. With Rust the only language on this machine nothing
         // names it, nothing is made here and no session is opened onto one.
         //
         // Asked of every descriptor rather than of the enabled ones, because
         // this is startup and the switch is a session's: a language turned off
         // this morning is one turned on again this afternoon without the server
-        // being restarted.
-        if languages::built_in().names_stores() {
+        // being restarted. `languages` is therefore the configured set rather
+        // than the built-in one — an installer whose own descriptor hardlinks
+        // out of a store wants the directory made, and a descriptor added to
+        // `config.yaml` after this ran is the one case here that wants a
+        // restart.
+        if languages.names_stores() {
             let stores = languages::stores(data_dir);
 
             std::fs::create_dir_all(&stores).map_err(|error| {
@@ -530,17 +539,20 @@ impl BuildCache {
     /// Nothing waits on it and nothing fails if it will not start: a session
     /// whose compile server is missing falls back to starting one of its own,
     /// which is what every session did before this existed.
-    pub fn compiling(&self, settings: &RustBuildCache, session_account: Option<&Logon>) {
+    pub fn compiling(&self, config: &Config, session_account: Option<&Logon>) {
         let (Some(dir), Some(sccache), Some(data_dir)) = (&self.dir, &self.sccache, &self.data_dir)
         else {
             return;
         };
 
         // Wanted by somebody, which is a language that is on and names the
-        // capability rather than a Repo that holds a manifest.
-        if !languages::built_in().naming(languages::SCCACHE, switched(settings)) {
+        // capability rather than a Repo that holds a manifest — and the size
+        // it asks its store to be, which is what the server is started with.
+        let languages = languages::configured(config);
+
+        let Some(size) = languages.wanting(languages::SCCACHE) else {
             return;
-        }
+        };
 
         let mut running = self.held();
 
@@ -548,7 +560,7 @@ impl BuildCache {
             // Still up and still the size the human asked for is nothing to do.
             // `try_wait` rather than a signal: a server that died is one to
             // start again, and asking is also what reaps it.
-            if !one.server.stopped() && one.size == settings.size() {
+            if !one.server.stopped() && one.size == size {
                 return;
             }
 
@@ -563,7 +575,7 @@ impl BuildCache {
         // have been.
         let began = std::time::Instant::now();
 
-        let started = compile_server(dir, sccache, data_dir, settings.size(), session_account)
+        let started = compile_server(dir, sccache, data_dir, size, session_account)
             .and_then(|rendering| left_running(&rendering));
 
         let took = began.elapsed();
@@ -585,7 +597,7 @@ impl BuildCache {
 
                 tracing::info!(
                     cache = %dir.display(),
-                    size = settings.size(),
+                    size,
                     ?took,
                     "the shared compile server is up: every session's rustc goes through \
                      this one, in a sandbox holding the worktrees and the cache",
@@ -594,7 +606,7 @@ impl BuildCache {
                 *running = Some(Compiling {
                     _held: outliving::held(Platform::HERE, &server),
                     server,
-                    size: settings.size().to_owned(),
+                    size: size.to_owned(),
                 });
             }
             Err(error) => {
@@ -630,14 +642,10 @@ impl BuildCache {
     /// sccache is joined in on the platforms that join it in at all — see
     /// [`sandbox::sccache_inside`].
     ///
-    /// `settings` is read at every session spawn rather than held from startup,
-    /// so a switch flipped in the workbench applies to the next session.
-    pub fn shared(
-        &self,
-        settings: &RustBuildCache,
-        platform: Platform,
-        ours: &Path,
-    ) -> Option<Shared> {
+    /// `config` is read at every session spawn rather than held from startup,
+    /// so a switch flipped in the workbench applies to the next session — and
+    /// so does a descriptor an installer wrote into `config.yaml` this morning.
+    pub fn shared(&self, config: &Config, platform: Platform, ours: &Path) -> Option<Shared> {
         let (dir, data_dir) = (self.dir.as_deref()?, self.data_dir.as_deref()?);
 
         let machine = languages::Machine::of(
@@ -648,7 +656,7 @@ impl BuildCache {
                 .map(|sccache| sandbox::sccache_inside(platform, ours, sccache)),
         );
 
-        let given = languages::built_in().given(&machine, switched(settings));
+        let given = languages::configured(config).given(&machine);
 
         if given.is_empty() {
             return None;
@@ -661,21 +669,6 @@ impl BuildCache {
             sccache: self.sccache.clone().filter(|_| given.sccache()),
             given,
         })
-    }
-}
-
-/// What the settings say about each language: the size where it is on, and
-/// nothing where it is off.
-///
-/// `rust_build_cache` is Rust's, which is what an install that wrote one keeps.
-/// Every other language is on at its own default, which is the rule every
-/// built-in follows — a human should never have a worse experience for not
-/// having checked the settings page. The next task is where `config.yaml` holds
-/// a map of its own and this reads that instead.
-fn switched(settings: &RustBuildCache) -> impl Fn(&str) -> Option<String> + '_ {
-    |name| match name {
-        languages::RUST => settings.enabled().then(|| settings.size().to_owned()),
-        _ => Some(SIZE.to_owned()),
     }
 }
 
@@ -723,8 +716,12 @@ impl Shared {
 /// starts on the switch rather than on what a checkout holds — see
 /// [`BuildCache::compiling`], and [`crate::languages::Descriptor::detected`],
 /// which is the question itself.
-pub fn builds_rust(repo: &Path) -> bool {
-    languages::built_in()
+///
+/// The descriptors rather than a config, because the one caller asks Rust's
+/// switch of them in the same breath: a language that is off compiles nothing
+/// to warn about.
+pub fn builds_rust(loaded: &Languages, repo: &Path) -> bool {
+    loaded
         .get(languages::RUST)
         .is_some_and(|rust| rust.detected(repo))
 }
@@ -1090,8 +1087,26 @@ mod tests {
     const OURS: &str = "/verkstead/bin";
 
     /// What a session is given, asked the way a sandbox asks it.
-    fn shared(cache: &BuildCache, settings: &RustBuildCache) -> Option<Shared> {
-        cache.shared(settings, Platform::HERE, Path::new(OURS))
+    fn shared(cache: &BuildCache, config: &Config) -> Option<Shared> {
+        cache.shared(config, Platform::HERE, Path::new(OURS))
+    }
+
+    /// A `config.yaml` as somebody could have written it, read the way the
+    /// server reads one.
+    ///
+    /// Through the file's own grammar rather than through a constructor,
+    /// because what is under test here is what an installation *says*: the
+    /// released version's `rust_build_cache` and the map that replaced it are
+    /// two spellings of the same thing, and a test that built the struct
+    /// directly could not tell them apart.
+    fn configured(yaml: &str) -> Config {
+        Config::read(yaml).expect("a config.yaml somebody could have written")
+    }
+
+    /// And nothing configured at all, which is every language on at its own
+    /// default size.
+    fn unconfigured() -> Config {
+        Config::default()
     }
 
     /// What a variable holds, or `None` where the session is not set it.
@@ -1112,14 +1127,14 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        assert!(shared(&cache, &RustBuildCache::of(false, None)).is_none());
+        assert!(shared(&cache, &configured("rust_build_cache:\n  enabled: false\n")).is_none());
     }
 
     /// And a server with no cache at all hands out nothing whatever the
     /// settings say.
     #[test]
     fn a_server_without_one_gives_a_sandbox_nothing_either() {
-        assert!(shared(&BuildCache::none(), &RustBuildCache::default()).is_none());
+        assert!(shared(&BuildCache::none(), &unconfigured()).is_none());
         assert!(!BuildCache::none().caches_compiles());
     }
 
@@ -1132,8 +1147,7 @@ mod tests {
             Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
             PathBuf::from("/var/lib/verkstead"),
         );
-        let shared = shared(&cache, &RustBuildCache::default())
-            .expect("nothing configured is the feature on");
+        let shared = shared(&cache, &unconfigured()).expect("nothing configured is the feature on");
 
         assert_eq!(
             shared.dirs(),
@@ -1169,6 +1183,126 @@ mod tests {
         );
     }
 
+    /// A cache with an sccache on it, which is what a session is composed
+    /// against where the whole of the descriptors is the thing under test.
+    fn compiling_cache() -> BuildCache {
+        BuildCache::at(
+            PathBuf::from("/var/cache/verkstead"),
+            Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
+            PathBuf::from("/var/lib/verkstead"),
+        )
+    }
+
+    /// An override of one of Rust's variables changes that one and leaves the
+    /// rest as the built-in says.
+    ///
+    /// Which is the whole reason the merge is key by key: an installer who
+    /// moved the registry somewhere still gets every later fix to the three
+    /// variables they did not write, rather than a copy of this release's
+    /// descriptor frozen into their file.
+    #[test]
+    fn an_override_of_one_variable_leaves_the_rest_as_the_built_in_says() {
+        let cache = compiling_cache();
+        let config =
+            configured("languages:\n  rust:\n    env:\n      CARGO_HOME: \"{cache}/crates\"\n");
+
+        let shared = shared(&cache, &config).expect("a session is still given one");
+
+        assert_eq!(
+            variable(&shared, "CARGO_HOME"),
+            Some("/var/cache/verkstead/crates"),
+            "the one the file wrote",
+        );
+        assert_eq!(
+            variable(&shared, "SCCACHE_DIR"),
+            Some("/var/cache/verkstead/sccache"),
+            "and the ones it did not, exactly as the built-in has them",
+        );
+        assert_eq!(variable(&shared, "SCCACHE_CACHE_SIZE"), Some(SIZE));
+        assert!(variable(&shared, "RUSTC_WRAPPER").is_some());
+    }
+
+    /// And a `null` takes a variable **out** of the next session rather than
+    /// setting it to nothing.
+    #[test]
+    fn a_null_takes_a_variable_out_of_the_next_session() {
+        let cache = compiling_cache();
+        let config = configured("languages:\n  rust:\n    env:\n      CARGO_HOME: null\n");
+
+        let shared = shared(&cache, &config).expect("what is left is still worth having");
+
+        assert_eq!(
+            variable(&shared, "CARGO_HOME"),
+            None,
+            "taken out, rather than set to an empty string a cargo inside would \
+             read as a directory called nothing",
+        );
+        assert_eq!(
+            variable(&shared, "SCCACHE_DIR"),
+            Some("/var/cache/verkstead/sccache"),
+            "and nothing else went with it",
+        );
+    }
+
+    /// A language with no built-in behind it is a descriptor of its own: on by
+    /// default, and its variables in the next session.
+    ///
+    /// Which is the point of the whole arrangement — the people this is for
+    /// build in languages Verkstead's maintainer does not, and adding one is a
+    /// file rather than a build.
+    #[test]
+    fn a_language_verkstead_never_heard_of_is_in_the_next_session() {
+        let cache = compiling_cache();
+        let config = configured(
+            "languages:\n  gleam:\n    label: Gleam\n    detect:\n      - gleam.toml\n    \
+             env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n      GLEAM_LIMIT: \"{size}\"\n",
+        );
+
+        let shared = shared(&cache, &config).expect("a session is given what it says");
+
+        assert_eq!(
+            variable(&shared, "GLEAM_CACHE"),
+            Some("/var/cache/verkstead/gleam"),
+            "the placeholders are filled for an installer's descriptor exactly \
+             as they are for a built-in",
+        );
+        assert_eq!(
+            variable(&shared, "GLEAM_LIMIT"),
+            Some(SIZE),
+            "and its store is its own default size until somebody says",
+        );
+        assert_eq!(
+            variable(&shared, "CARGO_HOME"),
+            Some("/var/cache/verkstead/cargo"),
+            "beside Rust's, which is untouched by a language beside it",
+        );
+    }
+
+    /// The released version's key is still the switch on Rust's variables, and
+    /// the map is what wins where both are written.
+    #[test]
+    fn the_key_that_was_there_before_the_map_still_switches_rust() {
+        let cache = compiling_cache();
+
+        assert!(
+            shared(&cache, &configured("rust_build_cache:\n  enabled: false\n")).is_none(),
+            "an install that turned it off before the map existed is still off",
+        );
+
+        let both = configured(
+            "rust_build_cache:\n  enabled: false\n  size: 5G\nlanguages:\n  rust:\n    \
+             enabled: true\n    size: 90G\n",
+        );
+
+        let shared = shared(&cache, &both).expect("the map turned it back on");
+
+        assert_eq!(
+            variable(&shared, "SCCACHE_CACHE_SIZE"),
+            Some("90G"),
+            "and the map's size is the one the store is given",
+        );
+    }
+
     /// An sccache the server never found is a cache that still shares the
     /// downloads — see [`BuildCache::resolve`].
     #[test]
@@ -1178,7 +1312,7 @@ mod tests {
             None,
             PathBuf::from("/var/lib/verkstead"),
         );
-        let shared = shared(&cache, &RustBuildCache::default()).unwrap();
+        let shared = shared(&cache, &unconfigured()).unwrap();
 
         assert!(!cache.caches_compiles());
         assert_eq!(shared.sccache(), None);
@@ -1200,8 +1334,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("never-made/verkstead");
 
-        let resolved =
-            BuildCache::resolve(Some(&cache), dir.path()).expect("it is made rather than refused");
+        let resolved = BuildCache::resolve(Some(&cache), dir.path(), languages::built_in())
+            .expect("it is made rather than refused");
 
         assert_eq!(resolved.dir(), Some(cache.as_path()));
         assert!(cache.is_dir());
@@ -1224,7 +1358,10 @@ mod tests {
         let file = dir.path().join("a-file");
         std::fs::write(&file, "not a directory\n").unwrap();
 
-        assert!(BuildCache::resolve(Some(&file.join("cache")), dir.path()).is_err());
+        assert!(
+            BuildCache::resolve(Some(&file.join("cache")), dir.path(), languages::built_in())
+                .is_err()
+        );
     }
 
     /// The compile server is only ever the human's to have: switched off, there
@@ -1237,7 +1374,7 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        cache.compiling(&RustBuildCache::of(false, None), None);
+        cache.compiling(&configured("rust_build_cache:\n  enabled: false\n"), None);
 
         assert!(cache.held().is_none());
     }
@@ -1253,7 +1390,7 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        cache.compiling(&RustBuildCache::default(), None);
+        cache.compiling(&unconfigured(), None);
 
         assert!(cache.held().is_none());
     }
@@ -1295,7 +1432,7 @@ mod tests {
 
         assert_eq!(cache.caches_compiles(), here);
         assert_eq!(
-            shared(&cache, &RustBuildCache::default())
+            shared(&cache, &unconfigured())
                 .expect("nothing configured is the feature on")
                 .sccache()
                 .is_some(),
@@ -1340,7 +1477,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert!(
-            !builds_rust(dir.path()),
+            !builds_rust(languages::built_in(), dir.path()),
             "an empty directory builds nothing"
         );
 
@@ -1348,12 +1485,12 @@ mod tests {
         std::fs::write(dir.path().join("crates/Cargo.toml"), "[package]\n").unwrap();
 
         assert!(
-            !builds_rust(dir.path()),
+            !builds_rust(languages::built_in(), dir.path()),
             "a manifest somewhere underneath is not the root's"
         );
 
         std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();
 
-        assert!(builds_rust(dir.path()));
+        assert!(builds_rust(languages::built_in(), dir.path()));
     }
 }

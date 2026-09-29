@@ -1089,6 +1089,42 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     );
 }
 
+/// And a language an installer wrote a descriptor for rides along the same way,
+/// every key of it.
+///
+/// The page draws two keys of an entry — the switch and the size — and an
+/// installer owns the rest: the label, the manifests and the variables. One
+/// request writes the whole of `config.yaml`, so a save built out of what the
+/// page sent would take a language off the machine at the next session.
+#[tokio::test]
+async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it() {
+    let (dir, app) = app().await;
+
+    let descriptor = "languages:\n  gleam:\n    label: Gleam\n    detect:\n      \
+                      - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n";
+
+    hand_edit(dir.path(), "config.yaml", descriptor);
+
+    save_author(&app, "Ada", "ada@example.com").await;
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(written.contains("Ada"), "what the page sent is in the file");
+
+    for key in [
+        "gleam",
+        "Gleam",
+        "gleam.toml",
+        "GLEAM_CACHE",
+        "{cache}/gleam",
+    ] {
+        assert!(
+            written.contains(key),
+            "and so is `{key}`, which the page never drew: {written}",
+        );
+    }
+}
+
 /// Save a text and leave everything else alone, which is what the instructions
 /// pane's own press sends.
 async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {

@@ -322,8 +322,7 @@ impl Agents {
         // to reach starts one inside its own sandbox. Every time rather than
         // once, because the switch, the size and whether the server is still
         // alive are all read at this moment.
-        self.cache
-            .compiling(config.rust_build_cache(), session_account.as_ref());
+        self.cache.compiling(&config, session_account.as_ref());
 
         let sandbox = Sandbox::for_conversation(
             conversation,

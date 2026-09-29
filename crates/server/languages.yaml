@@ -10,6 +10,23 @@
 # behaviour — the Compile Server an sccache needs — is built into the server and
 # switched on by name here.
 #
+# Two more keys belong to the same entry and are not written here, because what
+# they say is a machine's rather than a release's:
+#
+#   enabled    whether sessions get this language at all. Absent is **on**, so
+#              a language nobody has said anything about is one that works.
+#
+#   size       how big its store may grow, which is what `{size}` below stands
+#              for. Absent is 30G.
+#
+# Those two are the only keys the settings page ever writes, so an entry an
+# installer wrote keeps everything else in it when somebody saves that page.
+# `rust_build_cache` in `config.yaml` is still read as Rust's two, and this map
+# wins where both say something.
+#
+# A variable set to `null` is taken **out**: that is how an override drops one
+# of the variables below without having to write the rest of them out again.
+#
 # Placeholders stand for the things only the server knows:
 #
 #   {cache}    the Build Cache: `--build-cache-dir`, or this machine's own cache
@@ -23,8 +40,8 @@
 #              free to be a disk of its own, which is what the packaged unit's
 #              separate `CacheDirectory` and `StateDirectory` are.
 #
-#   {size}     how big this language's store may grow: the settings page's to
-#              change, and the default where nobody has.
+#   {size}     how big this language's store may grow: this entry's own `size`
+#              key, which the settings page writes, and 30G where nobody has.
 #
 #   {sccache}  the sccache this server found, at the path a session reaches it
 #              by. Only inside the `sccache` capability below, which is what
