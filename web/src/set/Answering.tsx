@@ -789,10 +789,12 @@ function Tabulated(props: {
 ///
 /// A row cannot be wrapped in a label the way a list entry is, so the click sits
 /// on the row and the radio is named by the cell holding its text — which is the
-/// accessible name a wrapping label would have given it. A click on the radio
-/// bubbles to the row like any other, so both reach the same handler exactly
-/// once, and the gestures are the list's: a click selects or clears, an arrow
-/// key only moves.
+/// accessible name a wrapping label would have given it. The gestures are the
+/// list's down to the handler they go through: a press anywhere in the row
+/// selects or clears, a press on the radio is the radio's own, and an arrow key
+/// only moves. See [`rowPress`], which is what makes the two shapes one
+/// arrangement — here it forwards nothing and cancels nothing, there being no
+/// label, and what it is here for is the focus.
 function Row(props: {
   option: OptionView;
   group: string;
@@ -805,7 +807,7 @@ function Row(props: {
   return (
     <tr
       class={marks(props.option)}
-      onClick={() => props.fields.pick(n())}
+      onClick={rowPress(() => props.fields.pick(n()))}
     >
       <td class={page.pick}>
         <input
@@ -815,9 +817,12 @@ function Row(props: {
           value={n()}
           checked={props.fields.selected() === n()}
           aria-labelledby={naming()}
-          // The click is the row's, so only the arrow key's change is answered
-          // here — see `Offered` for what the two gestures are between them.
+          // Both, exactly as the list's radio answers both — see `Offered`,
+          // which is the same two lines for the same two gestures. A press that
+          // landed anywhere else in the row is the row's own and never reaches
+          // here.
           onChange={() => props.fields.move(n())}
+          onClick={() => props.fields.pick(n())}
         />
         <span class={page.n}>{n()}</span>
       </td>
@@ -867,9 +872,10 @@ function Row(props: {
 /// The other half of it is in the stylesheet: a row takes no selection, so there
 /// is no sliver left to be rid of. See `.option label` in `Sheet.module.css`.
 ///
-/// The rows of an Answer Table are already pressed this way and always were —
-/// there is no label to wrap a `tr` in, so nothing was ever forwarded and there
-/// is nothing to cancel. See [`Row`].
+/// The rows of an Answer Table come through here too, and there is no label to
+/// wrap a `tr` in: nothing is forwarded to them, so nothing is cancelled, and
+/// what they take from this is the focus. Every row a Set is answered by is then
+/// one arrangement rather than two that happen to agree. See [`Row`].
 function rowPress(
   act: () => void,
 ): (event: MouseEvent & { currentTarget: HTMLElement }) => void {

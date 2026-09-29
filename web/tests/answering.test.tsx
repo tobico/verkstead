@@ -544,13 +544,25 @@ describe("a question whose Options were declared as a table", () => {
   it("counts a tap on the radio itself once, like a tap anywhere else", async () => {
     const { page } = await answering(withTable(WAITING));
 
-    // The radio's own click bubbles to the row, so it reaches the one handler
-    // there and not a second of its own — a second would undo the first.
+    // The radio's own click is the radio's, and the row stands out of a press
+    // that landed on it — so one gesture reaches one handler, rather than that
+    // one and the row's undoing it.
     fireEvent.click(option(page, "Q1", 1));
     expect(option(page, "Q1", 1).checked).toBe(true);
 
     fireEvent.click(option(page, "Q1", 1));
     expect(option(page, "Q1", 1).checked).toBe(false);
+  });
+
+  it("focuses the radio a press picked, as a press on a list row does", async () => {
+    const { page } = await answering(withTable(WAITING));
+
+    // The row always carried its own click and moved no focus with it, so the
+    // arrow keys had nothing to move afterwards. A list's row always did, by way
+    // of the label wrapped round it.
+    fireEvent.click(row(page, "Q1", 2).querySelector("td:nth-child(2)")!);
+
+    expect(document.activeElement).toBe(option(page, "Q1", 2));
   });
 
   it("moves the selection on an arrow key without ever clearing it", async () => {
