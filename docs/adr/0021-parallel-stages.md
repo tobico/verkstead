@@ -192,3 +192,9 @@ one and hide two.
   matching device is up. After cluster mode; a grilling of its own.
 - **Being told that a stage has waited long to join.** Asked about in passing
   and not taken up.
+- **Several stages of one roadmap running out of one account's window**, said
+  once rather than once per stage. They run under one Implementation Pairing and
+  so share one usage window, and what a window running out writes today is one
+  stop, one Notice, one *blocked on you* and one notification **per
+  Conversation** — three stages stopping together read as three things rather
+  than one. Weighed while stage 04 was planned and left exactly as it is.
