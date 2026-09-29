@@ -141,6 +141,46 @@ impl Drivers {
         }
     }
 
+    /// Which Conversations are **taking a place on the server**: those with a
+    /// driver registered, and those with a session running, each counted once.
+    ///
+    /// The second limit in front of an unattended start — see
+    /// [`crate::stages::CONVERSATIONS_AT_ONCE`], which is how many places there
+    /// are, and [`crate::continuing::carry_on`], which spends what is left of
+    /// them. Every Conversation of every kind is in it: a grilling, a Review, a
+    /// Tinker, another roadmap's stage. What the limit is for is the machine, and
+    /// the machine does not care which effort a session belongs to.
+    ///
+    /// **Both registers rather than either alone.** A stage waiting to join the
+    /// chain has no session — the hold stands in front of the launch — and a
+    /// Conversation between two task sessions has none for a moment either, so
+    /// counting sessions would let one more in through both gaps. And a grilling
+    /// nobody has picked on yet is a session with no driver behind it, which is
+    /// the gap the other way. The union is what stays put across all three.
+    ///
+    /// The sessions register is handed in whole rather than asked per
+    /// Conversation, for [`Drivers::driven`]'s reason: one lock taken once.
+    ///
+    /// A Conversation that is Done, Draft or stopped is in neither register and
+    /// so takes no place — a stop being raised as the driver lets go. And **both
+    /// registers are facts about this process**, so a server that has just come
+    /// back holds no places at all until the startup resume takes its runs back
+    /// up, which is the reading the stall sweep already waits for.
+    ///
+    /// The set rather than the count, because the one caller that has a
+    /// Conversation of its own to leave out needs to say which — see
+    /// [`crate::continuing::carry_on`], where the Conversation whose settle
+    /// brought the reading about is the place that settle freed.
+    pub(crate) fn taking(&self, working: &HashSet<i64>) -> HashSet<i64> {
+        self.driving
+            .lock()
+            .expect("the drivers register is not poisoned")
+            .keys()
+            .copied()
+            .chain(working.iter().copied())
+            .collect()
+    }
+
     /// Whether any driver is registered for `conversation_id`.
     ///
     /// The raw reading of the register, which is what the Conversation page
@@ -432,5 +472,66 @@ mod tests {
                 "{state:?} is not a state anything is supposed to be driving",
             );
         }
+    }
+
+    /// A place on the server is taken by a Conversation with a session running
+    /// **or** a driver registered, and by one with neither it is not.
+    ///
+    /// Both registers rather than either alone — see [`Drivers::taking`]. A stage
+    /// waiting to join the chain is a driver with no session, and a grilling
+    /// nobody has picked on yet is a session with no driver, so a count off one
+    /// register would miss whichever of the two it was not.
+    #[test]
+    fn a_session_running_or_a_driver_registered_each_take_a_place() {
+        let drivers = Drivers::new();
+
+        assert!(
+            drivers.taking(&working(&[])).is_empty(),
+            "a server with nothing running and nothing driven holds no places",
+        );
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])),
+            working(&[CONVERSATION]),
+            "a session running takes one, with nothing registered behind it",
+        );
+
+        let driving = drivers.driving(CONVERSATION + 1);
+
+        assert_eq!(
+            drivers.taking(&working(&[])),
+            working(&[CONVERSATION + 1]),
+            "and a driver registered takes one, with no session under it",
+        );
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])),
+            working(&[CONVERSATION, CONVERSATION + 1]),
+            "two Conversations, two places",
+        );
+
+        drop(driving);
+
+        assert!(
+            drivers.taking(&working(&[])).is_empty(),
+            "and a driver that let go leaves the place behind it",
+        );
+    }
+
+    /// And a Conversation in both registers at once takes **one** place rather
+    /// than two: what the limit counts is Conversations, and a run seen out by a
+    /// driver is the ordinary shape of one.
+    #[test]
+    fn a_conversation_in_both_registers_takes_one_place() {
+        let drivers = Drivers::new();
+        let watchers: Vec<Driving> = (0..3).map(|_| drivers.driving(CONVERSATION)).collect();
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])).len(),
+            1,
+            "one Conversation, however many things are holding it",
+        );
+
+        drop(watchers);
     }
 }

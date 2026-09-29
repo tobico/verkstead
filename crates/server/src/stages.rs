@@ -117,6 +117,44 @@ pub(crate) const STAGES: &str = "roadmaps";
 /// many are permitted is the caller's to say.
 pub(crate) const AT_ONCE: usize = 3;
 
+/// How many Conversations Verkstead runs at once **across the whole server**,
+/// whatever roadmap or Process they belong to, where nobody has said otherwise.
+///
+/// Four, which is the other number
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md) settled, and it sits
+/// beside [`AT_ONCE`]'s three so that one roadmap cannot take the whole server by
+/// default. The two limit different things and both are in force: the roadmap's
+/// is about how much of one effort is open at once, and this one is there for the
+/// machine — a stage may be a heavy build and a test run, and the hardware is
+/// shared by everything the server runs.
+///
+/// **A place is taken by a Conversation with a session running or a driver
+/// registered**, of any kind: a grilling, a Review, a Tinker, another roadmap's
+/// stage. Both registers rather than the sessions one alone, because a stage
+/// waiting to join the chain has no session at all and a Conversation between two
+/// task sessions has none for a moment either — see
+/// [`crate::drivers::Drivers::taking`], which is where the two are counted
+/// together. A Conversation that is Done, Draft or stopped holds none, a stop
+/// being raised as the driver lets go.
+///
+/// Which leaves the two limits deliberately asymmetric, and it is worth knowing
+/// which way: a **halted** stage keeps its place under its own roadmap's limit,
+/// the record having it in flight, and takes none here, nothing being run or
+/// driven. A server of halted stages goes on starting other roadmaps' stages
+/// while each halted stage's own roadmap stands still.
+///
+/// **It holds back only what Verkstead starts by itself** — a stage started by a
+/// settle. A press goes ahead over the limit and is counted from then on, which
+/// is why nothing on the adoption's side of this module has heard of the number:
+/// see [`startable`], which is what a press is offered and reads [`AT_ONCE`]
+/// alone.
+///
+/// Passed in rather than read here, for the reason [`AT_ONCE`] is: where a start
+/// is permitted stays the one place, and how many are permitted is the caller's
+/// to say. What counts the places is the carry-on — see
+/// [`crate::continuing::carry_on`].
+pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
+
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
 /// written to, where there are any.
 ///
@@ -332,7 +370,12 @@ pub(crate) enum Next {
         starting: Vec<Stage>,
 
         /// One sentence per ready stage that does not start: one that waited for
-        /// a place, one whose brief is not there to prime it from.
+        /// a place on its roadmap, one that waited for a place on the server, one
+        /// whose brief is not there to prime it from.
+        ///
+        /// The two waits are told apart because they are waits on different
+        /// things — see [`CONVERSATIONS_AT_ONCE`], which is the second limit, and
+        /// [`next_stage`], where both are spent.
         ///
         /// Said on the settled Conversation's Timeline as they stand, so that a
         /// roadmap which has gone quiet says why it went quiet — a stage waiting
@@ -562,6 +605,20 @@ pub(crate) struct Declaring<'a> {
 /// lowest-numbered ones start and the rest are held: the roadmap's order is still
 /// the roadmap's own, and a stage that waited is told so rather than dropped.
 ///
+/// **And a place on the server, which is the second limit**, in front of the
+/// first. `server_places` is how many of them are left over once every
+/// Conversation with a session running or a driver registered has taken its own —
+/// the carry-on counts them and hands the remainder in, the way it hands in the
+/// roadmap's number, so that how many are permitted stays the caller's to say. See
+/// [`CONVERSATIONS_AT_ONCE`], which is how many there are where Settings has not
+/// said, and [`crate::drivers::Drivers::taking`], which is the counting.
+///
+/// The two are spent together and a stage that starts spends one of each, so a
+/// ready stage that fits under its roadmap's limit and not under the server's is
+/// held with **a sentence of its own**: a roadmap waiting on the machine and a
+/// roadmap waiting on itself are two different things to be waiting for, and the
+/// human's next move is different for each.
+///
 /// **One brief read per stage that starts**, and a stage whose brief is not there
 /// halts itself alone — held with its own sentence while the rest of the ready
 /// stages go on starting. A brief nobody wrote is the human's to fix, and stopping
@@ -590,6 +647,7 @@ pub(crate) fn next_stage(
     branch: &str,
     record: &store::StageStandings,
     at_once: usize,
+    server_places: usize,
 ) -> Next {
     let index = format!("{ROADMAPS}/{roadmap}/{INDEX}");
 
@@ -676,6 +734,32 @@ pub(crate) fn next_stage(
                 entry.label,
                 entry.title,
                 how_many_places(at_once),
+            ));
+
+            continue;
+        }
+
+        // And the second limit, which this one fits under its roadmap's and not
+        // under: the places the server has are taken by Conversations of every
+        // kind, and this stage would be one more of them.
+        //
+        // A sentence of its own rather than the one above, because what it is
+        // waiting for is a different thing: nothing about this roadmap will free
+        // the place, and the human reading the Timeline can see for themselves
+        // what the server is busy with. Counted off `starting` for the reason the
+        // roadmap's places are — a place is spent by a stage that starts and by
+        // nothing else.
+        if starting.len() >= server_places {
+            // How many are taken is deliberately not said, for the reason the
+            // stages in flight are not: the registers were read before any of
+            // this, and a Conversation may have finished since. What says the
+            // number as of the moment it is asked is the settings pane.
+            held.push(format!(
+                "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place \
+                 on the server: the Conversations Verkstead is running have taken them all, \
+                 whatever roadmap or Process they belong to. It starts when one of them comes \
+                 free.",
+                entry.label, entry.title,
             ));
 
             continue;
@@ -2079,7 +2163,8 @@ mod tests {
     }
 
     /// What a reading holds back, which is a sentence per ready stage that does
-    /// not start: one waiting for a place, one whose brief is not there.
+    /// not start: one waiting for a place on its roadmap, one waiting for a place
+    /// on the server, one whose brief is not there.
     #[track_caller]
     fn holding(next: Next) -> Vec<String> {
         match next {
@@ -2221,6 +2306,10 @@ Turns this askance clone into Verkstead.
         /// tests that are about the limit rather than about which stages are
         /// ready. Every other reading here runs at [`AT_ONCE`], which is what the
         /// carry-on passes where nobody has set the number in Settings.
+        ///
+        /// On an **empty server**: every place there is stands free, which is the
+        /// reading every test but the ones about the second limit wants. See
+        /// [`Repo::next_on_a_server`], which is those.
         fn next_running(
             &self,
             at: &str,
@@ -2230,6 +2319,32 @@ Turns this askance clone into Verkstead.
             record: &store::StageStandings,
             at_once: usize,
         ) -> Next {
+            self.next_with_places(
+                at,
+                commit,
+                roadmap,
+                branch,
+                record,
+                at_once,
+                CONVERSATIONS_AT_ONCE,
+            )
+        }
+
+        /// And the same reading with both limits the caller's, which is what the
+        /// carry-on hands in: how many stages of this roadmap run at once, and how
+        /// many places the whole server has **left over** once everything already
+        /// running has taken its own.
+        #[allow(clippy::too_many_arguments)]
+        fn next_with_places(
+            &self,
+            at: &str,
+            commit: &str,
+            roadmap: &str,
+            branch: &str,
+            record: &store::StageStandings,
+            at_once: usize,
+            server_places: usize,
+        ) -> Next {
             next_stage(
                 self.path(),
                 Declaring { branch: at, commit },
@@ -2237,7 +2352,27 @@ Turns this askance clone into Verkstead.
                 branch,
                 record,
                 at_once,
+                server_places,
             )
+        }
+
+        /// What this roadmap would start with `server_places` free across the
+        /// whole server, its own limit being whatever is passed.
+        ///
+        /// The second limit's own harness — see [`CONVERSATIONS_AT_ONCE`]. A
+        /// roadmap's places and the server's are spent together, so both numbers
+        /// are the caller's here: what these tests are about is which of the two
+        /// is the one that bites.
+        fn next_on_a_server(
+            &self,
+            roadmap: &str,
+            record: &store::StageStandings,
+            at_once: usize,
+            server_places: usize,
+        ) -> Next {
+            let commit = self.committed();
+
+            self.next_with_places("main", &commit, roadmap, "", record, at_once, server_places)
         }
 
         /// What this roadmap would start with only `at_once` places to give, the
@@ -3428,6 +3563,150 @@ Turns this askance clone into Verkstead.
         assert!(
             held[0].contains("04") && held[0].contains("waiting for a place"),
             "told it is waiting rather than left to look forgotten: {held:?}",
+        );
+    }
+
+    /// And the **second** limit in front of the first: a ready stage that fits
+    /// under its roadmap's places and not under the server's waits, and is told it
+    /// is the server it is waiting on.
+    ///
+    /// A sentence of its own rather than the roadmap's, because what it is waiting
+    /// for is a different thing — nothing about this roadmap will free the place —
+    /// and a roadmap gone quiet says which of the two it went quiet for. See
+    /// [`CONVERSATIONS_AT_ONCE`].
+    #[test]
+    fn a_ready_stage_beyond_the_servers_places_waits_and_says_so() {
+        let repo = four_roots();
+
+        // Four places of its own, so nothing here is the roadmap's limit, and two
+        // free across the server: the Conversations holding the other two belong
+        // to whatever they belong to.
+        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2);
+
+        assert_eq!(
+            starting(&next),
+            ["01", "02"],
+            "two places on the server, and the lowest-numbered two take them",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 2, "and the other two wait: {held:?}");
+
+        for (stage, said) in ["03", "04"].iter().zip(&held) {
+            assert!(
+                said.contains(stage) && said.contains("waiting for a place on the server"),
+                "which stage, and which of the two limits it is waiting on: {said:?}",
+            );
+            assert!(
+                !said.contains("this roadmap runs"),
+                "and not its roadmap's, which has places to spare: {said:?}",
+            );
+        }
+    }
+
+    /// A server with no place free starts nothing at all, however much room the
+    /// roadmap itself has — with a sentence per ready stage, rather than the
+    /// silence a roadmap with nothing ready keeps.
+    ///
+    /// Which is the one that has to be visible: a server whose places are all held
+    /// by stages waiting on answers starts nothing more until one is answered, and
+    /// that is a thing to say rather than a stall to look like.
+    #[test]
+    fn a_server_with_no_places_left_starts_nothing_and_says_why() {
+        let repo = four_roots();
+
+        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 0);
+
+        assert!(
+            starting(&next).is_empty(),
+            "every place on the server is taken: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 4, "and all four ready stages wait: {held:?}");
+        assert!(
+            held.iter()
+                .all(|said| said.contains("waiting for a place on the server")),
+            "each told what it is waiting on: {held:?}",
+        );
+    }
+
+    /// And a server with places to spare leaves the roadmap's own limit to do the
+    /// holding, in the roadmap's own words.
+    ///
+    /// The two limits are both in force and the stricter one is what a stage is
+    /// told about. Three of one roadmap and four free on the server is the shape
+    /// every default machine is in.
+    #[test]
+    fn a_stage_held_by_its_roadmap_is_not_told_the_server_is_full() {
+        let repo = four_roots();
+
+        let next = repo.next_on_a_server(
+            "mvp",
+            &store::StageStandings::default(),
+            AT_ONCE,
+            CONVERSATIONS_AT_ONCE,
+        );
+
+        assert_eq!(
+            starting(&next),
+            ["01", "02", "03"],
+            "the roadmap's three, the server having four to give",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 04 is the one that waits: {held:?}");
+        assert!(
+            held[0].contains("this roadmap runs") && !held[0].contains("on the server"),
+            "told it is its roadmap's places that are taken: {held:?}",
+        );
+    }
+
+    /// And a place on the server is spent by a stage that **starts** and by
+    /// nothing else, the way a roadmap's is: a stage held for a brief nobody wrote
+    /// leaves its place to whatever is ready after it.
+    ///
+    /// Otherwise a server with two places free would run one stage and tell the
+    /// next one the machine was full while a place stood free.
+    #[test]
+    fn a_stage_with_no_brief_leaves_its_place_on_the_server_behind_it() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_ROOTS);
+
+        // Every brief but 02's, which is the entry that halts itself.
+        for (label, slug) in [
+            ("01", "workbench"),
+            ("03", "implementation"),
+            ("04", "wrap-up"),
+        ] {
+            repo.brief(
+                "mvp",
+                &format!("{label}-{slug}.md"),
+                &format!("# {label}. {slug}\n"),
+            );
+        }
+
+        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2);
+
+        assert_eq!(
+            starting(&next),
+            ["01", "03"],
+            "02 halted for its own brief and left its place to 03",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 2, "and 02 and 04 are both held: {held:?}");
+        assert!(
+            held[0].contains("02") && held[0].contains("there is nothing there to read"),
+            "02 for the brief nobody wrote: {held:?}",
+        );
+        assert!(
+            held[1].contains("04") && held[1].contains("waiting for a place on the server"),
+            "and 04 for the place 03 took: {held:?}",
         );
     }
 

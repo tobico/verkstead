@@ -18062,10 +18062,19 @@ const TWO_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.m
 /// and the fourth waits.
 const FOUR_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n- [ ] 03: Count the refusals — [brief](03-refusals.md) — no dependencies\n- [ ] 04: Say why — [brief](04-saying-why.md) — no dependencies\n"#;
 
+/// And five, which is more roots than the **server** has places however many the
+/// roadmap is allowed: four start and the fifth waits.
+const FIVE_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n- [ ] 03: Count the refusals — [brief](03-refusals.md) — no dependencies\n- [ ] 04: Say why — [brief](04-saying-why.md) — no dependencies\n- [ ] 05: Let them through — [brief](05-letting-through.md) — no dependencies\n"#;
+
 /// The briefs those last two name, written on the roadmap's own branch beside the
 /// two every one of these fixtures writes.
 const TWO_MORE_BRIEFS: &str = r#"    printf '# 03. Count the refusals\n' > docs/roadmaps/rate-limiting/03-refusals.md
     printf '# 04. Say why\n' > docs/roadmaps/rate-limiting/04-saying-why.md"#;
+
+/// And the fifth beside them, for the roadmap with five roots.
+const THREE_MORE_BRIEFS: &str = r#"    printf '# 03. Count the refusals\n' > docs/roadmaps/rate-limiting/03-refusals.md
+    printf '# 04. Say why\n' > docs/roadmaps/rate-limiting/04-saying-why.md
+    printf '# 05. Let them through\n' > docs/roadmaps/rate-limiting/05-letting-through.md"#;
 
 /// The two presses a roadmap Conversation ever takes: start grilling, and pick
 /// the roadmap direction on the Set that ends it.
@@ -18711,6 +18720,226 @@ async fn a_fourth_ready_stage_waits_for_a_place_and_is_told_so() {
         .contains("04-saying-why"),
         "and no branch was cut for the one that waited",
     );
+}
+
+/// And the **server's** places are the second limit, in front of the roadmap's: a
+/// roadmap allowed five stages with five roots starts four, which is as many
+/// Conversations as the whole server runs at once — and then a **press** starts
+/// the fifth over the limit.
+///
+/// Two halves of the one rule, which is why they are one test: the limit holds
+/// back what Verkstead starts by itself and never what the human presses. The
+/// fifth is told it is waiting for a place *on the server* rather than on its
+/// roadmap, because they are two different things to be waiting for — nothing
+/// about this roadmap will free the place, and what took them is four sessions
+/// running. Then *Continue a roadmap* starts it anyway, with all four places held,
+/// and what the press made is a fifth Conversation running.
+#[tokio::test]
+async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FIVE_ROOTS,
+            RECORDS_STACKING,
+            "",
+            THREE_MORE_BRIEFS,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Five places of its own, so the roadmap's limit is not what holds anything
+    // back here: what is left is the server's four, and nothing else is running.
+    configure(&fixture, "at_once:\n  roadmap_stages: 5\n");
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+            "roadmaps/rate-limiting/04-saying-why",
+        ],
+        "four Conversations across the server, and the lowest-numbered four at that",
+    );
+
+    // Said after the four that started, the waiting being a consequence of them.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 05"),
+        "which stage is waiting: {said:?}",
+    );
+    assert!(
+        !said.contains("this roadmap runs"),
+        "and not on its roadmap, which was given five places: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        5,
+        "the roadmap's own Conversation and four stages, and no fifth stage",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &[
+                "branch",
+                "--list",
+                "roadmaps/rate-limiting/05-letting-through"
+            ],
+        )
+        .contains("05-letting-through"),
+        "and no branch was cut for the one that waited",
+    );
+
+    // Every one of the four is still running or still driven, which is what makes
+    // the press below a press at four rather than a press at however many were
+    // left: a place is held by a Conversation with a session running or a driver
+    // registered, and each of these has both.
+    for stage in &stages {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", stage.id)).await;
+
+        assert!(
+            view.working || view.driven,
+            "{} is holding a place on the server",
+            view.branch,
+        );
+    }
+
+    // And now the human presses *Continue a roadmap* on the stage that is
+    // waiting. The limit is there for what Verkstead starts by itself, so the
+    // press goes ahead over it — read its own way in, through the adoption rather
+    // than through the carry-on.
+    //
+    // Off the notice, the way the press is: the roadmap is a document on the
+    // branch the Conversation that planned it is still on, so the base travels
+    // with the reading and the adoption is fixed to it.
+    let offers: Vec<verkstead_render::AbandonedRepo> =
+        get(&fixture.app, "/api/ui/abandoned-roadmaps").await;
+
+    let offered = offers
+        .iter()
+        .flat_map(|repo| repo.roadmaps.iter().map(move |roadmap| (repo, roadmap)))
+        .find(|(_, roadmap)| roadmap.name == "rate-limiting")
+        .expect("the roadmap is still offered with a stage waiting");
+
+    assert_eq!(
+        offered.1.stage, "05",
+        "and 05 is the stage the press would start, the other four being somebody's",
+    );
+
+    let started: Started = post(
+        &fixture.app,
+        "/api/ui/adoptions",
+        &serde_json::json!({
+            "repo_id": offered.0.repo_id,
+            "roadmap": "rate-limiting",
+            "base": offered.1.base,
+        }),
+    )
+    .await;
+    let Started::Started { id: adopting } = started else {
+        panic!("the adoption starts a Conversation to press on, got {started:?}");
+    };
+
+    // The Profiles this bench already saved rather than three more of them: a
+    // Profile's name is taken once it is saved, and what the pairings settle is
+    // which account the stage runs under rather than which Profile row it is.
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&fixture.app, "/api/ui/profiles").await;
+
+    for role in ["grilling", "implementation", "review"] {
+        let profile = profiles
+            .iter()
+            .find(|profile| profile.name.as_deref() == Some(role))
+            .expect("the Profiles the roadmap Conversation was paired under are still saved")
+            .id;
+
+        let pairing = serde_json::json!({
+            "profile_id": profile,
+            "model": format!("claude-{role}-5"),
+        });
+        let picked = match role {
+            "review" => serde_json::json!({ "pairing": pairing }),
+            _ => pairing,
+        };
+
+        let chosen: verkstead_render::ProfileChosen = post(
+            &fixture.app,
+            &format!("/api/ui/conversations/{adopting}/{role}-pairing"),
+            &picked,
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+    }
+
+    let adopted: Adopted = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{adopting}/adopt"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        adopted,
+        Adopted::Adopted,
+        "the press is not held back by a server whose places are taken",
+    );
+
+    let fifth: ConversationView =
+        get(&fixture.app, &format!("/api/ui/conversations/{adopting}")).await;
+
+    assert_eq!(fifth.branch, "roadmaps/rate-limiting/05-letting-through");
+    assert_eq!(fifth.state, Lifecycle::Implementing);
+    assert!(
+        git(
+            &fixture.repo(),
+            &[
+                "branch",
+                "--list",
+                "roadmaps/rate-limiting/05-letting-through"
+            ],
+        )
+        .contains("05-letting-through"),
+        "and the branch the settle would not cut is cut now",
+    );
+
+    // And what the press made is counted from then on: a fifth Conversation
+    // running, over a limit of four. The press goes ahead of the limit rather
+    // than out from under it — the next thing Verkstead would start by itself
+    // stands behind all five.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let fifth: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{adopting}")).await;
+
+        if fifth.working || fifth.driven {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage the press started never took a place of its own. \
+             The Timeline says: {:?}",
+            notices(&fifth),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
 }
 
 /// And a start that halts halts only itself: stage 01's branch is already taken,

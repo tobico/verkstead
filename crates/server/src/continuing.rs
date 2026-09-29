@@ -17,6 +17,20 @@
 //! changed on the settings page is in force at the next start without a restart,
 //! and nothing already running is stopped by it.
 //!
+//! **And up to as many Conversations across the whole server**, whatever roadmap
+//! or Process they belong to — four where nobody has said, which is
+//! [`stages::CONVERSATIONS_AT_ONCE`]. A place there is held by every Conversation
+//! with a session running or a driver registered, so a grilling somebody else
+//! started, a Review and another roadmap's stage are all standing in front of
+//! this one. The two limits are both in force and a stage that starts spends one
+//! of each; the counting is done here, off the two registers as they stand at the
+//! settle — see [`stages::next_stage`], which is handed what is left of them.
+//!
+//! The one place that is *not* held back is a press. *Continue a roadmap*, Start
+//! and Resume read their own way in and start what they were going to start, over
+//! the limit, and what they made is counted from then on: the limit is there for
+//! work nobody asked for, and a human at the workbench has asked.
+//!
 //! A roadmap that declares nothing has one ready stage at most, each of its stages
 //! standing on the one before it, so such a roadmap runs exactly as it always
 //! did: there is one scheduler rather than two.
@@ -252,6 +266,25 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     // happens on the blocking thread below with the git reads.
     let settings = state.settings.clone();
 
+    // And how many places the whole server has left, which is the other limit in
+    // front of a start — see [`stages::CONVERSATIONS_AT_ONCE`]. Counted here
+    // rather than inside the reading, so that where a start is permitted stays the
+    // one place and how many are permitted stays this caller's to say.
+    //
+    // Two in-process registers read as they stand this moment, which is why it
+    // happens on the runtime's threads rather than on the blocking one below: a
+    // count taken before a handful of git reads would be a count taken a moment
+    // too early, and both are locks rather than syscalls.
+    let mut taking = state.drivers.taking(&state.sessions.working());
+
+    // The Conversation whose settle brought this reading about is holding one of
+    // those registrations — the watcher running this very call — and it is Done.
+    // The place it is holding is the place this settle freed, so counting it here
+    // would be the roadmap waiting for a place it already has.
+    taking.remove(&conversation_id);
+
+    let server_places = stages::CONVERSATIONS_AT_ONCE.saturating_sub(taking.len());
+
     // Both readings together, off the runtime's threads: a handful of git reads
     // against a local directory, and a file read for the workflow.
     let read = tokio::task::spawn_blocking({
@@ -280,6 +313,10 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                     // never fewer than one whatever the file holds. See
                     // [`crate::settings::AtOnce`].
                     settings.config().at_once().roadmap_stages(),
+                    // And how many places the server has left over, counted off
+                    // its two registers a moment ago. Four where nobody has said,
+                    // whatever roadmap or Process is holding them.
+                    server_places,
                 ),
 
                 // Nothing left to read the roadmap at: not the top of its chain,
