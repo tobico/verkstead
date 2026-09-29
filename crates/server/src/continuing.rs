@@ -230,12 +230,25 @@ impl Brought {
     /// waiting, in the same breath and each on its own roadmap's Timeline. A
     /// roadmap passed over in silence reads as a roadmap forgotten.
     ///
-    /// **And it cannot repeat for nothing.** A look stops before it reads any
-    /// roadmap at all while the places are full — see [`crate::places`] — so the
-    /// first roadmap it reads always has one to give, and the only way a later
-    /// one finds none is that a stage started in this very look. One round of
-    /// these sentences per place that changes hands, which is the pace whole
-    /// Conversations finish at.
+    /// **And it cannot repeat for nothing**, which is what `full` is for: the
+    /// places counted afresh against the limit *after* the starts, and the
+    /// sentence said only where they really are all taken — see [`places_full`].
+    ///
+    /// Asked again rather than read off the reading, because the reading counts a
+    /// place as spent by every stage it puts up to start and a start can still
+    /// refuse after that: a branch somebody has taken, a git author nobody has
+    /// set. Such a stage spends a place on paper, holds the stage behind it, and
+    /// registers nothing — so the next look finds the places exactly as they were
+    /// and would say it all over again, every half minute for as long as the
+    /// server is up. The one Timeline a look writes to would be the one a human
+    /// most needs to read.
+    ///
+    /// What the check leaves said is the case this is here for. The places run out
+    /// mid-list: with one free and three roadmaps wanting it, the oldest starts a
+    /// stage — which takes that place, so the places are full — and the other two
+    /// are told they are still waiting, in the same breath and each on its own
+    /// roadmap's Timeline. A roadmap passed over in silence reads as a roadmap
+    /// forgotten.
     ///
     /// The other two waits stay off a Timeline. A stage held by its **own**
     /// roadmap's limit waits on that roadmap settling, which is the settle that
@@ -243,11 +256,19 @@ impl Brought {
     /// human, who was told at the settle and would be told again every half
     /// minute until they got to it. See [`stages::Held`], where the three part
     /// company.
-    async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held) {
+    async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held, full: bool) {
         match (self, held) {
-            (Self::Settle, _) | (Self::Look, stages::Held::Server(_)) => {
+            (Self::Settle, _) => say(state, conversation_id, held.said()).await,
+            (Self::Look, stages::Held::Server(_)) if full => {
                 say(state, conversation_id, held.said()).await;
             }
+            (Self::Look, stages::Held::Server(_)) => tracing::debug!(
+                conversation_id,
+                said = held.said(),
+                "a look held a stage back for a place that a start then did not take after \
+                 all, so the places are not full and it says nothing rather than saying this \
+                 again at every look from here on",
+            ),
             (Self::Look, _) => tracing::debug!(
                 conversation_id,
                 said = held.said(),
@@ -256,6 +277,17 @@ impl Brought {
             ),
         }
     }
+}
+
+/// Whether every place on the server is taken **this moment**.
+///
+/// The same count a start is weighed against — see [`crate::stages::CONVERSATIONS_AT_ONCE`] —
+/// asked again after the starts rather than carried down from before them, which
+/// is [`Brought::held`]'s reason and the one caller. Both halves read afresh: the
+/// two registers, and how many places there are off `config.yaml`.
+fn places_full(state: &AppState) -> bool {
+    state.drivers.taking(&state.sessions.working()).len()
+        >= state.settings.config().at_once().conversations()
 }
 
 /// Start every stage of `conversation_id`'s roadmap that may start now.
@@ -592,8 +624,20 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
     // And what was ready and did not start, said after the ones that did: a
     // Timeline reads in the order things happened, and a stage waits for a place
     // because the stages above it took theirs.
+    //
+    // Whether the server's places really are all taken, which is the one of these
+    // a **look** says out loud and only where they are — see [`Brought::held`],
+    // where that is decided and why. Counted once for the whole list rather than
+    // per notice, and only where a look has a sentence of that kind to say: it is
+    // a file read and two locks, and a settle needs neither.
+    let full = brought == Brought::Look
+        && held
+            .iter()
+            .any(|held| matches!(held, stages::Held::Server(_)))
+        && places_full(&state);
+
     for notice in held {
-        brought.held(&state, conversation_id, &notice).await;
+        brought.held(&state, conversation_id, &notice, full).await;
     }
 }
 

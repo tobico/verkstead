@@ -115,11 +115,14 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
 ///
 /// **Nothing at all while the places are full**, which is the ordinary answer on
 /// a busy server and costs a file read and two register reads to reach. Every
-/// roadmap below it would be read only to be told the same thing. Which is also
-/// what makes a stage held for a place inside a look worth saying out loud — see
-/// [`crate::continuing::Brought::held`]: the first roadmap read always has a
-/// place to give, so a later one finding none means a stage started in this very
-/// look.
+/// roadmap below it would be read only to be told the same thing.
+///
+/// Which is *not* on its own what makes a stage held for a place worth saying out
+/// loud inside a look. A reading spends a place on every stage it puts up to
+/// start, and a start can still refuse after that — so the places being full when
+/// a look began is no promise that a roadmap it passes over is genuinely waiting
+/// on the machine. What decides that is a count taken after the starts, once per
+/// reading: see [`crate::continuing::Brought::held`].
 ///
 /// **Oldest roadmap first**, which is the order the free places are handed out
 /// in. A roadmap's age is the age of the Conversation that wrote it rather than

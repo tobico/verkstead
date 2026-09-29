@@ -2484,7 +2484,10 @@ restart loses nothing that was waiting. And the look is silent unless it starts
 something, beside the one thing it says about a Stage it did not start: that a
 Stage of this roadmap is waiting for a place another roadmap has just taken,
 said on each waiting roadmap's own Timeline, because a roadmap passed over in
-silence reads as a roadmap forgotten. See ADR-0021, *What starts, and how many*.
+silence reads as a roadmap forgotten — and said only where the places really are
+all taken once the look has finished starting, a Stage that went up to start and
+was refused having spent a place on paper and taken none. See ADR-0021, *What
+starts, and how many*.
 _Avoid_: slot, seat, quota, capacity, concurrency limit, the roadmap's place
 (that is the other limit, counted off the record rather than off what runs)
 

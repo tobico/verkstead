@@ -19856,6 +19856,100 @@ async fn a_roadmap_at_its_own_limit_is_passed_over_and_the_next_one_starts() {
     );
 }
 
+/// And a look that started nothing says nothing, however many stages it held:
+/// the stage waiting for a place on the server is told **once**, by the settle,
+/// and not again at every look for the rest of the server's life.
+///
+/// Which is the hole under *a look is silent unless it starts something*. A
+/// reading spends a place on every stage it puts up to start, and a start can
+/// still refuse after that — a branch somebody has taken, as here, or a git
+/// author nobody has set. So the place 01 spends is a place nothing takes: the
+/// server is no fuller than it was, the next look finds exactly what this one
+/// found, and a sentence said off that reading would be said again every half
+/// minute for as long as the server is up, on the one Timeline a look ever
+/// writes to.
+///
+/// What says it is not that the places were full when the look began but that
+/// they are full when it has finished starting — see the server's own
+/// `continuing::Brought::held`. Here they never are, so the Timeline stands
+/// where the settle left it.
+#[tokio::test]
+async fn a_look_that_started_nothing_does_not_say_a_stage_is_waiting_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+        *LOOKING,
+        &[],
+    )
+    .await;
+
+    // One place across the whole server, so the roadmap's own three never come
+    // into it: what holds 02 back is 01 having gone up to start.
+    configure(&fixture, "at_once:\n  conversations: 1\n");
+
+    // And 01's branch already taken, which is the start that refuses *after* the
+    // reading has counted its place as spent.
+    git(
+        &fixture.repo(),
+        &["branch", "roadmaps/rate-limiting/01-counter"],
+    );
+
+    staged_and_settled(&fixture).await;
+
+    // Said once by the settle, which is right: a settle says every wait it finds,
+    // and it happens once.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 02"),
+        "the stage behind the one that could not start is the one told: {said:?}",
+    );
+
+    assert_eq!(waiting_for_a_place(&fixture, fixture.id).await, 1);
+
+    // And nothing is left holding a place, so the look really does read this
+    // roadmap rather than stopping at the top — which is what makes the silence
+    // below a silence about something.
+    until_let_go(&fixture, fixture.id).await;
+
+    // Several looks' worth at a hundred milliseconds apiece, each finding what the
+    // settle found: 01 refused by its branch, 02 held behind it, nothing started.
+    pause(paced(Duration::from_millis(500))).await;
+
+    assert_eq!(
+        waiting_for_a_place(&fixture, fixture.id).await,
+        1,
+        "the looks in between said nothing: {:?}",
+        notices_on(&fixture, fixture.id).await,
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and none of them started anything either, 01's branch still being taken",
+    );
+}
+
+/// How many times a Conversation has been told a stage is waiting for a place on
+/// the server.
+///
+/// The count rather than a match, because what these are about is a sentence
+/// being said **again**: one that is true is on the Timeline already, so nothing
+/// short of counting tells a look that repeated it from a look that held its
+/// tongue.
+async fn waiting_for_a_place(fixture: &Grilling, id: i64) -> usize {
+    notices_on(fixture, id)
+        .await
+        .iter()
+        .filter(|said| said.contains("waiting for a place on the server"))
+        .count()
+}
+
 /// And a start that halts halts only itself: stage 01's branch is already taken,
 /// so stage 01 does not start and stage 02 does.
 ///
