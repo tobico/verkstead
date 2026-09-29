@@ -17,6 +17,13 @@
 //! And one of them is not a refusal at all. `WouldDiscard` is the press stopping
 //! to ask: the start goes ahead on the press after it, which is why the press
 //! reads as going ahead while it is drawn. See [`goingAhead`].
+//!
+//! Which is the one the create replay does *not* carry as a sentence. What answers
+//! it is a press rather than anything to go and fix, so it travels whole and the
+//! draft's own take-up picks it up as its starting outcome — see `stoppedOnCreate`
+//! in [`composing`](./composing.ts). Carried as a sentence it would have told the
+//! human to press start again over a press that could only ask the same question
+//! over again.
 
 import { A } from "@solidjs/router";
 import { For, Show, type JSX } from "solid-js";

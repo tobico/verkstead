@@ -20,6 +20,13 @@
 //! with the rest of the work in it — and the refusals travel to that draft
 //! rather than dying with the page that made it, see [`refusedOnCreate`].
 //!
+//! **And the one outcome that is not a refusal travels whole**, which is a take-up
+//! stopped to ask what closing another conversation would discard: what answers it
+//! is a press, and the press is on the draft this made. So the draft's own take-up
+//! picks up the outcome and its press is the confirming one — see
+//! [`stoppedOnCreate`]. A sentence would have said *press start again to go ahead*
+//! about a press that had no way of knowing what had been asked.
+//!
 //! **The files are not held the same way**, because a `File` is a handle the
 //! browser gave this page rather than text a device can write down: they are
 //! held in the page (`src/holding.ts`), a reload loses them, and the replay
@@ -60,7 +67,7 @@ import {
   startGrilling,
   takeUpPullRequest,
 } from "../api/client";
-import type { CompanionMode, Process, Started } from "../api/types";
+import type { CompanionMode, Process, Started, TakenUp } from "../api/types";
 import { forget, read, write } from "../device";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
@@ -313,8 +320,13 @@ export function clear(): void {
 
 /// What became of a press: the Conversation it made and whatever the replay
 /// could not do to it, or the one refusal that leaves nothing at all.
+///
+/// `stopped` is the one outcome of the replay that is not a refusal — a take-up
+/// that stopped to ask what closing another conversation would discard. It travels
+/// whole because what answers it is a press rather than anything to go and fix,
+/// and the press is on the draft this made.
 export type Created =
-  | { conversation: number; refused: string[] }
+  | { conversation: number; refused: string[]; stopped: TakenUp | null }
   | "NoSuchRepo";
 
 /// Create the Conversation this page describes, and put every touched field on
@@ -367,6 +379,13 @@ export async function create(
 
   const id = started.Started.id;
   const refused: string[] = [];
+
+  /// The take-up outcome that stopped to ask rather than refusing, where the
+  /// kickoff was a take-up and that is what it came back with.
+  ///
+  /// Carried whole rather than as a sentence, because what answers it is the press
+  /// on the draft this made — see the take-up below.
+  let stopped: TakenUp | null = null;
 
   /// One field's answer, read the way the composer reads it: nothing where it
   /// landed, and the sentence the pane would have said where it did not.
@@ -501,10 +520,22 @@ export async function create(
       // somewhere else, and both reach it by this one endpoint. Nothing picked
       // is the Develop every draft defaults to, which is pointed at nothing.
       const outcome = await takeUpPullRequest(id);
-      said(
-        outcome === "TakenUp",
-        `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
-      );
+
+      // And the one outcome that is not a refusal: the press stopped to ask what
+      // closing another conversation would discard, and the answer is a press. So
+      // it travels as the outcome rather than as a sentence about it — the draft's
+      // own composer takes it up, draws it with a link per conversation, and the
+      // first press there is the confirming one. Left as a sentence it would have
+      // read *press start again to go ahead* over a press that could only ask the
+      // same question over again.
+      if (typeof outcome === "object" && "WouldDiscard" in outcome) {
+        stopped = outcome;
+      } else {
+        said(
+          outcome === "TakenUp",
+          `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
+        );
+      }
     } else {
       const outcome = await startGrilling(id);
       said(
@@ -514,7 +545,7 @@ export async function create(
     }
   }
 
-  return { conversation: id, refused };
+  return { conversation: id, refused, stopped };
 }
 
 /// The Conversation this page's press makes, which is one of two starts.
@@ -601,9 +632,15 @@ async function put(
 /// the composer picks it up: one create's worth, because the next create
 /// replaces it and a refusal about a Conversation nobody is looking at is a
 /// refusal about work already done.
+///
+/// And the take-up that stopped to ask beside them, for the same reason and for
+/// one more: it is answered by a press rather than by anything to go and fix, so
+/// the draft's own take-up picks it up as the outcome it is and the press there is
+/// the confirming one. See [`stoppedOnCreate`].
 const [replayed, setReplayed] = createSignal<{
   conversation: number;
   refused: string[];
+  stopped: TakenUp | null;
 } | null>(null);
 
 /// What the create that made this Conversation could not do, in the words its
@@ -614,10 +651,29 @@ export function refusedOnCreate(id: number): string[] {
   return left !== null && left.conversation === id ? left.refused : [];
 }
 
+/// And the take-up the create stopped over, for this Conversation's own press to
+/// go on from — `null` for every other Conversation and for every create that was
+/// not stopped.
+///
+/// Read once, when the composer's take-up starts: what it becomes is that press's
+/// own state, and everything after it is the press answering itself.
+export function stoppedOnCreate(id: number): TakenUp | null {
+  const left = replayed();
+  return left !== null && left.conversation === id ? left.stopped : null;
+}
+
 /// Leave them for that Conversation's composer, or take away what was left for
 /// the one before it.
-export function leaveRefusals(conversation: number, refused: string[]): void {
-  setReplayed(refused.length === 0 ? null : { conversation, refused });
+export function leaveRefusals(
+  conversation: number,
+  refused: string[],
+  stopped: TakenUp | null,
+): void {
+  setReplayed(
+    refused.length === 0 && stopped === null
+      ? null
+      : { conversation, refused, stopped },
+  );
 }
 
 /// A compose page out of its stored body, checked field by field.

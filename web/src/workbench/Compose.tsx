@@ -428,7 +428,7 @@ function Compose(props: {
       setGone(false);
       clear();
       setState(blank());
-      leaveRefusals(outcome.conversation, outcome.refused);
+      leaveRefusals(outcome.conversation, outcome.refused, outcome.stopped);
 
       void queries.invalidateQueries({ queryKey: ["conversations"] });
       navigate(pathOf(outcome.conversation));

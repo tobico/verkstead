@@ -84,7 +84,7 @@ import shell from "../Panes.module.css";
 import { Empty, ErrorLine } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
-import { refusedOnCreate } from "./composing";
+import { refusedOnCreate, stoppedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
@@ -549,7 +549,14 @@ function StartTakeUp(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
-  const [said, setSaid] = createSignal<TakenUp | null>(null);
+  // Starting from whatever the create replay was stopped over, where this draft
+  // came off a compose page that was: the press on that page asked the question
+  // and nobody was here to answer it, so the press on this one is the answer. Left
+  // at null the question would be asked a second time, and the line under it would
+  // have said *press start again to go ahead* over a press that could only ask.
+  const [said, setSaid] = createSignal<TakenUp | null>(
+    stoppedOnCreate(props.conversation.id),
+  );
 
   const start = useMutation(() => ({
     // What the last press was stopped over, sent back: this press is the human

@@ -274,7 +274,7 @@ describe("the compose page", () => {
   // nothing left over from the create the test before it made.
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   it("is the one way into a new conversation from the sidebar", async () => {
@@ -792,7 +792,7 @@ describe("the compose page", () => {
 describe("the process a compose page is composing under", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// Where the row reads it, which is the order the row is read in: the
@@ -915,7 +915,7 @@ describe("the process a compose page is composing under", () => {
 describe("the target a compose page is pointed at", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// A page on Review, against the repo it would be composed against, which is
@@ -1263,15 +1263,18 @@ describe("the target a compose page is pointed at", () => {
     );
   });
 
-  /// And a take-up stopped over what it would discard is carried the same way,
-  /// which is the outcome the replay has to carry that is not a refusal.
+  /// And a take-up stopped over what it would discard is carried whole, which is
+  /// the outcome the replay has to carry that is not a refusal.
   ///
-  /// There is nowhere for a link to go here either, so what the draft carries is
-  /// the sentence — and the sentence ends on the press, which the draft it made
-  /// has under its own composer.
-  it("says on the draft it made what a start would have discarded", async () => {
+  /// It is answered by a press rather than by anything to go and fix, so it travels
+  /// as the outcome rather than as a sentence about one: the draft's own take-up
+  /// picks it up, draws every conversation as a link, and the press under it is
+  /// already the confirming one. Carried as a sentence it would have said *press
+  /// start again to go ahead* over a press that could only ask the same question
+  /// over again.
+  it("hands the draft it made the start it was stopped on", async () => {
     composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
-    creating(
+    const fetching = creating(
       whenever(
         `/api/ui/conversations/${OPEN.id}/process`,
         json("Picked"),
@@ -1291,6 +1294,13 @@ describe("the target a compose page is pointed at", () => {
         } satisfies TakenUp),
         "POST",
       ),
+      // The draft the create navigates into, which is a Review: its composer is
+      // the take-up's press rather than a grill start's, and that is the press
+      // this is about.
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({ ...OPEN, process: "Review" satisfies Process }),
+      ),
     );
     const { container } = mount("/compose");
 
@@ -1299,13 +1309,38 @@ describe("the target a compose page is pointed at", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          /The conversation on rate-limiting would be closed to make way/,
-        ),
-      ).toBeTruthy(),
+    // The conversation that would lose something, as a link on the draft — which
+    // is what the compose page had nowhere to draw.
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "rate-limiting" }),
     );
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+
+    // And the press is the one that goes ahead, rather than the one that asks
+    // again: one more press, and the losses go back named.
+    const start = await waitFor(() =>
+      screen.getByRole("button", { name: "Start anyway" }),
+    );
+
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(1);
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(
+        2,
+      ),
+    );
+
+    const pressed = fetching.mock.calls.filter(
+      ([asked, init]) =>
+        String(asked) === `/api/ui/conversations/${OPEN.id}/take-up` &&
+        init?.method === "POST",
+    );
+
+    expect(JSON.parse(String(pressed[1]![1]?.body))).toEqual({
+      discarding: [77],
+    });
   });
 
   /// And a **Fix Merge Issues** page is the same press over the same field: it
@@ -1542,7 +1577,7 @@ describe("the pickers a compose page's process draws", () => {
 describe("the agent control on a compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// The row reads Repo, Process, Agent, and the pickers are what the last of
@@ -1715,7 +1750,7 @@ describe("the agent control on a compose page", () => {
 describe("the agent dropdown on a compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// A page holding a one-role Process and the repo it would be composed
@@ -1843,7 +1878,7 @@ describe("the agent dropdown on a compose page", () => {
 describe("registering a repo from the Repo dropdown", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// A repository nothing has registered yet — not one of the fixture's, so
@@ -1958,7 +1993,7 @@ describe("registering a repo from the Repo dropdown", () => {
 describe("making a repo from the Repo dropdown", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// The repository the create made, as the server answers for it: not one of
@@ -2321,7 +2356,7 @@ describe("making a repo from the Repo dropdown", () => {
 describe("continuing a roadmap from the compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// The workbench with roadmaps to adopt, and the two endpoints a press walks
@@ -2785,7 +2820,7 @@ describe("continuing a roadmap from the compose page", () => {
 describe("the files a compose page holds", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, []);
+    leaveRefusals(0, [], null);
   });
 
   /// What the server says when it takes one: the record it made, which is what
