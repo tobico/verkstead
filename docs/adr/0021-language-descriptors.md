@@ -76,8 +76,24 @@ Every built-in is on until somebody turns it off, for the reason Rust's is: a
 human should never have a worse experience for not having checked the
 settings. An enabled language's variables are set for **every** session
 whatever the Repo holds, as Rust's are today — a manifest is often not at the
-root, and a variable nothing reads costs nothing. Detection is for warnings
-and for starting servers. All three platforms from the start.
+root, and a variable nothing reads costs nothing. All three platforms from the
+start.
+
+**Detection is for warnings and nothing else.** It is not what starts the
+**Compile Server**, and that is the one place the variables and the detection
+could disagree where the disagreement is not free. A Repo whose manifest is not
+at the root is handed `RUSTC_WRAPPER`, or CMake's launchers, all the same — and
+with no server of Verkstead's up, the sccache client inside starts one of its
+own, on the loopback every Sandbox shares, so the next such session's compiles
+run inside the first one's Sandbox, where its Worktree is not bound, and the
+build fails outright. That is the hazard the Compile Server exists to remove,
+reached by the ordinary case the paragraph above is written for. So **the
+Compile Server starts wherever a language naming the sccache capability is
+enabled and there is an sccache to run**, whatever the Repo holds: it costs one
+idle server on a machine that compiles neither Rust nor C++, and it cannot be
+wrong about a Repo. Rejected: keeping detection and setting the launchers only
+where it fired, which gives up variables-for-every-session and buys an uncached
+compile where this buys a cached one.
 
 ## How deep the caching goes
 
