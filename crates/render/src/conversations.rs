@@ -259,8 +259,14 @@ pub struct Parked {
     pub spoken_to: u32,
 }
 
-/// One Repo's notice under the new-conversation box: the roadmaps in it that
-/// nothing is driving.
+/// One Repo's notice under the new-conversation box: the roadmaps in it with a
+/// stage that could be started now.
+///
+/// Not the roadmaps nothing is driving, which is what this was while a roadmap ran
+/// its stages one at a time — a declaring roadmap with a ready stage beside the
+/// ones somebody is on is being driven and has work the press can pick up, and
+/// both of those are true at once. See the abandoned rule in the server's
+/// `stages` module.
 ///
 /// One notice per Repo with its roadmaps inside, rather than one per roadmap —
 /// what the human reads first is which repository has work left lying about,

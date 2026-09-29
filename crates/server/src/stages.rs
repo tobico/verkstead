@@ -1205,15 +1205,24 @@ pub(crate) fn misdeclared(worktree: &Path, names: &BTreeSet<String>) -> Option<S
     })
 }
 
-/// A roadmap in a registered Repo that nothing is driving, with the stage
-/// adopting it would start.
+/// A roadmap in a registered Repo with a stage that could start now, and the
+/// stages adopting it would start.
 ///
 /// **Abandoned** is the workbench's word for it, and the whole of what it means
-/// is *there is a stage startable right now and nothing is on it* — see
+/// is *there is a stage startable right now and nothing is on that stage* — see
 /// [`startable`] for the four clauses. A roadmap that has finished, one whose
-/// next stage somebody is already working, and one whose next brief is missing
-/// are all not abandoned, and none of them is a state to draw: what the human
-/// can do something about is the only thing worth saying.
+/// every ready stage somebody is already working, one whose places are all taken
+/// and one whose next brief is missing are all not abandoned, and none of them is
+/// a state to draw: what the human can do something about is the only thing worth
+/// saying.
+///
+/// **Not the same thing as a roadmap nothing is driving**, which is what this
+/// meant while a roadmap ran its stages one at a time — there the one stage that
+/// could start was the whole roadmap, so a stage in flight was a roadmap in
+/// flight. A declaring roadmap has stages side by side, and one with a ready
+/// stage beside the ones somebody is on is a roadmap being driven *and* one with
+/// work the press can pick up. So this is drawn off what may start rather than
+/// off whether anybody is anywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Abandoned {
     /// What the roadmap calls itself in its heading, or empty where it has
@@ -1421,8 +1430,9 @@ fn notice(
     })
 }
 
-/// The roadmaps one Repo is holding that nothing is driving, whether or not
-/// there are any.
+/// The roadmaps one Repo is holding with a stage that could start now, whether or
+/// not there are any — see [`Abandoned`], which is what *abandoned* comes to now
+/// that a roadmap can have stages worked side by side.
 ///
 /// Read at the default branch's tip as origin holds it, which is the repository
 /// as everyone working on it sees it — the same ref [`adopting`] draws the page
@@ -2358,7 +2368,7 @@ Turns this askance clone into Verkstead.
             run(self.path(), &["checkout", "-q", "main"]);
         }
 
-        /// Everything this Repo is holding that nothing is driving — at the
+        /// Everything this Repo is holding with a stage that could start — at the
         /// default branch's tip and on every branch the default has not swallowed
         /// — with a record holding nothing, for [`Repo::abandoned`]'s reason.
         fn waiting(&self) -> Vec<AbandonedRoadmap> {
