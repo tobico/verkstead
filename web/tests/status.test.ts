@@ -252,4 +252,42 @@ describe("the status word", () => {
       attention: false,
     });
   });
+
+  /// A Conversation on its way to another machine, which is what the head of
+  /// its timeline says from the press until the work lands — named, because
+  /// *transferring* on its own is half a sentence. Quietly: the human pressed
+  /// it themselves.
+  it("says where a conversation being moved is going", () => {
+    expect(status(like({ transferring: "the-laptop" }))).toEqual({
+      word: "Transferring to the-laptop",
+      state: "Implementing",
+      attention: false,
+    });
+  });
+
+  /// Over everything else there is to say, including the two the accent is
+  /// spent on: whatever else is true of it, what this conversation is doing is
+  /// leaving. And over the states nothing drives, because a Done conversation
+  /// moves like any other — a Draft and a Closed one are refused the press
+  /// rather than drawn without the word.
+  it("says it over every other word, and on a conversation that is done", () => {
+    expect(
+      status(
+        like({
+          transferring: "the-laptop",
+          waiting: true,
+          blocked_on: 12,
+          working: true,
+        }),
+      ).word,
+    ).toBe("Transferring to the-laptop");
+
+    expect(status(like({ state: "Done", transferring: "the-laptop" }))).toEqual(
+      {
+        word: "Transferring to the-laptop",
+        state: "Done",
+        attention: false,
+      },
+    );
+  });
 });

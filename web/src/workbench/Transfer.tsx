@@ -24,15 +24,31 @@
 //! where no match is somebody being sent to **Open repo** on a machine that may
 //! already have the repository.
 //!
-//! **Go does nothing yet.** What moves the work is the next thing built here;
-//! what this dialog settles is whether the press can be made at all.
+//! **And Go writes the move down rather than making it.** The session's turn
+//! ends first — whatever is running runs to its own end and nothing is started
+//! after it — and the work goes then, so what comes back says the conversation
+//! is *going*. The card shuts on it, and the head of the timeline reads
+//! *Transferring to* that machine until it lands. See `crate::transfers`.
+//!
+//! **The press asks the preflight again**, because the reading here was drawn a
+//! moment ago and a machine can go to sleep in a moment. Where it comes back
+//! holding something, what the card draws is that reading in place of its own —
+//! the same sentences, about the world the press arrived in.
 
 import { For, Show, createSignal, createUniqueId, type JSX } from "solid-js";
 
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+
 import { Modal } from "../Modal";
 import { AGENT_NAME, DEFAULT_PROFILE } from "../agents";
-import { preflight } from "../api/client";
-import type { ConversationView, Lacking, PairingRole } from "../api/types";
+import { preflight, transfer } from "../api/client";
+import type {
+  ConversationView,
+  Lacking,
+  PairingRole,
+  Preflight,
+  Transferring,
+} from "../api/types";
 import { UNREACHABLE, harnessAbsentOn } from "../broken";
 import { useDevices } from "../devices";
 import { useReading } from "../freshness";
@@ -40,6 +56,22 @@ import { ErrorLine } from "../notices";
 import { keyOf, useDevice, type Device } from "../reaching";
 import { DeviceSelect } from "./Setup";
 import styles from "./Transfer.module.css";
+
+/// What each refusal of the press says, where it is a word rather than a
+/// reading.
+///
+/// Every one of them is a page drawn against a conversation that has moved
+/// since — which is what the sentences say, rather than reporting the word the
+/// server used.
+const REFUSAL: Record<string, string> = {
+  NotTransferable:
+    "This conversation cannot be moved: a draft moves by the device select on " +
+    "its own composer, and a closed one has no work left to move.",
+  Elsewhere:
+    "The work has already been moved to another device. This device is keeping " +
+    "a copy of the record, and the press that moves it again is over there.",
+  NoSuchConversation: "This conversation is gone.",
+};
 
 /// What each of a Conversation's three roles is called, which is what a missing
 /// harness is named against.
@@ -180,13 +212,63 @@ function Picking(props: {
     };
   });
 
-  /// Whether the work could go: something picked, the reading in, and nothing in
+  /// The reading the press came back holding, where it was refused over one —
+  /// which is this card's own reading taken again as the press arrived.
+  ///
+  /// Drawn in place of it while it stands, and cleared the moment another
+  /// device is picked: what it is about is the machine that was pressed on.
+  const [again, setAgain] = createSignal<Preflight | null>(null);
+
+  /// And what a press that was refused in a word says, or a press that never
+  /// reached the machine holding the work.
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  /// What the findings under the select are: the press's own reading where it
+  /// brought one back, and otherwise this card's.
+  const found = (): Preflight | undefined => again() ?? reading.data;
+
+  /// Whether the work could go: something picked, a reading in, and nothing in
   /// the way.
   ///
   /// A reading that has not landed is not a device that is ready — what a
   /// preflight is for is that Go is never drawn over a question nobody has
   /// answered yet.
-  const ready = (): boolean => (reading.data?.lacks.length ?? -1) === 0;
+  const ready = (): boolean => (found()?.lacks.length ?? -1) === 0;
+
+  const queries = useQueryClient();
+
+  /// Pressing Go: the move is written down, and the card shuts on it.
+  ///
+  /// What is read again afterwards is the conversation and the list, because
+  /// both say something new from here — the head of the timeline reads
+  /// *Transferring to* that machine, and the row goes on being this device's
+  /// until the work has actually gone.
+  const going = useMutation(() => ({
+    mutationFn: (target: string) =>
+      transfer(here(), props.conversation.id, target),
+
+    onSuccess: (outcome: Transferring) => {
+      if (typeof outcome === "object" && "Lacking" in outcome) {
+        setAgain(outcome.Lacking);
+        return;
+      }
+
+      if (outcome !== "Transferring") {
+        setRefused(REFUSAL[outcome] ?? "The conversation could not be moved.");
+        return;
+      }
+
+      void queries.invalidateQueries({
+        queryKey: keyOf(here(), "conversation"),
+      });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+
+      props.close();
+    },
+
+    onError: (error: Error) =>
+      setRefused(`The conversation could not be moved: ${error.message}`),
+  }));
 
   return (
     <>
@@ -206,7 +288,14 @@ function Picking(props: {
         // Nothing to correct: what this holds is a choice being made rather than
         // a pick this browser remembers — see `DeviceSelect`.
         remembered={false}
-        pick={setPicked}
+        // And what the last press said goes with the machine it was about: a
+        // reading of one device drawn under the name of another would be the
+        // card saying something untrue about both.
+        pick={(chosen) => {
+          setAgain(null);
+          setRefused(null);
+          setPicked(() => chosen);
+        }}
       />
 
       <Show
@@ -220,19 +309,19 @@ function Picking(props: {
           fallback={<p class={styles.waiting}>Checking…</p>}
         >
           <Show
-            when={reading.data}
+            when={found()}
             fallback={
               <ErrorLine class={styles.failure}>
                 That device could not be checked: {reading.error?.message}
               </ErrorLine>
             }
           >
-            {(found) => (
+            {(reading) => (
               <Show
-                when={found().lacks.length > 0}
+                when={reading().lacks.length > 0}
                 fallback={
                   <p class={styles.ready}>
-                    {found().device} has everything this conversation needs.
+                    {reading().device} has everything this conversation needs.
                   </p>
                 }
               >
@@ -240,14 +329,21 @@ function Picking(props: {
                     something to go and put right somewhere, and the somewhere
                     is in the sentence. */}
                 <ul class={styles.lacks}>
-                  <For each={found().lacks}>
-                    {(said) => <li>{lacking(said, found().device)}</li>}
+                  <For each={reading().lacks}>
+                    {(said) => <li>{lacking(said, reading().device)}</li>}
                   </For>
                 </ul>
               </Show>
             )}
           </Show>
         </Show>
+      </Show>
+
+      {/* And a press that was refused in a word, or one that never reached the
+          machine holding the work: said under the findings, where the reading's
+          own failure is said. */}
+      <Show when={refused()}>
+        {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
       </Show>
 
       <div class={styles.out}>
@@ -258,11 +354,22 @@ function Picking(props: {
         >
           Cancel
         </button>
-        {/* Drawn enabled or refused, and nothing behind it yet: what moves the
-            work is the next thing built here, and what this dialog settles is
-            whether the press could be made at all. */}
-        <button type="button" class={styles.go} disabled={!ready()}>
-          Go
+        {/* What the card is for: the move written down, and the card shut on
+            it. Refused while the reading holds anything and while the press is
+            in flight — a second press would be a second move asked for. */}
+        <button
+          type="button"
+          class={styles.go}
+          disabled={!ready() || going.isPending}
+          onClick={() => {
+            const target = onto();
+            if (target === undefined) return;
+
+            setRefused(null);
+            going.mutate(target);
+          }}
+        >
+          {going.isPending ? "Going…" : "Go"}
         </button>
       </div>
     </>

@@ -467,3 +467,135 @@ describe("transferring a conversation to another device", () => {
     expect(go(card).disabled).toBe(true);
   });
 });
+
+describe("pressing Go", () => {
+  /// Where the press goes: to the device the Conversation is on, naming the
+  /// machine it is to be moved to — the same two devices the reading names,
+  /// in the same two places.
+  const transferTo = (device: string) =>
+    `/api/ui/conversations/${GRILLING.id}/transfer/${device}`;
+
+  /// The press, and the card shutting on it. Nothing here says the work has
+  /// arrived — what comes back says it is *going*, the session's turn being
+  /// what it waits for.
+  it("writes the move down and shuts the card", async () => {
+    const fetching = theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(READY)),
+      whenever(transferTo(LAPTOP), json("Transferring"), "POST"),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    fireEvent.click(go(card));
+
+    await waitFor(() => expect(dialog()).toBeNull());
+
+    // And the press was made on the one path, which is where the two devices
+    // are: a press put to the wrong end would be this device asking the laptop
+    // to move work it does not have.
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === transferTo(LAPTOP) && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  });
+
+  /// And nothing is pressed for a device that was never picked: Go is refused
+  /// while the reading holds anything, which is what the preflight is for.
+  it("is refused while the far end is missing something", async () => {
+    const fetching = theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(NO_REPO)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    fireEvent.click(go(card));
+
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === transferTo(LAPTOP) && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+    expect(dialog()).not.toBeNull();
+  });
+
+  /// The press asks the preflight again, because the reading here was drawn a
+  /// moment ago and a machine can go to sleep in a moment. What it brings back
+  /// is drawn in place of this card's own — the same sentences, about the world
+  /// the press arrived in — and the card stays up.
+  it("draws what the press found in the way, and stays open", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(READY)),
+      whenever(transferTo(LAPTOP), json({ Lacking: ASLEEP }), "POST"),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    fireEvent.click(go(card));
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    expect(findings(card)[0]!).toContain(UNREACHABLE);
+    expect(go(card).disabled).toBe(true);
+    expect(dialog()).not.toBeNull();
+  });
+
+  /// And a press refused in a word says so where the reading's own failure is
+  /// said, rather than shutting on a move nobody made.
+  it("says why a press that moved nothing was refused", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(READY)),
+      whenever(transferTo(LAPTOP), json("Elsewhere"), "POST"),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    fireEvent.click(go(card));
+
+    await waitFor(() =>
+      expect(card.textContent).toContain("already been moved"),
+    );
+
+    expect(dialog()).not.toBeNull();
+  });
+
+  /// And from the press until the work lands, the head of the timeline says
+  /// where it is going — named, because the machine is the whole of what the
+  /// human wants to read there.
+  it("says on the conversation where the work is going", async () => {
+    theCluster(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({
+          ...GRILLING,
+          transferring: "laptop",
+        } satisfies ConversationView),
+      ),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(container.textContent).toContain("Transferring to laptop"),
+    );
+  });
+});

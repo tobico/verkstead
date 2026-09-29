@@ -919,6 +919,19 @@ pub struct ConversationView {
     /// reached, and a tombstone drawn because the far end was asleep would be a
     /// read-only copy of the work presented as the work.
     pub transferred: Option<TransferredTo>,
+
+    /// And the machine it is on its way to, where a press has asked for it to be
+    /// moved and the move has not run yet (ADR-0020, *Transfer*).
+    ///
+    /// **The name the human gave that machine**, rather than the Device Id
+    /// beside it in [`Self::transferred`]: this one is drawn in a sentence at the
+    /// head of the Timeline — *Transferring to the-laptop* — where that one is
+    /// the address a redirect is built out of.
+    ///
+    /// `null` is every Conversation staying where it is. It is the state between
+    /// the press and the move: the session running now runs to its own end,
+    /// nothing is started after it, and then the work goes.
+    pub transferring: Option<String>,
 }
 
 /// Which copy of a transferred Conversation is the live one: the device holding

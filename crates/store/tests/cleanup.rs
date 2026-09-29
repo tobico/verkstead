@@ -28,17 +28,17 @@ use verkstead_store::{
     Account, Adding, Ask, Commit, CompanionMode, CompanionWorktree, Decision, Deletion, Edited,
     Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade, Process,
     ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
-    add_companion, append_capture, append_transcript, archive_conversation, ask, attach,
-    attach_mcp_server, capture, close_conversation, create_profile, deletable, delete_conversation,
-    deleted_tables, end_session, load_conversation, load_response, lock_set, nothing_else,
-    open_database, open_pending_steer, pick_direction, reclaim, record_addressed_comments,
-    record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
-    record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
-    record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
-    session_id, set_grilling_pairing, set_process, set_target, settle_wrap_up, skip_review,
-    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
-    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
-    unarchive_conversation,
+    add_companion, append_capture, append_transcript, archive_conversation, ask, ask_to_transfer,
+    attach, attach_mcp_server, capture, close_conversation, create_profile, deletable,
+    delete_conversation, deleted_tables, end_session, load_conversation, load_response, lock_set,
+    nothing_else, open_database, open_pending_steer, pick_direction, reclaim,
+    record_addressed_comments, record_backlog, record_check_rollup, record_commit,
+    record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
+    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
+    save_brief, save_pending_steer, session_id, set_grilling_pairing, set_process, set_target,
+    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    start_implementing, stop, submit_response, timeline, transcript, trim_conversation, trimmable,
+    trimmed, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -905,6 +905,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .bind(id)
         .bind("0011223344556677889900aabbccddee")
         .execute(pool)
+        .await
+        .unwrap();
+
+    // And a move somebody pressed for and nothing ever made, which is the same
+    // kind of row one press earlier: a request outlives nothing here, because
+    // what acts on one takes it away — and the walk has to reach it all the
+    // same, a Conversation being deletable long after anybody pressed anything.
+    ask_to_transfer(pool, id, "0011223344556677889900aabbccddee")
         .await
         .unwrap();
 

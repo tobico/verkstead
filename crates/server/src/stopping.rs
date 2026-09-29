@@ -166,6 +166,15 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
         return true;
     }
 
+    // And the other press that stops a launch without stopping the run: the work
+    // is being moved onto another device, so whatever is running is being seen
+    // out and nothing is to be started behind it (ADR-0020, *Transfer*). A copy
+    // the work has already left is the same answer for a stronger reason —
+    // nothing writes to a tombstone. See [`crate::transfers::going`].
+    if crate::transfers::going(state, conversation_id).await {
+        return true;
+    }
+
     if undriven(state, conversation_id).await {
         return true;
     }

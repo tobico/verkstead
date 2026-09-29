@@ -106,7 +106,10 @@ pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
     rollout_cwd, statements, transcript_after, transcript_view, turns,
 };
-pub use transfer::{HarnessThere, Lacking, PairingRole, Preflight};
+pub use transfer::{
+    Arrived, BirthKey, ConversationAcross, HarnessThere, Lacking, PairingAcross, PairingRole,
+    PickedAcross, Preflight, ProfileAcross, Transferring,
+};
 pub use update::UpdateNotice;
 pub use view::{
     Answered, AskView, DiffView, Ending, OptionView, QuestionView, RepoDiffView, SetReading,

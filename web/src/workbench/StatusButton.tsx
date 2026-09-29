@@ -83,6 +83,20 @@ export type Status = {
 export function status(conversation: ConversationView): Status {
   const state = STATE[conversation.state];
 
+  // The work is on its way to another machine, which is the one thing that
+  // outranks everything below: from the press until it lands, what this
+  // conversation is doing is leaving. Said above the Draft and the ended states
+  // rather than under them, because a Done conversation moves like any other —
+  // and it is drawn in the ordinary colour, a move the human pressed themselves
+  // being news to nobody.
+  if (conversation.transferring !== null) {
+    return {
+      word: `Transferring to ${conversation.transferring}`,
+      state,
+      attention: false,
+    };
+  }
+
   if (conversation.state === "Draft" || ENDED.has(conversation.state)) {
     return { word: null, state, attention: false };
   }

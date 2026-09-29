@@ -173,7 +173,7 @@ fn pairings(conversation: &store::Conversation) -> Vec<(PairingRole, &store::Pai
     [
         (
             PairingRole::Grilling,
-            conversation.grilling_pairing.pairing(),
+            conversation.grilling_pairing.as_ref(),
         ),
         (
             PairingRole::Implementation,

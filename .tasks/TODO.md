@@ -23,7 +23,7 @@ Roadmap stage: [09: Transfer](docs/roadmaps/cluster-mode/09-transfer.md)
 
 - [x] 01: The birth key, and one row per Conversation — [details](01-the-birth-key.md)
 - [x] 02: The preflight, and the dialog that refuses — [details](02-the-preflight.md)
-- [ ] 03: The press, the turn's end, and the Conversation across — [details](03-the-press-and-the-turns-end.md)
+- [x] 03: The press, the turn's end, and the Conversation across — [details](03-the-press-and-the-turns-end.md)
 - [ ] 04: The Timeline and everything hanging off it — [details](04-the-timeline-across.md)
 - [ ] 05: The branch and the working changes — [details](05-the-branch-and-the-working-changes.md)
 - [ ] 06: Companions over the link — [details](06-companions-over-the-link.md)

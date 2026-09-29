@@ -157,6 +157,19 @@ async fn sweep(state: &AppState) {
             continue;
         }
 
+        // And a *Transfer to…* the human pressed, whose session has since ended
+        // — which is a Conversation nothing is driving because the thing that
+        // was driving it is about to hand it to another machine. Not a stall,
+        // and this is also where a request left behind by a server that has
+        // restarted since is taken up: nothing survives a process, and a move
+        // nobody is making is exactly what this sweep is for. A copy whose work
+        // has already gone is the same answer for a plainer reason — a tombstone
+        // is nothing anything was driving. See
+        // [`crate::transfers::moving`].
+        if crate::transfers::moving(state, conversation.id).await {
+            continue;
+        }
+
         stalled(state, conversation.id, lifecycle).await;
     }
 }

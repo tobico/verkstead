@@ -116,3 +116,140 @@ pub struct HarnessThere {
     /// Whether a session of that type could be launched there at all.
     pub there: bool,
 }
+
+/// What became of pressing **Go**.
+///
+/// Named the way the stops' and the close's answers are, and for their reason: a
+/// press that quietly did nothing would leave the human waiting for work to move
+/// that was never going anywhere.
+///
+/// **Nothing here says the work has arrived**, because nothing could: the press
+/// writes down that the Conversation is going, and the move runs once the turn
+/// the session is part way through has ended. What says it landed is the record
+/// itself — the copy over there, and the mark on the copy here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Transferring {
+    /// It is going: the request is written, whatever is running runs to its own
+    /// end, nothing is started after it, and the move follows.
+    Transferring,
+
+    /// The far end is missing something after all — the reading the dialog drew
+    /// a moment ago, taken again as the press arrived.
+    ///
+    /// **The whole reading rather than a word**, so the dialog says what is in
+    /// the way in the same sentences it was already saying it in. A device that
+    /// went to sleep between the drawing and the press is the ordinary way here.
+    Lacking(Preflight),
+
+    /// It is drafting or closed, so there is nothing of the kind this moves. A
+    /// Draft is moved by the device select on its own composer; a Closed
+    /// Conversation has no work left to move.
+    NotTransferable,
+
+    /// This copy is not the live record: the work has already been handed to
+    /// another device, and what this device holds is the tombstone. What moves
+    /// it now is a press over there.
+    Elsewhere,
+
+    NoSuchConversation,
+}
+
+/// A Conversation as it crosses the link: everything the far end writes its own
+/// row from, and nothing about the machine it came off.
+///
+/// **Not a viewer type.** No browser is ever handed one of these — what a
+/// browser sees of a move is the Timeline it leaves on both sides — and the two
+/// ends of it are two Verksteads.
+///
+/// Ids are each device's own and collide by construction, so nothing here is one
+/// of the sender's: the Repo is the one *this* device's registry answered for the
+/// match, and each Pairing's Profile is named by the device it is at home on
+/// rather than by a row number. What does travel unchanged is the pair that is
+/// cluster-wide by construction — the **Rank**, which carries the device that
+/// issued it, and the **birth key**, which says where the work was born.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationAcross {
+    /// The key the work was born under, which every copy of it says the same.
+    pub born: BirthKey,
+
+    /// The Repo **on the receiving device** the work is in, as the sending
+    /// device's matching settled it — see [`RepoAcross`](crate::RepoAcross).
+    pub repo: i64,
+
+    /// The branch the work is on, and whether the name is one somebody settled
+    /// on or one Verkstead invented and a session may still replace.
+    pub branch: String,
+    pub branch_named: bool,
+    pub naming: bool,
+
+    /// The state it is in, which is what the far end's Resume asks its question
+    /// of.
+    pub state: crate::Lifecycle,
+
+    /// Its **Rank**, verbatim.
+    pub rank: String,
+
+    /// And what each of the three roles has settled.
+    pub grilling: PickedAcross,
+    pub implementation: PickedAcross,
+    pub review: PickedAcross,
+}
+
+/// What names a Conversation across a whole cluster: the device it was drafted
+/// on, and the id it was given there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BirthKey {
+    pub device: String,
+    pub id: i64,
+}
+
+/// What one role has settled, as it crosses.
+///
+/// The three states rather than an option, for the reason the record keeps
+/// three: a role picked away is a choice somebody made and an empty picker is
+/// one they have not, and a copy that could not tell them apart would arrive
+/// either unable to start or starting a session the human said there was to be
+/// none of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PickedAcross {
+    Nothing,
+    Skipped,
+    Under(PairingAcross),
+}
+
+/// The Profile and model a role's sessions run under, as they cross.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingAcross {
+    pub profile: ProfileAcross,
+
+    /// The model paired with it, where one was — `None` being a choice made
+    /// before pairings had models, which runs on the Profile's own first one
+    /// wherever it is launched.
+    pub model: Option<String>,
+}
+
+/// An Agent Profile named the way a cluster names one: the device it is at home
+/// on, and the id it has **there**.
+///
+/// **Never the sender's local id.** A Profile on one machine is a row on every
+/// other that has heard of it — a mirror, with a local id of its own — so the
+/// pair is the one name for it that means the same thing on both ends. The
+/// receiving device turns it back into an id of its own, which is its own row
+/// where the account is at home there and its mirror where it is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileAcross {
+    pub device: String,
+    pub id: i64,
+}
+
+/// What the receiving device answers: the id it numbered its copy.
+///
+/// Which is what the sending device writes on its own copy as the mark saying
+/// where the live record now is — and what makes that answer the **commit
+/// point** of the whole move. Until it arrives nothing has changed on the
+/// sending side, and the work is still being done there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Arrived {
+    pub id: i64,
+}

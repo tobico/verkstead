@@ -36,7 +36,7 @@ use crate::{
     ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
     Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
     Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -462,6 +462,10 @@ fn the_viewers_types_are_written_from_these() {
     // reading the Transfer dialog draws under its device select and refuses Go
     // on. The findings write the role and the harness they name with them.
     Preflight::export_all(&config).unwrap();
+
+    // And what became of pressing Go, which carries that same reading back where
+    // the machine has gone off between the drawing and the press.
+    Transferring::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

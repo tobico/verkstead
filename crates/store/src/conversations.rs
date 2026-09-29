@@ -2231,6 +2231,27 @@ pub async fn conversation_ranks(pool: &SqlitePool) -> Result<Vec<(i64, String)>>
         .context("reading where every Conversation sits")
 }
 
+/// And where one of them sits, which is the other way a rank is read.
+///
+/// A transfer carries it verbatim onto the device the work is moving to — the
+/// key and the Device Id that issued it, unchanged, so the copy keeps its place
+/// in the merged order (ADR-0020, *Transfer*). One row rather than the list
+/// above because that is the question: a move is about one Conversation, and a
+/// mint is the only thing that wants every neighbour.
+///
+/// `None` is a row from a database the rewrite has not reached, which no served
+/// answer holds.
+pub async fn conversation_rank(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT rank FROM conversations WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading where Conversation {id} sits"))?;
+
+    Ok(row.and_then(|(rank,)| rank))
+}
+
 /// How much work is on one Repo, counted by whether it is over.
 ///
 /// **Live** is everything still going, a Draft included: the Conversation is on

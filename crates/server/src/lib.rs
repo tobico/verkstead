@@ -310,6 +310,9 @@ pub mod terminal;
 /// orchestrator does, asking the machine the same question it asks.
 pub mod terminals;
 mod transcript;
+/// Moving a Conversation onto another device of the cluster: the press, the
+/// wait for the turn to end, and the move itself.
+mod transfers;
 /// What Verkstead says to a running session: the keystrokes the rescue and the
 /// nudge both go in as.
 mod typing;

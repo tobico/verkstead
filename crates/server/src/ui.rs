@@ -54,7 +54,7 @@ use verkstead_render::{
     ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
     SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
     TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -470,6 +470,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/preflight/{device}",
             get(preflight),
+        )
+        // And the press behind that reading: **Go**, which writes down that the
+        // work is going to that device and nothing else — the move runs once the
+        // turn the session is part way through has ended. A POST to the same two
+        // devices the reading names, and answered by the one holding the work.
+        // See [`crate::transfers`].
+        .route(
+            "/api/ui/conversations/{id}/transfer/{device}",
+            post(transfer),
         )
         // And the close a draft's work moving to another device ends with, which
         // carries the words that say where it went: the close above with a
@@ -2126,6 +2135,10 @@ pub(crate) async fn conversation_view(
             device: to.device,
             id: to.id,
         }),
+        // And the machine it is on its way to, by the name the human gave it:
+        // what the head of the Timeline says between the press and the move —
+        // see [`crate::transfers::transferring`].
+        transferring: crate::transfers::transferring(state, id).await,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -4678,6 +4691,33 @@ async fn preflight(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/transfer/{device}` — move this Conversation
+/// onto that device.
+///
+/// **Two devices in the path again**, for the reading's reason: the press is
+/// answered by the machine holding the work, whichever one the browser opened,
+/// and the machine being named is the one it is going to.
+///
+/// **And the press does not wait for the move.** What it writes down is that the
+/// work is going: whatever is running runs to its own end, nothing is started
+/// after it, and the move follows. See [`crate::transfers`].
+async fn transfer(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Transferring::NoSuchConversation).into_response();
+    };
+
+    match crate::transfers::transfer(&state, id, &device).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(refusal) => {
+            tracing::warn!("a transfer could not be pressed: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
 ///
 /// The Nudge is [`crate::conversations::close`]'s own rather than this
@@ -5346,7 +5386,7 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
 
 /// The store's lifecycle state as the viewer receives it. One word either side,
 /// and this is where the two vocabularies are held to each other.
-fn lifecycle(state: store::Lifecycle) -> Lifecycle {
+pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
     match state {
         store::Lifecycle::Draft => Lifecycle::Draft,
         store::Lifecycle::Grilling => Lifecycle::Grilling,
@@ -5380,6 +5420,26 @@ pub(crate) fn picked_process(process: Process) -> store::Process {
         Process::Review => store::Process::Review,
         Process::Tinker => store::Process::Tinker,
         Process::FixMergeIssues => store::Process::FixMergeIssues,
+    }
+}
+
+/// And the same word read the other way, which is what a Conversation arriving
+/// from another device is written down as.
+///
+/// Beside its opposite number rather than where it is used, because the two
+/// vocabularies are held to each other in one place or in none: a state added to
+/// the ladder is two arms here, and a build that added one to only this one
+/// would land somebody's work in the wrong state.
+pub(crate) fn state_of(lifecycle: Lifecycle) -> store::Lifecycle {
+    match lifecycle {
+        Lifecycle::Draft => store::Lifecycle::Draft,
+        Lifecycle::Grilling => store::Lifecycle::Grilling,
+        Lifecycle::Implementing => store::Lifecycle::Implementing,
+        Lifecycle::Wrapping => store::Lifecycle::Wrapping,
+        Lifecycle::FollowUp => store::Lifecycle::FollowUp,
+        Lifecycle::Investigating => store::Lifecycle::Investigating,
+        Lifecycle::Done => store::Lifecycle::Done,
+        Lifecycle::Closed => store::Lifecycle::Closed,
     }
 }
 

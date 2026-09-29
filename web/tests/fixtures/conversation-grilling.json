@@ -304,6 +304,7 @@
     }
   ],
   "transferred": null,
+  "transferring": null,
   "trimmed": false,
   "waiting": true,
   "waiting_on_checks": false,

@@ -1934,7 +1934,21 @@ pending_steer: PendingSteerView | null,
  * reached, and a tombstone drawn because the far end was asleep would be a
  * read-only copy of the work presented as the work.
  */
-transferred: TransferredTo | null, };
+transferred: TransferredTo | null, 
+/**
+ * And the machine it is on its way to, where a press has asked for it to be
+ * moved and the move has not run yet (ADR-0020, *Transfer*).
+ *
+ * **The name the human gave that machine**, rather than the Device Id
+ * beside it in [`Self::transferred`]: this one is drawn in a sentence at the
+ * head of the Timeline — *Transferring to the-laptop* — where that one is
+ * the address a redirect is built out of.
+ *
+ * `null` is every Conversation staying where it is. It is the state between
+ * the press and the move: the session running now runs to its own end,
+ * nothing is started after it, and then the work goes.
+ */
+transferring: string | null, };
 
 /**
  * What became of a create.
@@ -6334,6 +6348,20 @@ device: string,
  * where the redirect goes.
  */
 id: number, };
+
+/**
+ * What became of pressing **Go**.
+ *
+ * Named the way the stops' and the close's answers are, and for their reason: a
+ * press that quietly did nothing would leave the human waiting for work to move
+ * that was never going anywhere.
+ *
+ * **Nothing here says the work has arrived**, because nothing could: the press
+ * writes down that the Conversation is going, and the move runs once the turn
+ * the session is part way through has ended. What says it landed is the record
+ * itself — the copy over there, and the mark on the copy here.
+ */
+export type Transferring = "Transferring" | { "Lacking": Preflight } | "NotTransferable" | "Elsewhere" | "NoSuchConversation";
 
 /**
  * Whether a declaration answered, and what it called itself or why it did not.

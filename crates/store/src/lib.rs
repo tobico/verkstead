@@ -29,6 +29,7 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
 mod archives;
+mod arrivals;
 mod attachments;
 mod banners;
 mod births;
@@ -67,6 +68,7 @@ mod shares;
 mod steers;
 mod stops;
 mod transcripts;
+mod transfers;
 mod unseen;
 mod waits;
 mod wrap_up;
@@ -75,6 +77,7 @@ pub use archives::{
     Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
     showing_archived, unarchive_conversation,
 };
+pub use arrivals::{Arrival, ArrivingPicked, arrive};
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
@@ -83,8 +86,8 @@ pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use births::{Birth, Transferred, birth, record_birth, transfer_away, transferred};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
-    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
-    trimmable, trimmed,
+    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, sweep_arrival,
+    trim_conversation, trimmable, trimmed,
 };
 pub use commits::{
     Commit, commit, commit_repo, commits_landed, forget_commit, record_commit, recorded_commits,
@@ -99,17 +102,17 @@ pub use conversations::{
     Investigated, Landed, Landing, Lifecycle, Process, Rebuilding, Resolving, Role, RowState,
     SetOnTimeline, Settling, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
     adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
-    conversation_branch, conversation_ranks, conversations, fill_target, follow_branch,
-    follow_up_done, follow_up_over, hold_pull_request, implement_again, investigation_over,
-    last_batch_proposal, last_proposal, load_conversation, note, open_set, opened_at,
-    pick_direction, picked_direction, process, rank_conversation, record_backlog, record_handoff,
-    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
-    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
-    settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption, start_conversation,
-    start_grilling, start_implementing, start_investigating, start_stage, start_tinkering,
-    start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, target, timeline,
-    unfinished_conversations, waiting, work_on_repo,
+    conversation_branch, conversation_rank, conversation_ranks, conversations, fill_target,
+    follow_branch, follow_up_done, follow_up_over, hold_pull_request, implement_again,
+    investigation_over, last_batch_proposal, last_proposal, load_conversation, note, open_set,
+    opened_at, pick_direction, picked_direction, process, rank_conversation, record_backlog,
+    record_handoff, record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch,
+    rename_branch, resolve_conflicts, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_process, set_review_pairing, set_state,
+    set_target, settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_investigating, start_stage,
+    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
+    target, timeline, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
@@ -167,6 +170,7 @@ pub use stops::{
     stop_as_asked, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
+pub use transfers::{ask_to_transfer, forget_transfer, transfer_asked};
 pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
@@ -749,6 +753,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // of one are not the live record beside it. After the Conversations, because
     // both hang off one — see [`births`].
     births::apply_schema(pool).await?;
+
+    // And the move somebody has pressed for and nothing has made yet, which
+    // hangs off a Conversation the same way — see [`transfers`].
+    transfers::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with every picker filled. After the Conversations only for

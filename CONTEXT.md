@@ -114,8 +114,10 @@ and the press is the eager one it has always been.
 Draft and Closed.** *Transfer to…* on the actions menu — the pane's and the
 sidebar card's alike — opens a card over the page with the device select and the
 **Preflight** of whatever machine is picked, and Go is refused while that reading
-holds anything. A Draft is moved by the device select on its own composer, there
-being a Brief and no work to carry; a Closed Conversation has none left to move.
+holds anything. What Go does is write the move down: the turn the session is part
+way through ends first, and the work goes then — see **Transfer**. A Draft is
+moved by the device select on its own composer, there being a Brief and no work
+to carry; a Closed Conversation has none left to move.
 
 **What it is called is its branch, where anybody has named one.** A Conversation
 is started on a name Verkstead invented, because there has to be a branch to cut
@@ -352,6 +354,32 @@ none of the questions under it, so it is the whole of its own preflight: no matc
 sends somebody to open a repository on a machine that may already have it, and a
 machine that is asleep will answer perfectly well tomorrow.
 _Avoid_: check, validation, dry run, health check
+
+**Transfer**:
+Moving a **Conversation** onto another device of the cluster, pressed from
+*Transfer to…* on its actions menu and refused while the **Preflight** of the
+machine picked holds anything (ADR-0020, *Transfer*). Allowed from every state
+but Draft and Closed.
+**The press writes down that the work is going rather than moving it.** The
+session running for that Conversation is part way through a turn, and a move
+that cut across it would leave the work wherever the agent had got to — so the
+press is a request, the way **Stop** after the current task and `verkstead done`
+are: whatever is running runs to its own end, nothing is started after it, and
+the move runs once the session is out. Pressed with nothing running there is
+nothing to see out and it runs where it stands. From the press until it lands
+the head of the Timeline reads *Transferring to* that machine, by the name the
+human gave it.
+**What crosses is a copy, and the far end's confirmation is the commit point.**
+The receiving device writes a row of its own — the **Repo** its own registry
+matched, the branch, the state, the **Pairing**s as its own Profile ids and the
+**Rank** and **Birth Key** verbatim, neither of which is any device's to invent —
+and answers with the id it gave it; only then does the sending device mark its
+own copy transferred. Which is what makes a failure safe: a move that falls over
+before that answer leaves the Conversation live and **stopped** where it was,
+with a Notice naming what failed, and whatever reached the far end is swept
+rather than left as a half-record. The Worktree on the sending device is left
+exactly where it is either way.
+_Avoid_: migrate, hand off, sync, failover
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when the work starts along

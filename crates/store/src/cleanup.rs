@@ -198,6 +198,10 @@ const CONVERSATION_KEYED: &[&str] = &[
     // copy, which is its own row with its own key.
     "births",
     "transferred",
+    // And a move somebody pressed for and nothing has acted on yet, which goes
+    // with the row for the reason the two above it do: what it names is a device
+    // this Conversation is not going to reach any more.
+    "transfers",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",
@@ -426,6 +430,41 @@ pub async fn deletable(pool: &SqlitePool, days: u32) -> Result<Vec<i64>> {
 /// published Share — see this module's header, where what a delete is not is
 /// what most of the case for it rests on.
 pub async fn delete_conversation(pool: &SqlitePool, id: i64) -> Result<Deletion> {
+    erased(pool, id, Authorised::ByTheArchive).await
+}
+
+/// And the same walk over a Conversation that **arrived here and never finished
+/// arriving**: a transfer that fell over part way, swept by the very device that
+/// was sending it (ADR-0020, *Transfer*).
+///
+/// **The archive does not authorise this one, and nothing about it needs to.**
+/// What that rule is there for is the human's own record — archiving is them
+/// saying they have finished looking, and it is the only thing that lets
+/// Verkstead forget work they did. A half-landed copy is none of that: it was
+/// never on their sidebar, nothing was ever run in it, and the device asking for
+/// it back is the device that wrote it a moment ago. What refusing would leave
+/// is a Conversation nobody can account for on a machine the work never reached.
+///
+/// Everything else is [`delete_conversation`] exactly: one transaction, child
+/// before parent all the way down, and nothing outside the store touched.
+pub async fn sweep_arrival(pool: &SqlitePool, id: i64) -> Result<Deletion> {
+    erased(pool, id, Authorised::ByTheSender).await
+}
+
+/// What a delete stands on, which is the whole of the difference between the two
+/// entries above.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Authorised {
+    /// The human archived it, and the days since have run out.
+    ByTheArchive,
+
+    /// The device that sent this copy is taking it back, its move having failed
+    /// before it was finished.
+    ByTheSender,
+}
+
+/// The walk itself, whichever of the two authorised it.
+async fn erased(pool: &SqlitePool, id: i64, authorised: Authorised) -> Result<Deletion> {
     let mut tx = super::writing(pool, "deleting a Conversation").await?;
 
     let known: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
@@ -438,15 +477,18 @@ pub async fn delete_conversation(pool: &SqlitePool, id: i64) -> Result<Deletion>
         return Ok(Deletion::NoSuchConversation);
     }
 
-    let archived: Option<(String,)> =
-        sqlx::query_as("SELECT archived_at FROM archived_conversations WHERE conversation_id = ?")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await
-            .with_context(|| format!("reading when Conversation {id} was archived"))?;
+    if authorised == Authorised::ByTheArchive {
+        let archived: Option<(String,)> = sqlx::query_as(
+            "SELECT archived_at FROM archived_conversations WHERE conversation_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading when Conversation {id} was archived"))?;
 
-    if archived.is_none() {
-        return Ok(Deletion::NotArchived);
+        if archived.is_none() {
+            return Ok(Deletion::NotArchived);
+        }
     }
 
     for table in EVENT_KEYED {

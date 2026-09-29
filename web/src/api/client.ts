@@ -116,6 +116,7 @@ import type {
   TerminalOpened,
   TerminalsView,
   TranscriptView,
+  Transferring,
   UpdateNotice,
 } from "./types";
 import type { Device } from "../reaching";
@@ -1465,6 +1466,25 @@ export function preflight(
       device,
       `/api/ui/conversations/${id}/preflight/${encodeURIComponent(onto)}`,
     ),
+  );
+}
+
+/// And the press behind that reading: move this conversation onto `onto`.
+///
+/// The same two devices in the same two places, for the same reason. What comes
+/// back says the work is *going* rather than that it has gone: the session's
+/// turn ends first, and the move follows it.
+export function transfer(
+  device: Device,
+  id: number,
+  onto: string,
+): Promise<Transferring> {
+  return post<Transferring>(
+    on(
+      device,
+      `/api/ui/conversations/${id}/transfer/${encodeURIComponent(onto)}`,
+    ),
+    {},
   );
 }
 
