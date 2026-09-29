@@ -324,9 +324,11 @@ stops, pull request and wrap-up bookkeeping, captures, transcripts,
 attachments — is copied to the target under new local ids, its rank string
 with it. The source **keeps its copy**, marked *transferred* and read-only.
 Every copy carries a cluster-wide **birth key** — the device the Conversation
-was drafted on and its id there — so the merged list draws only the live copy,
-a transferred copy's URL redirects to it, and each device's own list shows its
-transferred copies dimmed under *transferred to B*. A transfer back to a
+was drafted on and its id there — so the merged list draws only the live copy
+and a transferred copy's URL redirects to it. The copy itself is never drawn:
+the merge drops every tombstone and the page navigates off one rather than
+showing it, so what the source keeps is what the redirect and a transfer back
+are built out of rather than a row of its own. A transfer back to a
 device that still holds a copy replaces that copy wholesale by the live record
 under its existing local id, so old links keep working and nothing is merged
 by hand.
