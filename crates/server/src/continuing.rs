@@ -1,16 +1,36 @@
-//! Starting the next stage of a roadmap, with nobody asked.
+//! Starting the stages of a roadmap that may start now, with nobody asked.
 //!
 //! This is the piece that makes the whole pipeline unattended rather than merely
-//! gateless. A wrap-up settles — see [`crate::settling`] — and the stage after
-//! the one that settled starts: a Conversation of its own, on a branch of its
-//! own, in a session inside the bundled fork of next-stage. That fork writes
-//! `.tasks/`, at which point the runner takes over and works the backlog to
-//! empty, which finishes and opens a pull request, which wraps up, which starts
-//! the stage after it. Nothing in the loop asks for permission.
+//! gateless. A wrap-up settles — see [`crate::settling`] — and every stage of its
+//! roadmap whose dependencies have settled starts: each a Conversation of its
+//! own, on a branch of its own, in a session inside the bundled fork of
+//! next-stage. That fork writes `.tasks/`, at which point the runner takes over
+//! and works the backlog to empty, which finishes and opens a pull request, which
+//! wraps up, which starts whatever stood on it. Nothing in the loop asks for
+//! permission.
 //!
-//! **One thing stops it**, and it stops it naturally: the fork's breakdown quiz
-//! is a blocking ask, so the stage waits there and its Conversation carries
-//! *blocked on you* until the human answers from wherever they are.
+//! **Every ready stage rather than the lowest of them**, up to [`stages::AT_ONCE`]
+//! of one roadmap at a time — and a place is held by every stage the record has in
+//! flight, whatever that stage is doing. A roadmap that declares nothing has one
+//! ready stage at most, each of its stages standing on the one before it, so such
+//! a roadmap runs exactly as it always did: there is one scheduler rather than
+//! two.
+//!
+//! **Each start is its own act.** A branch already taken, a branch standing in the
+//! way, no git author configured, a fetch git would not make, a companion that
+//! cannot be delivered: each of them halts the one stage, says so on the settled
+//! Conversation's Timeline, and the rest of the ready stages are started anyway.
+//! Which is where the carry-on stopped reading *branch already taken* as *nothing
+//! was started* — a stage's own trouble is no longer the roadmap's.
+//!
+//! **And a ready stage that waited for a place is told so**, on the same Timeline
+//! and in the same breath, because a roadmap that has gone quiet with work left in
+//! it is one nobody can tell from a roadmap the scheduler forgot.
+//!
+//! **One thing stops a stage**, and it stops it naturally: the fork's breakdown
+//! quiz is a blocking ask, so the stage waits there and its Conversation carries
+//! *blocked on you* until the human answers from wherever they are. It holds its
+//! place while it waits, and holds up whatever stands on it and nothing else.
 //!
 //! **A stage is a Conversation of its own** rather than the old one carrying on.
 //! A Conversation is one Repo, one branch and one Worktree, and a stage is one
@@ -114,7 +134,13 @@ use crate::store;
 use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
-/// Start the stage after `conversation_id`'s, where there is one.
+/// Start every stage of `conversation_id`'s roadmap that may start now.
+///
+/// **Every** rather than the one after it, up to [`stages::AT_ONCE`] of one
+/// roadmap at a time — see [`stages::next_stage`], which is where that arithmetic
+/// is and where a stage that waited for a place gets its sentence. Each start is
+/// taken in turn and each is its own act: one that halts says so and the next is
+/// attempted anyway.
 ///
 /// Called when a wrap-up settles, on every Conversation rather than on the ones
 /// somebody thought were roadmap stages. Which roadmap this one is a stage of is
@@ -205,6 +231,10 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     let branch = conversation.branch.clone();
     let repo = conversation.repo.path.clone();
 
+    // The roadmap's name kept back for the log below, the reading itself taking
+    // the string.
+    let named = roadmap.clone();
+
     let reading: Vec<String> = declaring(&chain, wrote.as_deref(), &conversation.branch)
         .into_iter()
         .map(str::to_owned)
@@ -233,6 +263,11 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                     &roadmap,
                     &branch,
                     &record,
+                    // How many of one roadmap run at once. A constant while this
+                    // is the only thing that permits a start; the stage after
+                    // this one makes it a server setting, read here and passed
+                    // in exactly as it is now.
+                    stages::AT_ONCE,
                 ),
 
                 // Nothing left to read the roadmap at: not the top of its chain,
@@ -260,8 +295,8 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         }
     };
 
-    let stage = match next {
-        Next::Stage(stage) => *stage,
+    let (starting, held) = match next {
+        Next::Stages { starting, held } => (starting, held),
         Next::Complete { roadmap } => {
             tracing::info!(
                 conversation_id,
@@ -312,18 +347,51 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
             .await;
         }
         Next::Unstartable { why } => {
-            tracing::warn!(conversation_id, why, "the next stage could not be started");
+            tracing::warn!(
+                conversation_id,
+                why,
+                "no stage of the roadmap could be started"
+            );
 
             return say(
                 &state,
                 conversation_id,
-                &format!("The next stage of the roadmap could not be started: {why}."),
+                &format!("No stage of the roadmap could be started: {why}."),
             )
             .await;
         }
     };
 
-    start(&state, &conversation, conversation_id, stage, stacks, base).await;
+    tracing::info!(
+        conversation_id,
+        roadmap = named,
+        starting = starting.len(),
+        held = held.len(),
+        "the stages of the roadmap that may start now",
+    );
+
+    // Each of them its own act, one after another: a start that halts says so on
+    // this Conversation's Timeline and the next one is attempted anyway. Nothing
+    // here runs them side by side — the checkout lock inside each would serialise
+    // the making regardless, and a start is a handful of git reads and a row.
+    for stage in starting {
+        start(
+            &state,
+            &conversation,
+            conversation_id,
+            stage,
+            stacks,
+            base.clone(),
+        )
+        .await;
+    }
+
+    // And what was ready and did not start, said after the ones that did: a
+    // Timeline reads in the order things happened, and a stage waits for a place
+    // because the stages above it took theirs.
+    for notice in held {
+        say(&state, conversation_id, &notice).await;
+    }
 }
 
 /// Which branch the next stage is **cut from**: the highest stage of its
@@ -515,8 +583,9 @@ async fn start(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and this Conversation's implementation \
-                 Profile has gone, so there is no account to run it under. Nothing was started.",
+                "Stage {} of the `{}` roadmap was ready to start, and this Conversation's \
+                 implementation Profile has gone, so there is no account to run it under. Nothing \
+                 was started.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -540,9 +609,9 @@ async fn start(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and no git author is configured, so \
-                 Verkstead cannot commit on its branch. Nothing was started. Set one in \
-                 Settings and continue the roadmap from there.",
+                "Stage {} of the `{}` roadmap was ready to start, and no git author is \
+                 configured, so Verkstead cannot commit on its branch. Nothing was started. Set \
+                 one in Settings and continue the roadmap from there.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -588,9 +657,9 @@ async fn start(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and `{found}` is already a branch of \
-                 this repository — so it looks to have been started already. Nothing was \
-                 started.",
+                "Stage {} of the `{}` roadmap was ready to start, and `{found}` is already a \
+                 branch of this repository — so it looks to have been started already. Nothing \
+                 was started.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -611,9 +680,9 @@ async fn start(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and `{by}` is already a branch of this \
-                 repository, which stands in the way of `{branch}`. Nothing was started, and \
-                 nothing will start until that branch is renamed or gone.",
+                "Stage {} of the `{}` roadmap was ready to start, and `{by}` is already a branch \
+                 of this repository, which stands in the way of `{branch}`. Nothing was started, \
+                 and nothing will start until that branch is renamed or gone.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -645,10 +714,10 @@ async fn start(
                 state,
                 settled,
                 &format!(
-                    "Stage {} of the `{}` roadmap is next, and git would not fetch from \
-                     this repository's remote — so what its branch would come off cannot \
-                     be trusted to be what origin is holding. Nothing was started, and \
-                     the server log says why the fetch failed.",
+                    "Stage {} of the `{}` roadmap was ready to start, and git would not fetch \
+                     from this repository's remote — so what its branch would come off cannot be \
+                     trusted to be what origin is holding. Nothing was started, and the server \
+                     log says why the fetch failed.",
                     stage.label, stage.roadmap,
                 ),
             )

@@ -17957,6 +17957,24 @@ fn a_roadmap_then_wraps_up(
     workflow: &str,
     merging: &str,
 ) -> String {
+    a_roadmap_of_briefs_then_wraps_up(planning, worked, stages, workflow, merging, "")
+}
+
+/// And the same with `briefs` written beside the two every one of these
+/// roadmaps has — for a roadmap with more stages in its index than the two.
+///
+/// A fragment of the staging session's own shell rather than a list of files,
+/// because that is what writes the roadmap: the stages are written on the branch
+/// the roadmap Conversation is on, and a brief nobody wrote is a stage nothing
+/// starts.
+fn a_roadmap_of_briefs_then_wraps_up(
+    planning: &Path,
+    worked: &Path,
+    stages: &str,
+    workflow: &str,
+    merging: &str,
+    briefs: &str,
+) -> String {
     format!(
         r#"
 case "$2" in
@@ -17969,6 +17987,7 @@ case "$2" in
     printf '# Rate limiting roadmap\n\n## Stages\n\n{stages}' > docs/roadmaps/rate-limiting/ROADMAP.md
     printf '# 01. Count the requests\n\n## Goal\n\nA counter per key, and nothing else.\n' > docs/roadmaps/rate-limiting/01-counter.md
     printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+{briefs}
     git add -A
     git commit --quiet -m 'docs: stage the rate-limiting roadmap'
     : > /tmp/verkstead/done
@@ -18030,6 +18049,24 @@ const RECORDS_STACKING: &str = r#"    printf '# Git workflow\n\n## Review proces
 /// Both stages open, which is a roadmap with something to start.
 const TWO_STAGES: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n"#;
 
+/// And both of them declaring that they stand on nothing, which is a roadmap with
+/// two stages to start off the one settle.
+///
+/// The declaration is written on the stage's own line, after the link to its
+/// brief — see `declarations`, which is the reading of it. A roadmap declaring on
+/// every line is a declaring roadmap; [`TWO_STAGES`] declares on none, and runs in
+/// order.
+const TWO_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n"#;
+
+/// And four of them, which is more roots than one roadmap has places: three start
+/// and the fourth waits.
+const FOUR_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n- [ ] 03: Count the refusals — [brief](03-refusals.md) — no dependencies\n- [ ] 04: Say why — [brief](04-saying-why.md) — no dependencies\n"#;
+
+/// The briefs those last two name, written on the roadmap's own branch beside the
+/// two every one of these fixtures writes.
+const TWO_MORE_BRIEFS: &str = r#"    printf '# 03. Count the refusals\n' > docs/roadmaps/rate-limiting/03-refusals.md
+    printf '# 04. Say why\n' > docs/roadmaps/rate-limiting/04-saying-why.md"#;
+
 /// The two presses a roadmap Conversation ever takes: start grilling, and pick
 /// the roadmap direction on the Set that ends it.
 ///
@@ -18090,6 +18127,51 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
         assert!(
             Instant::now() < deadline,
             "no stage was ever started. The Timeline says: {:?}",
+            notices(&fixture.view().await),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// The Conversations the stages were started as, branch order, once `many` of
+/// them are working — or a panic saying how many ever did.
+///
+/// Waited for as a count rather than one at a time: a settle starts every ready
+/// stage of its roadmap, one after another, so a test that took the first one it
+/// saw would be reading the scheduler part-way through.
+async fn stages_of(fixture: &Grilling, many: usize) -> Vec<ConversationView> {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let mut working = Vec::new();
+
+        // Every other Conversation rather than the newest of them, for
+        // [`stage_of`]'s reason: a test may have put a stage of its own into the
+        // record by hand, and one of those is never working.
+        for entry in conversations(&fixture.app).await {
+            if entry.id == fixture.id {
+                continue;
+            }
+
+            let view: ConversationView =
+                get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
+
+            if view.state == Lifecycle::Implementing && !notices(&view).is_empty() {
+                working.push(view);
+            }
+        }
+
+        if working.len() >= many {
+            working.sort_by(|one, two| one.branch.cmp(&two.branch));
+
+            return working;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "{} of {many} stages ever started. The Timeline says: {:?}",
+            working.len(),
             notices(&fixture.view().await),
         );
 
@@ -18417,6 +18499,218 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     assert!(
         index.contains("*(in progress: `roadmaps/rate-limiting/01-counter`)*"),
         "the roadmap says which branch stage 01 is being worked on: {index:?}",
+    );
+}
+
+/// A settle starts **every** stage of its roadmap that may start now, rather than
+/// the lowest of them: both roots of a declaring roadmap, off the one wrap-up.
+///
+/// Each of them a Conversation of its own, on a branch of its own, in a Worktree
+/// of its own — a stage cannot be anything else — and the Conversation that
+/// settled names both of them where the human was watching when it happened.
+#[tokio::test]
+async fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 2).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+        ],
+        "both roots started, each on a branch named for its own brief",
+    );
+
+    for stage in &stages {
+        assert_eq!(
+            stage.state,
+            Lifecycle::Implementing,
+            "each goes straight to work, the brief being what a grilling would have settled",
+        );
+        assert!(
+            git(&fixture.repo(), &["branch", "--list", &stage.branch]).contains(&stage.branch),
+            "and its branch really is cut: {}",
+            stage.branch,
+        );
+    }
+
+    let worktrees: std::collections::BTreeSet<String> = stages
+        .iter()
+        .map(|stage| {
+            stage
+                .worktree
+                .as_ref()
+                .expect("a stage has a Worktree")
+                .path
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(
+        worktrees.len(),
+        2,
+        "a Worktree each, two stages worked side by side being two checkouts: {worktrees:?}",
+    );
+
+    // And the Conversation that settled names each of them, that being the one
+    // Timeline the human is looking at when a roadmap carries itself on.
+    //
+    // Waited on the second of the two notices: each start says so on the stage's
+    // own Timeline before this one, so a stage that is working is not yet a stage
+    // this Timeline has heard of.
+    let carried_on = said_on(&fixture, fixture.id, "02-refusing</code>.").await;
+
+    assert!(
+        carried_on.contains("Stage 01")
+            && carried_on.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "the settled Conversation says stage 01 started and on what: {carried_on:?}",
+    );
+    assert!(
+        carried_on.contains("Stage 02")
+            && carried_on.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
+        "and stage 02 beside it, one notice per stage started: {carried_on:?}",
+    );
+}
+
+/// Three stages of one roadmap at once, and the fourth ready stage waits for a
+/// place — told so on the Timeline, so that a roadmap which has gone quiet with
+/// work left in it says why rather than looking forgotten.
+///
+/// Four roots, which is more than the places a roadmap has. The lowest-numbered
+/// of them start: the roadmap's order is still the roadmap's own, and it is what
+/// decides between stages that are otherwise alike.
+#[tokio::test]
+async fn a_fourth_ready_stage_waits_for_a_place_and_is_told_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FOUR_ROOTS,
+            RECORDS_STACKING,
+            "",
+            TWO_MORE_BRIEFS,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 3).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "three of one roadmap at once, and the lowest-numbered three at that",
+    );
+
+    // Said after the three that started, the waiting being a consequence of them.
+    let said = said_on(&fixture, fixture.id, "waiting for a place").await;
+
+    assert!(
+        said.contains("Stage 04") && said.contains("at most 3 stages at a time"),
+        "which stage is waiting, and what for: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        4,
+        "the roadmap's own Conversation and three stages, and no fourth stage",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/04-saying-why"],
+        )
+        .contains("04-saying-why"),
+        "and no branch was cut for the one that waited",
+    );
+}
+
+/// And a start that halts halts only itself: stage 01's branch is already taken,
+/// so stage 01 does not start and stage 02 does.
+///
+/// Which is where the carry-on stopped reading *branch already taken* as *nothing
+/// was started*. The refusal itself is unchanged — a second Conversation on a
+/// stage already under way is still refused, by the branch — and what changed is
+/// that its roadmap's other ready stages are no longer refused with it.
+#[tokio::test]
+async fn a_stage_whose_branch_is_taken_leaves_its_siblings_started() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01 already on a branch, which is a stage somebody — or some earlier
+    // run — has started already.
+    git(
+        &fixture.repo(),
+        &["branch", "roadmaps/rate-limiting/01-counter"],
+    );
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.branch, "roadmaps/rate-limiting/02-refusing",
+        "01 is taken, and 02 stands on nothing of it",
+    );
+
+    // Waited on the notice the *second* start writes, which is the last of the
+    // two: the halt on 01 is said before it, so waiting on this one waits for the
+    // whole account of the settle rather than for half of it.
+    let said = said_on(&fixture, fixture.id, "02-refusing</code>.").await;
+
+    assert!(
+        said.contains("Stage 01")
+            && said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "the halt names the stage and the branch that refused it: {said:?}",
+    );
+    assert!(
+        said.contains("Stage 02")
+            && said.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
+        "and its sibling started anyway: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "one stage started and one halted, which is two Conversations and no more",
     );
 }
 

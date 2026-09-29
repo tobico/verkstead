@@ -94,6 +94,26 @@ pub(crate) const INDEX: &str = "ROADMAP.md";
 /// a stage branch reads as the roadmap's work at a glance.
 pub(crate) const STAGES: &str = "roadmaps";
 
+/// How many stages of **one roadmap** Verkstead runs at once.
+///
+/// Three, which is the number
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md) settled: enough that
+/// a roadmap shaped like a fan gets on with its fan, few enough that the human is
+/// never handed more breakdown Sets at once than they can read.
+///
+/// **A place is taken by every stage of the roadmap the record has in flight**,
+/// whatever that stage is doing — see [`Ready::Stages`], which is where they are
+/// counted. A stage blocked on a Question Set and a stage waiting to join the
+/// chain are both holding one, which is the human's choice rather than an
+/// oversight: what the limit is for is how much of one roadmap is open at once,
+/// and work somebody has been asked a question about is open.
+///
+/// A constant here and a server setting from the stage after this one, which is
+/// why it is passed into [`next_stage`] rather than read inside it: where a start
+/// is permitted stays the one place, and how many are permitted is the caller's
+/// to say.
+pub(crate) const AT_ONCE: usize = 3;
+
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
 /// written to, where there are any.
 ///
@@ -289,8 +309,33 @@ fn stacking(workflow: &str) -> bool {
 /// and which of those entries may start now is [`ready`]'s question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Next {
-    /// This one: the lowest-numbered stage that may start now.
-    Stage(Box<Stage>),
+    /// What the roadmap starts now, and what it says about the ready stages it
+    /// does not start.
+    ///
+    /// **Every ready stage there was a place for**, lowest number first — see
+    /// [`AT_ONCE`], which is how many places a roadmap has, and [`ready`], which
+    /// is which of its stages want one. A list rather than one stage because each
+    /// start is its own act from here on: one that halts halts itself, and the
+    /// rest are started anyway.
+    ///
+    /// `starting` is empty where every ready stage is held, which is a roadmap
+    /// already running as many as it runs at once. So this answer is not *the
+    /// roadmap has something to start* — it is *this is what the roadmap has to
+    /// say about what may start*, and the roadmap with nothing ready at all is
+    /// [`Next::InFlight`].
+    Stages {
+        /// The stages to start, lowest number first.
+        starting: Vec<Stage>,
+
+        /// One sentence per ready stage that does not start: one that waited for
+        /// a place, one whose brief is not there to prime it from.
+        ///
+        /// Said on the settled Conversation's Timeline as they stand, so that a
+        /// roadmap which has gone quiet says why it went quiet — a stage waiting
+        /// for a place is indistinguishable, from the sidebar, from a scheduler
+        /// that forgot about it.
+        held: Vec<String>,
+    },
 
     /// Every stage of it is done. The roadmap finished, and its directory stays
     /// where it is as the record of what it was.
@@ -312,14 +357,17 @@ pub(crate) enum Next {
         roadmap: String,
     },
 
-    /// There is nothing startable here and that is a thing to say: the stage's
-    /// brief is not there to prime a Conversation with, or the roadmap the
-    /// record names is not on this branch to read at all.
+    /// **Nothing of this roadmap may start**, and that is a thing to say: it is
+    /// not on the branch its declarations are read off at all, its index plans
+    /// nothing, or it declares badly.
     ///
-    /// A thing to say rather than to guess past. A roadmap entry pointing at a
-    /// file nobody wrote is the human's to fix, and starting the stage after it
-    /// instead would be Verkstead deciding to skip work; a roadmap that has been
-    /// renamed or emptied on this branch is the same, one level up.
+    /// A thing to say rather than to guess past. A roadmap that has been renamed
+    /// or emptied on that branch is the human's to fix, and falling back to some
+    /// older reading of it would be Verkstead guessing at which roadmap this is.
+    ///
+    /// **A stage of it whose own brief is missing is not this.** That halts the
+    /// one stage and no other: it is one of [`Next::Stages`]'s held sentences,
+    /// and the rest of the ready stages start anyway.
     Unstartable {
         /// Why, in the words the Timeline says it in.
         why: String,
@@ -502,8 +550,18 @@ pub(crate) struct Declaring<'a> {
 /// about, so the record is what skips it, and the annotation the roadmap keeps
 /// beside the line is the fallback where the record has no label for it.
 ///
-/// **One stage still**, which is the lowest of the ready ones: what changes here is
-/// *which* stage that is rather than how many start.
+/// **Every ready stage there is a place for**, lowest number first. `at_once` is
+/// how many stages of one roadmap run at once — see [`AT_ONCE`] — and every stage
+/// the record has in flight is already holding one of those places, so what starts
+/// here is what is left over. Where there are more ready stages than places the
+/// lowest-numbered ones start and the rest are held: the roadmap's order is still
+/// the roadmap's own, and a stage that waited is told so rather than dropped.
+///
+/// **One brief read per stage that starts**, and a stage whose brief is not there
+/// halts itself alone — held with its own sentence while the rest of the ready
+/// stages go on starting. A brief nobody wrote is the human's to fix, and stopping
+/// a whole roadmap's fan for one of them would be a stage's fault spreading to its
+/// siblings.
 ///
 /// A value rather than a lookup, so this stays a reading: the rows are read once,
 /// by the caller, and nothing in here asks the database.
@@ -516,13 +574,14 @@ pub(crate) struct Declaring<'a> {
 /// branch touched is exactly the guess this stopped making — and so is falling
 /// back to a reading of the same roadmap somewhere older.
 ///
-/// Blocking work: one git read, and one more for the brief.
+/// Blocking work: one git read, and one more per stage that starts.
 pub(crate) fn next_stage(
     repo: &Path,
     read: Declaring<'_>,
     roadmap: &str,
     branch: &str,
     record: &store::StageStandings,
+    at_once: usize,
 ) -> Next {
     let index = format!("{ROADMAPS}/{roadmap}/{INDEX}");
 
@@ -550,11 +609,18 @@ pub(crate) fn next_stage(
         };
     }
 
-    // Which of its stages may start is [`ready`]'s answer, and nothing starts more
-    // than one of them yet: the lowest is what this carries on with. Another
-    // roadmap in this Repo having work left is not a reason to start any of it.
-    let entry = match ready(roadmap, &list, record, branch) {
-        Ready::Stages(lowest, _) => lowest,
+    // Which of its stages may start is [`ready`]'s answer, and how many of them
+    // are already under way comes back with it. Another roadmap in this Repo
+    // having work left is not a reason to start any of it.
+    let (ready, in_flight) = match ready(roadmap, &list, record, branch) {
+        Ready::Stages {
+            lowest,
+            rest,
+            in_flight,
+        } => (
+            std::iter::once(lowest).chain(rest).collect::<Vec<_>>(),
+            in_flight,
+        ),
         Ready::Complete => {
             return Next::Complete {
                 roadmap: roadmap.to_owned(),
@@ -571,37 +637,68 @@ pub(crate) fn next_stage(
         Ready::Misdeclared(why) => return Next::Unstartable { why },
     };
 
-    // An entry naming no brief at all, which is a line to say something about
-    // rather than a path to go and read: `<commit>:docs/roadmaps/<name>/` is the
-    // roadmap's own directory, and git would hand back a listing of it.
-    if entry.link.is_empty() {
-        return Next::Unstartable {
-            why: format!(
-                "stage {} of the {roadmap} roadmap names no brief to start it from",
+    // What is left over once the stages somebody is on have taken theirs. Saturating
+    // because the record can hold more in flight than the limit allows — the limit
+    // is lowered in Settings, or a stage was started by hand — and a roadmap over
+    // its limit starts nothing rather than going backwards.
+    let places = at_once.saturating_sub(in_flight);
+
+    let mut starting = Vec::new();
+    let mut held = Vec::new();
+
+    for (place, entry) in ready.into_iter().enumerate() {
+        // Beyond the places there are, so it waits — and is told so. It starts the
+        // moment one of the stages ahead of it settles, which is a settle that runs
+        // this reading again.
+        if place >= places {
+            // How many are in flight is deliberately not said: three of them may
+            // have started a moment ago, in this very reading, and the record the
+            // count came off was read before any of that.
+            held.push(format!(
+                "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place: \
+                 this roadmap runs at most {at_once} stages at a time, and its places are taken. \
+                 It starts when one of them settles.",
+                entry.label, entry.title,
+            ));
+
+            continue;
+        }
+
+        // An entry naming no brief at all, which is a line to say something about
+        // rather than a path to go and read: `<commit>:docs/roadmaps/<name>/` is
+        // the roadmap's own directory, and git would hand back a listing of it.
+        if entry.link.is_empty() {
+            held.push(format!(
+                "Stage {} of the `{roadmap}` roadmap was ready and could not be started: its \
+                 line names no brief to start it from.",
                 entry.label,
-            ),
+            ));
+
+            continue;
+        }
+
+        let brief_path = format!("{ROADMAPS}/{roadmap}/{}", entry.link);
+
+        let Some(markdown) = at(repo, read.commit, &brief_path) else {
+            held.push(format!(
+                "Stage {} of the `{roadmap}` roadmap was ready and could not be started: it \
+                 names the brief `{brief_path}`, and there is nothing there to read on `{}`.",
+                entry.label, read.branch,
+            ));
+
+            continue;
         };
+
+        starting.push(Stage {
+            brief_path,
+            roadmap: roadmap.to_owned(),
+            label: entry.label.to_owned(),
+            title: entry.title.to_owned(),
+            brief: markdown,
+        });
     }
 
-    let brief_path = format!("{ROADMAPS}/{roadmap}/{}", entry.link);
-
-    let Some(markdown) = at(repo, read.commit, &brief_path) else {
-        return Next::Unstartable {
-            why: format!(
-                "stage {} of the {roadmap} roadmap names the brief {brief_path}, and there is \
-                 nothing there to read on `{}`",
-                entry.label, read.branch,
-            ),
-        };
-    };
-
-    Next::Stage(Box::new(Stage {
-        brief_path,
-        roadmap: roadmap.to_owned(),
-        label: entry.label.to_owned(),
-        title: entry.title.to_owned(),
-        brief: markdown,
-    }))
+    Next::Stages { starting, held }
 }
 
 /// What one roadmap may start now: the stages that are ready, or which of the
@@ -611,13 +708,29 @@ pub(crate) fn next_stage(
 /// be missing — see [`Ready::InFlight`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Ready<'a> {
-    /// The stages that may start now, lowest number first: the lowest of them,
-    /// and the rest behind it.
+    /// The stages that may start now, lowest number first, beside the count of
+    /// places the roadmap has already given away.
     ///
-    /// Split that way because the answer is never *no stages* — that is one of
-    /// the three below — and because nothing starts more than one stage yet:
-    /// both readings take the lowest and leave the rest where they are.
-    Stages(checklist::Entry<'a>, Vec<checklist::Entry<'a>>),
+    /// Split into the lowest and the rest because the answer is never *no
+    /// stages* — that is one of the three below — and because the adoption's
+    /// reading still takes the lowest and leaves the rest where they are.
+    Stages {
+        /// The lowest-numbered of them.
+        lowest: checklist::Entry<'a>,
+
+        /// And the rest behind it, in the roadmap's own order.
+        rest: Vec<checklist::Entry<'a>>,
+
+        /// How many stages of this roadmap the record has **in flight**, each of
+        /// them holding one of its places — see [`AT_ONCE`], which is how many
+        /// there are.
+        ///
+        /// Counted here rather than by the caller because this is where the
+        /// record and the boxes have already been read against each other: a
+        /// stage settled is not in flight whatever its row says, and a stage
+        /// whose box is ticked on the branch being read may still be somebody's.
+        in_flight: usize,
+    },
 
     /// Every stage of it is done: the roadmap finished.
     Complete,
@@ -753,10 +866,19 @@ pub(crate) fn ready<'a>(
     // sort, so a roadmap that numbers two lines alike keeps them as it wrote them.
     ready.sort_by_key(|entry| entry.number);
 
+    // And what the roadmap has already given away, which is the other half of
+    // what the scheduler needs: a place per stage somebody is on, whatever that
+    // stage is doing. See [`AT_ONCE`], where the rest of that rule is.
+    let in_flight = on_it.iter().filter(|on_it| **on_it).count();
+
     let mut ready = ready.into_iter();
 
     match ready.next() {
-        Some(lowest) => Ready::Stages(lowest, ready.collect()),
+        Some(lowest) => Ready::Stages {
+            lowest,
+            rest: ready.collect(),
+            in_flight,
+        },
         None => match settled.iter().all(|settled| *settled) {
             true => Ready::Complete,
             false => Ready::InFlight,
@@ -1494,9 +1616,11 @@ pub(crate) fn startable(
     // was; nothing ready with a stage still in flight is neither that nor a stage
     // to offer.
     //
-    // The lowest of them, nothing starting more than one stage yet.
+    // The lowest of them: the adoption offers one stage, whatever the roadmap has
+    // ready behind it. The press starting every ready stage is the stage after
+    // this one, and this reading is what it will be starting them off.
     let entry = match ready(name, &index, record, "") {
-        Ready::Stages(lowest, _) => lowest,
+        Ready::Stages { lowest, .. } => lowest,
         Ready::Complete => return Startable::Complete,
         Ready::InFlight => return Startable::InFlight,
         // Nothing of a roadmap that declares badly may start, here as anywhere.
@@ -1744,6 +1868,50 @@ mod tests {
 
     use super::*;
 
+    /// The one stage a reading starts, where the test expects exactly one — and
+    /// `said`, which is what that test is about, where it started anything else.
+    ///
+    /// Most of these are about *which* stage a roadmap starts rather than how
+    /// many, and every one of those roadmaps has one ready stage at a time: they
+    /// run in order, or the record says everything above the stage they are about
+    /// stands on something in flight. So the list is unwrapped here, once, and a
+    /// roadmap that suddenly starts two fails the test that says it starts one.
+    #[track_caller]
+    fn only(next: Next, said: &str) -> Stage {
+        let Next::Stages { mut starting, held } = next else {
+            panic!("{said} — and the reading started nothing at all: {next:?}");
+        };
+
+        assert!(
+            starting.len() == 1 && held.is_empty(),
+            "{said} — and the reading answered {starting:?}, holding {held:?}",
+        );
+
+        starting.remove(0)
+    }
+
+    /// What a reading holds back, which is a sentence per ready stage that does
+    /// not start: one waiting for a place, one whose brief is not there.
+    #[track_caller]
+    fn holding(next: Next) -> Vec<String> {
+        match next {
+            Next::Stages { held, .. } => held,
+            other => panic!("nothing of this roadmap was read as ready: {other:?}"),
+        }
+    }
+
+    /// And which stages it starts, by label — for the tests that are about how
+    /// many start rather than about one of them.
+    #[track_caller]
+    fn starting(next: &Next) -> Vec<&str> {
+        match next {
+            Next::Stages { starting, .. } => {
+                starting.iter().map(|stage| stage.label.as_str()).collect()
+            }
+            other => panic!("nothing of this roadmap was read as ready: {other:?}"),
+        }
+    }
+
     /// A roadmap index exactly as `/to-roadmap` writes one.
     const MVP: &str = "\
 # MVP roadmap
@@ -1858,13 +2026,44 @@ Turns this askance clone into Verkstead.
             branch: &str,
             record: &store::StageStandings,
         ) -> Next {
+            self.next_running(at, commit, roadmap, branch, record, AT_ONCE)
+        }
+
+        /// And the same reading with a limit of the caller's choosing, for the
+        /// tests that are about the limit rather than about which stages are
+        /// ready. Every other reading here runs at [`AT_ONCE`], which is what the
+        /// carry-on passes.
+        fn next_running(
+            &self,
+            at: &str,
+            commit: &str,
+            roadmap: &str,
+            branch: &str,
+            record: &store::StageStandings,
+            at_once: usize,
+        ) -> Next {
             next_stage(
                 self.path(),
                 Declaring { branch: at, commit },
                 roadmap,
                 branch,
                 record,
+                at_once,
             )
+        }
+
+        /// What this roadmap would start with only `at_once` places to give, the
+        /// record behind it as it stands.
+        fn next_limited(
+            &self,
+            roadmap: &str,
+            branch: &str,
+            record: &store::StageStandings,
+            at_once: usize,
+        ) -> Next {
+            let commit = self.committed();
+
+            self.next_running("main", &commit, roadmap, branch, record, at_once)
         }
 
         /// Everything written so far committed to the branch checked out, and the
@@ -2424,12 +2623,10 @@ Turns this askance clone into Verkstead.
         repo.write("mvp", MVP);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next("mvp", "anything-else") else {
-            panic!(
-                "stage 03 is the one left: {:?}",
-                repo.next("mvp", "anything-else"),
-            );
-        };
+        let stage = only(
+            repo.next("mvp", "anything-else"),
+            "stage 03 is the one left",
+        );
 
         assert_eq!(stage.roadmap, "mvp");
         assert_eq!(stage.label, "03");
@@ -2509,17 +2706,19 @@ Turns this askance clone into Verkstead.
         repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next("mvp", "grilling") else {
-            panic!("the stage after this Conversation's own is the one to start");
-        };
+        let stage = only(
+            repo.next("mvp", "grilling"),
+            "the stage after this Conversation's own is the one to start",
+        );
 
         assert_eq!(stage.label, "03");
 
         // And to anybody else it is the stage it says it is: the annotation is
         // about whose it is, not about whether it is done.
-        let Next::Stage(stage) = repo.next("mvp", "some-other-branch") else {
-            panic!("stage 02 is still unchecked");
-        };
+        let stage = only(
+            repo.next("mvp", "some-other-branch"),
+            "stage 02 is still unchecked",
+        );
 
         assert_eq!(stage.label, "02");
     }
@@ -2570,13 +2769,14 @@ Turns this askance clone into Verkstead.
         repo.write("mvp", UNTICKED);
         repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "anything-else",
-            &record([("mvp", "01", store::StageStanding::Settled)]),
-        ) else {
-            panic!("stage 01 settled, so stage 02 is the one to start");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "anything-else",
+                &record([("mvp", "01", store::StageStanding::Settled)]),
+            ),
+            "stage 01 settled, so stage 02 is the one to start",
+        );
 
         assert_eq!(stage.label, "02");
     }
@@ -2599,13 +2799,14 @@ Turns this askance clone into Verkstead.
         );
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "anything-else",
-            &record([("mvp", "02", store::StageStanding::Settled)]),
-        ) else {
-            panic!("the box speaks for 01 and the record for 02, so stage 03 is the one left");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "anything-else",
+                &record([("mvp", "02", store::StageStanding::Settled)]),
+            ),
+            "the box speaks for 01 and the record for 02, so stage 03 is the one left",
+        );
 
         assert_eq!(stage.label, "03");
     }
@@ -2679,16 +2880,17 @@ Turns this askance clone into Verkstead.
         repo.write("mvp", DECLARED);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "roadmaps/mvp/02-grilling",
-            &record([
-                ("mvp", "01", store::StageStanding::InFlight),
-                ("mvp", "02", store::StageStanding::Settled),
-            ]),
-        ) else {
-            panic!("stage 03 stands on 02 alone, and 02 has settled");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/02-grilling",
+                &record([
+                    ("mvp", "01", store::StageStanding::InFlight),
+                    ("mvp", "02", store::StageStanding::Settled),
+                ]),
+            ),
+            "stage 03 stands on 02 alone, and 02 has settled",
+        );
 
         assert_eq!(stage.label, "03");
     }
@@ -2771,15 +2973,232 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// Four stages standing on nothing, which is more roots than one roadmap has
+    /// places: what the limit is read off.
+    const FOUR_ROOTS: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — no dependencies
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — no dependencies
+";
+
+    /// A repository holding that roadmap with a brief for every stage of it, so
+    /// that what a reading starts is decided by the places rather than by which
+    /// briefs somebody wrote.
+    fn four_roots() -> Repo {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_ROOTS);
+
+        for (label, slug) in [
+            ("01", "workbench"),
+            ("02", "grilling"),
+            ("03", "implementation"),
+            ("04", "wrap-up"),
+        ] {
+            repo.brief(
+                "mvp",
+                &format!("{label}-{slug}.md"),
+                &format!("# {label}. {slug}\n"),
+            );
+        }
+
+        repo
+    }
+
+    /// Every ready stage starts off the one settle, rather than the lowest of
+    /// them: 01 and 02 both stand on nothing, so a settle starts both.
+    ///
+    /// Which is the whole of the scheduler. What it replaces is the rule that one
+    /// settle started one stage, and a roadmap shaped like a fan worked through
+    /// its fan one prong at a time.
+    #[test]
+    fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let next = repo.next("mvp", "");
+
+        assert_eq!(
+            starting(&next),
+            ["01", "02"],
+            "both roots start, and 03 stands on 02 which has not settled",
+        );
+        assert!(
+            holding(next).is_empty(),
+            "with nothing held: there were places for both",
+        );
+    }
+
+    /// And an undeclared roadmap starts one stage still, which is what *in order*
+    /// comes to: every stage of it stands on the one before it, so there is never
+    /// a second ready stage for a second place to be given to.
+    #[test]
+    fn a_settle_on_an_undeclared_roadmap_still_starts_one_stage() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let next = repo.next("mvp", "");
+
+        assert_eq!(starting(&next), ["01"]);
+        assert!(holding(next).is_empty());
+    }
+
+    /// Three of one roadmap at once, and the fourth ready stage waits for a place
+    /// — and is told it is waiting, so that a roadmap which has gone quiet says
+    /// why rather than looking like one the scheduler forgot.
+    ///
+    /// The lowest-numbered ready stages are the ones that start: the roadmap's
+    /// order is still the roadmap's own, and it is what decides between stages
+    /// that are otherwise alike.
+    #[test]
+    fn a_ready_stage_beyond_the_roadmaps_places_waits_and_says_so() {
+        let repo = four_roots();
+
+        let next = repo.next("mvp", "");
+
+        assert_eq!(
+            starting(&next),
+            ["01", "02", "03"],
+            "three of one roadmap at once, lowest first",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and the fourth waits: {held:?}");
+        assert!(
+            held[0].contains("04") && held[0].contains("waiting for a place"),
+            "which stage, and what it is waiting for: {held:?}",
+        );
+    }
+
+    /// A place is taken by every stage the record has in flight, whatever that
+    /// stage is doing: one in flight is one fewer place for this settle to give.
+    ///
+    /// Which is what makes a stage blocked on a Question Set hold its place — the
+    /// human's choice, so that a roadmap they have stopped to answer does not fill
+    /// up with work behind them.
+    #[test]
+    fn a_stage_in_flight_takes_one_of_the_roadmaps_places() {
+        let repo = four_roots();
+
+        let next = repo.next_with(
+            "mvp",
+            "",
+            &record([("mvp", "01", store::StageStanding::InFlight)]),
+        );
+
+        assert_eq!(
+            starting(&next),
+            ["02", "03"],
+            "01 is somebody's, and it is holding one of the three places",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(
+            held.len(),
+            1,
+            "so only one place was left to give: {held:?}"
+        );
+        assert!(held[0].contains("04"), "and 04 is what waits: {held:?}");
+    }
+
+    /// And a roadmap already running as many as it runs at once starts nothing at
+    /// all — with a sentence per ready stage saying so, rather than the silence a
+    /// roadmap with nothing ready keeps.
+    #[test]
+    fn a_roadmap_with_no_places_left_starts_nothing_and_says_why() {
+        let repo = four_roots();
+
+        let next = repo.next_with(
+            "mvp",
+            "",
+            &record([
+                ("mvp", "01", store::StageStanding::InFlight),
+                ("mvp", "02", store::StageStanding::InFlight),
+                ("mvp", "03", store::StageStanding::InFlight),
+            ]),
+        );
+
+        assert!(
+            starting(&next).is_empty(),
+            "three of this roadmap are already in flight: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
+        assert!(
+            held[0].contains("04") && held[0].contains("waiting for a place"),
+            "told it is waiting rather than left to look forgotten: {held:?}",
+        );
+    }
+
+    /// How many places there are is the caller's to say, which is what the stage
+    /// after this one turns into a setting: one place runs a declared roadmap in
+    /// order, whatever its declarations allow.
+    #[test]
+    fn a_roadmap_with_one_place_starts_one_stage_at_a_time() {
+        let repo = four_roots();
+
+        let next = repo.next_limited("mvp", "", &store::StageStandings::default(), 1);
+
+        assert_eq!(starting(&next), ["01"]);
+        assert_eq!(
+            holding(next).len(),
+            3,
+            "and the other three roots are told they are waiting",
+        );
+    }
+
+    /// A stage that halts holds up only the stages that stand on it: 04 stands on
+    /// 01, which is in flight, and 03 stands on 02, which has settled.
+    ///
+    /// The scheduler's half of a halt in the middle. What a halted stage is — one
+    /// blocked on a Question Set, one waiting to join the chain — never comes into
+    /// it: it is in flight by the record, so what stands on it waits and what
+    /// stands beside it does not.
+    #[test]
+    fn a_stage_in_flight_holds_up_its_own_dependents_and_no_others() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let next = repo.next_with(
+            "mvp",
+            "",
+            &record([
+                ("mvp", "01", store::StageStanding::InFlight),
+                ("mvp", "02", store::StageStanding::Settled),
+            ]),
+        );
+
+        assert_eq!(
+            starting(&next),
+            ["03"],
+            "02's dependent starts, and 04 stands on 01 as well as on 03",
+        );
+        assert!(
+            holding(next).is_empty(),
+            "04 is not ready rather than held: nothing it stands on has settled",
+        );
+    }
+
     /// The ready stages come back lowest number first, and a declaring roadmap can
     /// have several of them: 01 and 02 stand on nothing, so both may start.
     ///
-    /// Nothing starts more than one of them yet — the readings take the lowest —
-    /// but the order is what will decide which of them start where there are more
-    /// than places, so it is the reading's own and is asserted here.
+    /// The order is what decides which of them start where there are more than
+    /// places — see [`a_ready_stage_beyond_the_roadmaps_places_waits_and_says_so`]
+    /// — so it is the reading's own and is asserted here.
     #[test]
     fn the_ready_stages_of_a_declaring_roadmap_come_back_lowest_first() {
-        let Ready::Stages(lowest, rest) =
+        let Ready::Stages { lowest, rest, .. } =
             ready("mvp", DECLARED, &store::StageStandings::default(), "")
         else {
             panic!("both roots of this roadmap may start");
@@ -2798,7 +3217,7 @@ Turns this askance clone into Verkstead.
     /// unticked box has to have settled before anything above it is ready.
     #[test]
     fn an_undeclared_roadmap_has_one_ready_stage_at_most() {
-        let Ready::Stages(lowest, rest) =
+        let Ready::Stages { lowest, rest, .. } =
             ready("mvp", UNTICKED, &store::StageStandings::default(), "")
         else {
             panic!("the first stage of it stands on nothing");
@@ -2850,9 +3269,10 @@ Turns this askance clone into Verkstead.
 
         let abandoned = record([("mvp", "01", store::StageStanding::Abandoned)]);
 
-        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &abandoned) else {
-            panic!("an abandoned stage is not a settled one, so its unticked box stands");
-        };
+        let stage = only(
+            repo.next_with("mvp", "anything-else", &abandoned),
+            "an abandoned stage is not a settled one, so its unticked box stands",
+        );
 
         assert_eq!(
             stage.label, "01",
@@ -2868,9 +3288,10 @@ Turns this askance clone into Verkstead.
              - [ ] 02: Grilling — [brief](02-grilling.md)\n",
         );
 
-        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &abandoned) else {
-            panic!("stage 02 is the one left");
-        };
+        let stage = only(
+            repo.next_with("mvp", "anything-else", &abandoned),
+            "stage 02 is the one left",
+        );
 
         assert_eq!(stage.label, "02");
     }
@@ -2895,16 +3316,17 @@ Turns this askance clone into Verkstead.
         );
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "roadmaps/mvp/02-grilling",
-            &record([
-                ("mvp", "01", store::StageStanding::Settled),
-                ("mvp", "02", store::StageStanding::Settled),
-            ]),
-        ) else {
-            panic!("stage 02 has settled, so stage 03 is the one to start");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/02-grilling",
+                &record([
+                    ("mvp", "01", store::StageStanding::Settled),
+                    ("mvp", "02", store::StageStanding::Settled),
+                ]),
+            ),
+            "stage 02 has settled, so stage 03 is the one to start",
+        );
 
         assert_eq!(stage.label, "03");
     }
@@ -2929,13 +3351,14 @@ Turns this askance clone into Verkstead.
         );
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "roadmaps/mvp/02-grilling",
-            &record([("mvp", "01", store::StageStanding::Settled)]),
-        ) else {
-            panic!("the stage after this Conversation's own is the one to start");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/02-grilling",
+                &record([("mvp", "01", store::StageStanding::Settled)]),
+            ),
+            "the stage after this Conversation's own is the one to start",
+        );
 
         assert_eq!(stage.label, "03");
     }
@@ -2952,13 +3375,14 @@ Turns this askance clone into Verkstead.
         repo.write("mvp", UNTICKED);
         repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
 
-        let Next::Stage(stage) = repo.next_with(
-            "mvp",
-            "anything-else",
-            &record([("public-release", "01", store::StageStanding::Settled)]),
-        ) else {
-            panic!("nothing has settled in this roadmap, whatever another one has");
-        };
+        let stage = only(
+            repo.next_with(
+                "mvp",
+                "anything-else",
+                &record([("public-release", "01", store::StageStanding::Settled)]),
+            ),
+            "nothing has settled in this roadmap, whatever another one has",
+        );
 
         assert_eq!(stage.label, "01");
     }
@@ -2986,9 +3410,10 @@ Turns this askance clone into Verkstead.
             repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
             repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
 
-            let Next::Stage(stage) = repo.next("mvp", "grilling") else {
-                panic!("the stage after this Conversation's own is the one to start: {tail:?}");
-            };
+            let stage = only(
+                repo.next("mvp", "grilling"),
+                &format!("the stage after this Conversation's own is the one to start: {tail:?}"),
+            );
 
             assert_eq!(stage.label, "03", "{tail:?}");
         }
@@ -3008,9 +3433,10 @@ Turns this askance clone into Verkstead.
         );
         repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
 
-        let Next::Stage(stage) = repo.next("mvp", "grilling") else {
-            panic!("stage 02 is unticked and nobody's");
-        };
+        let stage = only(
+            repo.next("mvp", "grilling"),
+            "stage 02 is unticked and nobody's",
+        );
 
         assert_eq!(stage.label, "02");
     }
@@ -3117,10 +3543,10 @@ Turns this askance clone into Verkstead.
         );
         repo.brief("missing-roles", "03-workflow-permissions.md", "# 03.\n");
 
-        let Next::Stage(stage) = repo.next("missing-roles", "missing-roles/02-grant-filters")
-        else {
-            panic!("stage 03 of this Conversation's own roadmap is the one to start");
-        };
+        let stage = only(
+            repo.next("missing-roles", "missing-roles/02-grant-filters"),
+            "stage 03 of this Conversation's own roadmap is the one to start",
+        );
 
         assert_eq!(stage.roadmap, "missing-roles");
         assert_eq!(stage.label, "03");
@@ -3163,18 +3589,29 @@ Turns this askance clone into Verkstead.
 
     /// A stage that cannot be started is said rather than skipped: starting the
     /// one after it would be Verkstead deciding to leave work out.
+    ///
+    /// Held rather than refusing the whole reading, which is what it used to be:
+    /// a brief nobody wrote halts the one stage that names it, and the roadmap's
+    /// other ready stages start anyway. Here there are none, so the held sentence
+    /// is the whole of the answer.
     #[test]
     fn a_stage_whose_brief_is_missing_is_not_startable() {
         let repo = Repo::with(&[]);
         repo.write("mvp", MVP);
 
-        let Next::Unstartable { why } = repo.next("mvp", "anything-else") else {
-            panic!("there is no 03-implementation.md to start stage 03 from");
-        };
+        let next = repo.next("mvp", "anything-else");
 
         assert!(
-            why.contains("03") && why.contains("03-implementation.md"),
-            "which stage and which brief: {why:?}",
+            starting(&next).is_empty(),
+            "there is no 03-implementation.md to start stage 03 from: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "one stage was ready: {held:?}");
+        assert!(
+            held[0].contains("03") && held[0].contains("03-implementation.md"),
+            "which stage and which brief: {held:?}",
         );
     }
 
@@ -3186,13 +3623,48 @@ Turns this askance clone into Verkstead.
         let repo = Repo::with(&[]);
         repo.write("mvp", "# MVP roadmap\n\n- [ ] 03: Implementation\n");
 
-        let Next::Unstartable { why } = repo.next("mvp", "anything-else") else {
-            panic!("stage 03 names no brief to be primed from");
-        };
+        let next = repo.next("mvp", "anything-else");
 
         assert!(
-            why.contains("03") && why.contains("no brief"),
-            "which stage, and what its line is missing: {why:?}",
+            starting(&next).is_empty(),
+            "stage 03 names no brief to be primed from: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "one stage was ready: {held:?}");
+        assert!(
+            held[0].contains("03") && held[0].contains("no brief"),
+            "which stage, and what its line is missing: {held:?}",
+        );
+    }
+
+    /// And a brief nobody wrote stops the stage that names it and no other: its
+    /// siblings start, which is the whole of *each start is its own act*.
+    ///
+    /// The one place a reading can halt a stage by itself — everything else that
+    /// stops one is the making of a branch and a worktree, which is the carry-on's
+    /// — so it is the one place this rule is worth reading off a reading.
+    #[test]
+    fn a_missing_brief_holds_its_own_stage_and_starts_its_siblings() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let next = repo.next("mvp", "");
+
+        assert_eq!(
+            starting(&next),
+            ["02"],
+            "01 and 02 both stand on nothing, and only 02 has a brief to be primed from",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 01 is the one held: {held:?}");
+        assert!(
+            held[0].contains("01") && held[0].contains("01-workbench.md"),
+            "with the brief nobody wrote named: {held:?}",
         );
     }
 
@@ -3244,15 +3716,16 @@ Turns this askance clone into Verkstead.
 
         let top = "roadmaps/rate-limiting/02-the-window";
 
-        let Next::Stage(stage) = repo.next_at(
-            top,
-            &repo.commit_of(top),
-            "rate-limiting",
-            "roadmaps/rate-limiting/01-the-counter",
-            &record,
-        ) else {
-            panic!("the edit at the top of the chain has 03 standing on the stage that settled");
-        };
+        let stage = only(
+            repo.next_at(
+                top,
+                &repo.commit_of(top),
+                "rate-limiting",
+                "roadmaps/rate-limiting/01-the-counter",
+                &record,
+            ),
+            "the edit at the top of the chain has 03 standing on the stage that settled",
+        );
 
         assert_eq!(stage.label, "03");
 
@@ -3307,11 +3780,10 @@ Turns this askance clone into Verkstead.
 
         let top = "roadmaps/rate-limiting/01-the-counter";
 
-        let Next::Stage(stage) =
-            repo.next_at(top, &repo.commit_of(top), "rate-limiting", top, &record)
-        else {
-            panic!("stage 02 was added at the top of the chain and stands on the one that settled");
-        };
+        let stage = only(
+            repo.next_at(top, &repo.commit_of(top), "rate-limiting", top, &record),
+            "stage 02 was added at the top of the chain and stands on the one that settled",
+        );
 
         assert_eq!(stage.label, "02");
         assert_eq!(
