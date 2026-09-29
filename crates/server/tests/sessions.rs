@@ -20119,12 +20119,17 @@ async fn taking_up_however_reviewed(
 /// a link of whatever chain the walk turns out to find, and what git refuses a
 /// stack sync over. Made before the press, because the walk at the second door
 /// runs minutes later with nobody watching.
+///
+/// `holder` is the same thing where the checkout *is* a Conversation's and that
+/// Conversation has finished: the case the rule is for, which the walk clears by
+/// closing it. Made before the press for `standing`'s reason — see [`Holder`].
 async fn reviewing_a_branch(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     base: Option<&str>,
     standing: Option<&str>,
+    holder: Option<Holder<'_>>,
     process: Process,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
@@ -20153,6 +20158,10 @@ async fn reviewing_a_branch(
                 &at.to_string_lossy(),
             ],
         );
+    }
+
+    if let Some(holder) = holder {
+        stood_on_by_a_finished_conversation(&bench, holder).await;
     }
 
     let started: Started = post(
@@ -20274,6 +20283,7 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
         None,
+        None,
         Process::Review,
     )
     .await;
@@ -20370,6 +20380,7 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
         None,
+        None,
         Process::FixMergeIssues,
     )
     .await;
@@ -20452,6 +20463,134 @@ esac
     )
 }
 
+/// A Conversation to stand on a link of the chain, which is what a stack
+/// Verkstead built actually looks like: a stage apiece, each Done and each still
+/// holding the worktree its branch is checked out in.
+///
+/// `branch` is the link it stands on, `number` is the pull request of that link —
+/// which a stage Conversation has on its own record, that being what it was
+/// wrapped up onto — and `holding` is whether it has anything uncommitted in that
+/// worktree, which is the one thing a close cannot give back and, at this door, the
+/// one thing there is nobody left to ask about.
+#[derive(Clone, Copy)]
+struct Holder<'a> {
+    branch: &'a str,
+    number: i64,
+    holding: bool,
+}
+
+/// Put one of those on the bench: a real worktree on that branch, a Conversation
+/// recorded as working in it, and Done.
+///
+/// **Written through the store rather than driven through the app**, because what
+/// the walk reads is the record and the checkout and nothing else: which
+/// Conversation is working in the directory git names, and what state it is in.
+/// Taking one all the way round the app to reach Done would be a second wrap-up
+/// running inside a fixture that is about the first.
+///
+/// The branch is cut here and the worktree made here, which is what makes git
+/// refuse to move it — a stack sync rebases every branch of the chain, and that
+/// refusal is the whole reason any of this happens.
+///
+/// Hands back the Conversation's id, for the assertions about what became of it.
+async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) -> i64 {
+    let at = bench
+        .elsewhere
+        .path()
+        .join(format!("{}-holder", holder.branch));
+
+    git(
+        &bench.repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            holder.branch,
+            &at.to_string_lossy(),
+        ],
+    );
+
+    assert!(
+        git(&bench.repo, &["worktree", "list"]).contains(&at.to_string_lossy().to_string()),
+        "the link has to be standing in a real checkout for any of this to be about anything",
+    );
+
+    if holder.holding {
+        std::fs::write(at.join("half-a-thought.md"), "not committed\n").unwrap();
+    }
+
+    let pool = open_database(&bench.database).await.unwrap();
+
+    let id = verkstead_server::store::start_conversation(&pool, bench.repo_id, holder.branch)
+        .await
+        .unwrap()
+        .expect("nothing else has that branch");
+
+    verkstead_server::store::save_brief(&pool, id, "# A stage of its own\n")
+        .await
+        .unwrap();
+
+    verkstead_server::store::start_grilling(&pool, id, "c0ffee", &at, &[])
+        .await
+        .unwrap();
+
+    // And the pull request its work went onto, which is what makes it the
+    // Conversation that link *belongs to* rather than merely one standing in the
+    // directory: a stage is wrapped up onto a pull request of its own, and that row
+    // is what the note naming whose each link is reads.
+    verkstead_server::store::record_pull_request(
+        &pool,
+        id,
+        bench.repo_id,
+        &verkstead_server::store::PullRequest {
+            number: holder.number,
+            title: "Stage".to_owned(),
+            url: format!("https://github.com/tobico/verkstead/pull/{}", holder.number),
+            head: Some(holder.branch.to_owned()),
+            base: Some("main".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // And Done, which is where a stage Conversation ends: the state word written
+    // rather than walked to, the walk being a whole wrap-up and this fixture being
+    // about somebody else's.
+    sqlx::query("UPDATE conversations SET state = 'done' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    id
+}
+
+/// The state word of the Conversation going under `branch`, read straight out of
+/// the column.
+///
+/// The word rather than the state, and read by SQL rather than through the store:
+/// what is being asked about is a Conversation this fixture's own endpoints have
+/// no way to reach — the sidebar's list leaves a Closed one out, and there is no
+/// id to hand because the fixture made it before it existed.
+async fn state_of_the_conversation_on(database: &Path, branch: &str) -> String {
+    let pool = open_database(database).await.unwrap();
+
+    let (state,): (String,) =
+        sqlx::query_as("SELECT state FROM conversations WHERE COALESCE(named_branch, branch) = ?")
+            .bind(branch)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    pool.close().await;
+
+    state
+}
+
 /// A bare branch inside a stack is walked where its `submitting` step's pull
 /// request is recorded, and every pull request of the chain is watched from
 /// there.
@@ -20470,6 +20609,7 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_listing_a_stack(&opened),
+        None,
         None,
         None,
         Process::FixMergeIssues,
@@ -20590,6 +20730,7 @@ async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
         // The link under this branch, checked out in a worktree that is nobody's
         // here — which is what a human's own clone of the stage below looks like.
         Some("stage-01"),
+        None,
         Process::FixMergeIssues,
     )
     .await;
@@ -20627,6 +20768,175 @@ async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
     );
 }
 
+/// And a neighbour that *is* a Conversation's, finished with and holding nothing,
+/// makes way here on its own: closed, its worktree given back, and the run carries
+/// straight on into the wrap-up.
+///
+/// Which is the case a stack Verkstead built is made of — a stage per link, each
+/// Done and each still standing in the worktree its branch is checked out in — and
+/// the case the whole rule exists to clear. Nobody is here to be asked and nothing
+/// needs asking: a clean checkout has nothing to lose, so it is given back without
+/// a word and the sync the chain is owed can move the branch.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_a_finished_conversation_stands_on_carries_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        None,
+        // The stage below, which is a Conversation of its own that has finished
+        // with its work and kept its checkout — exactly what a stacked stage
+        // leaves behind.
+        Some(Holder {
+            branch: "stage-01",
+            number: 40,
+            holding: false,
+        }),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // The pull request lands, the walk runs, and what it finds below gives way.
+    let view = fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("one of a stack of 3"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        !said.contains("no sync was dispatched"),
+        "nothing stopped the run: the neighbour had finished and was holding nothing: {said}",
+    );
+    assert!(
+        said.contains("was closed to make way"),
+        "and the note says which of the chain gave its link up: {said}",
+    );
+
+    // The holder is Closed with its checkout handed back, which is what frees the
+    // branch: git will not move one that is checked out anywhere else.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let worktrees = git(&fixture.repo(), &["worktree", "list"]);
+
+        if !worktrees.contains("stage-01-holder") {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the finished Conversation never gave its checkout back: {worktrees}",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        state_of_the_conversation_on(&fixture.database, "stage-01").await,
+        "closed",
+        "the Conversation that made way is Closed, and a Steer is the way back in",
+    );
+
+    // And the run went on rather than stopping: the wrap-up is watching the whole
+    // chain, which is what it was dispatched for.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let pool = open_database(&fixture.database).await.unwrap();
+        let merges = verkstead_server::store::merges(&pool, fixture.id)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        if merges.len() == 3 {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got going over the chain: {} of 3 asked about",
+            merges.len(),
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+}
+
+/// And one holding uncommitted changes stops the run naming it, rather than being
+/// closed over the human's head.
+///
+/// The one thing a close cannot give back, at the one door where nobody can be
+/// asked about it. At the press a holder with something uncommitted stops the press
+/// to be confirmed; by the time this walk runs the human pressed Start minutes ago
+/// and is not standing here, so the Notice is the asking — and what it stops is a
+/// sync that would have rebased the branch out from under that work anyway.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_holds_uncommitted_changes_stops_the_run() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        None,
+        Some(Holder {
+            branch: "stage-01",
+            number: 40,
+            holding: true,
+        }),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    let view = fixture
+        .until(|view| {
+            notices_since_the_take_up(view)
+                .iter()
+                .any(|notice| notice.contains("no sync was dispatched"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("uncommitted changes") && said.contains("nobody is here to be asked"),
+        "the Notice says what would have been thrown away and why nobody was asked: {said}",
+    );
+    assert!(
+        said.contains("stage-01"),
+        "and names the Conversation holding it, by its branch: {said}",
+    );
+    assert!(
+        said.contains("one of a stack of 3"),
+        "and the chain it found is on the record all the same: {said}",
+    );
+
+    // Nothing was closed and nothing was taken: the checkout is where it was, with
+    // what was left in it still in it.
+    assert!(
+        git(&fixture.repo(), &["worktree", "list"]).contains("stage-01-holder"),
+        "the holder keeps its checkout, nothing having been agreed to",
+    );
+
+    assert_eq!(
+        state_of_the_conversation_on(&fixture.database, "stage-01").await,
+        "done",
+        "and it is exactly where the walk found it",
+    );
+}
+
 /// And one whose session opens none stops the run with what that session last
 /// said — with Resume another go at the one thing still owed.
 ///
@@ -20643,6 +20953,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         spill,
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
         &gh_opened_by_hand(&opened),
+        None,
         None,
         None,
         Process::Review,
@@ -21722,6 +22033,7 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
+        None,
         None,
         None,
         Process::FixMergeIssues,
