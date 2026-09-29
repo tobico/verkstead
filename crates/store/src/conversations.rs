@@ -6027,7 +6027,8 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
         .collect())
 }
 
-/// The branch of a roadmap's **own Conversation**: the one that wrote it.
+/// A roadmap's **own Conversation**: the one that wrote it, and the branch it
+/// wrote it on.
 ///
 /// The **foot** of the chain, and the one thing about a roadmap there was no read
 /// for. [`stage_chain`] answers for the stages that have joined; while none has,
@@ -6047,13 +6048,19 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
 /// says nothing about this one. The newest where somehow there are two — a roadmap
 /// planned twice is two Conversations, and the later of them is the one whose
 /// declarations are the newest.
-pub async fn roadmap_branch(
+///
+/// **Both halves of the one fact**, because both are wanted and by different
+/// readers: the branch is where the roadmap is newest written while no stage has
+/// joined, and the Conversation is the foot a start with **no settle behind it**
+/// takes its Pairings, its companions and its base from — see the server's
+/// `places` module, which is the look that makes such a start.
+pub async fn roadmap_planner(
     pool: &SqlitePool,
     repo_id: i64,
     roadmap: &str,
-) -> Result<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT COALESCE(c.named_branch, c.branch)
+) -> Result<Option<Planned>> {
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT r.conversation_id, COALESCE(c.named_branch, c.branch)
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
          JOIN directions d ON d.conversation_id = r.conversation_id
@@ -6067,10 +6074,81 @@ pub async fn roadmap_branch(
     .fetch_optional(pool)
     .await
     .with_context(|| {
-        format!("reading the branch the {roadmap} roadmap in Repo {repo_id} was written on")
+        format!("reading the Conversation the {roadmap} roadmap in Repo {repo_id} was written on")
     })?;
 
-    Ok(row.map(|(branch,)| branch))
+    Ok(row.map(|(conversation_id, branch)| Planned {
+        conversation_id,
+        branch,
+    }))
+}
+
+/// The Conversation that **wrote** a roadmap: which one it is, and the branch it
+/// wrote it on.
+///
+/// See [`roadmap_planner`], which is the read, and [`Joined`], which is the same
+/// pair of facts about a stage that has joined the chain above it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// The Conversation the roadmap was planned in.
+    pub conversation_id: i64,
+
+    /// And the branch it was planned on, as the record names it now: the name a
+    /// session renamed it to where one did, and the name it was cut under where
+    /// none has.
+    pub branch: String,
+}
+
+/// One roadmap Verkstead is **driving**: which Repo it is in, and what it is
+/// called.
+///
+/// See [`driven_roadmaps`], which is the read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Driven {
+    /// The Repo whose `docs/roadmaps/` holds it — which is what every other
+    /// reading of a roadmap is asked about, two Repos being free to hold
+    /// roadmaps of the same name.
+    pub repo_id: i64,
+
+    /// And its directory name under `docs/roadmaps/` — `mvp`.
+    pub roadmap: String,
+}
+
+/// Every roadmap Verkstead has started something of, in a Repo that is still
+/// registered.
+///
+/// What the look for a free place walks — see the server's `places` module. A
+/// roadmap is one Verkstead is driving from the moment anything of it is
+/// recorded against a Conversation: the roadmap's own Conversation, or a stage
+/// of it. Nothing is stored beyond that, and deliberately — what each of them
+/// has left is read afresh off the declarations, the record and the boxes at
+/// every look, so a row saying *this roadmap is still going* could only come to
+/// disagree with them.
+///
+/// **A roadmap in an unregistered Repo is not among them.** Unregistering is
+/// Verkstead being told to stop offering that repository for new work, and a
+/// stage it started unasked is new work — see [`registered_repos`], which is
+/// where the same flag keeps it off every other list.
+///
+/// One row per roadmap rather than per Conversation, and in no order worth
+/// relying on: which of several waiting roadmaps is served first is the
+/// caller's question, and this only answers which of them there are.
+pub async fn driven_roadmaps(pool: &SqlitePool) -> Result<Vec<Driven>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT DISTINCT c.repo_id, r.roadmap
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
+         ORDER BY c.repo_id, r.roadmap",
+    )
+    .fetch_all(pool)
+    .await
+    .context("reading which roadmaps Verkstead is driving")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(repo_id, roadmap)| Driven { repo_id, roadmap })
+        .collect())
 }
 
 /// One stage **queued to join** its roadmap's chain: the Conversation it is, and

@@ -195,6 +195,14 @@ struct Grilling {
     app: Router,
     id: i64,
 
+    /// The Repo this Conversation is against, for the tests that start a second
+    /// Conversation of their own on the same bench.
+    ///
+    /// The id rather than the path — [`Grilling::repo`] is where the directory
+    /// is. What a compose needs is the registry row, and nothing else here has
+    /// it to hand once the bench has become a fixture.
+    repo_id: i64,
+
     /// Where the database is, for the tests that stand a second server up over
     /// it.
     database: PathBuf,
@@ -424,6 +432,13 @@ impl Grilling {
     /// The caller holds on to what comes back — dropping the Router is the second
     /// server going away again.
     async fn restarted(&self, stub: &str, gh: &str) -> Router {
+        self.restarted_at_pace(stub, gh, *BRISKLY).await
+    }
+
+    /// And the same at a pace of the caller's choosing, for the tests where what
+    /// the second server does is something the first one was not doing: a sweep
+    /// the first server's pace had switched off.
+    async fn restarted_at_pace(&self, stub: &str, gh: &str, pace: Pace) -> Router {
         router_running_sessions(
             open_database(&self.database).await.unwrap(),
             self.state.path().to_owned(),
@@ -446,7 +461,7 @@ impl Grilling {
                 Attachments::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
-            .at_pace(*BRISKLY),
+            .at_pace(pace),
             gh_stub(gh),
         )
     }
@@ -1104,6 +1119,11 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // keep [`SWEEPING`].
     stalls: paced(Duration::from_secs(600)),
     // And longer than any of these run for again, for the stall sweep's reason
+    // and one step further: the look for a free place *starts* something, so one
+    // firing under a test about anything else would put a Conversation on the
+    // sidebar it never asked for. The ones that are about it keep [`LOOKING`].
+    places: paced(Duration::from_secs(600)),
+    // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and
     // asks about — so the tests that are about something else say nothing about
@@ -1138,6 +1158,18 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
     stalls: paced(Duration::from_millis(100)),
+    ..*BRISKLY
+});
+
+/// And the same at a pace that looks for a free place on the server, for the
+/// tests about a stage that waited for one.
+///
+/// A server looks every half minute. What is being asked here is whether a stage
+/// held back for want of a place is started once one comes free, with nobody
+/// pressing anything — and the seconds it waits before looking are not part of
+/// the answer.
+static LOOKING: LazyLock<Pace> = LazyLock::new(|| Pace {
+    places: paced(Duration::from_millis(100)),
     ..*BRISKLY
 });
 
@@ -3355,6 +3387,7 @@ impl Bench {
             spill: self.spill,
             app: self.app,
             id,
+            repo_id: self.repo_id,
             _signalling: signalling,
             database: self.database,
             _room: self.room,
@@ -3603,11 +3636,17 @@ fn pull_requests(view: &ConversationView) -> Vec<&PullRequestEvent> {
 /// idle on a blocking ask, so this is how one is held at a point the test needs
 /// it held at.
 fn handoff_directory(fixture: &Grilling) -> PathBuf {
-    fixture
-        .state
-        .path()
-        .join("handoffs")
-        .join(fixture.id.to_string())
+    handoffs_of(fixture, fixture.id)
+}
+
+/// And the same for any Conversation of this bench, for the tests that stand a
+/// second one up beside the fixture's own.
+///
+/// The directory is the *Conversation's* rather than the bench's — every session
+/// of one sees it as `/tmp/verkstead` — so a test that drives two of them cannot
+/// reach the second's markers through [`handoff_directory`].
+fn handoffs_of(fixture: &Grilling, id: i64) -> PathBuf {
+    fixture.state.path().join("handoffs").join(id.to_string())
 }
 
 /// The handoff on a Timeline, once the grilling has handed one over.
@@ -18940,6 +18979,388 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
 
         pause(Duration::from_millis(25)).await;
     }
+}
+
+/// A bench whose roadmap has a stage **waiting for a place on the server**, with
+/// nothing of its own roadmap about to settle.
+///
+/// Four roots and five places of the roadmap's own, so the roadmap's limit is
+/// never what holds anything back — and an **investigation** running beside them,
+/// which is a Conversation of another Process taking one of the server's four
+/// places. So three stages start and the fourth waits, and what frees its place
+/// is the investigation ending rather than any stage settling. Which is the case
+/// the look exists for: nothing that frees a place is a settle.
+///
+/// Hands back the investigation's Conversation, that being what the caller ends
+/// to free the place — and the stub itself, for the test that stands a second
+/// server up over the same work and has to run it under the same agent.
+async fn a_stage_waiting_behind_an_investigation(pace: Pace) -> (Grilling, i64, String) {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    // The roadmap's own stub with an investigating session in front of it: one
+    // `case` inside another, because what tells every session here apart is the
+    // skill its prompt names and an investigation's is not one the roadmap knows.
+    let stub = format!(
+        r#"
+case "$2" in
+*investigating/SKILL.md*)
+    SAYING='finding out where the 429s come from'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'that is that, then\n'
+    ;;
+*)
+{roadmap}
+    ;;
+esac
+"#,
+        roadmap = a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FOUR_ROOTS,
+            RECORDS_STACKING,
+            "",
+            TWO_MORE_BRIEFS,
+        ),
+    );
+
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), pace, &[]).await;
+
+    // Five places of its own against four roots, so nothing here is ever waiting
+    // on its own roadmap: what holds the fourth back is the server's four.
+    configure(&fixture, "at_once:\n  roadmap_stages: 5\n");
+
+    // And the investigation, started before the roadmap settles so that it is
+    // already holding a place when the carry-on counts them. The Profiles this
+    // bench saved rather than three more of them: what a Pairing settles is which
+    // account the session runs under, and an investigation settles one.
+    let started: Started = post(
+        &fixture.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": fixture.repo_id }),
+    )
+    .await;
+    let Started::Started { id: investigating } = started else {
+        panic!("the investigation starts a Conversation of its own, got {started:?}");
+    };
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&fixture.app, "/api/ui/profiles").await;
+    let implementation = profiles
+        .iter()
+        .find(|profile| profile.name.as_deref() == Some("implementation"))
+        .expect("the bench saved an implementation Profile for the roadmap")
+        .id;
+
+    let chosen: verkstead_render::ProfileChosen = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}/implementation-pairing"),
+        &serde_json::json!({
+            "profile_id": implementation,
+            "model": "claude-implementation-5",
+        }),
+    )
+    .await;
+    assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+
+    let picked: ProcessPicked = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}/process"),
+        &serde_json::json!({ "process": Process::Investigate }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    // Waited for as a session actually running, which is what takes a place: a
+    // row that exists is a Conversation the register has not heard of yet.
+    until_working(&fixture, investigating).await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 3).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "three stages and the investigation, which is the server's four places",
+    );
+
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 04"),
+        "and stage 04 is the one that waited: {said:?}",
+    );
+
+    (fixture, investigating, stub)
+}
+
+/// Read a Conversation of this bench back until something is running in it.
+///
+/// Off the Conversation's own view rather than the sidebar's row, so that it can
+/// be asked about a Conversation that is not the fixture's own — which is what
+/// [`Grilling::until`] cannot be.
+async fn until_working(fixture: &Grilling, id: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if view.working {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing ever ran in Conversation {id}. The Timeline says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// Put a Question Set to the human the way a session inside `id` would — see
+/// [`Grilling::ask`], which is this on the fixture's own Conversation.
+///
+/// The marker goes in *that* Conversation's handoff directory, which is what its
+/// sessions see as `/tmp/verkstead`: a bench driving two Conversations has two of
+/// them, and a marker left in the wrong one reaches nobody.
+async fn asks(fixture: &Grilling, id: i64, yaml: &str) -> i64 {
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{id}/api/v1/sets"))
+            .header(header::CONTENT_TYPE, "application/yaml")
+            .body(Body::from(yaml.to_owned()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
+
+    let directory = handoffs_of(fixture, id);
+
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("asked"), "").unwrap();
+
+    let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
+
+    created.id
+}
+
+/// End the investigation the way the human does — the round answered with
+/// **Nothing else** ticked — and wait until it has reached Done and let its place
+/// go.
+///
+/// Which is a Conversation of another Process finishing, and that is the whole
+/// point: nothing about it is a settle, so nothing about it runs the carry-on.
+/// The place it frees is a place for the roadmap, and only a look will spend it.
+async fn ends(fixture: &Grilling, investigating: i64) {
+    let set = asks(fixture, investigating, A_FOLLOW_UP_ROUND).await;
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({
+            "answers": [{ "label": "Q9", "selected": 1 }],
+            "nothing_else": true,
+        }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    std::fs::write(handoffs_of(fixture, investigating).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView = get(
+            &fixture.app,
+            &format!("/api/ui/conversations/{investigating}"),
+        )
+        .await;
+
+        if view.state == Lifecycle::Done && !view.working && !view.driven {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the investigation never finished and let its place go. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// A place coming free starts the stage that waited, with nobody pressing
+/// anything and no stage of its own roadmap having settled.
+///
+/// The half of the limit task 01 could not close on its own: what frees a place
+/// is a Conversation finishing or stopping, and none of those is a settle — so a
+/// stage held for a place would wait on something of its own roadmap settling,
+/// which may be nothing at all. What starts it is a look of the server's own.
+///
+/// The investigation here is the place-holder and the Process is the point: it is
+/// not a stage, so its ending runs no carry-on and says nothing to this roadmap.
+/// Between it reaching Done and the fourth stage starting there is nothing but
+/// the look.
+///
+/// **And what the stage inherits comes off the foot of the chain.** No stage of
+/// this roadmap has settled, so the foot is the Conversation that wrote it — the
+/// Pairings the session runs under are that Conversation's, the branch is cut from
+/// its branch, and the notice saying the stage started is on its Timeline.
+#[tokio::test]
+async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
+    let (fixture, investigating, _stub) = a_stage_waiting_behind_an_investigation(*LOOKING).await;
+
+    let planned = fixture.view().await.branch;
+
+    ends(&fixture, investigating).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+            "roadmaps/rate-limiting/04-saying-why",
+        ],
+        "the stage that waited started when the place came free",
+    );
+
+    // On the foot's Timeline, which is where the human is looking: the roadmap's
+    // own Conversation, no stage of it having settled.
+    let said = said_on(&fixture, fixture.id, "Stage 04").await;
+
+    assert!(
+        said.contains("has started as a Conversation of its own"),
+        "the foot's Timeline says the stage started: {said:?}",
+    );
+
+    let fourth = stages
+        .iter()
+        .find(|stage| stage.branch.ends_with("04-saying-why"))
+        .expect("the fourth stage is among them");
+
+    assert!(
+        notices(fourth).iter().any(|notice| notice
+            .contains(&format!("was cut from <code>{planned}</code>"))
+            || notice.contains(&format!("was cut from `{planned}`"))),
+        "and its branch was cut from the foot's own branch: {:?}",
+        notices(fourth),
+    );
+
+    // Every stage ran its planning session under the Pairing the foot was
+    // carrying, the one started off the look included — a stage inherits what its
+    // roadmap was settled with, and a look has nowhere else to take it from.
+    let planning = fixture.spill.path().join("stage-prompts");
+    let written = std::fs::read_to_string(&planning).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(started.len(), 4, "four planning sessions: {started:?}");
+    assert!(
+        started
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-implementation-5")),
+        "each under the foot's implementation Pairing: {started:?}",
+    );
+
+    // And **one** start however two arrivals overlap: the look has been running
+    // every hundred milliseconds throughout, alongside the settle that started
+    // the first three. Six Conversations is the roadmap's own, the investigation
+    // and four stages, with nothing started twice.
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        6,
+        "the roadmap, the investigation and one Conversation per stage",
+    );
+}
+
+/// And a server restarted while a stage was waiting starts it when a place comes
+/// free, nothing about the waiting having been written down.
+///
+/// Which is what *nothing is stored* buys: the second server has never heard of
+/// this roadmap having anything held back, and it does not need to have. What is
+/// ready is read afresh from the declarations, the record and the boxes at every
+/// look, so the look the new server makes finds exactly what the old one's would
+/// have.
+///
+/// The first server looks once as it comes up, with nothing yet to find, and then
+/// not again inside this test — its pace puts the next look ten minutes out. So
+/// the place the investigation frees stands empty under it, and the stage that
+/// waited is still waiting when the second server arrives.
+#[tokio::test]
+async fn a_restart_starts_the_stage_that_was_waiting_when_a_place_comes_free() {
+    let (fixture, investigating, stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
+
+    ends(&fixture, investigating).await;
+
+    // Nothing starts under the first server, whose next look is ten minutes out:
+    // the place is free and the stage that wants it is waiting, and only a look
+    // spends it.
+    pause(paced(Duration::from_millis(500))).await;
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        5,
+        "the roadmap, the investigation and three stages, with the fourth still waiting",
+    );
+
+    // A second server over the same database, which is what a restart is — at a
+    // pace that looks. It takes up what the first one was driving before it
+    // counts a single place, which is what keeps it from starting over the top of
+    // three stages it cannot see yet.
+    let _restarted = fixture
+        .restarted_at_pace(&stub, &gh_about(GREEN, "", ""), *LOOKING)
+        .await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert!(
+        stages
+            .iter()
+            .any(|stage| stage.branch == "roadmaps/rate-limiting/04-saying-why"),
+        "the stage that was waiting when the server went started after it came back: {:?}",
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+    );
 }
 
 /// And a start that halts halts only itself: stage 01's branch is already taken,

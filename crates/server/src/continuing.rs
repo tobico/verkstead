@@ -26,6 +26,20 @@
 //! of each; the counting is done here, off the two registers as they stand at the
 //! settle — see [`stages::next_stage`], which is handed what is left of them.
 //!
+//! **And a settle is not the only thing that brings this reading about.** A
+//! place on the server comes free when a Conversation of any kind finishes or
+//! stops, and none of those is a settle — so a stage held for a place is picked
+//! up by a look of the server's own, which runs this same reading against the
+//! foot of each roadmap's chain. See [`crate::places`], and [`Brought`], which is
+//! the whole of what the two readings differ by: a look discounts no Conversation
+//! from the places, and says nothing at all unless it starts something.
+//!
+//! **One start, however two arrivals overlap.** Both take [`AppState::starting`]
+//! and hold it to the end, so the second reads a record the first has already
+//! written its stage into — and a stage in flight is not one [`stages::ready`]
+//! offers. The branch refusal each start ends on is the backstop under that
+//! rather than the plan.
+//!
 //! The one place that is *not* held back is a press. *Continue a roadmap*, Start
 //! and Resume read their own way in and start what they were going to start, over
 //! the limit, and what they made is counted from then on: the limit is there for
@@ -153,6 +167,55 @@ use crate::store;
 use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
+/// What brought a reading of a roadmap about, which decides two things and
+/// nothing else: whether the Conversation it is read from is discounted from the
+/// places, and whether *nothing was started* is said out loud.
+///
+/// The two readings are otherwise the same reading, deliberately: what a roadmap
+/// has ready is read afresh from the declarations, the record and the boxes
+/// either way, so the two can never come to disagree about what may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Brought {
+    /// A wrap-up **settled**, and this is the Conversation that settled — see
+    /// [`crate::settling`].
+    Settle,
+
+    /// A **look** found a place free on the server, and this is the foot of the
+    /// roadmap's chain rather than anything that settled — see
+    /// [`crate::places`].
+    Look,
+}
+
+impl Brought {
+    /// Say on `conversation_id`'s Timeline that nothing was started, or, for a
+    /// look, say it in the log alone.
+    ///
+    /// **A look is silent unless it starts something.** It runs every
+    /// [`crate::Pace::places`] for as long as the server is up and reads every
+    /// roadmap being driven, so a sentence said here is a sentence said again a
+    /// few seconds later and for ever: a roadmap with nothing ready would bury
+    /// its own Timeline, and a stage halted for a branch somebody has taken
+    /// would bury it faster. The settle is where each of these is said, and it
+    /// is said there once.
+    ///
+    /// Which leaves nothing unreported: the look says nothing the settle before
+    /// it has not already said, and what it does say is that a stage started.
+    ///
+    /// In the log at **debug** for the same reason it is off the Timeline: a line
+    /// per driven roadmap per look, for the years a server is up, is not
+    /// something to write at a level anybody leaves on.
+    async fn not_started(self, state: &AppState, conversation_id: i64, markdown: &str) {
+        match self {
+            Self::Settle => say(state, conversation_id, markdown).await,
+            Self::Look => tracing::debug!(
+                conversation_id,
+                said = markdown,
+                "a look for a free place started nothing, and says so in the log alone",
+            ),
+        }
+    }
+}
+
 /// Start every stage of `conversation_id`'s roadmap that may start now.
 ///
 /// **Every** rather than the one after it, up to as many of one roadmap at a time
@@ -173,6 +236,26 @@ use crate::worktrees;
 /// started a stage of somebody else's effort, which nobody had asked for.
 /// Adopting another roadmap is the human's act, from *Continue a roadmap*.
 pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
+    reading(state, conversation_id, Brought::Settle).await;
+}
+
+/// The same reading, brought about by a settle or by a look — see [`Brought`].
+///
+/// **One start, however two arrivals overlap.** A settle and a look can land on
+/// one roadmap at the same moment, and the two would read the same record, find
+/// the same stage ready and start it twice. So every reading takes
+/// [`AppState::starting`] and holds it to the end: the second of them reads a
+/// record in which the first stage is already in flight, which is a stage
+/// [`stages::ready`] no longer offers. The branch refusal each start ends on is
+/// the backstop under that rather than the plan — it would leave a
+/// half-made Conversation closed and a notice about a branch nobody took.
+///
+/// Held across the starts themselves rather than around the reading alone,
+/// because the record is what the next reading sees and a stage is not in it
+/// until [`store::start_stage`] has run.
+pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brought) {
+    let _starting = state.starting.clone().lock_owned().await;
+
     let Some(conversation) = load(&state, conversation_id).await else {
         return;
     };
@@ -196,7 +279,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     // below, and this Conversation's own row is one of those. See
     // [`store::StageOf`].
     let Some(store::StageOf { roadmap, .. }) = recorded else {
-        return unrecorded(&state, &conversation, conversation_id).await;
+        return unrecorded(&state, &conversation, conversation_id, brought).await;
     };
 
     // And what the record says each stage of that roadmap has got to, which is
@@ -235,8 +318,8 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     // and while nothing has joined that is the branch of the Conversation that
     // planned it. A read that fails leaves the chain and the settling branch to
     // answer, which is what a roadmap whose foot has merged already comes to.
-    let wrote = match store::roadmap_branch(&state.pool, conversation.repo.id, &roadmap).await {
-        Ok(wrote) => wrote,
+    let wrote = match store::roadmap_planner(&state.pool, conversation.repo.id, &roadmap).await {
+        Ok(wrote) => wrote.map(|planned| planned.branch),
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -281,7 +364,15 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     // those registrations — the watcher running this very call — and it is Done.
     // The place it is holding is the place this settle freed, so counting it here
     // would be the roadmap waiting for a place it already has.
-    taking.remove(&conversation_id);
+    //
+    // A **look** discounts nothing. The Conversation it reads from is the foot of
+    // the roadmap's chain rather than anything that has just finished, and
+    // whatever it is holding it is holding for its own reasons — a stage that
+    // settled long ago holds nothing at all, and one the human has steered back
+    // into Implementing is genuinely running.
+    if brought == Brought::Settle {
+        taking.remove(&conversation_id);
+    }
 
     let server_places = stages::CONVERSATIONS_AT_ONCE.saturating_sub(taking.len());
 
@@ -353,24 +444,32 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                 "every stage of the roadmap is done, so nothing was started",
             );
 
-            say(
-                &state,
-                conversation_id,
-                &format!(
-                    "Every stage of the `{roadmap}` roadmap is done, so there is no stage to \
-                     start. The roadmap is complete."
-                ),
-            )
-            .await;
+            brought
+                .not_started(
+                    &state,
+                    conversation_id,
+                    &format!(
+                        "Every stage of the `{roadmap}` roadmap is done, so there is no stage to \
+                         start. The roadmap is complete."
+                    ),
+                )
+                .await;
 
             // A stage completing is a milestone, and this is the last one
             // completing: there is no stage after it to be announced by, so the
             // roadmap running out is what the devices are told instead.
-            crate::push::told(
-                &state.pool,
-                conversation_id,
-                crate::push::News::RoadmapComplete { roadmap },
-            );
+            //
+            // At the settle that completed it and nowhere else. A roadmap
+            // completes once, and every look for the rest of the server's life
+            // finds it complete again — a device told each time would be told
+            // about a milestone that happened weeks ago, every half minute.
+            if brought == Brought::Settle {
+                crate::push::told(
+                    &state.pool,
+                    conversation_id,
+                    crate::push::News::RoadmapComplete { roadmap },
+                );
+            }
 
             return;
         }
@@ -385,15 +484,17 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
             // started, so there is no milestone here — what there is is a roadmap
             // that will start something the moment one of the stages somebody is on
             // settles, which is the settle that will say so.
-            return say(
-                &state,
-                conversation_id,
-                &format!(
-                    "No stage of the `{roadmap}` roadmap can start yet: every stage it has left \
-                     is in flight, or stands on one that is. The roadmap is not complete."
-                ),
-            )
-            .await;
+            return brought
+                .not_started(
+                    &state,
+                    conversation_id,
+                    &format!(
+                        "No stage of the `{roadmap}` roadmap can start yet: every stage it has \
+                         left is in flight, or stands on one that is. The roadmap is not \
+                         complete."
+                    ),
+                )
+                .await;
         }
         Next::Unstartable { why } => {
             tracing::warn!(
@@ -402,12 +503,13 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                 "no stage of the roadmap could be started"
             );
 
-            return say(
-                &state,
-                conversation_id,
-                &format!("No stage of the roadmap could be started: {why}."),
-            )
-            .await;
+            return brought
+                .not_started(
+                    &state,
+                    conversation_id,
+                    &format!("No stage of the roadmap could be started: {why}."),
+                )
+                .await;
         }
     };
 
@@ -431,6 +533,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
             stage,
             stacks,
             base.clone(),
+            brought,
         )
         .await;
     }
@@ -439,7 +542,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     // Timeline reads in the order things happened, and a stage waits for a place
     // because the stages above it took theirs.
     for notice in held {
-        say(&state, conversation_id, &notice).await;
+        brought.not_started(&state, conversation_id, &notice).await;
     }
 }
 
@@ -506,7 +609,7 @@ fn cut_from<'a>(
 /// branch has gone gives way to the one below it instead of throwing the whole
 /// chain away.
 ///
-/// **Then the branch the roadmap was planned on** — see `store::roadmap_branch`,
+/// **Then the branch the roadmap was planned on** — see `store::roadmap_planner`,
 /// which is the read for it. That Conversation is the **foot** of the chain while
 /// its pull request is unmerged, and with no stage joined yet it is the only
 /// branch the roadmap exists on at all: the default branch does not hold it, and
@@ -554,7 +657,17 @@ fn declaring<'a>(
 ///   to say: there was never a roadmap of its own for the human to wonder about,
 ///   and a notice naming one it merely touched would invite exactly the
 ///   confusion this change removes.
-async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i64) {
+///
+/// A **look** never gets here, every Conversation it reads a roadmap from being
+/// one the record named — see [`crate::places`], where the foot of the chain is
+/// chosen. It is handed the reason it came all the same, so that a database
+/// somebody has been in by hand cannot put a repeating notice on a Timeline.
+async fn unrecorded(
+    state: &AppState,
+    conversation: &store::Conversation,
+    id: i64,
+    brought: Brought,
+) {
     let staged = match store::stacks_on(&state.pool, id).await {
         Ok(staged) => staged.is_some(),
         Err(error) => {
@@ -569,15 +682,16 @@ async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i6
             "a stage with no roadmap recorded against it, so nothing was started",
         );
 
-        return say(
-            state,
-            id,
-            "This stage was started before Verkstead recorded which roadmap a stage belongs \
-             to, so there is nothing on the record saying where to carry on. Nothing was \
-             started — continue the roadmap from *Continue a roadmap* to pick the next stage \
-             up.",
-        )
-        .await;
+        return brought
+            .not_started(
+                state,
+                id,
+                "This stage was started before Verkstead recorded which roadmap a stage belongs \
+                 to, so there is nothing on the record saying where to carry on. Nothing was \
+                 started — continue the roadmap from *Continue a roadmap* to pick the next \
+                 stage up.",
+            )
+            .await;
     }
 
     if conversation.direction == Some(Direction::Roadmap) {
@@ -586,14 +700,15 @@ async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i6
             "the roadmap Conversation created no single roadmap, so nothing was started",
         );
 
-        return say(
-            state,
-            id,
-            "This branch did not write exactly one roadmap, so there is none recorded against \
-             it and no stage was started. Start a roadmap's first stage from *Continue a \
-             roadmap*.",
-        )
-        .await;
+        return brought
+            .not_started(
+                state,
+                id,
+                "This branch did not write exactly one roadmap, so there is none recorded \
+                 against it and no stage was started. Start a roadmap's first stage from \
+                 *Continue a roadmap*.",
+            )
+            .await;
     }
 }
 
@@ -608,7 +723,14 @@ async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i6
 /// Everything that stops it stops it with a notice on the Timeline of the
 /// Conversation that has just settled. That is where the human is looking — the
 /// stage that would have carried it on does not exist, so there is no Timeline of
-/// its own to say anything on.
+/// its own to say anything on. Where a **look** brought the start about, that
+/// Conversation is the foot of the roadmap's chain and the halts go to the log
+/// instead — see [`Brought::not_started`], which is where that is decided and
+/// why. What the stage *starting* says is said either way: it happened, and it
+/// happens once.
+///
+/// `settled` is that Conversation whichever brought this about, its Pairings and
+/// its companions being what the stage inherits — see [`settle`].
 ///
 /// `base` is the branch the stage is cut from — see [`cut_from`], which chose
 /// it, and [`standing`], which is handed it and decides whether it is still
@@ -620,6 +742,7 @@ async fn start(
     stage: Stage,
     stacks: bool,
     base: String,
+    brought: Brought,
 ) {
     let branch = stage.branch();
     let repo = conversation.repo.path.clone();
@@ -628,10 +751,11 @@ async fn start(
     // hands, one branch further on. The implementation one is what the session
     // runs under, and without it there is nothing to run.
     if conversation.implementation_pairing.is_none() {
-        return say(
+        return halting(
             state,
+            brought,
             settled,
-            &format!(
+            format!(
                 "Stage {} of the `{}` roadmap was ready to start, and this Conversation's \
                  implementation Profile has gone, so there is no account to run it under. Nothing \
                  was started.",
@@ -654,10 +778,11 @@ async fn start(
     // around — and naming it here, where nothing has been made, is cheaper for
     // the human than naming it after a stage has half started.
     let Some(author) = Author::configured(state.settings.config().git_author()) else {
-        say(
+        halting(
             state,
+            brought,
             settled,
-            &format!(
+            format!(
                 "Stage {} of the `{}` roadmap was ready to start, and no git author is \
                  configured, so Verkstead cannot commit on its branch. Nothing was started. Set \
                  one in Settings and continue the roadmap from there.",
@@ -670,14 +795,21 @@ async fn start(
         // roadmap has stopped moving on its own, which is the fact a human
         // watching from a phone would otherwise learn by opening the sidebar
         // some hours later and finding nothing new in it.
-        crate::push::told(
-            &state.pool,
-            settled,
-            crate::push::News::StageNeedsAuthor {
-                label: stage.label.clone(),
-                roadmap: stage.roadmap.clone(),
-            },
-        );
+        //
+        // At the settle and not at a look, for the reason the roadmap
+        // completing is only told about once: the author is missing until
+        // somebody fills it in, and a look finds it missing again every
+        // [`crate::Pace::places`] until they do.
+        if brought == Brought::Settle {
+            crate::push::told(
+                &state.pool,
+                settled,
+                crate::push::News::StageNeedsAuthor {
+                    label: stage.label.clone(),
+                    roadmap: stage.roadmap.clone(),
+                },
+            );
+        }
 
         return;
     };
@@ -702,10 +834,11 @@ async fn start(
     };
 
     if let Some(found) = already {
-        return say(
+        return halting(
             state,
+            brought,
             settled,
-            &format!(
+            format!(
                 "Stage {} of the `{}` roadmap was ready to start, and `{found}` is already a \
                  branch of this repository — so it looks to have been started already. Nothing \
                  was started.",
@@ -725,10 +858,11 @@ async fn start(
     // nothing of any remote, and a halt that costs nothing is a halt that
     // happens before anything has been made.
     if let Some(by) = blocking(&repo, &branch).await {
-        return say(
+        return halting(
             state,
+            brought,
             settled,
-            &format!(
+            format!(
                 "Stage {} of the `{}` roadmap was ready to start, and `{by}` is already a branch \
                  of this repository, which stands in the way of `{branch}`. Nothing was started, \
                  and nothing will start until that branch is renamed or gone.",
@@ -759,10 +893,11 @@ async fn start(
         // starting from the wrong place — and which place that should be is a
         // question this cannot answer without them either.
         Ok(None) => {
-            return say(
+            return halting(
                 state,
+                brought,
                 settled,
-                &format!(
+                format!(
                     "Stage {} of the `{}` roadmap was ready to start, and git would not fetch \
                      from this repository's remote — so what its branch would come off cannot be \
                      trusted to be what origin is holding. Nothing was started, and the server \
@@ -808,10 +943,11 @@ async fn start(
 
         gave_up(state, id).await;
 
-        say(
+        halting(
             state,
+            brought,
             settled,
-            &format!(
+            format!(
                 "Stage {} of the `{}` roadmap could not be given everything it inherits from \
                  this Conversation: {error}. Nothing was started.",
                 stage.label, stage.roadmap,
@@ -900,7 +1036,7 @@ async fn start(
         Ok(Err(halted)) => {
             gave_up(state, id).await;
 
-            return say(state, settled, &halted.said(&stage, &branch, &from)).await;
+            return halting(state, brought, settled, halted.said(&stage, &branch, &from)).await;
         }
         Err(error) => {
             tracing::error!(error = ?error, settled, stage = id, "making the next stage's worktrees failed");
@@ -1732,6 +1868,19 @@ async fn taken(repo: &Path, branch: &str) -> bool {
             // letting an agent loose on it.
             true
         })
+}
+
+/// Say that one stage did not start, wherever a start halts.
+///
+/// [`Brought::not_started`] with the sentence already built, which is what every
+/// halt in [`start`] hands it: each of them is a `format!` of its own, and
+/// spelling the call out at every one of them would bury what each is about.
+///
+/// Whether it reaches the Timeline is the reason the start was attempted — a
+/// settle says it, a look logs it. See [`Brought::not_started`], which is where
+/// that is decided and why.
+async fn halting(state: &AppState, brought: Brought, settled: i64, markdown: String) {
+    brought.not_started(state, settled, &markdown).await;
 }
 
 /// Put a notice on a Timeline.

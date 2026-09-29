@@ -7,16 +7,17 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Joined, Lifecycle,
-    ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState, StageOf, StageStanding,
-    Staged, Steer, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
-    any_archived, archive_conversation, archived, close_conversation, conversation_branch,
-    conversations, create_profile, follow_branch, hold_pull_request, join_queue, load_conversation,
-    open_database, pick_direction, queue_to_join, record_another_pull_request, record_pull_request,
-    record_roadmap, register_repo, reinvent_branch, rename_branch, roadmap_branch, save_brief,
-    set_base_commit, set_grilling_pairing, set_state, set_target, settle_naming, show_archived,
-    showing_archived, stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption,
-    start_conversation, start_grilling, start_stage, start_tinkering, start_unnamed_conversation,
-    state, steer_conversation, switch_repo, target, timeline, unarchive_conversation,
+    Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState, StageOf,
+    StageStanding, Staged, Steer, Switched, Unarchiving, add_companion, adopted_pull_request,
+    adopting, any_archived, archive_conversation, archived, close_conversation,
+    conversation_branch, conversations, create_profile, follow_branch, hold_pull_request,
+    join_queue, load_conversation, open_database, pick_direction, queue_to_join,
+    record_another_pull_request, record_pull_request, record_roadmap, register_repo,
+    reinvent_branch, rename_branch, roadmap_planner, save_brief, set_base_commit,
+    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
+    stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
+    start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
+    steer_conversation, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -2395,7 +2396,7 @@ async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
     record_roadmap(&pool, elsewhere, Some("mvp")).await.unwrap();
 
     assert_eq!(
-        roadmap_branch(&pool, ours, "mvp").await.unwrap(),
+        roadmap_planner(&pool, ours, "mvp").await.unwrap(),
         None,
         "nothing in this Repo has planned it: a label is not it, and neither is a direction \
          of something else",
@@ -2405,12 +2406,19 @@ async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
     record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
 
     assert_eq!(
-        roadmap_branch(&pool, ours, "mvp").await.unwrap().as_deref(),
-        Some("roadmaps/mvp"),
+        roadmap_planner(&pool, ours, "mvp").await.unwrap(),
+        Some(Planned {
+            conversation_id: wrote,
+            branch: "roadmaps/mvp".to_owned(),
+        }),
+        "both halves of the foot: the Conversation that planned it, and the branch it \
+         planned it on",
     );
 
     assert_eq!(
-        roadmap_branch(&pool, ours, "public-release").await.unwrap(),
+        roadmap_planner(&pool, ours, "public-release")
+            .await
+            .unwrap(),
         None,
         "and one roadmap's planning branch says nothing about another's",
     );
@@ -2423,7 +2431,11 @@ async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
         .unwrap();
 
     assert_eq!(
-        roadmap_branch(&pool, ours, "mvp").await.unwrap().as_deref(),
+        roadmap_planner(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .map(|planned| planned.branch)
+            .as_deref(),
         Some("roadmaps/the-mvp"),
     );
 }

@@ -225,6 +225,14 @@ pub struct Pace {
     /// how often Verkstead looks at things, and a stall is one of the things it
     /// looks for.
     pub stalls: Duration,
+
+    /// And how often the roadmaps being driven are looked over for a stage
+    /// waiting on a place the whole server has — see [`crate::places`].
+    ///
+    /// Here for [`Pace::stalls`]'s reason again, and it is the one of these that
+    /// decides how long work waits rather than how long a report does: what
+    /// comes of a look is a stage started.
+    pub places: Duration,
 }
 
 impl Default for Pace {
@@ -237,6 +245,7 @@ impl Default for Pace {
             waking: Duration::from_secs(300),
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            places: crate::places::LOOKED_AT_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
