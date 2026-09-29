@@ -9,12 +9,17 @@
 //! wraps up, which starts whatever stood on it. Nothing in the loop asks for
 //! permission.
 //!
-//! **Every ready stage rather than the lowest of them**, up to [`stages::AT_ONCE`]
-//! of one roadmap at a time — and a place is held by every stage the record has in
-//! flight, whatever that stage is doing. A roadmap that declares nothing has one
-//! ready stage at most, each of its stages standing on the one before it, so such
-//! a roadmap runs exactly as it always did: there is one scheduler rather than
-//! two.
+//! **Every ready stage rather than the lowest of them**, up to as many of one
+//! roadmap at a time as the settings say — three where nobody has said, which is
+//! [`stages::AT_ONCE`] — and a place is held by every stage the record has in
+//! flight, whatever that stage is doing. The number is read out of `config.yaml`
+//! here, at every settle, the way the git author and the build cache are: a limit
+//! changed on the settings page is in force at the next start without a restart,
+//! and nothing already running is stopped by it.
+//!
+//! A roadmap that declares nothing has one ready stage at most, each of its stages
+//! standing on the one before it, so such a roadmap runs exactly as it always
+//! did: there is one scheduler rather than two.
 //!
 //! **Each start is its own act.** A branch already taken, a branch standing in the
 //! way, no git author configured, a fetch git would not make, a companion that
@@ -136,11 +141,11 @@ use crate::worktrees;
 
 /// Start every stage of `conversation_id`'s roadmap that may start now.
 ///
-/// **Every** rather than the one after it, up to [`stages::AT_ONCE`] of one
-/// roadmap at a time — see [`stages::next_stage`], which is where that arithmetic
-/// is and where a stage that waited for a place gets its sentence. Each start is
-/// taken in turn and each is its own act: one that halts says so and the next is
-/// attempted anyway.
+/// **Every** rather than the one after it, up to as many of one roadmap at a time
+/// as `at_once.roadmap_stages` says — see [`stages::next_stage`], which is where
+/// that arithmetic is and where a stage that waited for a place gets its
+/// sentence. Each start is taken in turn and each is its own act: one that halts
+/// says so and the next is attempted anyway.
 ///
 /// Called when a wrap-up settles, on every Conversation rather than on the ones
 /// somebody thought were roadmap stages. Which roadmap this one is a stage of is
@@ -240,6 +245,13 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         .map(str::to_owned)
         .collect();
 
+    // And how many stages of one roadmap may be under way together, which is a
+    // setting: read at the moment of the start rather than held from startup, so a
+    // limit changed on the settings page is in force at the next settle and
+    // nothing already running is stopped by it. The read is a file read, so it
+    // happens on the blocking thread below with the git reads.
+    let settings = state.settings.clone();
+
     // Both readings together, off the runtime's threads: a handful of git reads
     // against a local directory, and a file read for the workflow.
     let read = tokio::task::spawn_blocking({
@@ -263,11 +275,11 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                     &roadmap,
                     &branch,
                     &record,
-                    // How many of one roadmap run at once. A constant while this
-                    // is the only thing that permits a start; the stage after
-                    // this one makes it a server setting, read here and passed
-                    // in exactly as it is now.
-                    stages::AT_ONCE,
+                    // How many of one roadmap run at once, off the settings file
+                    // as it stands this moment — three where nobody has said, and
+                    // never fewer than one whatever the file holds. See
+                    // [`crate::settings::AtOnce`].
+                    settings.config().at_once().roadmap_stages(),
                 ),
 
                 // Nothing left to read the roadmap at: not the top of its chain,

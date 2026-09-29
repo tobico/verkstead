@@ -94,7 +94,8 @@ pub(crate) const INDEX: &str = "ROADMAP.md";
 /// a stage branch reads as the roadmap's work at a glance.
 pub(crate) const STAGES: &str = "roadmaps";
 
-/// How many stages of **one roadmap** Verkstead runs at once.
+/// How many stages of **one roadmap** Verkstead runs at once where nobody has
+/// said otherwise.
 ///
 /// Three, which is the number
 /// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md) settled: enough that
@@ -108,10 +109,12 @@ pub(crate) const STAGES: &str = "roadmaps";
 /// oversight: what the limit is for is how much of one roadmap is open at once,
 /// and work somebody has been asked a question about is open.
 ///
-/// A constant here and a server setting from the stage after this one, which is
-/// why it is passed into [`next_stage`] rather than read inside it: where a start
-/// is permitted stays the one place, and how many are permitted is the caller's
-/// to say.
+/// The default rather than the rule: what it is on this machine is
+/// `at_once.roadmap_stages` in `config.yaml`, read afresh at every start — see
+/// [`crate::settings::AtOnce`], which falls back to this, and the carry-on, which
+/// reads the file and passes the number into [`next_stage`]. Passed in rather
+/// than read here so that where a start is permitted stays the one place, and how
+/// many are permitted is the caller's to say.
 pub(crate) const AT_ONCE: usize = 3;
 
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
@@ -313,7 +316,8 @@ pub(crate) enum Next {
     /// does not start.
     ///
     /// **Every ready stage there was a place for**, lowest number first — see
-    /// [`AT_ONCE`], which is how many places a roadmap has, and [`ready`], which
+    /// [`AT_ONCE`], which is how many places a roadmap has until Settings says
+    /// otherwise, and [`ready`], which
     /// is which of its stages want one. A list rather than one stage because each
     /// start is its own act from here on: one that halts halts itself, and the
     /// rest are started anyway.
@@ -551,7 +555,8 @@ pub(crate) struct Declaring<'a> {
 /// beside the line is the fallback where the record has no label for it.
 ///
 /// **Every ready stage there is a place for**, lowest number first. `at_once` is
-/// how many stages of one roadmap run at once — see [`AT_ONCE`] — and every stage
+/// how many stages of one roadmap run at once, which is the setting the carry-on
+/// reads and [`AT_ONCE`] where nobody has set it — and every stage
 /// the record has in flight is already holding one of those places, so what starts
 /// here is what is left over. Where there are more ready stages than places the
 /// lowest-numbered ones start and the rest are held: the roadmap's order is still
@@ -656,9 +661,11 @@ pub(crate) fn next_stage(
             // count came off was read before any of that.
             held.push(format!(
                 "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place: \
-                 this roadmap runs at most {at_once} stages at a time, and its places are taken. \
-                 It starts when one of them settles.",
-                entry.label, entry.title,
+                 this roadmap runs {} at a time, and its places are taken. It starts when one of \
+                 them settles.",
+                entry.label,
+                entry.title,
+                how_many_places(at_once),
             ));
 
             continue;
@@ -701,6 +708,18 @@ pub(crate) fn next_stage(
     Next::Stages { starting, held }
 }
 
+/// How many places a roadmap has, said in a sentence.
+///
+/// The number is a setting now — see [`crate::settings::AtOnce`] — so *at most 1
+/// stages* is a thing a Timeline can be asked to say, and a roadmap somebody set
+/// to one is the roadmap most likely to be waiting for a place at all.
+fn how_many_places(at_once: usize) -> String {
+    match at_once {
+        1 => "one stage".to_owned(),
+        many => format!("at most {many} stages"),
+    }
+}
+
 /// What one roadmap may start now: the stages that are ready, or which of the
 /// ways it has none.
 ///
@@ -723,7 +742,7 @@ pub(crate) enum Ready<'a> {
 
         /// How many stages of this roadmap the record has **in flight**, each of
         /// them holding one of its places — see [`AT_ONCE`], which is how many
-        /// there are.
+        /// there are where Settings has not said.
         ///
         /// Counted here rather than by the caller because this is where the
         /// record and the boxes have already been read against each other: a
@@ -2032,7 +2051,7 @@ Turns this askance clone into Verkstead.
         /// And the same reading with a limit of the caller's choosing, for the
         /// tests that are about the limit rather than about which stages are
         /// ready. Every other reading here runs at [`AT_ONCE`], which is what the
-        /// carry-on passes.
+        /// carry-on passes where nobody has set the number in Settings.
         fn next_running(
             &self,
             at: &str,
@@ -3140,9 +3159,9 @@ Turns this askance clone into Verkstead.
         );
     }
 
-    /// How many places there are is the caller's to say, which is what the stage
-    /// after this one turns into a setting: one place runs a declared roadmap in
-    /// order, whatever its declarations allow.
+    /// How many places there are is the caller's to say, and what says it is the
+    /// `at_once.roadmap_stages` setting — see [`crate::settings::AtOnce`]. One
+    /// place runs a declared roadmap in order, whatever its declarations allow.
     #[test]
     fn a_roadmap_with_one_place_starts_one_stage_at_a_time() {
         let repo = four_roots();
@@ -3154,6 +3173,76 @@ Turns this askance clone into Verkstead.
             holding(next).len(),
             3,
             "and the other three roots are told they are waiting",
+        );
+    }
+
+    /// And the one place a roadmap set to one has is held by the stage in flight
+    /// the same way three are: a ready stage does not take the place of a stage
+    /// somebody has been asked a question about.
+    ///
+    /// Which is the setting's own half of *a stage blocked on the human holds its
+    /// place*. What the stage is doing never comes into it — in flight by the
+    /// record is a place gone — so a roadmap run one at a time starts its next
+    /// stage when the one before it settles and not before.
+    #[test]
+    fn the_one_place_a_roadmap_set_to_one_has_is_held_by_a_stage_in_flight() {
+        let repo = four_roots();
+
+        let next = repo.next_limited(
+            "mvp",
+            "",
+            &record([("mvp", "01", store::StageStanding::InFlight)]),
+            1,
+        );
+
+        assert!(
+            starting(&next).is_empty(),
+            "01 is somebody's, and it is the only place there is: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 3, "and the three roots left wait: {held:?}");
+        assert!(
+            held[0].contains("02") && held[0].contains("runs one stage at a time"),
+            "told what it is waiting for, in the number the setting says: {held:?}",
+        );
+    }
+
+    /// And a roadmap already over the number it is now allowed starts nothing,
+    /// rather than going backwards: the limit was lowered in Settings while three
+    /// of its stages were under way.
+    ///
+    /// Which is the reading's half of *a change stops nothing already running*.
+    /// Nothing here can stop a stage — it is asked what may start — so a limit
+    /// lowered under work in flight is three stages that carry on and no fourth,
+    /// and the ready stage is told it is waiting.
+    #[test]
+    fn a_roadmap_over_a_lowered_limit_starts_nothing_and_stops_nothing() {
+        let repo = four_roots();
+
+        let next = repo.next_limited(
+            "mvp",
+            "",
+            &record([
+                ("mvp", "01", store::StageStanding::InFlight),
+                ("mvp", "02", store::StageStanding::InFlight),
+                ("mvp", "03", store::StageStanding::InFlight),
+            ]),
+            1,
+        );
+
+        assert!(
+            starting(&next).is_empty(),
+            "three are under way and one place is allowed: {next:?}",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
+        assert!(
+            held[0].contains("04") && held[0].contains("waiting for a place"),
+            "told it is waiting rather than left to look forgotten: {held:?}",
         );
     }
 

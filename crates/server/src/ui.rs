@@ -31,31 +31,33 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved, Author,
-    BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView,
-    CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    Confirming, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
-    Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked, PendingSteerView,
-    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    Adopted, AnswerAttached, AnswerAttachmentRemoved, AtOnceView, Attached, AttachmentRemoved,
+    Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
+    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, FileDeleted, FileDeleting,
+    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
+    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
+    McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    PairingView, Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
+    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
+    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
-use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
+use crate::settings::{
+    AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache,
+};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -5088,6 +5090,13 @@ async fn save_settings(
                     CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
                     CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
                 ),
+                // And how much Verkstead runs at once, as the number was typed:
+                // an empty field is the default asked for back, and so is
+                // anything that is not a whole number of places. The page
+                // refuses a limit below one rather than sending it — a roadmap
+                // with no places starts nothing — and a save carrying one
+                // anyway configures nothing, which is that default again.
+                AtOnce::of(Some(edit.at_once.roadmap_stages)),
                 // And how a conflict is resolved, in every Repo there is, which
                 // is one of two words and never absent: there is no third state
                 // for a page to send.
@@ -5318,6 +5327,7 @@ fn as_told(
     let author = config.git_author();
     let cache = config.rust_build_cache();
     let cleanup = config.cleanup();
+    let at_once = config.at_once();
 
     SettingsView {
         git_author: Author {
@@ -5352,6 +5362,14 @@ fn as_told(
                 days_configured: cleanup.delete_after_configured().is_some(),
             },
         },
+        // And how much Verkstead runs at once, read the way the Cleanup's
+        // durations are: the number either way, and the flag beside it saying
+        // whether it is one somebody chose.
+        at_once: AtOnceView {
+            roadmap_stages: at_once.roadmap_stages(),
+            roadmap_stages_configured: at_once.roadmap_stages_configured().is_some(),
+        },
+
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: resolution(config.conflict_resolution()),

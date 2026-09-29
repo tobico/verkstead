@@ -18588,6 +18588,64 @@ async fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
     );
 }
 
+/// And how many stages of one roadmap start at once is a **setting**: set to one,
+/// a roadmap declaring two roots starts the lower of them and tells the other it
+/// is waiting for a place.
+///
+/// Which is what *a declared roadmap run in order* is — the declarations still say
+/// both may start, and the limit is what says only one does. The number is written
+/// into `config.yaml` after the server came up, because that is the human at the
+/// settings page on their phone while the work was going on: it is read afresh at
+/// the start, so what the file says at the settle is what the scheduler goes by.
+#[tokio::test]
+async fn the_settings_say_how_many_stages_of_one_roadmap_start_at_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // One place, said while the roadmap was being planned — nothing was restarted
+    // for it, and nothing had to be.
+    configure(&fixture, "at_once:\n  roadmap_stages: 1\n");
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(
+        stages[0].branch, "roadmaps/rate-limiting/01-counter",
+        "the lowest-numbered of the two roots is the one that started",
+    );
+
+    // Said after the one that started, the waiting being a consequence of it.
+    let said = said_on(&fixture, fixture.id, "waiting for a place").await;
+
+    assert!(
+        said.contains("Stage 02") && said.contains("runs one stage at a time"),
+        "which stage is waiting, and the limit it is waiting on: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "the roadmap's own Conversation and one stage, the setting having said one",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/02-refusing"],
+        )
+        .contains("02-refusing"),
+        "and no branch was cut for the root that waited",
+    );
+}
+
 /// Three stages of one roadmap at once, and the fourth ready stage waits for a
 /// place — told so on the Timeline, so that a roadmap which has gone quiet with
 /// work left in it says why rather than looking forgotten.

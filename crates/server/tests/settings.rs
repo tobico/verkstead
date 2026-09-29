@@ -132,6 +132,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -153,6 +154,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -172,6 +174,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -198,6 +201,33 @@ fn cleanup_unset() -> serde_json::Value {
     })
 }
 
+/// And how much Verkstead runs at once as a save that is not about it sends it:
+/// the field empty, which is nobody having said and the default asked for back.
+fn at_once_unset() -> serde_json::Value {
+    serde_json::json!({ "roadmap_stages": "" })
+}
+
+/// Save how many stages of one roadmap run at once and leave everything else
+/// alone, which is what that pane's one press sends.
+async fn save_at_once(app: &Router, roadmap_stages: &str) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "at_once": { "roadmap_stages": roadmap_stages },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await
+}
+
 /// Save a Cleanup and leave everything else alone, which is what the Cleanup
 /// pane's own two presses send.
 async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) -> SettingsSaved {
@@ -211,6 +241,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
                 "trim": { "enabled": trim.0, "days": trim.1 },
                 "delete": { "enabled": delete.0, "days": delete.1 },
             },
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -334,6 +365,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -562,6 +594,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": ["/var/cache/verkstead-node"],
@@ -638,6 +671,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -781,6 +815,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
                 "trim": { "enabled": false, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
             },
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -794,6 +829,99 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     assert_eq!(saved.settings.rust_build_cache.size, "5G");
     assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
     assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
+}
+
+/// How much Verkstead runs at once where nobody has said: three stages of one
+/// roadmap, drawn as the default rather than as a choice.
+#[tokio::test]
+async fn a_limit_nobody_has_configured_is_three_stages_of_one_roadmap() {
+    let (_dir, app) = app().await;
+
+    let at_once = settings(&app).await.at_once;
+
+    assert_eq!(at_once.roadmap_stages, 3);
+    assert!(
+        !at_once.roadmap_stages_configured,
+        "the default is shown rather than chosen"
+    );
+}
+
+/// And what a save of it says: the number goes into the file the scheduler reads
+/// at every start, and comes back off it — including from a router started afresh
+/// on the same directory, which is what a restart is.
+#[tokio::test]
+async fn the_limit_goes_in_and_comes_back() {
+    let (dir, app) = app().await;
+
+    let saved = save_at_once(&app, "1").await;
+
+    assert_eq!(saved.settings.at_once.roadmap_stages, 1);
+    assert!(saved.settings.at_once.roadmap_stages_configured);
+
+    // In the file the carry-on reads, rather than only in the answer.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("at_once:") && written.contains("roadmap_stages: 1"),
+        "the number is in config.yaml: {written}"
+    );
+
+    assert_eq!(settings(&app).await.at_once.roadmap_stages, 1);
+
+    let restarted = restarted(dir.path()).await;
+    assert_eq!(settings(&restarted).await.at_once.roadmap_stages, 1);
+}
+
+/// Clearing the field is asking for the default back rather than for a roadmap
+/// with no places — and so is anything that is not a whole number of at least
+/// one, because what the server can make nothing of is nothing configured.
+#[tokio::test]
+async fn a_limit_cleared_is_the_default_again() {
+    let (_dir, app) = app().await;
+
+    save_at_once(&app, "2").await;
+
+    for typed in ["", "  ", "none", "0"] {
+        let saved = save_at_once(&app, typed).await;
+
+        assert_eq!(
+            saved.settings.at_once.roadmap_stages, 3,
+            "nothing a roadmap could run in {typed:?}",
+        );
+        assert!(!saved.settings.at_once.roadmap_stages_configured);
+    }
+}
+
+/// A save from another section carries the limit as it stands, and that is what
+/// leaves it alone: one request writes the whole of `config.yaml`.
+#[tokio::test]
+async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
+    let (_dir, app) = app().await;
+
+    save_at_once(&app, "1").await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "cleanup": cleanup_unset(),
+            "at_once": { "roadmap_stages": "1" },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert_eq!(
+        saved.settings.at_once.roadmap_stages, 1,
+        "and the limit stands"
+    );
+    assert!(saved.settings.at_once.roadmap_stages_configured);
 }
 
 /// How a conflict is resolved where nobody has said: a merge, which is the half
@@ -825,6 +953,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Rebase",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -862,6 +991,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -905,6 +1035,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -947,6 +1078,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -966,6 +1098,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -1066,6 +1199,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1099,6 +1233,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1141,6 +1276,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1158,6 +1294,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1210,6 +1347,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": binds,
@@ -1440,6 +1578,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1604,6 +1743,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],

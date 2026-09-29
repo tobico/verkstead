@@ -1,4 +1,8 @@
 {
+  "at_once": {
+    "roadmap_stages": 3,
+    "roadmap_stages_configured": false
+  },
   "cleanup": {
     "delete": {
       "days": 30,

@@ -34,6 +34,8 @@
 //!   delete:
 //!     enabled: false
 //!     days: 30
+//! at_once:
+//!   roadmap_stages: 3
 //! conflict_resolution: merge
 //! share_on_done: false
 //! sandbox_binds:
@@ -81,6 +83,15 @@
 //! delete is off at thirty, because it is the one thing in Verkstead that
 //! forgets — see [`Cleanup`], and [`crate::cleanup`] for the sweep that reads
 //! it on every pass.
+//!
+//! `at_once` is written that way as well, and it is the one section here about
+//! *how much* Verkstead runs rather than about what it runs or what it is told:
+//! `roadmap_stages` is how many stages of one roadmap may be under way together,
+//! three where nobody has said otherwise — see [`AtOnce`], and
+//! [`crate::stages::next_stage`], which is handed it at every start. A whole
+//! number of at least one, because a limit that would start nothing is not a
+//! state worth having: the settings page refuses one, and a hand-edit that wrote
+//! one is read as a key nobody set, which is three.
 //!
 //! `conflict_resolution` is written that way too, and the default it falls back
 //! to is the safe half of the choice: a conflicted pull request has its base
@@ -635,6 +646,18 @@ pub struct Config {
     #[serde(default)]
     cleanup: Cleanup,
 
+    /// And how much Verkstead runs at once: how many stages of one roadmap may be
+    /// under way together — see [`AtOnce`], and [`crate::stages::next_stage`],
+    /// which is handed the number at every start.
+    ///
+    /// Written the way the two above it are: an absent key, an absent file and one
+    /// nothing can parse all mean [`crate::stages::AT_ONCE`]. A section of its own
+    /// rather than a key beside the build cache because what it holds is a class of
+    /// setting rather than one setting — how much of the machine Verkstead helps
+    /// itself to — and the settings page draws it as one card for that reason.
+    #[serde(default)]
+    at_once: AtOnce,
+
     /// And how a pull request that will not merge is resolved: the base merged
     /// in, which is what nobody choosing anything gets, or the branch rebased
     /// onto the base and force-pushed.
@@ -797,6 +820,9 @@ impl Config {
             // duration that is not a whole number of days never became one —
             // see [`CleanupStep`].
             cleanup: config.cleanup,
+            // And a limit of none at all read as nobody having said — see
+            // [`AtOnce::read`], which is the whole of that tidying.
+            at_once: config.at_once.read(),
             conflict_resolution: config.conflict_resolution,
             share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
@@ -821,6 +847,7 @@ impl Config {
         git_author: GitAuthor,
         rust_build_cache: RustBuildCache,
         cleanup: Cleanup,
+        at_once: AtOnce,
         conflict_resolution: ConflictResolution,
         share_on_done: bool,
         sandbox_binds: Vec<String>,
@@ -836,6 +863,12 @@ impl Config {
             // empty box is the default asked for back rather than a duration of
             // nothing.
             cleanup,
+            // And how many stages of one roadmap run at once, where a number was
+            // typed — an empty box is the default asked for back, exactly as it is
+            // for the durations above. A number below one never arrives: the page
+            // refuses it rather than sending it, there being nothing a roadmap
+            // with no places could do.
+            at_once,
             // Written down as it stands rather than left out where it is the
             // default, the way the build cache's switch is: what the page sends
             // is where the setting is to sit, and a key that appeared only for
@@ -884,6 +917,12 @@ impl Config {
     /// three days and no delete at all where nobody has said otherwise.
     pub fn cleanup(&self) -> &Cleanup {
         &self.cleanup
+    }
+
+    /// And how much Verkstead runs at once, which is three stages of one roadmap
+    /// where nobody has said otherwise.
+    pub fn at_once(&self) -> &AtOnce {
+        &self.at_once
     }
 
     /// And how a conflict is resolved where the Repo it is in says nothing,
@@ -1204,6 +1243,82 @@ impl CleanupStep {
 /// could wait.
 fn days_typed(days: String) -> Option<u32> {
     blank_is_nothing(days)?.parse().ok()
+}
+
+/// How much Verkstead runs at once, as the human left it.
+///
+/// One number so far: how many stages of **one roadmap** may be under way
+/// together — see [`crate::stages::next_stage`], which is handed it at every
+/// start, and ADR-0021, which is where the three came from. A section rather
+/// than a key on its own because the question is *how much of this machine does
+/// Verkstead help itself to*, and there is more than one answer to it.
+///
+/// Optional and absent on a machine nobody has been to the settings page of,
+/// which is [`crate::stages::AT_ONCE`] — the shape [`RustBuildCache`] has and
+/// for the same reason: a human should never have a worse experience for not
+/// having checked the settings.
+///
+/// **And never less than one.** A roadmap with no places starts nothing, ever,
+/// and a roadmap that has silently stopped is the failure this whole pipeline is
+/// about — so the settings page refuses a number below one rather than writing
+/// it, and a hand-edit that wrote one anyway is read as nobody having said. Which
+/// is the same three every other way of saying nothing here means.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct AtOnce {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    roadmap_stages: Option<usize>,
+}
+
+impl AtOnce {
+    /// What a settings page has just been told: the number where one was typed.
+    ///
+    /// An empty box is nothing configured, the way an empty build cache size is:
+    /// clearing it is how the human asks for the default back. So is anything
+    /// that is not a whole number of at least one — the page refuses those
+    /// rather than sending them, and a save that carried one anyway is a save
+    /// that configured nothing.
+    pub fn of(roadmap_stages: Option<String>) -> AtOnce {
+        AtOnce {
+            roadmap_stages: roadmap_stages.and_then(limit_typed),
+        }
+    }
+
+    /// And the same section tidied as the file is read: a limit of none at all is
+    /// nobody having said.
+    ///
+    /// The one thing in this section that can be wrong, and it is wrong the way
+    /// everything in these files is wrong — quietly, and never as an error. What
+    /// `roadmap_stages: 0` asks for is a roadmap that never starts anything,
+    /// which is not a thing to configure; read as unset it is the three the key
+    /// would have meant if it had not been there at all.
+    fn read(self) -> AtOnce {
+        AtOnce {
+            roadmap_stages: self.roadmap_stages.filter(|places| *places >= 1),
+        }
+    }
+
+    /// How many stages of one roadmap may be under way together, which is
+    /// [`crate::stages::AT_ONCE`] where nobody has said.
+    pub fn roadmap_stages(&self) -> usize {
+        self.roadmap_stages.unwrap_or(crate::stages::AT_ONCE)
+    }
+
+    /// And the number exactly as it is written down, and `None` where nobody has
+    /// written one: what a settings page draws as a placeholder rather than as a
+    /// value somebody chose.
+    pub fn roadmap_stages_configured(&self) -> Option<usize> {
+        self.roadmap_stages
+    }
+}
+
+/// The whole number of places a field holds, or `None` where it holds anything
+/// else — an empty box, a space, a word, a fraction, and the nought that would
+/// start nothing.
+fn limit_typed(places: String) -> Option<usize> {
+    blank_is_nothing(places)?
+        .parse()
+        .ok()
+        .filter(|places| *places >= 1)
 }
 
 /// The name and the email address a session's commits are by.
@@ -1834,9 +1949,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor,
-        HeaderValue, IgnoreRule, McpServer, RuleTrouble, RustBuildCache, Secrets, ServerTrouble,
-        Settings, trouble_among,
+        AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
+        GitAuthor, HeaderValue, IgnoreRule, McpServer, RuleTrouble, RustBuildCache, Secrets,
+        ServerTrouble, Settings, trouble_among,
     };
 
     #[test]
@@ -2138,6 +2253,146 @@ mod tests {
         );
     }
 
+    /// How many stages of one roadmap run at once is the human's number, and what
+    /// they wrote is what the scheduler is handed.
+    #[test]
+    fn how_many_stages_a_roadmap_runs_at_once_is_what_the_config_file_says() {
+        let config = Config::read("at_once:\n  roadmap_stages: 1\n").unwrap();
+
+        assert_eq!(config.at_once().roadmap_stages(), 1);
+        assert_eq!(
+            config.at_once().roadmap_stages_configured(),
+            Some(1),
+            "and the page is told it is a number somebody chose, not the default",
+        );
+    }
+
+    /// And nothing said is three, which is the number ADR-0021 settled: an absent
+    /// key, an absent section, an absent file and one nothing can parse all say it.
+    #[test]
+    fn a_roadmap_nobody_has_said_a_number_for_runs_three_at_once() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "at_once:\n",
+            "at_once:\n  roadmap_stages:\n",
+        ] {
+            let config = Config::read(text).unwrap();
+
+            assert_eq!(
+                config.at_once().roadmap_stages(),
+                crate::stages::AT_ONCE,
+                "nothing said here is the default: {text:?}",
+            );
+            assert_eq!(
+                config.at_once().roadmap_stages_configured(),
+                None,
+                "and the page draws it as a placeholder: {text:?}",
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(
+            settings.config().at_once().roadmap_stages(),
+            crate::stages::AT_ONCE,
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "at_once: [oh\n").unwrap();
+
+        assert_eq!(
+            settings.config().at_once().roadmap_stages(),
+            crate::stages::AT_ONCE,
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// And a limit that would start nothing is no limit at all — read as nobody
+    /// having said, whichever way it arrives.
+    ///
+    /// The page refuses one rather than sending it; what this is about is the
+    /// hand-edit that wrote one anyway, which is the way everything in these files
+    /// is wrong: quietly, and never as an error.
+    #[test]
+    fn a_limit_that_would_start_nothing_is_no_limit_configured() {
+        let config = Config::read("at_once:\n  roadmap_stages: 0\n").unwrap();
+
+        assert_eq!(config.at_once().roadmap_stages(), crate::stages::AT_ONCE);
+        assert_eq!(config.at_once().roadmap_stages_configured(), None);
+
+        for typed in ["", "   ", "0", "lots", "2.5", "-1"] {
+            assert_eq!(
+                AtOnce::of(Some(typed.to_owned())).roadmap_stages_configured(),
+                None,
+                "nothing a roadmap could run in {typed:?}",
+            );
+        }
+    }
+
+    /// And the number a save writes is the one the next read finds, which is what
+    /// the settings page depends on: it saves and then draws what came back.
+    #[test]
+    fn a_saved_limit_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Cleanup::default(),
+                AtOnce::of(Some("1".to_owned())),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![],
+                String::new(),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            Settings::in_data_dir(dir.path())
+                .config()
+                .at_once()
+                .roadmap_stages(),
+            1,
+        );
+
+        // And cleared is the default back rather than a number of nothing written
+        // down: the field standing empty is how the human asks for it.
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Cleanup::default(),
+                AtOnce::of(Some(String::new())),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![],
+                String::new(),
+            ))
+            .unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            !written.contains("roadmap_stages"),
+            "a limit nobody typed is not in the file: {written}",
+        );
+        assert_eq!(
+            Settings::in_data_dir(dir.path())
+                .config()
+                .at_once()
+                .roadmap_stages(),
+            crate::stages::AT_ONCE,
+        );
+    }
+
     /// How a conflict is resolved is the human's word for it, and what they
     /// wrote is what comes back.
     #[test]
@@ -2206,6 +2461,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Rebase,
                 false,
                 vec![],
@@ -2225,6 +2481,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2305,6 +2562,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 true,
                 vec![],
@@ -2321,6 +2579,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2443,6 +2702,7 @@ mod tests {
                     CleanupStep::of(false, Some("14".to_owned())),
                     CleanupStep::of(true, Some("2".to_owned())),
                 ),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2481,6 +2741,7 @@ mod tests {
                     CleanupStep::of(true, Some(String::new())),
                     CleanupStep::of(false, Some("  ".to_owned())),
                 ),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2707,6 +2968,7 @@ mod tests {
                 ),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2741,6 +3003,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2773,6 +3036,7 @@ mod tests {
                 ),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2798,6 +3062,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2868,6 +3133,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2901,6 +3167,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2966,6 +3233,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
@@ -2987,6 +3255,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -3071,6 +3340,7 @@ mod tests {
             GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
             RustBuildCache::default(),
             Cleanup::default(),
+            AtOnce::default(),
             ConflictResolution::Merge,
             false,
             vec![],
@@ -3197,6 +3467,7 @@ mod tests {
             GitAuthor::default(),
             RustBuildCache::default(),
             Cleanup::default(),
+            AtOnce::default(),
             ConflictResolution::Merge,
             false,
             vec![],
@@ -3273,6 +3544,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -3452,6 +3724,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
+                AtOnce::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],

@@ -62,7 +62,13 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCache, heldCleanup, heldInstructions, heldPaths } from "./held";
+import {
+  heldAtOnce,
+  heldCache,
+  heldCleanup,
+  heldInstructions,
+  heldPaths,
+} from "./held";
 import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -234,6 +240,8 @@ export function LanguagesPane(props: {
         // And what becomes of an archived Conversation, likewise — see
         // [`heldCleanup`].
         cleanup: heldCleanup(told()),
+        // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].
+        at_once: heldAtOnce(told()),
         // And so is how a conflict is resolved, which is the section under it
         // on the page.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

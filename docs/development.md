@@ -388,6 +388,19 @@ file the size it was; a pass that found nothing does not. And it touches nothing
 outside Verkstead's own record: the git branch stays, and a published share
 stays published.
 
+`"at_once"` is how much Verkstead runs at once, which is one number so far:
+`"roadmap_stages"`, how many stages of one roadmap may be under way together.
+Three where nobody has said — an absent key, an absent file and one nothing can
+parse all mean it — and a place is held by every stage that is under way whatever
+it is doing, a stage waiting on an answer included. The number is read afresh at
+every start, so a change is in force at the next settle without a restart and
+stops nothing already running; `"roadmap_stages_configured"` beside it is what
+says whether the number is one somebody typed, and the settings page draws the
+default as a placeholder. It is the one field on that page with a floor under it:
+a limit below one is a roadmap that would never start anything, so the page
+refuses one rather than sending it, and a save carrying one anyway configures
+nothing. Its own card, under the instructions.
+
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the
 work branch and pushes, or `"Rebase"`, which rebases the branch onto its base and

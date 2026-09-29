@@ -3178,6 +3178,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "trim": { "enabled": true, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
             },
+            // And a limit somebody typed, for the reason the size above is typed:
+            // this is the fixture of a Verkstead that has been told everything,
+            // and `settings-unset.json` is the one holding the default the page
+            // draws as a placeholder. One rather than two, because one is the
+            // number with something to say — a declared roadmap run in order.
+            "at_once": { "roadmap_stages": "1" },
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one

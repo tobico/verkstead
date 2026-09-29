@@ -298,6 +298,9 @@ describe("what Next saves", () => {
         trim: { enabled: true, days: "5" },
         delete: { enabled: true, days: "90" },
       },
+      // And how much Verkstead runs at once, as the string a form holds — see
+      // [`heldAtOnce`].
+      at_once: { roadmap_stages: "1" },
       conflict_resolution: TOLD.conflict_resolution,
       sandbox_binds: [
         "/var/cache/verkstead-node",

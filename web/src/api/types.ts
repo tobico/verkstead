@@ -398,6 +398,44 @@ text_html: string,
 columns: Array<string>, options: Array<OptionView>, };
 
 /**
+ * And how much Verkstead is to run at once, as the human has just set it.
+ *
+ * A string because that is what a form holds, and an empty one is *nothing
+ * configured* rather than a limit of nothing — which is what clearing the field
+ * means and what puts the default back.
+ *
+ * What the page will not send is a number below one. Every other field here
+ * sends whatever was typed and lets the server read what it can of it; this one
+ * has a floor, because what a limit of nought asks for is a roadmap that never
+ * starts anything and there is no reading of that worth writing down. A save
+ * carrying one anyway configures nothing, which is the default again.
+ */
+export type AtOnceEdit = { roadmap_stages: string, };
+
+/**
+ * How much Verkstead runs at once, as the settings page draws it.
+ *
+ * One number so far, with room beside it: how many stages of one roadmap may be
+ * under way together. The number is always there, the way the Cleanup's days
+ * are, with the flag beside it saying whether it is one somebody chose — which
+ * is what lets the field draw the default as a placeholder.
+ */
+export type AtOnceView = { 
+/**
+ * How many stages of one roadmap may be under way together. At least one,
+ * always: a roadmap with no places would start nothing at all.
+ *
+ * A count of places rather than a quantity of anything, which is what the
+ * scheduler is handed — see `stages::next_stage` on the server.
+ */
+roadmap_stages: number, 
+/**
+ * Whether that number is one somebody typed, rather than the default being
+ * shown.
+ */
+roadmap_stages_configured: boolean, };
+
+/**
  * What became of attaching a file to a Conversation.
  *
  * Every refusal is a sentence the composer has to put in front of the human —
@@ -4388,6 +4426,12 @@ rust_build_cache: BuildCacheEdit,
  */
 cleanup: CleanupEdit, 
 /**
+ * And how much Verkstead is to run at once, as a value again: what is sent is
+ * what the file holds afterwards, and an empty field is the default asked for
+ * back.
+ */
+at_once: AtOnceEdit, 
+/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
@@ -4528,6 +4572,11 @@ rust_build_cache: BuildCacheView,
  * after the archiving it does it.
  */
 cleanup: CleanupView, 
+/**
+ * And how much Verkstead runs at once, which is one number so far: how many
+ * stages of one roadmap may be under way together.
+ */
+at_once: AtOnceView, 
 /**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.

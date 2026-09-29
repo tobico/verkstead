@@ -1,5 +1,5 @@
-//! The paths, the Cleanup and the instructions a save carries when the form in
-//! front of the human is not about them.
+//! The paths, the Cleanup, the limits and the instructions a save carries when
+//! the form in front of the human is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
 //! every value in it — the author, the build cache, the share-on-Done switch,
@@ -19,6 +19,7 @@
 //! takes it out of the file.
 
 import type {
+  AtOnceEdit,
   CleanupEdit,
   CleanupStepEdit,
   CleanupStepView,
@@ -40,6 +41,8 @@ export function heldConfig(told: SettingsView | undefined) {
     rust_build_cache: heldCache(told),
     // And what becomes of an archived Conversation, likewise.
     cleanup: heldCleanup(told),
+    // And how much Verkstead runs at once — see [`heldAtOnce`].
+    at_once: heldAtOnce(told),
     // And how a conflicted pull request is resolved, which is one of two words
     // and never absent: there is no third state for a form to send.
     conflict_resolution: told?.conflict_resolution ?? "Merge",
@@ -89,6 +92,22 @@ export function heldCache(told: SettingsView | undefined): {
     enabled: told?.rust_build_cache.enabled ?? true,
     size: told?.rust_build_cache.size_configured
       ? (told?.rust_build_cache.size ?? "")
+      : "",
+  };
+}
+
+/// And how much Verkstead runs at once, as it stands, ready to be sent by a
+/// section that is not about it.
+///
+/// A number nobody typed goes back as the empty string rather than as the default
+/// it is being shown as — see [`heldCleanup`], which says the same about a
+/// duration: the number that comes back is always there, and a section that
+/// echoed it would be writing a choice into the file on behalf of somebody who
+/// never made it.
+export function heldAtOnce(told: SettingsView | undefined): AtOnceEdit {
+  return {
+    roadmap_stages: told?.at_once.roadmap_stages_configured
+      ? String(told.at_once.roadmap_stages)
       : "",
   };
 }
