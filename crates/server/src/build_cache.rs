@@ -518,7 +518,7 @@ impl BuildCache {
     /// detection.** It comes up wherever a language naming the
     /// [`crate::languages::SCCACHE`] capability is enabled and there is an
     /// sccache to run, whatever the Repo holds — see
-    /// [`crate::languages::Languages::naming`]. A Repo whose manifest is not at
+    /// [`crate::languages::Languages::wanting`]. A Repo whose manifest is not at
     /// its root is handed the wrapper variable all the same, and with no server
     /// of Verkstead's up the client inside starts one in its own Sandbox, on the
     /// loopback every Sandbox shares: the next such session's compiles then run
@@ -1470,8 +1470,10 @@ mod tests {
         );
     }
 
-    /// A Repo builds Rust where it has a manifest at its root, which is the one
-    /// question both the compile server and the setup card's warning turn on.
+    /// A Repo builds Rust where it has a manifest at its root, which is the
+    /// question the setup card's warning turns on — and the only one it is
+    /// asked of now. The Compile Server comes up on the switch instead; see
+    /// [`crate::languages::Languages::wanting`].
     #[test]
     fn a_repo_builds_rust_where_it_has_a_manifest_at_its_root() {
         let dir = tempfile::tempdir().unwrap();

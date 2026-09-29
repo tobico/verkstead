@@ -130,18 +130,21 @@ directory you can see from a shell is one the workbench says is not there.
 A bare binary outside NixOS has no namespace like this and needs no options at
 all: see [development.md](development.md#quickstart).
 
-A Rust build cache is not one of them, and there is nothing to configure for
-one. The **Build Cache** is the server's own: the module makes
+A build cache is not one of them, and there is nothing to configure for one.
+The **Build Cache** is the server's own: the module makes
 `/var/cache/verkstead`, puts `sccache` on the service's path, and every Sandbox
 gets the directory writable with `CARGO_HOME` inside it and `sccache` as its
 `RUSTC_WRAPPER` — so a crate is downloaded once and compiled once for the
 machine rather than once per Conversation. The sccache server every Sandbox
 compiles through is Verkstead's own, in a Sandbox of its own holding the
-worktrees and the cache, and it comes and goes with the service. Whether
-Sandboxes get one, and how
-large its compiled half may grow, are in the workbench settings; it is on with
+worktrees and the cache, and it comes and goes with the service. Which
+languages a Sandbox gets at all, and how
+large the compiled half may grow, are in the workbench settings; each is on with
 nothing configured. `systemctl clean --what=cache verkstead` empties it, and
-nothing but build output is in it.
+nothing but build output is in it. Those variables are not Rust's by name
+anywhere in the server: Rust is a **descriptor** like any other, and writing
+one for a language Verkstead has never heard of is [Languages](#languages)
+below.
 
 The **Data Directory** is not one of the three either, and not a choice on this
 module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
@@ -869,6 +872,146 @@ without rustup is a machine where a session finds whatever else is on the
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform
 directory — is [development.md](development.md#quickstart).
+
+## Languages
+
+A language is a **descriptor**: data, in one grammar, saying what to call it,
+what says a checkout builds it, and what variables a session is given. Rust is
+the only one Verkstead ships, and there is nothing special about it — its
+descriptor is a YAML file embedded in the binary, written exactly the way you
+would write one. So the built-ins below are both what Verkstead does and the
+worked examples of the grammar.
+
+This is the whole of Rust's, as it ships:
+
+```yaml
+languages:
+  rust:
+    label: Rust
+    detect:
+      - Cargo.toml
+    env:
+      CARGO_HOME: "{cache}/cargo"
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: "{sccache}"
+          SCCACHE_DIR: "{cache}/sccache"
+          SCCACHE_CACHE_SIZE: "{size}"
+```
+
+`label` is what the settings page calls it. `detect` is what says a Repo builds
+it, looked for at the root of a checkout — **for the composer's warning and
+nothing else**: the variables are every session's whatever the Repo holds,
+because a manifest is often not at the root and a variable nothing reads costs
+nothing. `env` is those variables. `capabilities` names behaviour the server
+has built in, which a descriptor can *name* and cannot *describe*: `sccache` is
+the **Compile Server**, and a capability's variables are set only on a machine
+that can offer it — no sccache anywhere and a session gets the downloads above
+and none of the three below. There is no key for a command to run, and there
+will not be one: a settings file that started programs is a settings file whose
+sandbox somebody then has to describe in YAML too.
+
+Two more keys belong to the same entry and are not in the file above, because
+what they say is your machine's rather than the release's: `enabled`, whether
+sessions get this language at all, and `size`, how big its store may grow —
+which is what `{size}` stands for. Absent, they are **on** and **30G**. They
+are also the only two keys the settings page ever writes, so a save from the
+**Language support** pane leaves everything else in an entry exactly as you
+typed it.
+
+**Your own entries merge over the built-ins, key by key.** What you write goes
+under `languages:` in `config.yaml` in the data directory, and each key lands
+in the built-in entry of that name. So changing one variable keeps every later
+fix to the rest:
+
+```yaml
+# config.yaml — this machine's Build Cache is a spinning disk and its Worktrees
+# are not, so the registry goes beside the Worktrees instead. Everything else
+# about Rust — its manifest, its Compile Server and that server's own store —
+# is still whatever this Verkstead ships.
+languages:
+  rust:
+    env:
+      CARGO_HOME: "{stores}/cargo"
+```
+
+and a variable set to `null` is taken **out**, which is how one of the
+built-ins above is dropped without writing the rest of them again:
+
+```yaml
+languages:
+  rust:
+    env:
+      CARGO_HOME: null
+```
+
+**A name Verkstead has never heard of is a language in its own right.** It is
+on from the next session, with its variables in every Sandbox and its own box
+on the settings page, and no release has to know about it:
+
+```yaml
+languages:
+  gleam:
+    label: Gleam
+    detect:
+      - gleam.toml
+    env:
+      HEX_HOME: "{cache}/hex"
+```
+
+**The placeholders are the things only the server knows**, and the two worth
+choosing between are `{cache}` and `{stores}`. `{cache}` is the **Build Cache**
+— `--build-cache-dir`, else `/var/cache/verkstead` on the packaged unit and the
+platform's own cache directory otherwise — and it is where a store goes that
+nothing has to share a filesystem with. Rust's two are both there: a registry
+and a pile of compiled objects are *read*, wherever they are. `{stores}` is a
+directory beside the **Worktrees**, under the data directory, and it is for a
+store that *does* care: pnpm, bun and uv hardlink packages out of theirs into
+the project rather than copying them, and fall back to copying the lot where
+the store and the project are on different filesystems. The Build Cache is free
+to be a second disk — the flag may name one outright, and the packaged unit's
+`CacheDirectory` and `StateDirectory` are two mounts a sysadmin separates as a
+matter of course — so a store that has to be next to the checkout says so:
+
+```yaml
+languages:
+  node:
+    label: Node
+    detect:
+      - package.json
+    env:
+      PNPM_HOME: "{stores}/pnpm"
+```
+
+The other two are not a choice. `{size}` is that entry's own `size` key, and
+`{sccache}` is where a session reaches the sccache this server found — it only
+means anything inside the `sccache` capability, which is what says there is one
+at all. A placeholder's directory is made, and opened to a session, only where
+a loaded descriptor names it: on an install whose `config.yaml` says nothing,
+Rust is the only descriptor loaded, nothing names `{stores}`, and no session
+is opened onto it.
+
+**What an entry that will not load costs you is the entry, and nothing else.**
+Two ways one fails. Naming a variable the Sandbox sets itself — `PATH`, `HOME`,
+`VERKSTEAD_SERVER`, `RUSTUP_HOME`, and the Windows names for a profile that the
+two Unixes have no equivalent of, refused on every platform so that a file
+which loaded on a Mac cannot break the same install on a Windows box — is
+refused by name, because a descriptor that could rewrite those is one that
+could take a session's `verkstead` away from it, or its agent's login. And an
+entry nothing can parse is refused the same way. Either way that language falls
+back to the descriptor Verkstead ships, which is the cache you already had;
+every other language loads; the server comes up. A language with no built-in
+behind it — your Gleam, with a typo in it — goes **off** rather than on at
+nothing.
+
+The **Language support** pane is where you find out. That language's box is
+drawn with its controls off and a sentence saying why: the reason, naming the
+variable where a variable is what was refused, and which of the two became of
+it. Nothing of what you typed is thrown away — a save from that page writes the
+whole of `config.yaml` and puts your entry back exactly as it was — so the fix
+is in the file, and the next session reads it. Settings are read at every
+session spawn: nothing restarts.
 
 ## A day's work
 

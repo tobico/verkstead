@@ -551,7 +551,25 @@ flowchart LR
     and accepted, sessions already sharing one uid and the whole host network.
     The checkbox and the size are `rust_build_cache` in `config.yaml`, read at
     every spawn, so a change applies to the next session; absent means on at
-    30G. Named for Rust so a sibling can stand beside it later.
+    30G. Named for Rust so a sibling can stand beside it later. (*revised
+    2026-09-30, language descriptors stage 01;
+    [ADR 0021](../adr/0021-language-descriptors.md)*: the sibling arrived as a
+    grammar rather than as a second key. A language is a **descriptor** — data:
+    a label, the manifests that detect it, the variables a session is given and
+    the capabilities it names — and Rust's is a YAML file embedded in the
+    binary, in the grammar an installer writes. `config.yaml` carries a
+    `languages:` map merged over the built-ins key by key, `null` taking a
+    variable out, with `enabled` and `size` as keys of the same entry and the
+    only two the settings page writes; `rust_build_cache` is still read as
+    Rust's two, and the map wins where both are written. What a descriptor
+    cannot say is a command to run, so the sccache half stays the server's own
+    behaviour, named by Rust's descriptor and switched on by that name. And the
+    compile server comes up on the **switch** rather than on a manifest: the
+    wrapper variable is every session's whatever the Repo holds — a manifest is
+    often not at the root of one — and a Repo handed it with no server of
+    Verkstead's up is a client that starts one inside its own sandbox, which is
+    the hazard this exists to remove. Detection is left to the composer's
+    warning alone.)
 
     **Compile caching is off on Windows, and the downloads are not** (*settled
     2026-09-06, the AppContainer stage's probe;

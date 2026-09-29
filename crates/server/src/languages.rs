@@ -662,7 +662,7 @@ impl Descriptor {
     ///
     /// **The setup card's warning and nothing else reads this.** What a session
     /// is given does not turn on it, and neither does the Compile Server — see
-    /// [`Languages::naming`].
+    /// [`Languages::wanting`].
     pub fn detected(&self, path: &Path) -> bool {
         self.detect
             .iter()

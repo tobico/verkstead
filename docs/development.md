@@ -176,13 +176,32 @@ than once per Conversation; with `sccache` on the `PATH` the server was started
 from, every session is told to compile through it as `RUSTC_WRAPPER` and the
 compiling is cached too, on all three platforms. The dev shell carries one, so a
 checkout run gets the whole thing. It is on with nothing configured, and the
-settings page is where it is switched off or given a size.
+settings page is where a language is switched off, or its compiled store given
+a size.
+
+**None of those variable names are Rust's by name in the server.** A language
+is a **descriptor** — data, in one grammar — and Rust's is
+`crates/server/languages.yaml`, embedded in the binary and read by
+`crates/server/src/languages.rs`, which is the module's documentation as well
+as its data. What a session is given is whatever the loaded descriptors say,
+with the `languages:` map in `config.yaml` merged over the built-ins key by
+key. `{cache}` in one of them is this directory; `{stores}` is a second one
+beside the worktrees, for a store that has to share a filesystem with the
+project, and it is made only where a loaded descriptor names it. The grammar,
+with the built-ins as its worked examples, is
+[adoption.md](adoption.md#languages).
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
-child of the running server the first time a session starts on a repo with a
-root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the build
+child of the running server the first time a session starts while a language
+naming the `sccache` capability is switched on — Rust's descriptor names it —
+in a sandbox holding `<data-dir>/worktrees` and the build
 cache and nothing else — so `ps` shows one more sandboxed child beside each
-session's, and it goes when the server does. That sandbox is described and
+session's, and it goes when the server does. **The switch rather than the
+checkout**: a repo whose `Cargo.toml` is not at its root is handed
+`RUSTC_WRAPPER` all the same, and a client with no server of Verkstead's to
+reach starts one inside its own sandbox, which is the whole hazard. What a
+descriptor's `detect` manifests are still read for is the composer's warning.
+That sandbox is described and
 rendered by the code a session's is, so it is `bwrap` on Linux, `sandbox-exec`
 on a Mac and the session account on Windows without any half saying which.
 Every session's `sccache` is only the client half reaching it. Sessions starting
@@ -226,9 +245,16 @@ github_token: ghp_...
 git_author:
   name: Tobias Cohen
   email: tobi@tobico.net
-rust_build_cache:
-  enabled: true
-  size: 30G
+languages:
+  rust:
+    enabled: true
+    size: 30G
+  gleam:
+    label: Gleam
+    detect:
+      - gleam.toml
+    env:
+      HEX_HOME: "{cache}/hex"
 cleanup:
   trim:
     enabled: true
@@ -242,6 +268,14 @@ sandbox_binds:
   - /var/cache/verkstead-node
   - /var/cache/verkstead-cargo
 ```
+
+`languages` is one entry per language, merged key by key over the descriptors
+embedded in the binary: `enabled` and `size` are the two the settings page
+writes, and everything else in an entry is the installer's. `gleam` above is a
+language Verkstead has never heard of and works all the same. `rust_build_cache`
+is where Rust's two used to be said, and is still read as Rust's — the map wins
+where both say something, and the first save from the settings page carries it
+into the map and leaves the old key out of the file.
 
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
 are said. A bind is one absolute path, every session gets every one of them, and
@@ -266,8 +300,9 @@ what the settings page saves through:
 ```console
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
- "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles":"Cached"},
+ "languages":[{"name":"rust","label":"Rust","enabled":true,
+   "compiling":{"size":"30G","size_configured":false,"cached":"Cached"},
+   "unread":null}],
  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
    "delete":{"enabled":false,"days":30,"days_configured":false}},
  "conflict_resolution":"Merge",
@@ -275,7 +310,7 @@ $ curl http://127.0.0.1:8422/api/ui/settings
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
-         "rust_build_cache":{"enabled":true,"size":""},
+         "languages":[{"name":"rust","enabled":true,"size":""}],
          "cleanup":{"trim":{"enabled":true,"days":""},
            "delete":{"enabled":false,"days":""}},
          "conflict_resolution":"Merge",
@@ -284,8 +319,9 @@ $ curl -X POST -H 'Content-Type: application/json' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
-  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-    "compiles":"Cached"},
+  "languages":[{"name":"rust","label":"Rust","enabled":true,
+    "compiling":{"size":"30G","size_configured":false,"cached":"Cached"},
+    "unread":null}],
   "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
     "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
@@ -306,11 +342,19 @@ Verkstead needs that GitHub says the token has not been given — `gist`, which
 publishing a share writes with, and empty on a token that carries it or on a
 fine-grained one GitHub named no scopes for at all. `"github_token"` is
 `"Keep"` to leave the configured one alone, which is what a save of the author
-fields sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of
-values rather than an action: an empty `"size"` is no size configured, which
-puts the default back, and `"compiles"` is read-only — `"Cached"` where the
-server found an `sccache` and `"NoSccache"` where it did not. Its own
-environment rather than anybody's setting.
+fields sends, and `"Clear"` to take it away.
+
+`"languages"` is one entry per **descriptor** the server loaded, sent as values
+rather than as an action. A save carries the two keys the page draws — the
+switch and, on the one whose store an sccache bounds, the size, where an empty
+`"size"` is no size configured and puts the default back — and nothing else, so
+the rest of an entry in `config.yaml` is left exactly as its author wrote it.
+Everything else in what comes back is read-only: `"label"` is the descriptor's,
+`"compiling"` stands only on a language naming the `sccache` capability and its
+`"cached"` is the server's own environment — `"Cached"` where it found an
+`sccache` and `"NoSccache"` where it did not — and `"unread"` is null unless
+that language's entry in the file would not load, when it carries the reason
+and whether the language fell back to `"BuiltIn"` or to `"Nothing"`.
 
 `"sandbox_binds"` is the list `config.yaml` holds, sent as values in the grammar
 the flags use — so a Verkstead started with no flags at all gets its first bind

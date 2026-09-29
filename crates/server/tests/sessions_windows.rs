@@ -674,7 +674,7 @@ async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
 ///
 /// **Not what starts the Compile Server.** That comes up wherever a language
 /// naming the sccache capability is switched on and there is an sccache to run,
-/// whatever the checkout holds — see `languages::Languages::naming`, which the
+/// whatever the checkout holds — see `languages::Languages::wanting`, which the
 /// session start asks of the settings rather than of the Repo. So a cache
 /// handed to a fixture is a compile server either way, and what this decides is
 /// whether there is anything on disk for a session to compile.

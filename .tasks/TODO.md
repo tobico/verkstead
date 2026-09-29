@@ -21,4 +21,4 @@ Roadmap stage: [01: Language descriptors](docs/roadmaps/language-caches/01-langu
 - [x] 02: The languages map in `config.yaml` — [details](02-the-languages-map.md)
 - [x] 03: The settings page lists languages — [details](03-the-settings-page-lists-languages.md)
 - [x] 04: What will not load — [details](04-what-will-not-load.md)
-- [ ] 05: The docs — [details](05-the-docs.md)
+- [x] 05: The docs — [details](05-the-docs.md)

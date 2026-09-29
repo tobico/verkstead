@@ -298,12 +298,14 @@ as the file that harness reads: `.claude/CLAUDE.md`, `.codex/AGENTS.md`,
 such file at all where nobody has typed a text. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git
 directory behind it, both at that companion's own mode, so a read-only one is
-read-only through both. The **Build Cache** is
-inside as well, writable, with the `sccache` it compiles through read-only
-beside the executable — that one is a client, and what it reaches is the
-**Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
-the two platforms whose sessions can reach one, which is the Build Cache's own
-entry. The filesystem is the boundary and the network is not, because what
+read-only through both. **The directories the loaded descriptors name are
+inside as well, writable** — the **Build Cache**, which is where both of Rust's
+stores are, and the one beside the Worktrees where a **Descriptor** asks for
+that instead — with the `sccache` a session compiles through read-only beside
+the executable: that one is a client, and what it reaches is the **Compile
+Server** in a Sandbox of Verkstead's own. A directory no loaded descriptor
+names is not in there at all.
+The filesystem is the boundary and the network is not, because what
 stops a session doing harm is that there is nothing within reach to harm:
 inside, it is the host's own, whole and unfiltered, and that is true of all
 three. It was not true of the third for a while — an identity granted the
@@ -510,21 +512,86 @@ being somewhere one could be echoed. And nothing is tried when a server is
 attached or when a session launches: this is a check at save and nowhere else.
 _Avoid_: tool server, integration, plugin, extension, connector
 
+**Descriptor**:
+What a language *is* to Verkstead: **data**, in one grammar, saying a label for
+the settings page, the manifests that detect it in a Repo, the variables a
+session is given, and the **capabilities** it names. Rust is the only one
+Verkstead ships and there is nothing special about it — the built-ins are a
+YAML file embedded in the binary, written the way an installer writes one, so
+they are the grammar's own worked examples rather than a second shape nobody
+ever sees.
+**Data rather than behaviour.** A descriptor cannot say a command to run: a
+settings file that started programs would be one whose sandbox somebody then
+had to describe in YAML too. Behaviour is a **capability** built
+into the server and switched on by name — `sccache`, which is the **Compile
+Server**, and Rust's descriptor names it. A capability's variables are set only
+where this server can offer it, so a language keeps its own on a machine that
+cannot and loses only the capability's; and a name this server has never heard
+of is a capability it cannot offer rather than a file it refuses, so a
+descriptor written for a newer Verkstead is a language that still gets its
+variables.
+**What an installer writes merges over them, key by key.** The `languages:` map
+in `config.yaml` is that same grammar again, and each entry goes into the
+built-in of its name one key at a time — so changing one variable still gets
+every later fix to the rest, and a variable set to `null` is taken **out**. An
+entry naming a language Verkstead has never heard of is a descriptor in its own
+right: on by default, with its variables in the next session and its box on the
+settings page, and no release needed to put it there. **The file only**, there
+being no descriptor editor: `enabled` and `size` are keys of the same entry and
+the only two the settings page ever writes, which is what lets one save write
+the whole of `config.yaml` without taking an installer's own keys away. Absent
+`enabled` is on and absent `size` is 30G, so a language nobody has said
+anything about is one that works. `rust_build_cache`, where Rust's two used to
+be said, is still read as Rust's, and the map wins where both say something.
+**Placeholders are what only the server knows**, and there are four. `{cache}`
+is the **Build Cache**, where a store goes that nothing has to share a
+filesystem with — Rust's two are both there. `{stores}` is a directory beside
+the **Worktrees**, for a store that does: pnpm, bun and uv hardlink packages out
+of theirs into the project rather than copying them and fall back to copying the
+lot where the two are on different filesystems, and the Build Cache is free to
+be a disk of its own — `--build-cache-dir` may name one outright, and the
+packaged unit's `CacheDirectory` and `StateDirectory` are two things a sysadmin
+mounts separately as a matter of course. `{size}` is this entry's own size, and
+`{sccache}` is where a session reaches the sccache this server found, which is
+the `sccache` capability's alone. A placeholder's directory is made, and granted
+writable to a session, only where a loaded descriptor names it — so with Rust
+the only language built in, nothing names the one beside the Worktrees and no
+session is opened onto it.
+**An entry that will not load falls back to the built-in of that name.** Two
+ways one fails — naming a variable the Sandbox sets itself, which is refused by
+name, and being something nothing can parse — and one answer to both: what is
+left is the descriptor Verkstead ships, which is the cache the installer
+already had. A language with no built-in behind it goes **off** rather than on
+at nothing, every other language loads, and the server comes up; losing a
+working build cache to one mistyped variable is the worse experience for not
+having checked. What was written stays written, exactly as it was typed,
+because a save from the settings page writes the whole file and an entry
+nothing could read is still text somebody is about to fix — and while it is
+there the **Language support** pane draws that language's two controls off with
+the reason beside them, naming the variable where a variable is what was
+refused, and saying which of the two became of it.
+_Avoid_: language plugin, language definition, toolchain, language config
+
 **Build Cache**:
-One directory of Verkstead's own that every Sandbox gets writable, so a Rust
-dependency is downloaded and compiled once for the machine rather than once per
-Conversation. The server's own feature rather than Sandbox Configuration: it
-makes the directory, it resolves the `sccache` it compiles through off its own
-environment, and it is **on with nothing configured** — a human should never
-have a worse experience for not having checked the settings. Where it is is the
-installer's (`--build-cache-dir`, else the platform's own place for one: the
-XDG cache directory on both Unixes — `~/.cache/verkstead` where nothing says
-otherwise — and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather
-than the roaming application data because a compiled crate follows nobody
-between machines. The packaged unit says `/var/cache/verkstead`); whether a
-Sandbox gets one at all, and how
-big its compiled half may grow, is the human's, in the workbench settings. The
-one control there that only ever *closes* a hole — the **Sandbox
+One directory of Verkstead's own that every Sandbox gets writable, so what a
+build downloads and compiles is fetched once for the machine rather than once
+per Conversation. What `{cache}` in a **Descriptor** stands for, and the place
+for a store nothing has to share a filesystem with: Rust's descriptor puts
+`CARGO_HOME` and the compiled objects in it, and a language added after it
+reaches the same directory by writing the same placeholder. The server's own
+feature rather than Sandbox Configuration: it makes the directory, it resolves
+the `sccache` it compiles through off its own environment, and it is **on with
+nothing configured** — a human should never have a worse experience for not
+having checked the settings. Where it is is the installer's
+(`--build-cache-dir`, else the platform's own place for one: the XDG cache
+directory on both Unixes — `~/.cache/verkstead` where nothing says otherwise —
+and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
+roaming application data because a compiled crate follows nobody between
+machines. The packaged unit says `/var/cache/verkstead`); which languages a
+Sandbox gets at all, and how big the compiled half may grow, is the human's, in
+the workbench settings — a box per descriptor under **Language support**, with
+the size hanging off the one whose store an sccache bounds. The one control
+there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared — and
 the composer says so on a repository that builds Rust. **Both halves on all
@@ -543,10 +610,21 @@ The one `sccache` server the machine compiles through, run by Verkstead in a
 every Sandbox shares the host's network — so sessions left to start their own
 all reach for one port, and whichever lost the race has its compiles run inside
 another session's Sandbox, where its Worktree is not bound and the build fails.
-Started before the first session of a Conversation whose Repo builds Rust,
-never on a machine that builds none, and on all three platforms — the third only
-since a session there stopped running behind a boundary that could reach no such
-thing. Its Sandbox holds the Worktrees
+**The one capability a Descriptor can name**, which is what says when it comes
+up: wherever a language naming `sccache` is switched on and there is an sccache
+to run, on all three platforms — the third only since a session there stopped
+running behind a boundary that could reach no such thing. Sized by that
+descriptor's own `size`, and by the first of them where two ever name it, there
+being one store and one server for the machine. **On the switch rather than on
+a manifest at a Repo's root**, which is where it used to turn: the wrapper
+variable is every session's whatever its checkout holds, because a manifest is
+often not at the top of one, and a Repo handed `RUSTC_WRAPPER` with no server
+of Verkstead's up is a client that starts one inside its own Sandbox — which is
+the hazard this exists to remove. **What a descriptor's manifests are still for
+is the setup card's warning**, and nothing else: a composer saying this
+repository's compiles are not being cached is worth drawing where the
+repository builds that language, and is nothing to withhold a variable over.
+Its Sandbox holds the Worktrees
 directory — all of it, so a Conversation grilled later is one it can already
 compile for — and the Build Cache, and nothing else Verkstead keeps: `rustc`
 runs proc macros while it compiles, so the database and the settings files stay
