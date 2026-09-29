@@ -475,10 +475,52 @@ fi
         std::fs::write(self.settings.secrets_path(), yaml).unwrap();
     }
 
-    /// And `config.yaml`, which is who those sandboxes commit as and how their
-    /// shared build cache is set.
+    /// And `config.yaml`, which is who those sandboxes commit as, how their
+    /// shared build cache is set, and what MCP servers this installation
+    /// declares.
     fn configure(&self, yaml: &str) {
         std::fs::write(self.settings.config_path(), yaml).unwrap();
+    }
+
+    /// Declare these MCP servers and nothing else, the way the settings page
+    /// leaves `config.yaml`.
+    ///
+    /// Written again rather than added to, because that is what a save of that
+    /// section is: the declarations the page sent are the declarations there
+    /// are, so this is also how one is edited and how one is deleted.
+    fn declaring(&self, servers: &[(&str, &str)]) {
+        let declared: String = servers
+            .iter()
+            .map(|(name, url)| format!("  - name: {name}\n    url: {url}\n"))
+            .collect();
+
+        self.configure(&format!("mcp_servers:\n{declared}"));
+    }
+
+    /// And attach each of them to the Conversation, the way the draft
+    /// composer's menu does.
+    ///
+    /// The Conversation is loaded again afterwards, because what it has
+    /// attached is carried on it — see the store's `Conversation::mcp_servers`
+    /// — and every sandbox built from here on is built around the copy the
+    /// fixture holds.
+    async fn attaching(&mut self, names: &[&str]) {
+        for name in names {
+            store::attach_mcp_server(&self.pool, self.conversation.id, name)
+                .await
+                .unwrap();
+        }
+
+        self.reload().await;
+    }
+
+    /// The Conversation as the record has it now, which is what a sandbox is
+    /// built around.
+    async fn reload(&mut self) {
+        self.conversation = store::load_conversation(&self.pool, self.conversation.id)
+            .await
+            .unwrap()
+            .expect("the Conversation is still there");
     }
 
     /// A Profile of the second agent type, whose whole account is one home.
@@ -3783,6 +3825,101 @@ async fn a_claude_sessions_config_trusts_the_repo_and_the_worktree_and_holds_no_
         serde_json::json!({"allowedTools": []}),
         "nor an entry's own"
     );
+}
+
+/// A Claude session is launched with the MCP servers its Conversation attached:
+/// one entry apiece in the `.claude.json` it reads, each with the transport
+/// Claude Code refuses a URL without — and nothing of them reaches the
+/// account's own file when the session ends.
+#[tokio::test]
+async fn a_claude_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
+
+    fixture.declaring(&[
+        ("docs", "https://mcp.example.com/docs"),
+        ("tickets", "https://mcp.example.com/tickets"),
+    ]);
+    fixture.attaching(&["tickets", "docs"]).await;
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+
+    let config: serde_json::Value = serde_json::from_str(&reported["config"]).unwrap();
+
+    assert_eq!(
+        config["mcpServers"],
+        serde_json::json!({
+            "tickets": {"type": "http", "url": "https://mcp.example.com/tickets"},
+            "docs": {"type": "http", "url": "https://mcp.example.com/docs"},
+        }),
+        "the session reads the Conversation's servers and none of the human's: {config}"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"numStartups\": 1, \"mcpServers\": {\"the-humans\": {}}}\n",
+        "and the account's file is untouched: it has lost none of its own servers \
+         and gained none of Verkstead's"
+    );
+}
+
+/// Which servers is read off the Conversation and what each of them is off the
+/// settings, both at the moment a session is launched — so a URL corrected
+/// between two sessions is what the second is given, and a declaration deleted
+/// in the meantime is left out rather than holding the launch up.
+#[tokio::test]
+async fn a_second_session_is_given_the_declarations_as_they_stand_then() {
+    let mut fixture = grilling().await;
+
+    fixture.declaring(&[
+        ("docs", "https://mcp.example.com/docs"),
+        ("tickets", "https://mcp.example.com/tickets"),
+    ]);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let first = servers_inside(&fixture);
+
+    assert_eq!(
+        first,
+        serde_json::json!({
+            "docs": {"type": "http", "url": "https://mcp.example.com/docs"},
+            "tickets": {"type": "http", "url": "https://mcp.example.com/tickets"},
+        }),
+        "the first session has both of them as they were declared"
+    );
+
+    // The human corrects one URL on the settings page and deletes the other
+    // declaration. Nothing about the Conversation changes: its chips are
+    // references by name, and the one whose declaration has gone is drawn as a
+    // server that is gone rather than taken off.
+    fixture.declaring(&[("docs", "https://docs.internal/mcp")]);
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({ "docs": {"type": "http", "url": "https://docs.internal/mcp"} }),
+        "and the next one is given the corrected URL, with the deleted declaration \
+         simply left out"
+    );
+}
+
+/// What a session inside reads under `mcpServers` in its own `.claude.json`.
+fn servers_inside(fixture: &Grilling) -> serde_json::Value {
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+
+    serde_json::from_str::<serde_json::Value>(&reported["config"]).unwrap()["mcpServers"].clone()
 }
 
 /// What a Claude session changes in its `.claude.json` reaches the account as

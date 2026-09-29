@@ -3530,6 +3530,20 @@ pub struct Sandbox {
     /// file at all.
     instructions: String,
 
+    /// And the MCP servers this Conversation attached, each as its name and the
+    /// URL it is reached at, read at the same moment and for the same reason.
+    ///
+    /// Written into a Claude root's `.claude.json` copy, which is the whole of
+    /// how a session is launched with one — see [`root::config`]. Which servers
+    /// comes off the Conversation and what each of them *is* comes off the
+    /// settings, so a URL corrected there reaches the next session and a name
+    /// nothing declares any more is simply not in this list — see
+    /// [`crate::settings::Config::servers_among`].
+    ///
+    /// Empty is the ordinary Conversation, and the root it built before there
+    /// were any.
+    mcp_servers: Vec<(String, String)>,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
@@ -3824,6 +3838,15 @@ impl Sandbox {
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
             instructions: config.instructions().to_owned(),
+            // Resolved here rather than carried as names, so that the one
+            // reading of the settings a launch makes is the one every part of
+            // it works off — and so that a name the settings no longer declare
+            // is gone before anything can be built around it.
+            mcp_servers: config
+                .servers_among(&conversation.mcp_servers)
+                .into_iter()
+                .map(|(name, url)| (name.to_owned(), url.to_owned()))
+                .collect(),
             server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,
@@ -4684,6 +4707,11 @@ impl Sandbox {
     /// account's own, written as the session starts — see
     /// [`root::Root::config`].
     ///
+    /// **And the Conversation's MCP servers in it**, which is the whole of how
+    /// a session is launched with one: the account's are taken out of the copy
+    /// and Verkstead's own are written in their place — see
+    /// [`Sandbox::mcp_servers`], read as the sandbox was built.
+    ///
     /// **Copied rather than linked**, so the trust seeded into it is written
     /// into the session's copy and not into the account's file. What the
     /// session changes in it is merged back as it ends — see
@@ -4710,7 +4738,7 @@ impl Sandbox {
         if builds {
             surface.made(Access::Written {
                 path: copy.clone(),
-                contents: root.config(config_file),
+                contents: root.config(config_file, &self.mcp_servers),
             });
         }
 

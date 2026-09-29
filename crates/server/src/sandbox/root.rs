@@ -214,10 +214,31 @@ const OPENCODE_CARRIED: &str = "provider";
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
 ///
-/// **Never in a session's copy, and never written back.** Those are the human's
-/// own servers, the same leak as plugins — and a key a copy never had is not a
-/// key a session removed.
+/// **Never the account's own, and never written back.** Those are the human's
+/// servers, the same leak as plugins — and a key a copy never had is not a key
+/// a session removed.
+///
+/// **What a copy holds under it is Verkstead's own**, one entry per server the
+/// Conversation attached that the settings still declare — see [`config`]. The
+/// write-back is unchanged by that: the key is neither written nor removed at
+/// either level, so a server Verkstead put in the copy reaches the account no
+/// more than the human's reached the session.
 const MCP_SERVERS: &str = "mcpServers";
+
+/// What an entry Verkstead writes under it says about a transport.
+///
+/// Read off Claude Code 2.1.268, which refuses a `url` with no `type` beside
+/// it. HTTP is the only transport a declaration can be — there is no command
+/// and no arguments on the settings page, and stdio was turned down in the
+/// grilling this was settled in, see ADR-0021 — so the value is a constant
+/// rather than anything read.
+const HTTP: &str = "http";
+
+/// And the key its URL is under.
+const URL: &str = "url";
+
+/// And the key the transport is under.
+const TYPE: &str = "type";
 
 /// Of the account's `.claude.json`, the key its per-path entries are under.
 const PROJECTS_CONFIG: &str = "projects";
@@ -600,21 +621,26 @@ impl Root {
     }
 
     /// The `.claude.json` a Claude session is given: a copy of the account's own
-    /// at `config_file` as it is at this moment, with its MCP servers taken out
-    /// and the Repo and the Worktree trusted — see [`config`].
+    /// at `config_file` as it is at this moment, with its MCP servers taken out,
+    /// the Repo and the Worktree trusted, and `servers` written in their place —
+    /// see [`config`].
     ///
     /// Copied rather than linked, so what is seeded is written into the copy
     /// and not into the account. What the session changes goes back as it ends
     /// — see [`merged_back`].
     ///
+    /// `servers` is what the Conversation attached, each as its name and its
+    /// URL, and empty is the ordinary Conversation — see
+    /// [`crate::settings::Config::servers_among`].
+    ///
     /// Blocking: one read.
-    pub(crate) fn config(&self, config_file: &Path) -> Vec<u8> {
+    pub(crate) fn config(&self, config_file: &Path, servers: &[(String, String)]) -> Vec<u8> {
         let trusted = match &self.harness {
             Harness::Claude { trusted, .. } => trusted.as_slice(),
             Harness::Codex | Harness::Grok | Harness::OpenCode => &[],
         };
 
-        config(std::fs::read(config_file).ok().as_deref(), trusted)
+        config(std::fs::read(config_file).ok().as_deref(), trusted, servers)
     }
 
     /// Make each directory of the memory store in the account where it is not
@@ -915,7 +941,23 @@ type Object = serde_json::Map<String, serde_json::Value>;
 /// The `.claude.json` a session is given, out of the account's own where there
 /// is one to read.
 ///
-/// **Without `mcpServers`**, at the top level and under each `projects` entry.
+/// **Without the account's `mcpServers`**, at the top level and under each
+/// `projects` entry.
+///
+/// **And with `servers` written under it instead**, one entry per MCP server
+/// the Conversation attached that the settings still declare, each
+/// `{"type": "http", "url": …}`: the transport is said because Claude Code
+/// 2.1.268 refuses a `url` without it, and HTTP is the only one a declaration
+/// can be. At the top level rather than under a `projects` entry, because it
+/// is the session that was launched with them rather than a directory. A
+/// Conversation with none attached is no key at all, which is the copy as it
+/// was written before there were any.
+///
+/// **Nothing is checked first.** A URL nothing is listening at is a server the
+/// harness reports as failed, and a session that carries on without it — where
+/// a launch that reached out first would be one a Conversation could be held
+/// up by. And every tool of a server is allowed: sessions run with permission
+/// prompts off and there is no per-tool filter — see ADR-0021.
 ///
 /// **With a `projects` entry for each of `trusted` saying
 /// `hasTrustDialogAccepted`**, beside whatever the account's entry for that path
@@ -928,13 +970,29 @@ type Object = serde_json::Map<String, serde_json::Value>;
 ///
 /// An account whose file is not there, or does not read as a JSON object, is
 /// given the seeding and nothing else.
-fn config(account: Option<&[u8]>, trusted: &[String]) -> Vec<u8> {
+fn config(account: Option<&[u8]>, trusted: &[String], servers: &[(String, String)]) -> Vec<u8> {
     let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
         Some(serde_json::Value::Object(own)) => own,
         _ => Object::new(),
     };
 
     copy.remove(MCP_SERVERS);
+
+    // Verkstead's own in their place, where the Conversation has any. Written
+    // after the removal rather than over it, so that what the account had
+    // cannot survive under a name the settings happen to share with it.
+    if !servers.is_empty() {
+        let mut ours = Object::new();
+
+        for (name, url) in servers {
+            ours.insert(
+                name.clone(),
+                serde_json::json!({ TYPE: HTTP, URL: url.clone() }),
+            );
+        }
+
+        copy.insert(MCP_SERVERS.to_owned(), serde_json::Value::Object(ours));
+    }
 
     let projects = object_at(&mut copy, PROJECTS_CONFIG);
 
@@ -1398,7 +1456,8 @@ mod tests {
         assert_eq!(
             read(&config(
                 Some(account.to_string().as_bytes()),
-                &trusted(&root)
+                &trusted(&root),
+                &[],
             )),
             serde_json::json!({
                 "projects": {
@@ -1413,11 +1472,82 @@ mod tests {
             })
         );
         assert_eq!(
-            read(&config(Some(b"{ not json"), &trusted(&root)[..1])),
+            read(&config(Some(b"{ not json"), &trusted(&root)[..1], &[])),
             serde_json::json!({
                 "projects": { "C:/Users/ada/src/verkstead": { "hasTrustDialogAccepted": true } },
             }),
             "and an account file that does not read gives the seeding alone"
+        );
+    }
+
+    /// A server as a Conversation's attachment comes to one at a launch.
+    fn attached(name: &str, url: &str) -> (String, String) {
+        (name.to_owned(), url.to_owned())
+    }
+
+    /// The copy holds one entry per server the Conversation attached, each with
+    /// the transport Claude Code refuses a URL without — and the account's own
+    /// are gone all the same, at the top level and under an entry.
+    #[test]
+    fn the_copy_holds_the_conversations_servers_and_none_of_the_accounts() {
+        let account = serde_json::json!({
+            "mcpServers": { "the-humans": {} },
+            "projects": { "/repo": { "mcpServers": { "its-own": {} } } },
+        });
+
+        assert_eq!(
+            read(&config(
+                Some(account.to_string().as_bytes()),
+                &["/repo".to_owned()],
+                &[
+                    attached("docs", "https://mcp.example.com/docs"),
+                    attached("tickets", "https://mcp.example.com/tickets"),
+                ],
+            )),
+            serde_json::json!({
+                "mcpServers": {
+                    "docs": { "type": "http", "url": "https://mcp.example.com/docs" },
+                    "tickets": { "type": "http", "url": "https://mcp.example.com/tickets" },
+                },
+                "projects": { "/repo": { "hasTrustDialogAccepted": true } },
+            })
+        );
+    }
+
+    /// A name the account happens to share is Verkstead's here, rather than the
+    /// human's surviving the strip under a familiar name.
+    #[test]
+    fn a_server_the_account_names_too_is_the_conversations() {
+        let account = serde_json::json!({
+            "mcpServers": { "docs": { "command": "the-humans-own" } },
+        });
+
+        assert_eq!(
+            read(&config(
+                Some(account.to_string().as_bytes()),
+                &[],
+                &[attached("docs", "https://mcp.example.com/docs")],
+            ))["mcpServers"],
+            serde_json::json!({
+                "docs": { "type": "http", "url": "https://mcp.example.com/docs" },
+            })
+        );
+    }
+
+    /// And a Conversation with nothing attached is the copy as it was written
+    /// before there was anything to attach: no key at all.
+    #[test]
+    fn a_conversation_with_no_servers_gets_the_copy_it_always_got() {
+        assert_eq!(
+            read(&config(
+                Some(br#"{"numStartups": 7, "mcpServers": {"the-humans": {}}}"#),
+                &["/repo".to_owned()],
+                &[],
+            )),
+            serde_json::json!({
+                "numStartups": 7,
+                "projects": { "/repo": { "hasTrustDialogAccepted": true } },
+            })
         );
     }
 
@@ -1502,6 +1632,55 @@ mod tests {
         assert_eq!(
             merged,
             serde_json::json!({ "mcpServers": { "the-humans": {} } })
+        );
+    }
+
+    /// A server Verkstead wrote into the copy reaches the account no more than
+    /// the human's reached the session: the key is neither written nor removed,
+    /// whichever side of it changed.
+    #[test]
+    fn a_server_verkstead_wrote_into_the_copy_never_reaches_the_account() {
+        let given = serde_json::json!({
+            "mcpServers": { "docs": { "type": "http", "url": "https://mcp.example.com/docs" } },
+            "numStartups": 1,
+        });
+
+        // The session left the copy as it was given, and changed something
+        // beside it — so there is a merge, and the servers are not in it.
+        let (changed, merged) = merging(
+            given.clone(),
+            serde_json::json!({
+                "mcpServers": { "docs": { "type": "http", "url": "https://mcp.example.com/docs" } },
+                "numStartups": 2,
+            }),
+            serde_json::json!({
+                "mcpServers": { "the-humans": {} },
+                "numStartups": 1,
+            }),
+        );
+
+        assert!(changed);
+        assert_eq!(
+            merged,
+            serde_json::json!({
+                "mcpServers": { "the-humans": {} },
+                "numStartups": 2,
+            })
+        );
+
+        // And a session that took Verkstead's servers out of its copy takes
+        // nothing out of the account's, the removal being of a key that is
+        // never written back either way.
+        let (changed, merged) = merging(
+            given,
+            serde_json::json!({ "numStartups": 1 }),
+            serde_json::json!({ "mcpServers": { "the-humans": {} }, "numStartups": 1 }),
+        );
+
+        assert!(!changed);
+        assert_eq!(
+            merged,
+            serde_json::json!({ "mcpServers": { "the-humans": {} }, "numStartups": 1 })
         );
     }
 

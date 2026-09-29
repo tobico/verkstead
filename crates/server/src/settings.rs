@@ -854,6 +854,33 @@ impl Config {
         &self.mcp_servers
     }
 
+    /// And the ones `attached` names, each as its name and the URL it is
+    /// reached at — which is what a Conversation's chips come to at the moment
+    /// a session is launched.
+    ///
+    /// **In the order they were attached** rather than the order they were
+    /// declared in: the chips are the Conversation's list, and it is the
+    /// Conversation being launched.
+    ///
+    /// **A name nothing declares is left out**, silently as far as the launch
+    /// goes. A chip whose declaration has since been deleted is already drawn
+    /// as a server that is gone — see the server's
+    /// `conversations::attached_servers` — and there is nowhere to send an
+    /// agent, so there is nothing to write into a root and nothing to tell a
+    /// session about. Holding the launch over it would stop the work for a
+    /// reference the human can see is broken.
+    pub fn servers_among<'a>(&'a self, attached: &[String]) -> Vec<(&'a str, &'a str)> {
+        attached
+            .iter()
+            .filter_map(|name| {
+                self.mcp_servers
+                    .iter()
+                    .find(|server| server.name() == Some(name.as_str()))
+                    .and_then(|server| Some((server.name()?, server.url()?)))
+            })
+            .collect()
+    }
+
     /// And the text every session is given, which is empty where nobody has
     /// typed one — a session told nothing beyond what its Repo carries.
     ///
@@ -3074,5 +3101,53 @@ mod tests {
     /// One declaration, for the tests above.
     fn declared(name: &str, url: &str) -> McpServer {
         McpServer::of(Some(name.to_owned()), Some(url.to_owned()))
+    }
+
+    /// What a Conversation's chips come to at a launch: the declarations they
+    /// name, in the order the human attached them rather than the order they
+    /// were declared in.
+    #[test]
+    fn the_servers_a_conversation_attached_come_back_in_its_own_order() {
+        let config = Config::read(concat!(
+            "mcp_servers:\n",
+            "  - name: docs\n    url: https://mcp.example.com/docs\n",
+            "  - name: tickets\n    url: https://mcp.example.com/tickets\n",
+            "  - name: alerts\n    url: https://mcp.example.com/alerts\n",
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.servers_among(&["tickets".to_owned(), "docs".to_owned()]),
+            vec![
+                ("tickets", "https://mcp.example.com/tickets"),
+                ("docs", "https://mcp.example.com/docs"),
+            ],
+        );
+        assert!(
+            config.servers_among(&[]).is_empty(),
+            "and a Conversation with nothing attached has nothing to launch with"
+        );
+    }
+
+    /// A name nothing declares any more is left out, and what is beside it
+    /// still launches: the chip says the server is gone, and the work does not
+    /// wait on the human going and fixing it.
+    #[test]
+    fn a_name_nothing_declares_is_left_out() {
+        let config =
+            Config::read("mcp_servers:\n  - name: docs\n    url: https://mcp.example.com/docs\n")
+                .unwrap();
+
+        assert_eq!(
+            config.servers_among(&["deleted".to_owned(), "docs".to_owned()]),
+            vec![("docs", "https://mcp.example.com/docs")],
+        );
+        assert!(
+            Config::read("")
+                .unwrap()
+                .servers_among(&["docs".to_owned()])
+                .is_empty(),
+            "and an installation that declares none declares none"
+        );
     }
 }

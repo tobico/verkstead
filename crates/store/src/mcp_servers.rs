@@ -213,6 +213,36 @@ mod tests {
         assert!(!detach_mcp_server(&pool, id, "docs").await.unwrap());
     }
 
+    /// And the names are on the Conversation itself, which is what every
+    /// launch reads them off — the companions' rule, for the companions'
+    /// reason.
+    #[tokio::test]
+    async fn a_conversation_carries_the_names_it_has_attached() {
+        let (_dir, pool, id) = drafting().await;
+
+        assert!(
+            crate::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers
+                .is_empty(),
+            "a Conversation with nothing attached carries nothing"
+        );
+
+        attach_mcp_server(&pool, id, "tickets").await.unwrap();
+        attach_mcp_server(&pool, id, "docs").await.unwrap();
+
+        assert_eq!(
+            crate::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers,
+            vec!["tickets", "docs"],
+        );
+    }
+
     /// One Conversation's chips are its own: the name is a key inside a
     /// Conversation rather than across the record.
     #[tokio::test]

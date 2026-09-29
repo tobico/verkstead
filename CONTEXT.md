@@ -451,6 +451,13 @@ harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,
 and a per-tool list is one that goes stale the first time the server adds a
 tool.
+**And the prompt says so**: a neutral `# MCP servers` listing beside the
+attached files' own, naming each attached server and what that harness puts in
+front of its tool names — `mcp__<server>__<tool>` on Claude. Which is the one
+thing about a server a session cannot work out for itself; what it is *for* is
+the Brief's to say, as a file's is. No section at all where a Conversation has
+attached none, and none for a name whose declaration has since been deleted,
+that one being nothing the session was launched with.
 **An unreachable server never holds a launch**: the session starts, and what the
 harness makes of a server that will not answer is said inside it. A declaration
 is tried once on save, while the human is looking at the page, and that is a

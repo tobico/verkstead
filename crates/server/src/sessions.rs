@@ -2195,6 +2195,24 @@ impl Sessions {
             &agents.attachments.inside(Platform::HERE, conversation.id),
         );
 
+        // And the MCP servers it attached, named under that again — here for
+        // the two listings above's reason, and read against the settings as
+        // they are at this moment, which is what the root below is built from
+        // too: a name the settings no longer declare is neither configured nor
+        // mentioned. See [`skills::served`], which is also where the harness
+        // that is launched with none says nothing.
+        let prompt = skills::served(
+            &prompt,
+            &agents
+                .settings
+                .config()
+                .servers_among(&conversation.mcp_servers)
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect::<Vec<_>>(),
+            pairing.profile.agent_type(),
+        );
+
         // And, where the branch is still on the name Verkstead invented for it,
         // the instruction to pick a better one. Here for the reason the listing
         // above is here — it is not any one prompt's, and the three starts that
