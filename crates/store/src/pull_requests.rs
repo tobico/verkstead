@@ -1085,6 +1085,14 @@ pub(crate) async fn on_timeline(
 /// ordinarily the oldest: the Conversation that was closed to make way, offered
 /// as the way on.
 ///
+/// **And shut is every word for shut**, which is [`Lifecycle::shut`] and not the
+/// two states spelled out here. SQL compares words where the rest of the store
+/// reads them into states, so a spelling left out of that list is a row sorted as
+/// though it were open — and `aborted`, which is what Closed was called before
+/// the migration renamed it, is exactly such a word. One of those ahead of the
+/// Conversation genuinely at work would answer with a record the caller then
+/// reads as having nothing to give up, which is the refusal gone.
+///
 /// **The pull request a Conversation's work is *on*, rather than every row
 /// recorded beside it.** A wrap-up over a stack records the whole chain so that
 /// it can watch it — see [`stack`] — and those neighbours usually belong to a
@@ -1135,6 +1143,8 @@ async fn on_pull_request(
     number: i64,
     besides: Option<i64>,
 ) -> Result<Option<i64>> {
+    let shut = Lifecycle::shut();
+
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT p.conversation_id
          FROM pull_requests p
@@ -1144,15 +1154,16 @@ async fn on_pull_request(
            AND p.event_id = (SELECT MIN(q.event_id) FROM pull_requests q
                              WHERE q.conversation_id = p.conversation_id
                                AND q.repo_id = p.repo_id)
-         ORDER BY v.state NOT IN (?, ?) DESC, v.id DESC
+         ORDER BY v.state NOT IN (?, ?, ?) DESC, v.id DESC
          LIMIT 1",
     )
     .bind(repo_id)
     .bind(number)
     .bind(besides)
     .bind(besides)
-    .bind(Lifecycle::Done.stored())
-    .bind(Lifecycle::Closed.stored())
+    .bind(shut[0])
+    .bind(shut[1])
+    .bind(shut[2])
     .fetch_optional(pool)
     .await
     .with_context(|| {

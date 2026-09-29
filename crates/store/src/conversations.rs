@@ -114,7 +114,28 @@ pub enum Lifecycle {
     Closed,
 }
 
+/// What [`Lifecycle::Closed`] was called while the press was Abort.
+///
+/// A migration rewrites every row it can reach — see [`super::migrations`] — so
+/// this is the word in the ones it never did: a database restored from a backup
+/// taken before it ran, or a row somebody wrote by hand. Named once here because
+/// two places read it, and a query that knew one spelling of Closed and not the
+/// other would answer about a Conversation it had taken for open.
+pub(crate) const ABORTED: &str = "aborted";
+
 impl Lifecycle {
+    /// Both words a shut Conversation's column may hold: Done and Closed, and
+    /// Closed's own older spelling.
+    ///
+    /// What a query orders by rather than reads. [`Self::read`] turns a word into
+    /// a state and SQL cannot, so anywhere SQL has to know whether a row is still
+    /// at work it compares against these — see
+    /// [`super::pull_requests::conversation_on_pull_request`], where a word left
+    /// out of the list would sort as though the Conversation were open.
+    pub(crate) fn shut() -> [&'static str; 3] {
+        [Self::Done.stored(), Self::Closed.stored(), ABORTED]
+    }
+
     /// The word the column holds. Lowercase and spelled out, so the table reads
     /// as something rather than as a number nobody can look up.
     pub(crate) fn stored(self) -> &'static str {
@@ -148,7 +169,8 @@ impl Lifecycle {
             "follow-up" => Self::FollowUp,
             "investigating" => Self::Investigating,
             "done" => Self::Done,
-            "closed" | "aborted" => Self::Closed,
+            "closed" => Self::Closed,
+            word if word == ABORTED => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }

@@ -1921,6 +1921,60 @@ async fn a_pull_request_one_conversation_has_leads_to_nobody_else() {
     );
 }
 
+/// And a Conversation whose column still holds the *old* word for Closed is shut
+/// as surely as one that holds the new one.
+///
+/// `aborted` is what Closed was called while the press was Abort. A migration
+/// rewrites every row it can reach, and the ones it never did — a database
+/// restored from a backup taken before it ran — still say it, which is why the
+/// store reads the word at all. The ordering here compares words rather than
+/// reading them, so a spelling it did not know would sort as though that
+/// Conversation were still at work: the take-up would be told about a record it
+/// then reads as having nothing to give up, and the second live wrap-up the whole
+/// rule is against would go straight through.
+/// The newer row is the one spelled the old way, because that is where it bites:
+/// the newest is what a tie between two open-looking rows falls back to, so an
+/// `aborted` one that sorted as open would win it.
+#[tokio::test]
+async fn the_old_word_for_closed_is_shut_in_the_ordering_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let at_work = implementing(&pool).await;
+    let own = own(&pool, at_work).await;
+
+    record_pull_request(&pool, at_work, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // The Conversation that took the pull request over and was shut afterwards,
+    // which is the newer of the two rows.
+    let shut = beside_it_in(&pool, own, "stage-01-again").await;
+
+    record_pull_request(&pool, shut, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // Written by hand, because nothing in this Verkstead spells it any more: this
+    // is the row a restored backup leaves behind.
+    sqlx::query("UPDATE conversations SET state = 'aborted' WHERE id = ?")
+        .bind(shut)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(at_work),
+        "the older spelling of Closed is Closed, so the answer is the Conversation still at work",
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, shut)
+            .await
+            .unwrap(),
+        Some(at_work),
+        "and it is who else has it, asked by the row spelled the old way",
+    );
+}
+
 /// Another Conversation of the same Repo, carried to Implementing the way
 /// [`implementing`] carries the first: a stack in this workbench is a pull
 /// request per Conversation, so the neighbours have Conversations of their own.
