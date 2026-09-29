@@ -2161,7 +2161,19 @@ Conversation's, and one whose Conversation has *finished* with it closes that
 Conversation — by the ordinary Close, so its worktree goes with it, which is what
 frees the branch — and takes the pull request up over the top of it, saying on the
 new Conversation's Timeline whose it was. A holder already Closed or Archived has
-nothing to give up and is passed over. *Holds* means the pull request that
+nothing to give up and is passed over. **The one thing that close is asked about
+is what it would discard**: where a Conversation about to be closed has
+uncommitted changes — modified, staged, or untracked and not ignored, in its own
+worktree or a companion checkout it may write in, which is the reading
+`verkstead done` takes of one — the press stops, naming every such Conversation by
+its branch and linking to it, nothing being closed and nothing made; the press
+under it then reads *Start anyway*, and that one closes and takes up. The
+checkouts are read again on that second press rather than trusted from the first,
+so a Conversation the confirmation does not name and that is holding something
+stops it all over again with the list as it stands. A clean holder is closed with
+no question, a worktree whose directory has gone holds nothing, and asking on
+every start was rejected as a question with one answer nearly every time.
+*Holds* means the pull request that
 Conversation was pointed at or its finish step opened, rather than one it records
 beside that to watch, which is what a stack's neighbours are; asked which
 Conversation is on a pull request several have recorded, the answer is the open

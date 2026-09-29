@@ -1075,6 +1075,26 @@ base_commit: string | null, };
 export type CompileCaching = "Cached" | "NoSccache";
 
 /**
+ * What a take-up's press says beyond which Draft is making it.
+ *
+ * Empty on a first press, which is every press that has not been stopped — so
+ * this is a body of nothing until a [`TakenUp::WouldDiscard`] gives it
+ * something to carry.
+ */
+export type Confirming = { 
+/**
+ * The Conversations whose uncommitted changes may go: the ones a
+ * [`TakenUp::WouldDiscard`] named, sent back by the press that confirms
+ * them.
+ *
+ * **What may be lost rather than what will be.** The server reads every
+ * checkout again on this press, so a Conversation that is clean by then is
+ * closed without this having meant anything, and one that is dirty and not
+ * named here stops the press all over again.
+ */
+discarding: Array<number>, };
+
+/**
  * How a merge conflict between a pull request and its base branch is resolved.
  *
  * Two words for two ways of putting the base's work on a branch that has
@@ -5079,7 +5099,16 @@ why: string, } } | "Fork" | { "AlreadyHeld": {
 /**
  * The Conversation that has it, for the way there.
  */
-conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+conversation: number, } } | { "WouldDiscard": { 
+/**
+ * Every Conversation that would lose something, in the order they
+ * would be closed in.
+ *
+ * A list rather than one: a stack is taken up a link at a time, and
+ * every Conversation standing on a link of it is closed by the one
+ * press.
+ */
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -5391,6 +5420,24 @@ cursor: string, };
  * would match nothing and fall back to matching by position, silently.
  */
 export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
+
+/**
+ * A Conversation a take-up would close that has something uncommitted in it.
+ *
+ * What [`TakenUp::WouldDiscard`] is made of, and what the composer draws under
+ * the press: the id is the way there, and the branch is what the human knows
+ * it by — a Conversation is called by its branch everywhere it is listed, once
+ * anybody has named one.
+ */
+export type Uncommitted = { 
+/**
+ * The Conversation, for the way there.
+ */
+conversation: number, 
+/**
+ * The branch it goes under.
+ */
+branch: string, };
 
 /**
  * Something nothing here knows how to draw, in the conversation where it was

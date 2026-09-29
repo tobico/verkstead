@@ -1263,6 +1263,51 @@ describe("the target a compose page is pointed at", () => {
     );
   });
 
+  /// And a take-up stopped over what it would discard is carried the same way,
+  /// which is the outcome the replay has to carry that is not a refusal.
+  ///
+  /// There is nowhere for a link to go here either, so what the draft carries is
+  /// the sentence — and the sentence ends on the press, which the draft it made
+  /// has under its own composer.
+  it("says on the draft it made what a start would have discarded", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldDiscard: {
+            uncommitted: [{ conversation: 77, branch: "rate-limiting" }],
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /The conversation on rate-limiting would be closed to make way/,
+        ),
+      ).toBeTruthy(),
+    );
+  });
+
   /// And a **Fix Merge Issues** page is the same press over the same field: it
   /// waits on a brief, a target and the one role its table names, and the
   /// kickoff behind it is the take-up rather than a grill start.

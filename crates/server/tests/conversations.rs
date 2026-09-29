@@ -29,7 +29,7 @@ use verkstead_render::{
     PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
     RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
     SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
-    TargetRecorded, TimelineEvent,
+    TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -9305,10 +9305,16 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
 
 /// The press on a Draft holding a pull request, sent as its page sends it.
 async fn press_take_up(app: &Router, id: i64) -> TakenUp {
+    press_take_up_confirming(app, id, &[]).await
+}
+
+/// And the press that confirms one the last press stopped over: the Conversations
+/// whose uncommitted changes may go with the close that makes way.
+async fn press_take_up_confirming(app: &Router, id: i64, discarding: &[i64]) -> TakenUp {
     post(
         app,
         &format!("/api/ui/conversations/{id}/take-up"),
-        &serde_json::json!({}),
+        &serde_json::json!({ "discarding": discarding }),
     )
     .await
 }
@@ -10420,6 +10426,360 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
         "and the Profiles are answered before it in turn",
     );
     assert!(opened(&app, first).await.worktree.is_some());
+}
+
+/// A Done holder with something uncommitted in its Worktree stops the press
+/// naming it, and nothing at all happens.
+///
+/// A close takes the Worktree away by force, so whatever was left uncommitted in
+/// it goes with it — the one thing making way costs that cannot be given back, and
+/// so the one thing the human is asked about. See ADR-0020.
+///
+/// Three kinds of change, because the reading is `verkstead done`'s: modified,
+/// staged, and untracked and not ignored. Each of them on its own is something to
+/// lose.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() {
+    for change in [Change::Modified, Change::Staged, Change::Untracked] {
+        let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let implementation = profile(&app, elsewhere.path(), "opus").await;
+        let review = profile(&app, elsewhere.path(), "haiku").await;
+
+        let first =
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+        finished_with_it(&app, first).await;
+
+        let left = left_uncommitted(&app, first, change).await;
+
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            "Read the limiter again.\n#41\n",
+            implementation,
+            review,
+        )
+        .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::WouldDiscard {
+                uncommitted: vec![Uncommitted {
+                    conversation: first,
+                    branch: "rate-limiting".to_owned(),
+                }],
+            },
+            "a {change:?} file is something to lose, so the press stops and names who holds it",
+        );
+
+        let holder = opened(&app, first).await;
+
+        assert_eq!(
+            holder.state,
+            Lifecycle::Done,
+            "and the holder is exactly where the press found it",
+        );
+
+        let worktree = holder.worktree.expect("Done keeps its checkout");
+
+        assert!(!worktree.missing, "with the checkout still on disk");
+        assert!(
+            changed(Path::new(&worktree.path)).contains(&left),
+            "and what was uncommitted in it still uncommitted",
+        );
+
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+        assert_eq!(
+            opened(&app, second).await.worktree,
+            None,
+            "and nothing was made: the draft is still a draft",
+        );
+    }
+}
+
+/// And something uncommitted in a companion checkout the holder may write in
+/// stops it too.
+///
+/// The reading is `verkstead done`'s whole reading: what a session may write in is
+/// what is asked about, which is the Worktree and each read-write companion. A
+/// companion's worktree goes with the close exactly as the Conversation's own
+/// does, so what is uncommitted in one is just as lost.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holders_companion_checkout_stops_the_press_too() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(
+        add_companion(&app, first, askance).await,
+        CompanionAdded::Added,
+    );
+    assert_eq!(
+        companion_mode(&app, first, askance, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::Chosen,
+    );
+
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    // The Conversation's own checkout is clean, and the companion's is not: it is
+    // the companion alone that stops this.
+    let companion = only_companion(&app, first)
+        .await
+        .worktree
+        .expect("the take-up checked it out beside the work");
+
+    std::fs::write(
+        Path::new(&companion.path).join("notes.md"),
+        "half a thought\n",
+    )
+    .unwrap();
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+
+    // And the press that confirms it goes ahead, companion checkout and all.
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+}
+
+/// The second press names what the first one stopped over, and that one closes
+/// the holder and takes the pull request up.
+///
+/// Which is the whole of what the asking is: a question with two answers, and the
+/// second press is the yes. Nothing about it is a different start — it is the same
+/// take-up with the losses agreed to.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+    left_uncommitted(&app, first, Change::Modified).await;
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert!(matches!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard { .. },
+    ));
+
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+        "the press that names it is the one that goes ahead",
+    );
+
+    let holder = opened(&app, first).await;
+
+    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(
+        holder.worktree, None,
+        "closed by the ordinary Close, so the checkout it was holding went with it",
+    );
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+}
+
+/// And a confirmation that is not the whole of what would be lost stops the press
+/// all over again, with the list as it stands now.
+///
+/// The checkouts are read again on every press rather than trusted from the one
+/// before: what the confirmation says is which Conversations *may* lose something,
+/// and a Conversation holding something that it does not name has not been asked
+/// about at all.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    // A press that names a Conversation which is not the one holding anything —
+    // the page's list having been drawn against a world that has moved since.
+    left_uncommitted(&app, first, Change::Untracked).await;
+
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first + 404]).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+        "what it agreed to is not what would be lost, so it is asked again",
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+}
+
+/// And a Done holder whose checkouts are clean is closed and taken up from with
+/// the one press, nothing being asked about.
+///
+/// Which is the other half of the rule: asking on every start would be a question
+/// with one answer nearly every time. A holder whose Worktree directory has gone
+/// is the same case reached the other way — there is nothing left in it to lose.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_question() {
+    for take_the_directory in [false, true] {
+        let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let implementation = profile(&app, elsewhere.path(), "opus").await;
+        let review = profile(&app, elsewhere.path(), "haiku").await;
+
+        let first =
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+        finished_with_it(&app, first).await;
+
+        if take_the_directory {
+            // Uncommitted work and the directory taken out from under it, which is
+            // the Worktree a human deleted by hand: there is nothing there to ask
+            // about.
+            left_uncommitted(&app, first, Change::Modified).await;
+
+            let worktree = opened(&app, first).await.worktree.unwrap();
+            std::fs::remove_dir_all(&worktree.path).unwrap();
+        }
+
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            "Read the limiter again.\n#41\n",
+            implementation,
+            review,
+        )
+        .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::TakenUp,
+            "nothing to lose, so nothing to ask about",
+        );
+        assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
+    }
+}
+
+/// A kind of uncommitted change to leave in a checkout, which is the reading a
+/// close is asked about: modified, staged, or untracked and not ignored.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+enum Change {
+    Modified,
+    Staged,
+    Untracked,
+}
+
+/// Leave one in a Conversation's own Worktree, on the one file every one of these
+/// repositories has on the head branch.
+///
+/// `limits.md` is what `head_on_origin` commits, so a modified and a staged change
+/// are edits to a file that is really there; an untracked one is a file beside it.
+#[cfg(unix)]
+async fn left_uncommitted(app: &Router, id: i64, change: Change) -> String {
+    let worktree = opened(app, id)
+        .await
+        .worktree
+        .expect("it is Done, which keeps its checkout");
+    let worktree = Path::new(&worktree.path);
+
+    let path = match change {
+        Change::Modified | Change::Staged => "limits.md",
+        Change::Untracked => "scratch.md",
+    };
+
+    std::fs::write(worktree.join(path), "half a thought\n").unwrap();
+
+    if matches!(change, Change::Staged) {
+        git(worktree, &["add", path]);
+    }
+
+    path.to_owned()
+}
+
+/// What git sees as changed in a checkout, by path — the reading a close is asked
+/// about, read here the way the human would read it.
+#[cfg(unix)]
+fn changed(worktree: &Path) -> Vec<String> {
+    git(
+        worktree,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )
+    .lines()
+    .filter_map(|line| line.get(3..))
+    .map(str::to_owned)
+    .collect()
 }
 
 /// A Review Draft pointed at a bare branch rather than at a number, over Profiles

@@ -4485,6 +4485,30 @@ pub enum TakenUp {
         conversation: i64,
     },
 
+    /// A Conversation this start would close has uncommitted changes in a
+    /// checkout it may write in, so the press stops and names it. Nothing is
+    /// closed and nothing is made: the Draft is still a Draft.
+    ///
+    /// **Which is the one thing a close is asked about** — see ADR-0020. A close
+    /// takes the Worktree away by force, so whatever was left uncommitted in it
+    /// goes with it, and that is the only part of making way that cannot be
+    /// undone. A holder whose checkouts are clean is closed with no question at
+    /// all.
+    ///
+    /// The press that follows is the confirming one: it sends these Conversations
+    /// back as [`Confirming::discarding`], and the server closes and takes up.
+    /// The checkouts are read again on that press rather than trusted from this
+    /// one, so a Conversation written in since stops it all over again.
+    WouldDiscard {
+        /// Every Conversation that would lose something, in the order they
+        /// would be closed in.
+        ///
+        /// A list rather than one: a stack is taken up a link at a time, and
+        /// every Conversation standing on a link of it is closed by the one
+        /// press.
+        uncommitted: Vec<Uncommitted>,
+    },
+
     /// No Agent Profile is chosen for the implementation, which is what a red
     /// check and a conflict are fixed under.
     ///
@@ -4553,6 +4577,42 @@ pub enum TakenUp {
 
         why: CompanionRefusal,
     },
+}
+
+/// A Conversation a take-up would close that has something uncommitted in it.
+///
+/// What [`TakenUp::WouldDiscard`] is made of, and what the composer draws under
+/// the press: the id is the way there, and the branch is what the human knows
+/// it by — a Conversation is called by its branch everywhere it is listed, once
+/// anybody has named one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Uncommitted {
+    /// The Conversation, for the way there.
+    pub conversation: i64,
+
+    /// The branch it goes under.
+    pub branch: String,
+}
+
+/// What a take-up's press says beyond which Draft is making it.
+///
+/// Empty on a first press, which is every press that has not been stopped — so
+/// this is a body of nothing until a [`TakenUp::WouldDiscard`] gives it
+/// something to carry.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Confirming {
+    /// The Conversations whose uncommitted changes may go: the ones a
+    /// [`TakenUp::WouldDiscard`] named, sent back by the press that confirms
+    /// them.
+    ///
+    /// **What may be lost rather than what will be.** The server reads every
+    /// checkout again on this press, so a Conversation that is clean by then is
+    /// closed without this having meant anything, and one that is dirty and not
+    /// named here stops the press all over again.
+    #[serde(default)]
+    pub discarding: Vec<i64>,
 }
 
 /// What became of pressing Stop or Force stop.

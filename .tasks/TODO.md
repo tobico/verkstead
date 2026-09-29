@@ -17,6 +17,6 @@ Conversation per pull request*.
 ## Tasks
 
 - [x] 01: A finished holder makes way for a take-up — [details](01-a-finished-holder-makes-way.md)
-- [ ] 02: Uncommitted changes are asked about first — [details](02-uncommitted-changes-are-asked-about.md)
+- [x] 02: Uncommitted changes are asked about first — [details](02-uncommitted-changes-are-asked-about.md)
 - [ ] 03: A stack's neighbours make way — [details](03-a-stacks-neighbours-make-way.md)
 - [ ] 04: The way back — [details](04-the-way-back.md)

@@ -2784,8 +2784,8 @@ describe("the page of a draft from before, holding a pull request", () => {
   });
 
   /// And its Start is the Review's own: one *Start work* under the box, reaching
-  /// the take-up route with nothing in the body. There is no press of its own on
-  /// this page any more, and no pane behind one.
+  /// the take-up route with nothing in the body but an empty list. There is no
+  /// press of its own on this page any more, and no pane behind one.
   it("starts through the take-up route, like every other Review", async () => {
     const fetching = theHolding(
       // Nothing is chosen on the fixture, so the server would say it is not
@@ -2811,7 +2811,7 @@ describe("the page of a draft from before, holding a pull request", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${HOLDING.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
 
     expect(writes(fetching, `/api/ui/conversations/${HOLDING.id}/grill`)).toBe(
@@ -7193,8 +7193,10 @@ describe("starting the work", () => {
   /// the endpoint that checks the pull request out and moves the conversation
   /// into wrapping.
   ///
-  /// Nothing in the body, for the grill route's reason: which conversation is in
-  /// the path, and what its brief names is read by the server at the press.
+  /// Nothing in the body but an empty list, for the grill route's reason: which
+  /// conversation is in the path, and what its brief names is read by the server
+  /// at the press. The list is what a press that has been stopped sends back, and
+  /// a first press has been stopped over nothing.
   it("posts to the take-up route where the process is a review", async () => {
     const fetching = theWorkbenchWith(
       { process: "Review" },
@@ -7217,7 +7219,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7247,7 +7249,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7311,6 +7313,57 @@ describe("starting the work", () => {
     );
     expect(way.getAttribute("href")).toBe("/conversations/77");
     expect(screen.getByText(/still at work on that pull request/)).toBeTruthy();
+  });
+
+  /// And the one that is not a refusal at all draws every conversation it names
+  /// as a link, and turns the press into the one that goes ahead.
+  ///
+  /// A start that would close a finished conversation holding uncommitted changes
+  /// stops and asks: the links are who would lose something, and the button is
+  /// how the human answers. The press after it sends those conversations back,
+  /// which is what says the losses are agreed to.
+  it("names what a start would discard, and presses through it", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "Review" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldDiscard: {
+            uncommitted: [{ conversation: 77, branch: "rate-limiting" }],
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+    expect(start.textContent).toContain("Start work");
+
+    fireEvent.click(start);
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "rate-limiting" }),
+    );
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/uncommitted changes in the worktree would go with it/),
+    ).toBeTruthy();
+
+    // And the press now reads as going ahead, which is the whole of the second
+    // answer: the same start with what it would discard named back.
+    await waitFor(() => expect(start.textContent).toContain("Start anyway"));
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 1),
+      ).toEqual({ discarding: [77] }),
+    );
   });
 
   /// And a conversation that is ready says nothing at all: what the press does

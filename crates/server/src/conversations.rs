@@ -44,7 +44,7 @@ use verkstead_render::{
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
     PairingView, PickedView, Process, ProcessPicked, RepoPairingsView, RepoSwitched, Started,
-    TakenUp, TargetRecorded, Worktree,
+    TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -2509,6 +2509,13 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// See [`making_way`] — and [`refused_having_made_way`] for what a refusal
 /// reached over a close that has already happened says.
 ///
+/// **And a close discards what was uncommitted, so that is asked about first and
+/// nothing else is.** A press over a holder with changes in a checkout it may
+/// write in comes back as [`TakenUp::WouldDiscard`] naming it, having closed
+/// nothing and made nothing; the press after it carries those Conversations in
+/// `discarding`, which is the human saying to go ahead. Read at the press rather
+/// than taken from the one before — see [`to_lose`].
+///
 /// **Two roles rather than three, and one where the Process never reviews.** The
 /// work on a pull request is built, so there is no round for a grilling to open
 /// and no grilling picker on the page — see [`unready_to_wrap`]. A **Fix Merge
@@ -2546,7 +2553,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// transaction, which is how every wrapping Conversation gets there; a take-up
 /// is that ending reached by the other door. A branch has no such record to make,
 /// so [`store::take_up`] makes the move itself — see [`store::Landing`].
-pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
+pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Result<TakenUp> {
     let pool = &state.pool;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
@@ -2642,7 +2649,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // above it — nothing is closed for a start that was going to be refused
     // anyway, for its Profiles, its Target, a fork or a pull request GitHub has
     // nothing open under.
-    let mut made_way = None;
+    let mut giving_way = Vec::new();
 
     if let Some(number) = number
         && let Some(other) =
@@ -2650,7 +2657,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         && other != id
     {
         match making_way(state, other).await? {
-            MadeWay::Closed(branch) => made_way = Some(branch),
+            MadeWay::ToClose(holder) => giving_way.push(holder),
             MadeWay::NothingToGiveUp => {}
             MadeWay::StillAtWork => {
                 return Ok(TakenUp::AlreadyHeld {
@@ -2658,6 +2665,34 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
                 });
             }
         }
+    }
+
+    // And the one thing a close cannot give back: a Worktree goes by force, so
+    // whatever was left uncommitted in it goes with it. The human is asked about
+    // that and about nothing else — see ADR-0020 — so a holder whose checkouts
+    // are clean is closed without a word, and one that is holding something stops
+    // the press until a press that names it says to go ahead.
+    //
+    // Read here rather than trusted from the press that stopped: the confirmation
+    // says which Conversations *may* lose something, and what they are holding by
+    // now is this moment's question. Which is also why it is read after everything
+    // that could refuse the start — nothing is asked about a press that was never
+    // going to go through.
+    let holding = to_lose(&giving_way, discarding).await;
+
+    if !holding.is_empty() {
+        return Ok(TakenUp::WouldDiscard {
+            uncommitted: holding,
+        });
+    }
+
+    // Nothing left to ask about, so the way is made: each holder closed by the
+    // ordinary Close, and its branch kept for the Timeline of the Conversation
+    // taking over.
+    let mut made_way = None;
+
+    for holder in giving_way {
+        made_way = close_to_make_way(state, holder).await?;
     }
 
     // And from here on a refusal is one reached over a close that has already
@@ -2913,11 +2948,18 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 /// somebody else's pull request turns on, and these are the three answers it can
 /// give.
 enum MadeWay {
-    /// It had finished with it, so it was closed and the take-up carries on. The
-    /// branch it went under, for the Timeline of the Conversation that took over:
-    /// a Conversation is called by its branch once anybody has named one, and
-    /// that is the name it will be found under in the sidebar.
-    Closed(String),
+    /// It had finished with it, so it is a Conversation to close and the take-up
+    /// carries on over the top of it.
+    ///
+    /// The record rather than the id, because what happens to it next is two
+    /// readings of it: what it is holding uncommitted — see [`to_lose`], which
+    /// wants its Worktree and its companions' — and the branch it goes under,
+    /// which is what the Timeline of the Conversation taking over names it by.
+    ///
+    /// Read rather than closed, because a close is the one thing here that cannot
+    /// be taken back: nothing is closed until everything that would be lost by
+    /// closing has been asked about.
+    ToClose(Box<store::Conversation>),
 
     /// It was Closed already — or Archived, which is a Closed Conversation off
     /// the sidebar rather than a state of its own. Nothing to give up and nothing
@@ -2930,19 +2972,8 @@ enum MadeWay {
     StillAtWork,
 }
 
-/// Ask the Conversation that has this pull request to make way for a take-up.
-///
-/// **By the ordinary Close**, which is [`close`] and nothing written beside it:
-/// the sessions and the terminals ended, the Worktree and the companions' given
-/// back, the record moved, the Sets it left open shut. A second way of closing a
-/// Conversation would be a second thing to keep in step with the first.
-///
-/// **And the Worktree is why the close cannot wait.** A Done Conversation keeps
-/// its checkout — a Follow-up steer picks the work up there — and git holds one
-/// checkout per branch, so a take-up over a branch somebody is still standing on
-/// is refused all over again as [`TakenUp::CheckedOutElsewhere`]. Lifting the
-/// first refusal without the close would have moved the refusal rather than
-/// removed it.
+/// Read the Conversation that has this pull request, and say whether it can make
+/// way for a take-up.
 ///
 /// **A holder the record has lost makes way by not being there.** Nothing is
 /// standing on the branch and nothing is offering presses over the pull request,
@@ -2954,6 +2985,9 @@ enum MadeWay {
 /// way round of it — the refusal leads the human to the Conversation, where the
 /// pane's own escape hatch can end it, and closing a record nothing can read on
 /// the strength of a take-up somewhere else would be Verkstead guessing.
+///
+/// Nothing is closed here. What closing costs is read first — see [`to_lose`] —
+/// and the close itself is [`close_to_make_way`].
 async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
     let holder = match store::load_conversation(&state.pool, other).await {
         Ok(Some(holder)) => holder,
@@ -2971,24 +3005,116 @@ async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
     };
 
     match holder.state {
-        store::Lifecycle::Closed => return Ok(MadeWay::NothingToGiveUp),
-        store::Lifecycle::Done => {}
-        _ => return Ok(MadeWay::StillAtWork),
+        store::Lifecycle::Closed => Ok(MadeWay::NothingToGiveUp),
+        store::Lifecycle::Done => Ok(MadeWay::ToClose(Box::new(holder))),
+        _ => Ok(MadeWay::StillAtWork),
+    }
+}
+
+/// Every Conversation about to be closed that is holding something a close would
+/// throw away — or none at all, where this press has said each of them may lose
+/// it.
+///
+/// **The reading is `verkstead done`'s**, which is the reading of a Worktree
+/// Verkstead already has: modified, staged, or untracked and not ignored, in the
+/// Conversation's own checkout and in each companion it may write in — see
+/// [`crate::diffs::writable`] and [`crate::diffs::changed`]. What a session may
+/// write in is what is asked about, here as there.
+///
+/// **A checkout git will not answer about holds nothing.** The ordinary way to
+/// reach that is a Worktree whose directory has gone, which is exactly a
+/// Conversation with nothing left to lose. It is the safe way round of it too:
+/// what stands behind a misread here is the close itself, which takes a directory
+/// git has already disowned.
+///
+/// **`discarding` says which Conversations may lose something rather than which
+/// do.** The press that was stopped named them, the press that confirms sends
+/// them back, and this reads the checkouts again either way: a Conversation that
+/// has been written in since is not on that list and stops the press again.
+///
+/// Blocking, all of it — `git status` per checkout — so it goes to a worker of
+/// its own, the way the Diff's own reading does.
+async fn to_lose(giving_way: &[Box<store::Conversation>], discarding: &[i64]) -> Vec<Uncommitted> {
+    let asking = giving_way
+        .iter()
+        .map(|holder| {
+            (
+                holder.id,
+                holder.branch.clone(),
+                crate::diffs::writable(holder),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let holding = tokio::task::spawn_blocking(move || {
+        asking
+            .into_iter()
+            .filter(|(_, _, readings)| {
+                readings.iter().any(|reading| {
+                    crate::diffs::changed(&reading.worktree)
+                        .is_some_and(|changes| !changes.is_empty())
+                })
+            })
+            .map(|(conversation, branch, _)| Uncommitted {
+                conversation,
+                branch,
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+
+    // Every one of them where any of them is unconfirmed, rather than the
+    // unconfirmed ones alone: what the press sends back is the list it was shown,
+    // so a list that named only what was new would never be the list the next
+    // press confirms.
+    if holding
+        .iter()
+        .all(|held| discarding.contains(&held.conversation))
+    {
+        return Vec::new();
     }
 
-    match close(state, other).await? {
+    holding
+}
+
+/// Close a Conversation that has finished with a pull request, to make way for a
+/// take-up of it.
+///
+/// **By the ordinary Close**, which is [`close`] and nothing written beside it:
+/// the sessions and the terminals ended, the Worktree and the companions' given
+/// back, the record moved, the Sets it left open shut. A second way of closing a
+/// Conversation would be a second thing to keep in step with the first.
+///
+/// **And the Worktree is why the close cannot wait.** A Done Conversation keeps
+/// its checkout — a Follow-up steer picks the work up there — and git holds one
+/// checkout per branch, so a take-up over a branch somebody is still standing on
+/// is refused all over again as [`TakenUp::CheckedOutElsewhere`]. Lifting the
+/// first refusal without the close would have moved the refusal rather than
+/// removed it.
+///
+/// Hands back the branch it went under, for the Timeline of the Conversation that
+/// took over: a Conversation is called by its branch once anybody has named one,
+/// and that is the name it will be found under in the sidebar. `None` where the
+/// record lost it between the read and the close, which is a holder that has made
+/// way by not being there.
+async fn close_to_make_way(
+    state: &AppState,
+    holder: Box<store::Conversation>,
+) -> Result<Option<String>> {
+    match close(state, holder.id).await? {
         ConversationClosed::Closed | ConversationClosed::AlreadyClosed => {}
-        ConversationClosed::NoSuchConversation => return Ok(MadeWay::NothingToGiveUp),
+        ConversationClosed::NoSuchConversation => return Ok(None),
     }
 
     tracing::info!(
-        conversation_id = other,
+        conversation_id = holder.id,
         branch = holder.branch,
         "a Conversation that had finished with a pull request was closed to make way for a \
          take-up of it",
     );
 
-    Ok(MadeWay::Closed(holder.branch))
+    Ok(Some(holder.branch))
 }
 
 /// Say on the log that a take-up was refused after it had already closed the
