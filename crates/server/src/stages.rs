@@ -566,7 +566,10 @@ pub(crate) struct Declaring<'a> {
 /// halts itself alone — held with its own sentence while the rest of the ready
 /// stages go on starting. A brief nobody wrote is the human's to fix, and stopping
 /// a whole roadmap's fan for one of them would be a stage's fault spreading to its
-/// siblings.
+/// siblings. **And it leaves its place behind it**: a place is spent by a stage
+/// that starts and by nothing else, so the ready stage after it takes the one that
+/// stage would have had. Otherwise a roadmap allowed three would run two and tell
+/// the third its places were taken.
 ///
 /// A value rather than a lookup, so this stays a reading: the rows are read once,
 /// by the caller, and nothing in here asks the database.
@@ -651,11 +654,18 @@ pub(crate) fn next_stage(
     let mut starting = Vec::new();
     let mut held = Vec::new();
 
-    for (place, entry) in ready.into_iter().enumerate() {
+    for entry in ready {
         // Beyond the places there are, so it waits — and is told so. It starts the
         // moment one of the stages ahead of it settles, which is a settle that runs
         // this reading again.
-        if place >= places {
+        //
+        // Counted off what has **started** rather than off how far down the ready
+        // stages this has walked: a place is spent by a stage that starts and by
+        // nothing else, so a stage held below for a brief nobody wrote leaves its
+        // place to whatever is ready after it. Counting positions would have this
+        // roadmap run fewer stages than it is allowed and tell one of them its
+        // places were taken while one stood free.
+        if starting.len() >= places {
             // How many are in flight is deliberately not said: three of them may
             // have started a moment ago, in this very reading, and the record the
             // count came off was read before any of that.
@@ -1772,15 +1782,21 @@ pub(crate) fn startable(
         Err(refusal) => return refusal,
     };
 
-    // And the same three clauses on the rest, as many of them as there are places
-    // left over — the stage above has taken one of them. What refuses one of these
-    // leaves it out rather than refusing the press: the human is being offered
+    // And the same three clauses on the rest, until there are as many as there are
+    // places left over — the stage above has taken one of them. What refuses one of
+    // these leaves it out rather than refusing the press: the human is being offered
     // work, and a sibling whose brief nobody has written yet is no reason to
     // withhold the stages that are ready beside it.
+    //
+    // Taken *after* the clauses rather than before them, for [`next_stage`]'s
+    // reason: a place is spent by a stage that is offered and by nothing else, so
+    // one left out leaves its place to the ready stage behind it. Taking first
+    // would have the press start fewer stages than the roadmap is allowed, and the
+    // lazy iterator is what keeps the clauses to one reading per stage offered.
     let beside = rest
         .into_iter()
-        .take(places - 1)
         .filter_map(|entry| offered(repo, commit, name, &entry).ok())
+        .take(places - 1)
         .collect();
 
     Startable::Stage(Box::new(Abandoned {
@@ -3916,6 +3932,52 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// And the place that stage would have had goes to the ready stage behind it:
+    /// a place is spent by a stage that starts and by nothing else.
+    ///
+    /// Four roots and three places, with the brief of the lowest one nobody wrote.
+    /// Counting how far down the ready stages the reading had walked would run two
+    /// of the three it is allowed and tell the fourth its places were taken — which
+    /// is a roadmap quietly running short of what it was set to, and a sentence that
+    /// is not true.
+    #[test]
+    fn a_stage_held_for_want_of_a_brief_leaves_its_place_to_the_next() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_ROOTS);
+
+        for (label, slug) in [
+            ("02", "grilling"),
+            ("03", "implementation"),
+            ("04", "wrap-up"),
+        ] {
+            repo.brief(
+                "mvp",
+                &format!("{label}-{slug}.md"),
+                &format!("# {label}. {slug}\n"),
+            );
+        }
+
+        let next = repo.next("mvp", "");
+
+        assert_eq!(
+            starting(&next),
+            ["02", "03", "04"],
+            "three started, which is the three places the roadmap has",
+        );
+
+        let held = holding(next);
+
+        assert_eq!(held.len(), 1, "and 01 is the one held: {held:?}");
+        assert!(
+            held[0].contains("01") && held[0].contains("01-workbench.md"),
+            "for the brief nobody wrote rather than for a place: {held:?}",
+        );
+        assert!(
+            !held[0].contains("waiting for a place"),
+            "nothing here waited for a place: {held:?}",
+        );
+    }
+
     /// A roadmap as the branch that has just settled holds it: stage 03 stands on
     /// 02, which is the stage somebody is still on.
     const BEFORE_THE_EDIT: &str = "\
@@ -4996,6 +5058,50 @@ Turns this askance clone into Verkstead.
         };
 
         assert!(taken.beside.is_empty());
+    }
+
+    /// And the place a stage left out would have had goes to the ready stage
+    /// behind it, which is [`next_stage`]'s rule read off the other reading.
+    ///
+    /// Four roots and three places, with the brief of the second one nobody wrote.
+    /// Taking the places before the clauses rather than after them would offer two
+    /// of the three the roadmap is allowed and leave 04 unoffered with a place
+    /// standing free — so the press would start fewer stages than the settle that
+    /// stands in for it would.
+    #[test]
+    fn a_stage_left_out_of_the_offer_leaves_its_place_to_the_next() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_ROOTS);
+
+        for (label, slug) in [
+            ("01", "workbench"),
+            ("03", "implementation"),
+            ("04", "wrap-up"),
+        ] {
+            repo.brief(
+                "mvp",
+                &format!("{label}-{slug}.md"),
+                &format!("# {label}. {slug}\n"),
+            );
+        }
+
+        repo.commit();
+
+        let Startable::Stage(abandoned) = repo.startable("mvp") else {
+            panic!("stage 01's own brief is there, so the press has something to start");
+        };
+
+        assert_eq!(abandoned.stage.label, "01");
+        assert_eq!(
+            abandoned
+                .beside
+                .iter()
+                .map(|stage| stage.label.as_str())
+                .collect::<Vec<_>>(),
+            ["03", "04"],
+            "02 names a brief nobody wrote and is left out, and the place it would \
+             have had goes to 04",
+        );
     }
 
     /// A stage whose Conversation was closed before it ever wrapped up did not
