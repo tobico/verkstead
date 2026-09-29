@@ -226,12 +226,15 @@ pub struct Pace {
     /// looks for.
     pub stalls: Duration,
 
-    /// And how often the roadmaps being driven are looked over for a stage
-    /// waiting on a place the whole server has — see [`crate::places`].
+    /// And how long the roadmaps being driven go unlooked-at for a stage waiting
+    /// on a place the whole server has, where **nothing frees one** — see
+    /// [`crate::places`].
     ///
     /// Here for [`Pace::stalls`]'s reason again, and it is the one of these that
-    /// decides how long work waits rather than how long a report does: what
-    /// comes of a look is a stage started.
+    /// decides how long work waits rather than how long a report does: what comes
+    /// of a look is a stage started. The backstop rather than the pace, though —
+    /// what ordinarily brings a look about is a place coming free, which this
+    /// says nothing about and does not wait for.
     pub places: Duration,
 }
 

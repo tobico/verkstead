@@ -432,8 +432,9 @@ flowchart LR
   is counted from then on — and **waiting for a place is a third way a stage is
   neither started nor halted**, beside waiting on a dependency and waiting to
   join. A place comes free when a Conversation of any kind finishes or stops,
-  which is not a settle, so the server looks over the roadmaps it is driving on
-  a pace of its own and starts what waited, oldest roadmap first. The halted
+  which is not a settle, so the server looks over the roadmaps it is driving as
+  one comes free — with a slow look behind that for the ways one can come free
+  unannounced — and starts what waited, oldest roadmap first. The halted
   stage is where the two limits part: it keeps its place under its own roadmap's
   until it is Resumed or closed, and holds none on the server, nothing being
   left running or driving it. See [ADR-0021](../adr/0021-parallel-stages.md).

@@ -19342,13 +19342,19 @@ async fn until_settled(fixture: &Grilling, id: i64) {
 /// Between it reaching Done and the fourth stage starting there is nothing but
 /// the look.
 ///
+/// **And the look is the one the place itself woke**, rather than one the clock
+/// happened to bring round: this bench's slow look is ten minutes out and the
+/// test does not run for ten minutes. What wakes it is the last driver of the
+/// investigation letting go, which is what a Conversation finishing comes to —
+/// see the server's own `drivers::Drivers::letting_go`.
+///
 /// **And what the stage inherits comes off the foot of the chain.** No stage of
 /// this roadmap has settled, so the foot is the Conversation that wrote it — the
 /// Pairings the session runs under are that Conversation's, the branch is cut from
 /// its branch, and the notice saying the stage started is on its Timeline.
 #[tokio::test]
 async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
-    let (fixture, investigating, _stub) = a_stage_waiting_behind_an_investigation(*LOOKING).await;
+    let (fixture, investigating, _stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
 
     let planned = fixture.view().await.branch;
 
@@ -19407,10 +19413,11 @@ async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
         "each under the foot's implementation Pairing: {started:?}",
     );
 
-    // And **one** start however two arrivals overlap: the look has been running
-    // every hundred milliseconds throughout, alongside the settle that started
-    // the first three. Six Conversations is the roadmap's own, the investigation
-    // and four stages, with nothing started twice.
+    // And **one** start however two arrivals overlap: a look is woken by every
+    // driver that lets go, and this bench has been letting them go throughout —
+    // each of those looks running alongside the settle that started the first
+    // three. Six Conversations is the roadmap's own, the investigation and four
+    // stages, with nothing started twice.
     assert_eq!(
         conversations(&fixture.app).await.len(),
         6,
@@ -19507,16 +19514,31 @@ esac
         "and no branch was cut for the root that waited",
     );
 
-    // And now the one place comes free, with nobody pressing anything: the
-    // investigation ends, and the look spends what it let go of.
-    ends(&fixture, investigating).await;
+    // And now the place comes free the other way about: the number is raised
+    // rather than the investigation ended, which is the human at the settings
+    // page deciding the machine can take one more.
+    //
+    // Nothing lets go of anything for it, so nothing wakes a look — this is the
+    // slow look behind the wake-up, and the whole of what that one is for. A
+    // limit changed under a full server frees a place and says so to nobody.
+    configure(&fixture, "at_once:\n  conversations: 2\n");
 
     let stages = stages_of(&fixture, 1).await;
 
     assert_eq!(
         stages[0].branch, "roadmaps/rate-limiting/01-counter",
-        "the stage that waited started when the place came free",
+        "the stage that waited started once the raised limit left a place for it",
     );
+
+    // And the investigation is still going, which is what says the place was made
+    // rather than freed: nothing on this server has finished at all.
+    let still: ConversationView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}"),
+    )
+    .await;
+
+    assert_eq!(still.state, Lifecycle::Investigating);
 }
 
 /// And a server restarted while a stage was waiting starts it when a place comes
@@ -19528,19 +19550,28 @@ esac
 /// look, so the look the new server makes finds exactly what the old one's would
 /// have.
 ///
-/// The first server looks once as it comes up, with nothing yet to find, and then
-/// not again inside this test — its pace puts the next look ten minutes out. So
-/// the place the investigation frees stands empty under it, and the stage that
-/// waited is still waiting when the second server arrives.
+/// The place is made rather than freed — the limit raised, with the investigation
+/// still going — so that nothing about it wakes the first server: a look comes of
+/// a driver letting go, and here nothing lets go of anything. The first server
+/// looked once as it came up, with nothing yet to find, and its slow look is ten
+/// minutes out, which this test does not run for. So the place stands empty under
+/// it, and the stage that wants it is still waiting when the second server
+/// arrives.
 #[tokio::test]
 async fn a_restart_starts_the_stage_that_was_waiting_when_a_place_comes_free() {
-    let (fixture, investigating, stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
+    let (fixture, _investigating, stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
 
-    ends(&fixture, investigating).await;
+    // Five places rather than four, with the same four held: the fifth is the one
+    // the waiting stage wants, and nothing has to end for it to exist. The
+    // roadmap's own five carried over from the bench, one save writing both.
+    configure(
+        &fixture,
+        "at_once:\n  roadmap_stages: 5\n  conversations: 5\n",
+    );
 
-    // Nothing starts under the first server, whose next look is ten minutes out:
-    // the place is free and the stage that wants it is waiting, and only a look
-    // spends it.
+    // Nothing starts under the first server, whose slow look is ten minutes out
+    // and whose wake-up nothing has pulled: the place is there and the stage that
+    // wants it is waiting, and only a look spends it.
     pause(paced(Duration::from_millis(500))).await;
 
     assert_eq!(

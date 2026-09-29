@@ -154,7 +154,7 @@ mod paths;
 #[cfg(windows)]
 pub mod pipe;
 /// The look that starts a roadmap stage which waited for a place the whole
-/// server has, once one comes free.
+/// server has, made as one comes free.
 mod places;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
@@ -1084,7 +1084,8 @@ fn routed(
     // And the look for a stage that is waiting on a place the whole server has,
     // which waits for the same signal and for the mirror image of the reason:
     // the places are counted off those same registrations, so a look in front of
-    // the resume would find every one of them free — see [`places`].
+    // the resume would find every one of them free. After that it is woken by a
+    // place coming free rather than by a clock — see [`places`].
     places::looking(&state, resumed);
 
     // And the pull requests of everything that has already finished, which is a

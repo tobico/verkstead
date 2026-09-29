@@ -398,10 +398,12 @@ has said — so one roadmap cannot take the whole server by default — and a pl
 there is held by every Conversation with a session running or a driver
 registered: a grilling, a Review, a Tinker, another roadmap's stage alike. For
 either, an absent key, an absent file and one nothing can parse all mean the
-default. Both are read afresh at every start and at every look for a free place,
-so a change is in force at the next start without a restart and stops nothing
-already running; `"roadmap_stages_configured"` and `"conversations_configured"`
-beside them are what say whether a number is one somebody typed, and the settings
+default. Both are read afresh at every start and at every look for a stage
+waiting on a place — which is a look made as a place comes free, with a slow one
+behind it for the ways one can come free unannounced — so a change is in force at
+the next start without a restart and stops nothing already running;
+`"roadmap_stages_configured"` and `"conversations_configured"` beside them are
+what say whether a number is one somebody typed, and the settings
 page draws a default as a placeholder. They are the one pair of fields on that
 page with a floor under them: a limit below one is a roadmap — or a server — that
 would never start anything, so the page refuses one rather than sending it, and a

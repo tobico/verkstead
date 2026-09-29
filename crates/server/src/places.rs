@@ -10,9 +10,10 @@
 //! settled, which may be nothing at all, and a server that had gone quiet with
 //! work left in it would stay quiet.
 //!
-//! What closes that loop is this: a look of the server's own, every
-//! [`crate::Pace::places`], at the roadmaps Verkstead is driving. Each of them is
-//! read exactly as a settle reads it, and what the free places hold is started.
+//! What closes that loop is this: a look of the server's own at the roadmaps
+//! Verkstead is driving, made **when a place comes free** rather than on a clock.
+//! Each of them is read exactly as a settle reads it, and what the free places
+//! hold is started.
 //!
 //! **Nothing about the waiting is stored.** What is ready is read afresh from the
 //! declarations, the record and the boxes at every look — see
@@ -39,17 +40,35 @@
 //!
 //! **And the look is silent unless it starts something.** It runs for as long as
 //! the server is up and over every roadmap there is, so a sentence said about a
-//! roadmap with nothing ready is a sentence said again half a minute later and
-//! for ever. Each of those is said once, by the settle that found it — see
-//! [`crate::continuing::Brought`], which is where the two readings part company.
+//! roadmap with nothing ready is a sentence said again at the next place to
+//! change hands and for ever. Each of those is said once, by the settle that
+//! found it — see [`crate::continuing::Brought`], which is where the two readings
+//! part company and where the one exception is checked.
 //!
-//! **When it looks.** Every [`crate::Pace::places`] once the startup resume is
-//! done, and never before it: both registers the places are counted off are facts
-//! about this process, so a server that has just come back holds no places at all
-//! until the resume takes its runs back up. A look that got there first would
-//! read four free places on a server running four Conversations and start over
-//! the top of them. Which is the reading [`crate::stalls::sweeping`] waits for
-//! too, and for the mirror image of the reason.
+//! **When it looks.** When a place comes free, and every [`crate::Pace::places`]
+//! behind that whether one has or not.
+//!
+//! The wake-up is [`crate::drivers::Drivers::letting_go`]: the last driver of a
+//! Conversation going out of scope, which is what a run ending, a wrap-up
+//! finishing and a Conversation being closed all come to. A look costs a reading
+//! of every roadmap the server has ever driven — several database reads and a
+//! handful of git reads apiece — and that bill grows for ever with the number of
+//! roadmaps a machine has run, so a server where nothing has happened for days
+//! should pay it none of the time rather than twice a minute. Which is what
+//! waiting on the thing itself buys: no places change hands, no looks.
+//!
+//! The slow one behind it is what makes every case eventual rather than only the
+//! common one. A place can come free without a driver letting go of anything — a
+//! grilling nobody has picked on yet is a session with no driver — and the limit
+//! itself can move under a look, the human raising it on the settings page while
+//! the machine is full. Neither wakes anything, and both are waited out.
+//!
+//! And never before the startup resume is done: both registers the places are
+//! counted off are facts about this process, so a server that has just come back
+//! holds no places at all until the resume takes its runs back up. A look that got
+//! there first would read four free places on a server running four Conversations
+//! and start over the top of them. Which is the reading [`crate::stalls::sweeping`]
+//! waits for too, and for the mirror image of the reason.
 //!
 //! And never on a server that runs no sessions, for the reason the stall sweep
 //! never runs there: nothing it started could run.
@@ -62,20 +81,22 @@ use crate::AppState;
 use crate::continuing::{self, Brought};
 use crate::store;
 
-/// How often the roadmaps being driven are looked over for one with a stage
-/// waiting on a place, as [`crate::Pace`] has it by default.
+/// How long the roadmaps being driven go unlooked-at when **nothing frees a
+/// place**, as [`crate::Pace`] has it by default.
 ///
-/// Half a minute. What it decides is how long a stage that was held waits after
-/// a place comes free, and the places come free at the pace whole Conversations
-/// finish at — so seconds are neither here nor there against it. Faster than the
-/// stall sweep's minute because this one starts work rather than reporting on
-/// it, and slower than the join's ten seconds because a join is one git read and
-/// this is a handful per roadmap.
+/// The backstop rather than the pace: what ordinarily brings a look about is a
+/// place coming free — see [`crate::drivers::Drivers::letting_go`] — and this is
+/// the wait behind that, for the ways a place can come free without waking
+/// anything. Half a minute, which is what the pace was when it was the only
+/// thing: short enough that the cases the wake-up misses are still measured in
+/// seconds, and no longer a cost a quiet server pays, because a quiet server is
+/// one where every one of these expires having found the places exactly as it
+/// left them.
 pub(crate) const LOOKED_AT_EVERY: Duration = Duration::from_secs(30);
 
 /// Look for a free place from now until the process stops: once as soon as
-/// `resumed` says the startup resume is done, and every [`crate::Pace::places`]
-/// after that.
+/// `resumed` says the startup resume is done, and after that whenever a place
+/// comes free or [`crate::Pace::places`] goes by without one.
 ///
 /// `resumed` is the signal [`crate::resume::at_startup`] is awaited through —
 /// waited for rather than raced, because a look that counted the places before
@@ -86,7 +107,7 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
     // [`crate::sessions::Sessions::runs_sessions`] and
     // [`crate::stalls::sweeping`], which stands down for the same reason. Only
     // the tests' routers are ever built that way, and there a look would be a
-    // stage started every half minute into a server with nothing to run it.
+    // stage started into a server with nothing to run it.
     if !state.sessions.runs_sessions() {
         return;
     }
@@ -106,7 +127,15 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
         loop {
             look(&state).await;
 
-            tokio::time::sleep(state.sessions.pace().places).await;
+            // Whichever comes first, and neither of them is a settle. A look
+            // woken by the first is a place that has genuinely just changed
+            // hands; one woken by the second is the backstop under everything
+            // that frees a place without saying so — see this module's own
+            // documentation, where the pair is set out.
+            tokio::select! {
+                () = state.drivers.letting_go() => {}
+                () = tokio::time::sleep(state.sessions.pace().places) => {}
+            }
         }
     });
 }

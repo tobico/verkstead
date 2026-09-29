@@ -2476,18 +2476,21 @@ the reading can stand above the limit rather than only at it.
 
 **A place comes free when a Conversation of any kind finishes or stops**, and
 none of those is a settle — so what waited for one would never be started by the
-settles alone. Verkstead looks over the roadmaps it is driving every half minute
-instead and starts what the free places hold, oldest roadmap first and within a
-roadmap lowest-numbered first, with nobody pressing anything. **Nothing about
-the waiting is stored**: what is ready is read afresh at every look, so a
-restart loses nothing that was waiting. And the look is silent unless it starts
-something, beside the one thing it says about a Stage it did not start: that a
-Stage of this roadmap is waiting for a place another roadmap has just taken,
-said on each waiting roadmap's own Timeline, because a roadmap passed over in
-silence reads as a roadmap forgotten — and said only where the places really are
-all taken once the look has finished starting, a Stage that went up to start and
-was refused having spent a place on paper and taken none. See ADR-0021, *What
-starts, and how many*.
+settles alone. Verkstead looks over the roadmaps it is driving **as a place comes
+free** instead and starts what the free places hold, oldest roadmap first and
+within a roadmap lowest-numbered first, with nobody pressing anything. A slow
+look behind that one catches the ways a place can come free that nothing
+announces — a limit the human raised while the machine was full — and a server
+where nothing is happening makes no look at all, a look costing a reading of
+every roadmap it has ever driven. **Nothing about the waiting is stored**: what
+is ready is read afresh at every look, so a restart loses nothing that was
+waiting. And the look is silent unless it starts something, beside the one thing
+it says about a Stage it did not start: that a Stage of this roadmap is waiting
+for a place another roadmap has just taken, said on each waiting roadmap's own
+Timeline, because a roadmap passed over in silence reads as a roadmap forgotten
+— and said only where the places really are all taken once the look has finished
+starting, a Stage that went up to start and was refused having spent a place on
+paper and taken none. See ADR-0021, *What starts, and how many*.
 _Avoid_: slot, seat, quota, capacity, concurrency limit, the roadmap's place
 (that is the other limit, counted off the record rather than off what runs)
 

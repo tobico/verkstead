@@ -31,8 +31,9 @@
 //! **And a settle is not the only thing that brings this reading about.** A
 //! place on the server comes free when a Conversation of any kind finishes or
 //! stops, and none of those is a settle — so a stage held for a place is picked
-//! up by a look of the server's own, which runs this same reading against the
-//! foot of each roadmap's chain. See [`crate::places`], and [`Brought`], which is
+//! up by a look of the server's own, made as a place comes free, which runs this
+//! same reading against the foot of each roadmap's chain. See [`crate::places`],
+//! and [`Brought`], which is
 //! the whole of what the two readings differ by: a look discounts no Conversation
 //! from the places, and says nothing at all unless it starts something.
 //!
@@ -192,13 +193,13 @@ impl Brought {
     /// Say on `conversation_id`'s Timeline that nothing was started, or, for a
     /// look, say it in the log alone.
     ///
-    /// **A look is silent unless it starts something.** It runs every
-    /// [`crate::Pace::places`] for as long as the server is up and reads every
-    /// roadmap being driven, so a sentence said here is a sentence said again a
-    /// few seconds later and for ever: a roadmap with nothing ready would bury
-    /// its own Timeline, and a stage halted for a branch somebody has taken
-    /// would bury it faster. The settle is where each of these is said, and it
-    /// is said there once.
+    /// **A look is silent unless it starts something.** It runs every time a
+    /// place on the server comes free — see [`crate::places`] — and reads every
+    /// roadmap being driven, so a sentence said here is a sentence said again the
+    /// next time anything at all finishes, and for ever: a roadmap with nothing
+    /// ready would bury its own Timeline, and a stage halted for a branch
+    /// somebody has taken would bury it faster. The settle is where each of these
+    /// is said, and it is said there once.
     ///
     /// Which leaves nothing unreported: the look says nothing the settle before
     /// it has not already said, and what it does say is that a stage started —
@@ -239,9 +240,9 @@ impl Brought {
     /// refuse after that: a branch somebody has taken, a git author nobody has
     /// set. Such a stage spends a place on paper, holds the stage behind it, and
     /// registers nothing — so the next look finds the places exactly as they were
-    /// and would say it all over again, every half minute for as long as the
-    /// server is up. The one Timeline a look writes to would be the one a human
-    /// most needs to read.
+    /// and would say it all over again at every place that ever changed hands on
+    /// the machine, for as long as the server is up. The one Timeline a look
+    /// writes to would be the one a human most needs to read.
     ///
     /// What the check leaves said is the case this is here for. The places run out
     /// mid-list: with one free and three roadmaps wanting it, the oldest starts a
@@ -253,9 +254,8 @@ impl Brought {
     /// The other two waits stay off a Timeline. A stage held by its **own**
     /// roadmap's limit waits on that roadmap settling, which is the settle that
     /// will say so; and a stage halted for a brief nobody wrote waits on the
-    /// human, who was told at the settle and would be told again every half
-    /// minute until they got to it. See [`stages::Held`], where the three part
-    /// company.
+    /// human, who was told at the settle and would be told again at every look
+    /// until they got to it. See [`stages::Held`], where the three part company.
     async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held, full: bool) {
         match (self, held) {
             (Self::Settle, _) => say(state, conversation_id, held.said()).await,
@@ -545,7 +545,8 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
             // At the settle that completed it and nowhere else. A roadmap
             // completes once, and every look for the rest of the server's life
             // finds it complete again — a device told each time would be told
-            // about a milestone that happened weeks ago, every half minute.
+            // about a milestone that happened weeks ago, every time anything on
+            // the machine finished.
             if brought == Brought::Settle {
                 crate::push::told(
                     &state.pool,
