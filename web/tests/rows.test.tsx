@@ -223,9 +223,16 @@ describe("every row in the app that wraps a control", () => {
   /// for exactly its reason: the prose about this arrangement mentions `<label`
   /// rather more often than the markup does, and one of those sentences was
   /// read as a row with the handler missing.
+  ///
+  /// **A comment's newlines stay behind it**, so what is counted below is the
+  /// line of the file rather than the line of this reading of it — a block
+  /// comment spanning fifteen lines would otherwise move every row under it
+  /// fifteen lines up, and the address this test fails with is the whole of
+  /// what it is for. A line comment keeps its newline already, the match
+  /// stopping at the end of the line.
   const bare = (source: string): string =>
     source
-      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ""))
       .replace(/^[ \t]*\/\/.*$/gm, "");
 
   /// A control that can never be pressed, which is a record of a tick rather
@@ -250,6 +257,24 @@ describe("every row in the app that wraps a control", () => {
 
   it("finds them, so a sweep that found none cannot pass", () => {
     expect(wrapping.length).toBeGreaterThan(10);
+  });
+
+  it("names each row at the line the file really holds it on", () => {
+    // What this test fails with is an address, and an address is worth what it
+    // opens. Counting the line off a reading with the comments squeezed out of
+    // it named a line of a file nobody has — sixty-nine lines out in the one
+    // that holds five of the rows.
+    expect(
+      wrapping
+        .filter(({ where }) => {
+          const [file, line] = where.split(":");
+          const source = COMPONENTS[`../src/${file}`]!.split("\n");
+
+          return !source[Number(line) - 1]?.includes("<label");
+        })
+        .map((row) => row.where),
+      "each of these addresses a line that does not open a row",
+    ).toEqual([]);
   });
 
   it("answers its own press, or is a tick nobody can press", () => {
