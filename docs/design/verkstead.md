@@ -419,7 +419,24 @@ flowchart LR
   halts **before it has joined** holds up only the stages that stand on it,
   where one halted after it has joined holds up every later join. So a wrap-up
   still starts nothing until it completes, and it is no longer the only thing a
-  stage is waiting for. See [ADR-0021](../adr/0021-parallel-stages.md).
+  stage is waiting for. *Refined 2026-09-29, building
+  parallel-stages/05-the-server-wide-limit*: *how many run together* is **two
+  settings rather than one** — three stages of one roadmap, and **four
+  Conversations across the whole server**, whatever roadmap or Process those
+  belong to, so that one roadmap cannot take the whole server by default. Both
+  are in force and a stage that starts spends one of each: a place on the server
+  is taken by every Conversation with a session running or a driver registered,
+  of any kind, so a grilling and a Review being worked beside a roadmap stand in
+  front of its next stage as its own siblings do. **Only what Verkstead starts
+  by itself is held back** — a press goes ahead over the limit and what it made
+  is counted from then on — and **waiting for a place is a third way a stage is
+  neither started nor halted**, beside waiting on a dependency and waiting to
+  join. A place comes free when a Conversation of any kind finishes or stops,
+  which is not a settle, so the server looks over the roadmaps it is driving on
+  a pace of its own and starts what waited, oldest roadmap first. The halted
+  stage is where the two limits part: it keeps its place under its own roadmap's
+  until it is Resumed or closed, and holds none on the server, nothing being
+  left running or driving it. See [ADR-0021](../adr/0021-parallel-stages.md).
 - **Stages always stack.** The next stage's branch stacks on the unmerged
   predecessor (`gh stack`), per the repo's stacked review process — *refined
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in
