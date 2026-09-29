@@ -112,3 +112,25 @@ where it is measured.
 - Check whether the Build Cache and the Worktrees are on one filesystem on this
   machine, and whether anything already assumes they are — that is what decides
   whether the grammar needs somewhere other than the cache to point at.
+
+## Settled when the backlog was written
+
+Three things the section above left open, answered in the grilling of
+2026-09-30 that turned this brief into `.tasks/`:
+
+- **Two placeholders, not one.** One names the Build Cache and one a directory
+  beside the Worktrees. The two are not on one filesystem on the maintainer's
+  own machine — the cache on an encrypted volume under `~/.cache`, the
+  Worktrees on a tmpfs under `/var/lib/verkstead` — so a store under the cache
+  is one stage 02's hardlinking package managers copy out of rather than link
+  out of. A placeholder's directory is made and granted only where a loaded
+  descriptor names it, so the second one costs a Sandbox nothing until
+  something uses it.
+- **The refused names are the union of all three platforms'**, refused on every
+  platform. Windows sets nine names the two Unixes do not, and a descriptor
+  that is fine where it was written and breaks the same install on another
+  machine is worse than a refusal the installer sees at once.
+- **An entry that does not load stays in the file.** A save from the settings
+  page writes the whole of `config.yaml`, and text the installer is about to go
+  and fix is not the page's to drop — it goes back as written, the way the
+  descriptor keys the page never drew do.

@@ -54,7 +54,7 @@ the others have landed, because it is their stores it bounds. 06 needs 04.
 
 ## Stages
 
-- [ ] 01: Language descriptors — [brief](01-language-descriptors.md)
+- [ ] 01: Language descriptors — [brief](01-language-descriptors.md) *(in progress: `roadmaps/language-caches/01-language-descriptors`)*
 - [ ] 02: Package stores — [brief](02-package-stores.md)
 - [ ] 03: C++ through the Compile Server — [brief](03-cpp-through-the-compile-server.md)
 - [ ] 04: The JVM — [brief](04-the-jvm.md)
