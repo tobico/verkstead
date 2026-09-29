@@ -18860,6 +18860,28 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
         );
     }
 
+    // And the settings page says the same number, which is the one thing on it
+    // out of neither file: how many of the server's places are held, as of the
+    // moment the page asked. A server holding every place starts nothing more
+    // until one comes free, and this is what keeps that from reading as a stall —
+    // so what it is worth is being the count a start is weighed against rather
+    // than a number of its own.
+    //
+    // Against the Conversations themselves rather than against a four written
+    // here, because the four are what the count is *of*: a page reading one
+    // register, or none, would agree with a literal and not with these.
+    assert_eq!(
+        places_taken(&fixture).await,
+        holding_a_place(&fixture).await,
+        "the settings page counts the Conversations that are holding a place",
+    );
+
+    assert_eq!(
+        holding_a_place(&fixture).await,
+        4,
+        "which is the four stages, the roadmap's own Conversation having let go",
+    );
+
     // And now the human presses *Continue a roadmap* on the stage that is
     // waiting. The limit is there for what Verkstead starts by itself, so the
     // press goes ahead over it — read its own way in, through the adoption rather
@@ -19964,6 +19986,41 @@ async fn a_look_that_started_nothing_does_not_say_a_stage_is_waiting_again() {
         1,
         "and none of them started anything either, 01's branch still being taken",
     );
+}
+
+/// How many of the server's places the settings page says are taken.
+///
+/// The one number on that page that is out of neither `config.yaml` nor
+/// `secrets.yaml` — see the server's own `ui::taken`, which counts it off the two
+/// registers a start is weighed against.
+async fn places_taken(fixture: &Grilling) -> usize {
+    let settings: verkstead_render::SettingsView = get(&fixture.app, "/api/ui/settings").await;
+
+    settings.at_once.places_taken
+}
+
+/// And how many Conversations of this bench are actually holding one, asked of
+/// each of them in turn.
+///
+/// The same question by the other door, so that what the page says can be checked
+/// against the Conversations rather than against a number written into a test: a
+/// place is held by one with a session running **or** a driver registered, and a
+/// page counting either alone would still agree with a literal.
+async fn holding_a_place(fixture: &Grilling) -> usize {
+    let rows = conversations(&fixture.app).await;
+
+    let mut held = 0;
+
+    for row in rows {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", row.id)).await;
+
+        if view.working || view.driven {
+            held += 1;
+        }
+    }
+
+    held
 }
 
 /// How many times a Conversation has been told a stage is waiting for a place on
