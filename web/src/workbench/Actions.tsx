@@ -161,12 +161,14 @@ import type {
   Resumed,
   SteerOpened,
 } from "../api/types";
+import { useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice, whose, type Device } from "../reaching";
 import styles from "./Actions.module.css";
 import { eagerly, pressed, pressedRows, rowFor } from "./eager";
 import { pathOf, pathTo } from "./openings";
+import { Transfer } from "./Transfer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
 /// words the human is told them in.
@@ -510,6 +512,14 @@ function actions(): {
   /// provider is what differs rather than the menu (see `reaching.ts`).
   const device = useDevice();
 
+  /// And whether this Verkstead is linked to anything at all, which is what
+  /// says whether there is anywhere to transfer a Conversation *to*.
+  ///
+  /// This device's own reading of its cluster, whichever machine the page is
+  /// about — see `useDevices`. It is the same cache entry the pane header reads
+  /// to name the machine the work is on, so the row costs no fetch of its own.
+  const devices = useDevices();
+
   /// Whether a Conversation is the one the page is standing on, which is the id
   /// **and** the device: ids collide by construction, so a sidebar card for this
   /// device's Conversation 4 is not the member's Conversation 4 being read
@@ -605,6 +615,18 @@ function actions(): {
     /// The pressed row's own name, which is what the confirming button reads.
     label: string;
   } | null>(null);
+
+  /// And the Conversation whose *Transfer to…* row was pressed, while the human
+  /// is picking a device for it — `null` while nothing is.
+  ///
+  /// Held out here for the reason the two above it are: the press shuts the menu
+  /// the row was in, and what opens over the page outlives it. The Conversation
+  /// itself rather than a flag, and frozen as the confirm's is: the card is
+  /// about the Conversation the row was hit on, which on the sidebar's menu is
+  /// very often not the one being read.
+  const [transferring, setTransferring] = createSignal<ConversationView | null>(
+    null,
+  );
 
   // The menu's own way to shut, held here because what closes it is the press
   // coming back rather than the press going out.
@@ -803,6 +825,18 @@ function actions(): {
     if (asked !== null) closing(asked.conversation, asked.ending, asked.away);
   };
 
+  /// And pressing *Transfer to…*, which opens a card and does nothing else: the
+  /// menu goes, and the dialog over the page is where the device is picked and
+  /// what that device is missing is read.
+  ///
+  /// The menu first, as a refusal does it: shutting it hands the focus back to
+  /// the button it was dropped from, which is then where the card hands the
+  /// focus back to when it is answered.
+  const transfers = (conversation: ConversationView): void => {
+    shut();
+    setTransferring(conversation);
+  };
+
   /// And putting the closed conversation away, which reads the same way: both
   /// of its refusals are a page drawn against a conversation that has moved,
   /// and both of its successes mean it is off the list.
@@ -932,6 +966,34 @@ function actions(): {
             press={() => click.mutate(conversation())}
           />
 
+          {/* And moving the work to another machine of the cluster, which is
+              the one row here that ends in the Conversation being somewhere
+              else. Under Steer because it is the further move: Steer says what
+              should happen next, and this says where.
+
+              Drawn from every state but Draft and Closed, and only where this
+              Verkstead is linked to something: a Draft is moved by the device
+              select on its own composer — there is no work to carry, only a
+              Brief — a Closed Conversation has none left to move, and a machine
+              in no cluster has nowhere to move it to.
+
+              The press opens a card and nothing else: what device, and what
+              that device is missing, are the dialog's — see [`Transfer`]. */}
+          <Show
+            when={
+              (devices.data?.members.length ?? 0) > 0 &&
+              conversation().state !== "Draft" &&
+              conversation().state !== "Closed"
+            }
+          >
+            <Action
+              class={styles.transfer}
+              label="Transfer to…"
+              says="Move this conversation, its branch and its working changes to another device."
+              press={() => transfers(conversation())}
+            />
+          </Show>
+
           {/* And where Close was, on a conversation that has already had it:
               the way to put the record out of sight once there is nothing left
               to read on it. Reversible, so there is nothing to confirm — and on
@@ -1015,6 +1077,16 @@ function actions(): {
           asked={confirming()?.label ?? null}
           keep={() => setConfirming(null)}
           close={() => confirmed()}
+        />
+
+        {/* And the dialog *Transfer to…* opens: the device select, whatever the
+            preflight found missing on the device picked, and the press that
+            will move the work — see [`Transfer`]. Every way out of it but that
+            press clears the signal and does nothing else, which leaves the
+            Conversation exactly where it was. */}
+        <Transfer
+          conversation={transferring()}
+          close={() => setTransferring(null)}
         />
       </>
     ),

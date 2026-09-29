@@ -27,16 +27,16 @@ use crate::{
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
     GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, PrefillView, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, PrefillView, Preflight,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
+    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -457,6 +457,11 @@ fn the_viewers_types_are_written_from_these() {
     // drawn from — what this device calls the request, and the whole of what the
     // asker said about itself.
     AskingDevice::export_all(&config).unwrap();
+
+    // And what a device lacks before work is moved onto it, which is the
+    // reading the Transfer dialog draws under its device select and refuses Go
+    // on. The findings write the role and the harness they name with them.
+    Preflight::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

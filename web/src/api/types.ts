@@ -2904,6 +2904,31 @@ export type InstallState = { "install": "Idle" } | { "install": "Installing" } |
 why: string, };
 
 /**
+ * One thing the far end has not got.
+ *
+ * Each names the *somewhere* it is to be put right, because each is a different
+ * errand: a repository to open over there, a harness to install over there, or
+ * a machine to go and wake.
+ */
+export type Lacking = "Unreachable" | { "Repo": { 
+/**
+ * What this device calls the repository, which is its directory's own
+ * name and the only name there is to point at.
+ */
+name: string, 
+/**
+ * Whether it is one of the Conversation's Companions rather than the
+ * repository the work itself is in. Both are refusals; they are not
+ * the same sentence.
+ */
+companion: boolean, } } | { "Harness": { role: PairingRole, 
+/**
+ * The Agent Profile's name as it reads here, or nothing for the one
+ * account on its harness that nobody named.
+ */
+profile: string | null, agent_type: AgentType, } };
+
+/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -3329,6 +3354,16 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
+ * Which of a Conversation's three roles a Pairing is for.
+ *
+ * Here rather than read off a Profile, because what a missing harness has to be
+ * named against is the Pairing that wants it: two roles can want two harnesses,
+ * and a sentence that said only *Claude Code is not over there* would leave the
+ * human to work out which picker to go and change.
+ */
+export type PairingRole = "Grilling" | "Implementation" | "Review";
+
+/**
  * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
@@ -3599,6 +3634,23 @@ token: Prefilled | null, };
  * blind.
  */
 export type Prefilled = { value: string, source: Source, };
+
+/**
+ * What one device lacks, as the device holding the work found it.
+ */
+export type Preflight = { 
+/**
+ * The device it was asked of, by the name the human gave that machine —
+ * which is what every one of these findings has to be said against, rather
+ * than sixteen bytes of hex.
+ */
+device: string, 
+/**
+ * Everything in the way, in the order a move would meet it: the machine,
+ * then the repositories, then the harnesses. Empty is a device the work can
+ * go to.
+ */
+lacks: Array<Lacking>, };
 
 /**
  * What kind of work a Conversation is for, and so which states it runs

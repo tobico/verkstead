@@ -28,7 +28,17 @@ import type { Broken, ProfileEntry, ProfileTrouble } from "./api/types";
 /// this, having a step above to point at; a profile row and a refused start say
 /// it and stop. The sentence itself is one sentence either way.
 export function harnessAbsent(agent: AgentType): string {
-  return `${AGENT_NAME[agent]} is not on this machine.`;
+  return harnessAbsentOn(agent, "this machine");
+}
+
+/// And the same finding about a machine that is not this one, named.
+///
+/// The transfer preflight's: what it reads is another device's own answer about
+/// its own `PATH`, and a second wording for *that harness is not there* would be
+/// two sentences for one fact — the only difference between them being which
+/// machine is being talked about, which is the argument.
+export function harnessAbsentOn(agent: AgentType, where: string): string {
+  return `${AGENT_NAME[agent]} is not on ${where}.`;
 }
 
 /// And what a machine that has stopped answering is called, which is the word

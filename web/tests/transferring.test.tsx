@@ -18,12 +18,27 @@
 //! The golden fixtures are the workbench's: `cargo test` renders the real
 //! endpoints and writes them, and the mark is a field on the very same record.
 
-import { cleanup, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationView, DevicesView } from "../src/api/types";
-import { OPEN, mount, theWorkbench } from "./bench";
+import dropdown from "../src/Menu.module.css";
+import shell from "../src/Panes.module.css";
+import sidebar from "../src/workbench/Conversations.module.css";
+import type {
+  ConversationView,
+  DevicesView,
+  Preflight,
+} from "../src/api/types";
+import { harnessAbsentOn, UNREACHABLE } from "../src/broken";
+import chrome from "../src/picking.module.css";
+import { rowKey } from "../src/reaching";
+import actions from "../src/workbench/Actions.module.css";
+import setup from "../src/workbench/Setup.module.css";
+import transfer from "../src/workbench/Transfer.module.css";
+import { OPEN, drawn, mount, theWorkbench } from "./bench";
+import { offered, pick, rows } from "./pickers";
 import { json, whenever } from "./serving";
+import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import linked from "./fixtures/devices-linked.json" with { type: "json" };
 
 /// The cluster this all happens in: this device, and the laptop the work went
@@ -156,5 +171,299 @@ describe("a conversation whose work has moved to another device", () => {
     await waitFor(() => expect(container.textContent).toContain(OPEN.branch));
 
     expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true);
+  });
+});
+
+/// The Conversation the dialog is opened over: one the work has started in, its
+/// grilling paired with an account on this device.
+///
+/// A Grilling rather than the Draft the fixtures open, because *Transfer to…* is
+/// drawn from every state but Draft and Closed — a Draft is moved by the device
+/// select on its own composer, and a Closed Conversation has no work left to
+/// move.
+const GRILLING = grilling as ConversationView;
+
+/// Where the preflight of a device is read: on the device the Conversation is
+/// on — which is this one, here — naming the machine it is asked about.
+const preflightOf = (device: string) =>
+  `/api/ui/conversations/${GRILLING.id}/preflight/${device}`;
+
+/// What a device with nothing in the way answers.
+///
+/// Written here rather than read out of a fixture, for the reason the branch
+/// lists in `bench.tsx` are: a golden file of this endpoint would need two
+/// linked Verksteads behind it, and what keeps these honest is that they are
+/// typed — `crates/server/tests/preflight.rs` is where the shape is proved
+/// against real machines.
+const READY = { device: "laptop", lacks: [] } satisfies Preflight;
+
+/// And the three findings, each named against the machine it is about.
+const NO_REPO = {
+  device: "laptop",
+  lacks: [{ Repo: { name: "verkstead", companion: false } }],
+} satisfies Preflight;
+
+const NO_HARNESS = {
+  device: "laptop",
+  lacks: [
+    { Harness: { role: "Grilling", profile: "fable", agent_type: "Claude" } },
+  ],
+} satisfies Preflight;
+
+const ASLEEP = { device: "laptop", lacks: ["Unreachable"] } satisfies Preflight;
+
+/// Open the Conversation's action menu: press the trigger, and hand back what
+/// it drops.
+async function openActions(container: ParentNode): Promise<HTMLElement> {
+  fireEvent.click(
+    await drawn(
+      container,
+      `.${actions.conversationActions} > .${dropdown.trigger}`,
+    ),
+  );
+
+  return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
+}
+
+/// The dialog *Transfer to…* opens, or `null` while nothing has opened one.
+function dialog(): HTMLDialogElement | null {
+  return document.body.querySelector<HTMLDialogElement>(
+    `dialog.${transfer.transferring}`,
+  );
+}
+
+/// The same, waited for: the press opens it a signal away rather than a request
+/// away, but it is still not there on the tick the click was made on.
+function opened(): Promise<HTMLDialogElement> {
+  return waitFor(() => {
+    const card = dialog();
+    if (!card) throw new Error("no transfer dialog is open");
+    return card;
+  });
+}
+
+/// Press *Transfer to…* on the Conversation pane's own menu, and hand back the
+/// dialog it opens — with its device select drawn, which waits on the
+/// membership landing: the select is not there at all until this device has
+/// read its own cluster.
+async function transferring(container: ParentNode): Promise<HTMLDialogElement> {
+  await openActions(container);
+  fireEvent.click(await drawn(container, `.${actions.transfer}`));
+
+  const card = await opened();
+  await drawn(card, `.${setup.deviceSelect}`);
+
+  return card;
+}
+
+/// The press that would move the work, which is drawn either enabled or
+/// refused and carries nothing behind it yet.
+function go(card: HTMLDialogElement): HTMLButtonElement {
+  const found = card.querySelector<HTMLButtonElement>(`.${transfer.go}`);
+  if (!found) throw new Error("the dialog has no Go");
+  return found;
+}
+
+/// What the preflight found, as the dialog draws it.
+function findings(card: HTMLDialogElement): string[] {
+  return [...card.querySelectorAll(`.${transfer.lacks} li`)].map(
+    (said) => said.textContent ?? "",
+  );
+}
+
+describe("transferring a conversation to another device", () => {
+  /// The row itself, on the menu the Conversation pane drops and on the same
+  /// rows the sidebar's right-click drops — they are one set of rows, which is
+  /// the whole reason `actions` is a factory rather than a component.
+  it("is on both menus for a conversation past drafting", async () => {
+    theCluster(whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)));
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    expect(menu.querySelector(`.${actions.transfer}`)).toBeTruthy();
+
+    // Away from that menu, so what is drawn next is the sidebar's own and not
+    // the one still hanging over the pane.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(document.body.querySelector(`.${actions.transfer}`)).toBeNull(),
+    );
+
+    // And the same row under the pointer on the card in the sidebar, which is
+    // very often about a Conversation no pane is showing. The card carries
+    // seven fields and the rows need a good deal more, so the Conversation is
+    // read again before there is anything to draw.
+    fireEvent.contextMenu(
+      await drawn(
+        container,
+        `[data-row="${rowKey(null, GRILLING.id)}"] .${sidebar.open}`,
+      ),
+      { clientX: 120, clientY: 200 },
+    );
+
+    const card = await drawn(
+      container,
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+
+    await waitFor(() =>
+      expect(card.querySelector(`.${actions.transfer}`)).toBeTruthy(),
+    );
+  });
+
+
+  /// And on neither menu at all where this Verkstead is linked to nothing,
+  /// which is nearly every one of them: a machine in no cluster has nowhere to
+  /// move a Conversation to, and a row that opened a dialog with no device in
+  /// it would be a press with nothing behind it.
+  it("is on neither menu where there is no cluster", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const menu = await openActions(container);
+
+    // The rows around it are there, so this is the row being left out rather
+    // than the menu not having been drawn.
+    await drawn(menu, `.${actions.steer}`);
+    expect(menu.querySelector(`.${actions.transfer}`)).toBeNull();
+  });
+  /// And it is not on either of the two states there is nothing to move from: a
+  /// Draft, which is moved by its own composer's device select, and a Closed
+  /// Conversation, whose work has ended.
+  it("is on neither menu for a draft or a closed conversation", async () => {
+    for (const state of ["Draft", "Closed"] as const) {
+      theCluster(
+        whenever(
+          `/api/ui/conversations/${GRILLING.id}`,
+          json({ ...GRILLING, state } satisfies ConversationView),
+        ),
+      );
+
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+      const menu = await openActions(container);
+
+      expect(
+        menu.querySelector(`.${actions.transfer}`),
+        `a ${state} conversation has nothing to transfer`,
+      ).toBeNull();
+
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /// The select inside it is the compose page's own, with the one device it
+  /// cannot offer left out: a Conversation cannot be moved onto the machine it
+  /// is already on.
+  it("offers every device of the cluster but the one the work is on", async () => {
+    theCluster(whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)));
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    await transferring(container);
+
+    // Every member, and one row fewer than the cluster has devices: this
+    // device's own is the one machine the work cannot be moved onto, and the
+    // names alone could not say so — two machines of one cluster are called
+    // `workbench` here, which is exactly why the row that goes is decided by
+    // the Device Id rather than by what anything reads as.
+    expect(rows("Device")).toEqual(
+      DEVICES.members.map((member) => member.identity.name),
+    );
+    expect(offered("Device")).toHaveLength(DEVICES.members.length);
+
+    // And each row wears the mark for the machine's operating system, which is
+    // what tells two devices of one name apart at a glance.
+    for (const row of offered("Device")) {
+      expect(row.querySelector(`.${chrome.mark}`)).toBeTruthy();
+    }
+  });
+
+  /// And picking one sets the preflight going, which is what the dialog draws
+  /// under the select. Nothing in the way is Go drawn enabled — the one state
+  /// in which it is.
+  it("draws the picked device's preflight and enables Go where nothing is in the way", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(READY)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+
+    // Nothing is asked of any device until one is picked, and Go is refused
+    // while nothing has been.
+    expect(go(card).disabled).toBe(true);
+
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    expect(card.textContent).toContain("laptop has everything");
+  });
+
+  /// A Repo the far end has no match for is named, points at **Open repo** on
+  /// that device, and leaves Go refused.
+  it("names a repo the far end has no match for and refuses Go", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(NO_REPO)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    const said = findings(card)[0]!;
+    expect(said).toContain("verkstead");
+    expect(said).toContain("laptop");
+    expect(said).toContain("Open repo");
+    expect(go(card).disabled).toBe(true);
+  });
+
+  /// And a harness the far end has not got is named against the Pairing that
+  /// wants it, in the words the onboarding probe says it in.
+  it("names the pairing whose harness the far end has not got", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(NO_HARNESS)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    const said = findings(card)[0]!;
+    expect(said).toContain("Grilling");
+    expect(said).toContain("fable");
+    expect(said).toContain(harnessAbsentOn("Claude", "laptop"));
+    expect(go(card).disabled).toBe(true);
+  });
+
+  /// And a device that answered nothing is refused as unreachable, by its own
+  /// name — never as *no match*, which would send the human to open a
+  /// repository on a machine that may already have it.
+  it("refuses a device that is not answering by its own name", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(ASLEEP)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    const said = findings(card)[0]!;
+    expect(said).toContain("laptop");
+    expect(said).toContain(UNREACHABLE);
+    expect(said).not.toContain("Open repo");
+    expect(go(card).disabled).toBe(true);
   });
 });

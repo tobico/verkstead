@@ -519,12 +519,45 @@ export function RepoOptions(props: {
 ///
 /// One control, and what a pick *does* is the page's own, exactly as it is for
 /// every other control in this row: the compose page moves what it is composing,
-/// and a saved draft's composer replays it.
+/// a saved draft's composer replays it, and the Transfer dialog sets a preflight
+/// going.
+///
+/// **And one caller picks a device to send work *to*** — see `Transfer.tsx`,
+/// which is why [`Self.without`] and [`Self.nothing`] are here: that dialog
+/// offers every device but the one the Conversation is already on, and starts
+/// with nothing picked rather than with a machine it would move to if the human
+/// pressed Go without looking.
 export function DeviceSelect(props: {
+  /// The control's own id, for the `<label>` that names it.
+  ///
+  /// Defaulted because nearly every page draws one of these, and named where two
+  /// stand on a page at once: the sidebar's Transfer dialog is opened over the
+  /// compose page often enough, and two controls under one id is a label that
+  /// names whichever the browser finds first.
+  id?: string;
+
   /// Which device is picked — `null` for this one, which is what a browser that
-  /// has never picked reads as.
-  chosen: Device;
+  /// has never picked reads as, and `undefined` for nothing picked at all.
+  ///
+  /// The two are not one state: every page that composes is *on* a device from
+  /// the moment it is drawn, and the one that sends work somewhere has not been
+  /// told where yet.
+  chosen: Device | undefined;
   disabled?: boolean;
+
+  /// The one device that is not offered, where there is one — `null` for this
+  /// device itself.
+  ///
+  /// For the Transfer dialog, whose whole question is *which other machine*: a
+  /// Conversation cannot be moved onto the device it is already on, and a row
+  /// offering it would be a press with nothing behind it. Undefined offers every
+  /// device, which is what composing does.
+  without?: Device;
+
+  /// What the control reads while nothing is picked, where the standing words
+  /// would say the wrong thing — an invitation rather than a record of a choice
+  /// not made, as the Repo select's is.
+  nothing?: string;
 
   /// Whether what is chosen is a pick this browser is holding, which is what
   /// makes it worth correcting when the device it names leaves the cluster.
@@ -542,21 +575,26 @@ export function DeviceSelect(props: {
   const devices = useDevices();
 
   /// Every device that can be picked: this one, and then each member in the
-  /// order the membership lists them.
+  /// order the membership lists them — less the one the caller has ruled out.
   const options = (): DeviceIdentity[] => {
     const view = devices.data;
-    return view === undefined
-      ? []
-      : [view.this, ...view.members.map((member) => member.identity)];
+    if (view === undefined) return [];
+
+    return [view.this, ...view.members.map((member) => member.identity)].filter(
+      (device) =>
+        props.without === undefined ||
+        device.device !== (props.without ?? view.this.device),
+    );
   };
 
   /// What the control is showing, as a row writes it: this device's own id where
-  /// nothing has been picked, and nothing at all until the membership has landed
-  /// — a control showing a device it has not read about yet would be one whose
-  /// first correction was made against an empty list.
+  /// nothing has been picked, the empty string where nothing is picked *at all*,
+  /// and nothing until the membership has landed — a control showing a device it
+  /// has not read about yet would be one whose first correction was made against
+  /// an empty list.
   const showing = (): string => {
     const view = devices.data;
-    if (view === undefined) return "";
+    if (view === undefined || props.chosen === undefined) return "";
 
     return props.chosen ?? view.this.device;
   };
@@ -575,6 +613,7 @@ export function DeviceSelect(props: {
     if (
       props.remembered !== false &&
       view !== undefined &&
+      props.chosen !== undefined &&
       props.chosen !== null &&
       deviceShown(view, props.chosen) === null
     ) {
@@ -586,13 +625,14 @@ export function DeviceSelect(props: {
     <Show when={(devices.data?.members.length ?? 0) > 0}>
       <div class={styles.deviceSelect}>
         <Listbox
-          id="conversation-device"
+          id={props.id ?? "conversation-device"}
           class={styles.deviceSelectPick}
           heading={{ words: "Device", class: styles.optionLabel }}
           options={options()}
           value={(device) => device.device}
           label={(device) => device.name}
           icon={(device) => osIcon(device.os)}
+          nothing={props.nothing}
           chosen={showing()}
           disabled={props.disabled}
           // This device's own id back to `null`, so that *this device* is the

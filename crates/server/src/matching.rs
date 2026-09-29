@@ -78,23 +78,51 @@ const MOST_THE_REPOS_ARE: usize = 1024 * 1024;
 /// rather than a question per Repo: a device asks once, and the rule that decides
 /// runs on the end that is going to act on the answer.
 ///
-/// **This end's origin is read at the moment it is asked for**, off the
-/// repository rather than off the row, like the far end's. It goes in a blocking
-/// task because that is what shelling out to git is; a match is asked for once
-/// before a launch rather than on every page, so the thread it borrows costs
-/// nothing.
+/// One repository, which is what a memory sync has to settle before a launch.
+/// [`each_across`] is the same reading asked of several at once, which is what a
+/// transfer's preflight wants: a Conversation is a repository and every Companion
+/// beside it, and a registry fetched once answers for all of them.
 pub async fn across(
     devices: &Devices,
     device: &str,
     here: &crate::store::Repo,
 ) -> Result<Option<RepoAcross>, Refusal> {
-    let read = here.path.clone();
-    let ours = match tokio::task::spawn_blocking(move || crate::repos::origin(&read)).await {
+    Ok(each_across(devices, device, std::slice::from_ref(here))
+        .await?
+        .pop()
+        .expect("one repository asked about is one answer"))
+}
+
+/// And the same question asked of several of this device's Repos at once, in the
+/// order they were given.
+///
+/// **One reading of the far end's registry for all of them**, rather than a dial
+/// apiece: which of a device's Repos is which repository is one answer that whole
+/// list is matched against, and a preflight over a Conversation with three
+/// Companions is not four questions to ask a machine.
+///
+/// **Each end's origin is read at the moment it is asked for**, off the
+/// repository rather than off the row. This end's go in one blocking task because
+/// that is what shelling out to git is; a match is asked for once before a launch
+/// or a move rather than on every page, so the thread it borrows costs nothing.
+pub async fn each_across(
+    devices: &Devices,
+    device: &str,
+    here: &[crate::store::Repo],
+) -> Result<Vec<Option<RepoAcross>>, Refusal> {
+    let read: Vec<std::path::PathBuf> = here.iter().map(|repo| repo.path.clone()).collect();
+    let ours = match tokio::task::spawn_blocking(move || {
+        read.iter()
+            .map(|path| crate::repos::origin(path))
+            .collect::<Vec<_>>()
+    })
+    .await
+    {
         Ok(ours) => ours,
 
         Err(why) => {
             return Err(Refusal::ours(format!(
-                "this device could not read its own repository's origin: {why:#}",
+                "this device could not read its own repositories' origins: {why:#}",
             )));
         }
     };
@@ -107,9 +135,16 @@ pub async fn across(
     )
     .await?;
 
-    Ok(theirs
-        .into_iter()
-        .find(|there| same(ours.as_deref(), &here.name, there)))
+    Ok(here
+        .iter()
+        .zip(ours)
+        .map(|(repo, origin)| {
+            theirs
+                .iter()
+                .find(|there| same(origin.as_deref(), &repo.name, there))
+                .cloned()
+        })
+        .collect())
 }
 
 /// Whether the repository whose origin is `ours` and whose name is `name` is the

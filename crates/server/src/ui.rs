@@ -458,6 +458,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And what one of this device's members lacks before the work could be
+        // moved onto it, which is the reading the Transfer dialog draws under
+        // its device select — see [`crate::preflight`]. A GET, because nothing
+        // is being decided: the press that moves the work is the next one, and
+        // this is what says whether it can be made at all.
+        //
+        // Answered by the device the Conversation is *on*, whichever device the
+        // browser opened: the Repo match runs on the end that is going to act on
+        // the answer, and that end is the one holding the work.
+        .route(
+            "/api/ui/conversations/{id}/preflight/{device}",
+            get(preflight),
+        )
         // And the close a draft's work moving to another device ends with, which
         // carries the words that say where it went: the close above with a
         // notice over it rather than a second way of closing — see
@@ -4622,6 +4635,45 @@ async fn steer_submit(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "steering a Conversation failed");
             unavailable("the conversation could not be steered")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/preflight/{device}` — what that device lacks
+/// before this Conversation could be moved onto it.
+///
+/// **Answered by the device the Conversation is on**, which a browser reaches
+/// through the Relay like every other reading of a member's: the Repo match runs
+/// on the end that is going to act on the answer, and the registry it is applied
+/// to is the *target's*. So the path names two devices — one in the Relay's own
+/// prefix, and one here — and they are never the same machine.
+///
+/// A device that did not answer is not a refusal: it is a finding on the reading,
+/// named. See [`crate::preflight`], where that distinction is the whole point.
+async fn preflight(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    // An id that is not a number cannot name a Conversation, so it gets the same
+    // answer as one that names none — the id comes out of a URL.
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_conversation(&id);
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_such_conversation(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation to preflight a transfer failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    match crate::preflight::of(state.devices.as_ref(), &state.pool, &conversation, &device).await {
+        Ok(reading) => Json(reading).into_response(),
+        Err(refusal) => {
+            tracing::warn!("a transfer could not be preflighted: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
         }
     }
 }

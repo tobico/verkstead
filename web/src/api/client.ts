@@ -65,6 +65,7 @@ import type {
   GrillingStarted,
   MergedRow,
   OnboardingView,
+  Preflight,
   PrefillView,
   Process,
   ProcessPicked,
@@ -1443,6 +1444,28 @@ export function takeUpPullRequest(
   id: number,
 ): Promise<TakenUp> {
   return post<TakenUp>(on(device, `/api/ui/conversations/${id}/take-up`), {});
+}
+
+/// What another device of the cluster lacks before this conversation could be
+/// moved onto it.
+///
+/// **Two devices in one call.** `device` is where the conversation *is*, which
+/// is what every reading here carries; `onto` is the machine being asked about,
+/// and it is in the path because the question is about it rather than answered
+/// by it — the repo match runs on the end holding the work. They are never the
+/// same machine: the select the dialog picks from leaves the conversation's own
+/// device out.
+export function preflight(
+  device: Device,
+  id: number,
+  onto: string,
+): Promise<Preflight> {
+  return get<Preflight>(
+    on(
+      device,
+      `/api/ui/conversations/${id}/preflight/${encodeURIComponent(onto)}`,
+    ),
+  );
 }
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch

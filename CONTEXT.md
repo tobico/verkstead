@@ -110,6 +110,13 @@ and unaware of what it is ending — the two stops are about the run, and the
 archives end nothing. Where nothing is running there is nothing to warn about,
 and the press is the eager one it has always been.
 
+**And it can be moved to another device of the cluster, from every state but
+Draft and Closed.** *Transfer to…* on the actions menu — the pane's and the
+sidebar card's alike — opens a card over the page with the device select and the
+**Preflight** of whatever machine is picked, and Go is refused while that reading
+holds anything. A Draft is moved by the device select on its own composer, there
+being a Brief and no work to carry; a Closed Conversation has none left to move.
+
 **What it is called is its branch, where anybody has named one.** A Conversation
 is started on a name Verkstead invented, because there has to be a branch to cut
 and nobody has thought about the work yet — and a name nobody chose says nothing
@@ -321,6 +328,30 @@ every link anybody kept still leads to the work and so that a transfer back has 
 row to replace under the id it already had. A forwarding stub with no record
 behind it was the recommendation; keeping the copy was the human's call.
 _Avoid_: global id, UUID, canonical id, origin, the stub
+
+**Preflight**:
+A reading of what another device lacks before a **Conversation** could be moved
+onto it, drawn under the device select in the *Transfer to…* dialog and refusing
+**Go** while it holds anything (ADR-0020, *Transfer*). Not a press and not a
+promise: it is what the far end says about itself at the moment it is asked, and
+what moves the work is the press after it.
+**Asked of the far end, with one exception.** Which of that device's **Repo**s is
+this repository is settled here rather than there, by the rule above — the far
+end sends its registry and the device holding the work applies it, so two
+Verksteads one version apart cannot disagree about which repository the work is
+in. Everything else only that machine can look at, so it answers about itself:
+which harnesses are on its `PATH`, and whether it is answering at all.
+**What it holds is named rather than counted.** A repository with no match names
+the repository and points at **Open repo** on that device; a harness that is not
+there is named against the **Pairing** that wants it, in the onboarding probe's
+own words; and a device that answered nothing is *unreachable*, named. Each is a
+different errand — a repository to open over there, a harness to install over
+there, or a machine to go and wake — and a count would be none of them.
+**And *unreachable* is never *no match*.** A machine that said nothing has failed
+none of the questions under it, so it is the whole of its own preflight: no match
+sends somebody to open a repository on a machine that may already have it, and a
+machine that is asleep will answer perfectly well tomorrow.
+_Avoid_: check, validation, dry run, health check
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when the work starts along

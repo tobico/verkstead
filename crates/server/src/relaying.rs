@@ -593,6 +593,18 @@ impl Refusal {
             saying,
         }
     }
+
+    /// Whether this is the far end's trouble rather than this device's.
+    ///
+    /// The one thing a caller ever asks of a refusal beyond its sentence, and it
+    /// is asked by the transfer preflight: a device that did not answer is
+    /// *unreachable* and is the whole of what there is to say about it, where
+    /// something wrong on this side is a failure to report rather than a finding
+    /// about that machine. Read off the status because that is where the two are
+    /// already told apart — see [`Refusal::ours`] and [`Refusal::theirs`].
+    pub fn from_them(&self) -> bool {
+        self.status == StatusCode::BAD_GATEWAY
+    }
 }
 
 /// One **press** this device puts to a member of its own accord, and what it

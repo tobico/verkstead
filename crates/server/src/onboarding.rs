@@ -653,6 +653,21 @@ impl Machine {
         present(&self.installed(sessions::binary(agent_type)))
     }
 
+    /// And every one of them, which is what a device answers a member asking
+    /// what could be launched here at all — see [`crate::peer::harnesses`].
+    ///
+    /// **The dependency step's own list**, walked in the order those rows are
+    /// drawn: a second spelling of *the four harnesses* is a list that would go
+    /// out of step with the one the wizard installs from.
+    ///
+    /// Blocks: one `PATH` walk apiece.
+    pub(crate) fn harnesses(&self) -> Vec<(store::AgentType, bool)> {
+        HARNESSES
+            .iter()
+            .map(|(_, agent_type)| (*agent_type, self.harness(*agent_type)))
+            .collect()
+    }
+
     /// The `PATH` a session searches, which on the machine this server is
     /// running on is composed now rather than read off a field — see
     /// [`Machine::path`] for why that one has none held, and

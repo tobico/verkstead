@@ -33,6 +33,7 @@ mod repos;
 mod settings;
 mod sharing;
 mod transcript;
+mod transfer;
 mod update;
 mod view;
 
@@ -105,6 +106,7 @@ pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
     rollout_cwd, statements, transcript_after, transcript_view, turns,
 };
+pub use transfer::{HarnessThere, Lacking, PairingRole, Preflight};
 pub use update::UpdateNotice;
 pub use view::{
     Answered, AskView, DiffView, Ending, OptionView, QuestionView, RepoDiffView, SetReading,

@@ -208,6 +208,7 @@ pub mod pipe;
 /// the product's business rather than an endpoint's, and the default is one rule
 /// for every binary that parses a [`Config`] rather than the server's alone.
 pub mod platform;
+pub mod preflight;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
