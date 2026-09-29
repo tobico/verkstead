@@ -61,10 +61,19 @@ writes, and the only two it writes.
   loaded — `HOME`, `PATH` and the rest of what `sandbox.rs` says. The file is
   the installer's own, and they can already open binds, but a descriptor that
   quietly replaced `PATH` would be a session that cannot find `verkstead`.
-- A descriptor that does not load turns **that language off**. The settings
-  page says why and every other language carries on. Rejected: refusing to
-  start, which is every session down for a typo in a language nobody on the
-  machine builds.
+- A descriptor that does not load **falls back to the built-in of that name**,
+  and turns the language off only where there is no built-in to fall back to.
+  The settings page says why either way, and every other language carries on.
+  An installer whose override of a built-in is refused keeps the cache they
+  already had, which is what merging key by key is for in the first place:
+  losing Rust's build cache to one mistyped variable is exactly the worse
+  experience for not having checked that the next section refuses, and it is not
+  what `config.yaml` does today, where even an unparseable file leaves the build
+  cache on at its default. Rejected: refusing to start, which is every session
+  down for a typo in a language nobody on the machine builds. Rejected as well:
+  turning the language off whatever it is, which spends a working built-in on a
+  typo; and dropping only the key at fault, which can leave a store
+  half-configured — one of Go's two variables moved and the other not.
 - **`rust_build_cache` is still read**, as Rust's `enabled` and `size`, so an
   install that wrote one keeps what it said.
 - **The file only.** There is no editor for descriptors on the settings page;

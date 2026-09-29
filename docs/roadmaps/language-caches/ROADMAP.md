@@ -25,7 +25,9 @@ broken Maven variable, which is why the proofs are what they are.
   out, the Sandbox's own variables refused. `enabled` and `size` are keys of
   the same entry and the only ones the settings page writes.
   `rust_build_cache` is still read as Rust's.
-- **A descriptor that does not load turns that language off** and nothing else.
+- **A descriptor that does not load falls back to the built-in of that name**,
+  and turns the language off only where there is none — so an installer's typo
+  costs them their override rather than the cache they had.
 - **On by default, set for every session, on all three platforms.**
 - **Everything each ecosystem can cache** — downloads and compiled output.
 - **C++ through CMake's launcher variables only.** `CC` and `CXX` are left
