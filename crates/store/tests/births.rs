@@ -25,8 +25,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Birth, Transferred, birth, conversations, open_database, record_birth, register_repo,
-    stamp_the_births, start_conversation, transfer_away, transferred,
+    Birth, Marked, Transferred, ask_to_transfer, birth, conversations, open_database, record_birth,
+    register_repo, stamp_the_births, start_conversation, transfer_asked, transfer_away,
+    transfer_made, transferred,
 };
 
 /// The device every Conversation started here is drafted on, named the way a
@@ -224,5 +225,86 @@ async fn a_copy_that_has_been_handed_on_says_where_the_live_record_is() {
         transferred(&pool, conversation).await.unwrap(),
         Some(onwards),
         "the mark is replaced rather than added to: one live record at a time",
+    );
+}
+
+/// The mark a move writes at its commit point is written **only while the request
+/// still names that device**, and it spends the request in the same breath
+/// (ADR-0020, *Transfer*).
+///
+/// What this is guarding is the one window a move cannot close for itself. A mover
+/// has a bundle to pack and as much as sixty-four megabytes to push between the
+/// press and this write, and a second press in that time is the human sending the
+/// work somewhere else — so a mover that read the request and then wrote the mark
+/// as two statements could write one after being overtaken, and two devices would
+/// each hold a live copy of one piece of work with an agent starting in it.
+#[tokio::test]
+async fn the_mark_is_written_only_while_the_request_still_names_that_device() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "task-runner").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+
+    // No request at all, which is a move the human took back while it was in
+    // flight — or one a mover that finished first has already spent.
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Superseded { asked: None },
+        "a mover with no request behind it writes nothing",
+    );
+    assert_eq!(
+        transferred(&pool, conversation).await.unwrap(),
+        None,
+        "and the copy here is still the record",
+    );
+
+    // A request naming somewhere else: the second press, landed while this move
+    // was packing and pushing.
+    let elsewhere = "ff11223344556677889900aabbccddee";
+    ask_to_transfer(&pool, conversation, elsewhere)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Superseded {
+            asked: Some(elsewhere.to_owned()),
+        },
+        "a mover that has been overtaken is told which device holds the press now",
+    );
+    assert_eq!(
+        transferred(&pool, conversation).await.unwrap(),
+        None,
+        "and still writes nothing: the work is going where the last press said",
+    );
+    assert_eq!(
+        transfer_asked(&pool, conversation).await.unwrap(),
+        Some(elsewhere.to_owned()),
+        "and leaves the request where it is, that being the other mover's",
+    );
+
+    // And the request this move is actually for, which is the ordinary one.
+    ask_to_transfer(&pool, conversation, &onwards.device)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked,
+    );
+    assert_eq!(
+        transferred(&pool, conversation).await.unwrap(),
+        Some(onwards),
+        "the copy here says where the live record went",
+    );
+    assert_eq!(
+        transfer_asked(&pool, conversation).await.unwrap(),
+        None,
+        "and the request is spent in the transaction that marked it, so nothing \
+         between the two reads this as a move still to make",
     );
 }

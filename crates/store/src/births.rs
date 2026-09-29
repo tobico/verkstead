@@ -252,6 +252,28 @@ pub async fn transfer_away(
     conversation_id: i64,
     to: &Transferred,
 ) -> Result<()> {
+    let mut held = pool
+        .acquire()
+        .await
+        .context("marking a Conversation transferred away")?;
+
+    mark_away(&mut held, conversation_id, to).await
+}
+
+/// The same write against a connection, which is where a move makes it.
+///
+/// **The mark and the request are spent together**, which is what makes a move's
+/// commit point one step rather than two: a second press in the minutes a move
+/// spends packing and pushing is the human sending the work somewhere else, and a
+/// mover that wrote this mark after that press had landed would leave two devices
+/// each holding a live copy of one piece of work. See
+/// [`super::transfers::transfer_made`], which is the caller that needs it that
+/// way and the only one that does.
+pub(crate) async fn mark_away(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    to: &Transferred,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO transferred (conversation_id, device, live_as)
          VALUES (?, ?, ?)
@@ -261,7 +283,7 @@ pub async fn transfer_away(
     .bind(conversation_id)
     .bind(&to.device)
     .bind(to.id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("marking Conversation {conversation_id} transferred away"))?;
 

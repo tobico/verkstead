@@ -404,12 +404,21 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
 ///
 /// Every failure comes back here as a sentence and goes through [`failed`],
 /// which is what leaves the human with a Conversation they can resume and a
-/// Notice saying why they have to.
+/// Notice saying why they have to — and a move overtaken by a second press goes
+/// through [`stood_down`] instead, which is a different end to a different
+/// story.
 async fn move_it(state: &AppState, conversation_id: i64, device: &str) {
     // The request as it stands now rather than as it stood at the press. Two
     // presses in the minutes before a session ends are the human changing their
     // mind about where the work goes: the second one's mover has the request,
     // and the first one's stands down rather than racing it.
+    //
+    // **The cheap early-out rather than the guarantee.** A press that lands after
+    // this read is one this mover cannot see here, and it has a bundle to pack
+    // and as much as sixty-four megabytes to push in front of it — so what
+    // actually keeps two movers from each marking a copy live is the read and the
+    // mark being one transaction at the commit point. See
+    // [`store::transfer_made`].
     match store::transfer_asked(&state.pool, conversation_id).await {
         Ok(Some(asked)) if asked == device => {}
 
@@ -439,7 +448,7 @@ async fn move_it(state: &AppState, conversation_id: i64, device: &str) {
     }
 
     match across(state, conversation_id, device).await {
-        Ok(there) => {
+        Ok(Outcome::Moved(there)) => {
             tracing::info!(
                 conversation_id,
                 device,
@@ -453,10 +462,29 @@ async fn move_it(state: &AppState, conversation_id: i64, device: &str) {
             state.nudges.announce(Nudge::Conversations);
         }
 
+        Ok(Outcome::StoodDown { landed, asked }) => {
+            stood_down(state, conversation_id, device, landed, asked).await;
+        }
+
         Err(Went { saying, landed }) => {
             failed(state, conversation_id, device, saying, landed).await
         }
     }
+}
+
+/// What a move that got as far as its own commit point came to.
+///
+/// The two are not a success and a failure: one is the work having moved, and the
+/// other is this mover finding that the human has since asked for it to go
+/// somewhere else. Nothing is wrong in either, which is why neither is a
+/// [`Went`].
+enum Outcome {
+    /// The work is on that device, under the id it numbered its copy.
+    Moved(i64),
+
+    /// A second press overtook it, so the mark was not written: the copy this
+    /// mover had landed, to take back, and the device the request names now.
+    StoodDown { landed: i64, asked: Option<String> },
 }
 
 /// What a move that did not finish has to say, and what it left behind.
@@ -474,7 +502,7 @@ struct Went {
 ///
 /// The id the far end gave its copy, or what went wrong and what is left over
 /// there to sweep.
-async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<i64, Went> {
+async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<Outcome, Went> {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -629,10 +657,17 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         });
     }
 
-    // The commit point is behind us: that device has the work. What is left is
-    // saying so here, and a failure at this one step is the one that has
-    // something over there to take back.
-    store::transfer_away(
+    // The commit point: that device has the work, and what is left is saying so
+    // here. The mark and the request are spent in one transaction — see
+    // [`store::transfer_made`], where that is argued: a second press landing while
+    // this move was packing and pushing is the human sending the work somewhere
+    // else, and a mover that wrote the mark after it would leave two devices each
+    // holding a live copy of one piece of work with an agent starting in it.
+    //
+    // A failure at this one step is the one that has something over there to take
+    // back, and so is being overtaken — the copy this mover landed is a copy
+    // nothing is going to use either way.
+    match store::transfer_made(
         &state.pool,
         conversation_id,
         &store::Transferred {
@@ -641,16 +676,22 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         },
     )
     .await
-    .map_err(|why| Went {
-        saying: format!("this device could not record where the work went: {why:#}"),
-        landed: Some(arrived.id),
-    })?;
+    {
+        Ok(store::Marked::Marked) => {}
 
-    // And the request is spent. After the mark rather than before it, so that
-    // nothing between the two reads this Conversation as one still standing
-    // still with a session to launch.
-    if let Err(error) = store::forget_transfer(&state.pool, conversation_id).await {
-        tracing::error!(error = ?error, conversation_id, "the transfer that has been made could not be forgotten");
+        Ok(store::Marked::Superseded { asked }) => {
+            return Ok(Outcome::StoodDown {
+                landed: arrived.id,
+                asked,
+            });
+        }
+
+        Err(why) => {
+            return Err(Went {
+                saying: format!("this device could not record where the work went: {why:#}"),
+                landed: Some(arrived.id),
+            });
+        }
     }
 
     // What this copy has to say for itself from here, which is where the work
@@ -713,7 +754,39 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         .await;
     }
 
-    Ok(arrived.id)
+    Ok(Outcome::Moved(arrived.id))
+}
+
+/// A move that was overtaken at its own commit point: take back the copy it had
+/// landed, and stand down.
+///
+/// **Nothing is wrong, so nothing is written down about it.** The human pressed
+/// *Transfer to…* again while this move was packing and pushing, which is them
+/// changing their mind about where the work should go — see
+/// [`store::transfer_made`], which is where this mover found out. So the request
+/// is not taken away and the Conversation is not stopped: both belong to the mover
+/// that holds the press, and this one's whole business is the copy it left on a
+/// machine the work is not going to.
+///
+/// Said in the log and nowhere else, which is [`swept`]'s rule and for its reason:
+/// what the human is owed is the Timeline of the move that does happen.
+async fn stood_down(
+    state: &AppState,
+    conversation_id: i64,
+    device: &str,
+    landed: i64,
+    asked: Option<String>,
+) {
+    tracing::info!(
+        conversation_id,
+        superseded = device,
+        asked = asked.as_deref().unwrap_or("nowhere"),
+        there = landed,
+        "the Conversation is going somewhere else now, so this move stood down at its commit \
+         point and the copy it had landed is being taken back",
+    );
+
+    swept(state, device, landed).await;
 }
 
 /// One sentence about a move on the Timeline of the copy it left behind.
