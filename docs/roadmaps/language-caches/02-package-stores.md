@@ -67,5 +67,14 @@ stage starts and then proven by the real install.
 - Check which tools keep more than a store under the directory the variable
   names — configuration, credentials — since a shared one must hold nothing
   that is a session's own.
+- Check which tools hardlink out of their store into the project rather than
+  copying — pnpm, bun and uv all do — and what each does where the store and the
+  Worktree are on different filesystems, which the Build Cache and the Worktrees
+  are free to be. A silent fall-back to copying leaves the store working and the
+  point of it gone, and none of the proofs above can see it: a copy out of the
+  store still fetches nothing. What can see it is the install's own words — uv
+  and pnpm both say when they could not hardlink — or the link count on a file
+  in the project. Stage 01 left the grammar able to take a second placeholder if
+  this is what it needs.
 - Check what the dev shell's nixpkgs carries for each tool and what CI's
   runner image has already.

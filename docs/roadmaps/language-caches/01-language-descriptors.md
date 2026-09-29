@@ -52,7 +52,16 @@ the stage turns on them.
 
 The grammar in the ADR is the shape agreed, not its spelling. Key names, the
 placeholder for the cache directory and how a capability is named are this
-stage's to settle.
+stage's to settle — and, with them, **whether one placeholder is enough**. pnpm,
+bun and uv hardlink packages out of their store into the project rather than
+copying them, and fall back to a full copy where the store and the project are
+on different filesystems. The Build Cache and the Worktrees are free to be: the
+packaged unit gives systemd `CacheDirectory=verkstead` and
+`StateDirectory=verkstead`, two directories a sysadmin mounts separately as a
+matter of course, and `--build-cache-dir` can name a second disk outright. If
+that wants a store beside the Worktrees rather than under the cache, it wants a
+second placeholder, and this is the stage that can still add one. Stage 02 is
+where it is measured.
 
 ## Proposed tasks (provisional)
 
@@ -100,3 +109,6 @@ stage's to settle.
   refused.
 - Check how Windows grants the cache directory: whole, in which case a
   descriptor's subdirectory needs no entry of its own.
+- Check whether the Build Cache and the Worktrees are on one filesystem on this
+  machine, and whether anything already assumes they are — that is what decides
+  whether the grammar needs somewhere other than the cache to point at.
