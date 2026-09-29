@@ -10794,7 +10794,8 @@ async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let first = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
