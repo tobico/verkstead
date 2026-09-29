@@ -4472,10 +4472,14 @@ pub enum TakenUp {
     /// could be pushed to it — the fixes would have nowhere to go.
     Fork,
 
-    /// Another Conversation is already on that pull request, and there is one
-    /// Conversation per piece of work. Which one is the whole of what the
-    /// human needs: the way on is that Conversation rather than a second one
-    /// over the same branch.
+    /// Another Conversation is still at work on that pull request, and there is
+    /// one *open* Conversation per pull request — see ADR-0020. Which one is the
+    /// whole of what the human needs: the way on is that Conversation rather than
+    /// a second one over the same branch.
+    ///
+    /// Only a holder that is still at work. One that has finished with the pull
+    /// request is closed to make way and the take-up carries on, so a Done, Closed
+    /// or Archived Conversation on it is no refusal at all.
     AlreadyHeld {
         /// The Conversation that has it, for the way there.
         conversation: i64,

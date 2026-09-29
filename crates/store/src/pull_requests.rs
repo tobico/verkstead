@@ -1055,23 +1055,35 @@ pub(crate) async fn on_timeline(
         .collect())
 }
 
-/// Which Conversation already has this Repo's pull request on its record, where
-/// one has.
+/// Which Conversation has this Repo's pull request on its record, where one has —
+/// the open one, where one of them is open.
 ///
 /// What a press asks: a take-up names a Repo and a number, and there is one
-/// Conversation per piece of work — so a number another Conversation is already
-/// on is refused leading there rather than taken up a second time over the same
-/// branch.
+/// *open* Conversation per pull request — so a number a Conversation still at
+/// work has is refused leading there, and a finished one's is taken up over the
+/// top of it. Which of those this answer is, is the caller's to decide: what is
+/// asked here is who has it.
 ///
 /// By the Repo and the number together, because that pair is what a pull
 /// request *is* to Verkstead: `#41` names something else in the next repository
 /// along, or nothing at all.
 ///
 /// **Every Conversation**, whatever state it is in — Done and Closed included. A
-/// pull request stays on the record it was written to, so a second wrap-up over
-/// the same branch would be two of them pushing to it whether or not the first
-/// has finished. Which is also why an Archived one counts: archiving is a Closed
-/// Conversation off the sidebar rather than a state of its own.
+/// pull request stays on the record it was written to, so a Done holder is a
+/// Conversation to close rather than a row to overlook, and a Closed one is what
+/// says this pull request has been through here before. Which is also why an
+/// Archived one counts: archiving is a Closed Conversation off the sidebar rather
+/// than a state of its own.
+///
+/// **And the open one where there is one**, which is why this is ordered at all.
+/// A pull request is on several records from the moment a take-up may close its
+/// holder and record it again: the Conversation that had it, and the one that
+/// took it over. Whoever asks who has it — the take-up itself, and the stack note
+/// that names a neighbour's holder — means the one that is still at work, and the
+/// newest where none of them is, that being the one the others are the history
+/// of. Unordered, SQLite answers with whichever row it reaches first, which is
+/// ordinarily the oldest: the Conversation that was closed to make way, offered
+/// as the way on.
 ///
 /// **The pull request a Conversation's work is *on*, rather than every row
 /// recorded beside it.** A wrap-up over a stack records the whole chain so that
@@ -1091,13 +1103,18 @@ pub async fn conversation_on_pull_request(
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT p.conversation_id
          FROM pull_requests p
+         JOIN conversations v ON v.id = p.conversation_id
          WHERE p.repo_id = ? AND p.number = ?
            AND p.event_id = (SELECT MIN(q.event_id) FROM pull_requests q
                              WHERE q.conversation_id = p.conversation_id
-                               AND q.repo_id = p.repo_id)",
+                               AND q.repo_id = p.repo_id)
+         ORDER BY v.state NOT IN (?, ?) DESC, v.id DESC
+         LIMIT 1",
     )
     .bind(repo_id)
     .bind(number)
+    .bind(Lifecycle::Done.stored())
+    .bind(Lifecycle::Closed.stored())
     .fetch_optional(pool)
     .await
     .with_context(|| {

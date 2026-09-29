@@ -2154,12 +2154,23 @@ that branch as the base.
 **A pull request is taken up** by a **Review** or **Fix Merge Issues**
 Conversation at Start, named in the Target field rather than picked off a list —
 the list of every open pull request read off GitHub when the compose page opened
-is gone with the menu level. One a Conversation already holds, Closed included,
-is refused by name and leads to that Conversation instead, the branch being that
-Conversation's — *holds* meaning the pull request that Conversation was pointed
-at or its finish step opened, rather than one it records beside that to watch,
-which is what a stack's neighbours are; one from a fork is refused too, its
-head branch being nowhere origin can be pushed to. Taking it up puts the
+is gone with the menu level. **One open Conversation per pull request**, open
+being neither Done nor Closed: one another Conversation is still at work on is
+refused by name and leads to that Conversation instead, the branch being that
+Conversation's, and one whose Conversation has *finished* with it closes that
+Conversation — by the ordinary Close, so its worktree goes with it, which is what
+frees the branch — and takes the pull request up over the top of it, saying on the
+new Conversation's Timeline whose it was. A holder already Closed or Archived has
+nothing to give up and is passed over. *Holds* means the pull request that
+Conversation was pointed at or its finish step opened, rather than one it records
+beside that to watch, which is what a stack's neighbours are; asked which
+Conversation is on a pull request several have recorded, the answer is the open
+one, and the newest where none is. One from a fork is refused too, its
+head branch being nowhere origin can be pushed to. Every refusal that costs
+nothing comes first, so nothing is closed for a start that was going to be
+refused anyway — and a close is never undone: a take-up refused after one says so
+on the server log, and a **Steer** is the way back into what was closed. Taking
+it up puts the
 Conversation on the pull request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
 one ahead, diverged, not on origin at all or checked out anywhere else is refused
@@ -2184,8 +2195,9 @@ checks for all of them, and the Timeline says what the stack is from the bottom
 and which of it belongs to a Conversation of its own — which it usually does,
 that being what a stacked stage leaves behind. Recorded without being claimed:
 the pull request the Conversation was pointed at is the one it is on, the
-neighbours are watched, and a press pointed straight at one of them is refused
-by the Conversation that took *it* up, exactly as it always was. A lone pull
+neighbours are watched, and a press pointed straight at one of them meets the
+Conversation that took *it* up — refused where it is still at work, and closed
+where it has finished, exactly as a lone pull request's holder is. A lone pull
 request finds a chain of itself, and nothing is said about a stack there is
 none of — but a `gh` that would not answer the question is said, that and a
 lone pull request leaving the same record otherwise and nothing walking a

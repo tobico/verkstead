@@ -1811,6 +1811,70 @@ async fn a_lone_pull_request_is_a_stack_of_one() {
     );
 }
 
+/// And where two Conversations have the same pull request, the one that is asked
+/// for is the open one — the newest where neither of them is open.
+///
+/// Which is what *one open Conversation per pull request* made worth asking. A
+/// take-up over a pull request whose holder has finished closes that holder and
+/// records the pull request again, so from then on it is on two records: the
+/// Conversation that had it and the Conversation that took it over. Whoever asks
+/// who has it means the one still at work — the take-up, which would otherwise
+/// offer a Closed Conversation as the way on, and the stack note that names a
+/// neighbour's holder.
+#[tokio::test]
+async fn the_conversation_a_pull_request_leads_to_is_the_open_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let first = implementing(&pool).await;
+    let own = own(&pool, first).await;
+
+    record_pull_request(&pool, first, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // The first has finished with it and been closed, which is what a take-up
+    // over somebody else's finished work leaves behind.
+    for waiting_on in waiting_on(&pool, first).await {
+        settle_wrap_up(&pool, first, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, first).await.unwrap(), Finished::Done);
+    close_conversation(&pool, first).await.unwrap();
+
+    // And the second took the same pull request up, which is the row that now
+    // matters: it is the one still at work on it.
+    let second = beside_it_in(&pool, own, "stage-01-again").await;
+
+    record_pull_request(&pool, second, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "the open Conversation is the one on it, whatever was recorded first",
+    );
+
+    // And where neither is open, the newest: the one whose close the others are
+    // the history of.
+    for waiting_on in waiting_on(&pool, second).await {
+        settle_wrap_up(&pool, second, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, second).await.unwrap(), Finished::Done);
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "a Done one is still the newest of the two",
+    );
+
+    close_conversation(&pool, second).await.unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "and Closed as well, it is the newest still",
+    );
+}
+
 /// Another Conversation of the same Repo, carried to Implementing the way
 /// [`implementing`] carries the first: a stack in this workbench is a pull
 /// request per Conversation, so the neighbours have Conversations of their own.

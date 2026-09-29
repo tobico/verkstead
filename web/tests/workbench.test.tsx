@@ -7288,10 +7288,10 @@ describe("starting the work", () => {
     },
   );
 
-  /// And the one that carries a conversation leads there: there is one
-  /// conversation per piece of work, so what this refusal offers is the one that
-  /// already has the pull request rather than a second wrap-up over its branch.
-  it("leads to the conversation that already holds the pull request", async () => {
+  /// And the one that carries a conversation leads there: there is one open
+  /// conversation per pull request, so what this refusal offers is the one still
+  /// at work on it rather than a second wrap-up over its branch.
+  it("leads to the conversation still at work on the pull request", async () => {
     theWorkbenchWith(
       { process: "Review" },
       whenever(
@@ -7307,9 +7307,10 @@ describe("starting the work", () => {
     );
 
     const way = await waitFor(() =>
-      screen.getByRole("link", { name: "another conversation's" }),
+      screen.getByRole("link", { name: "Another conversation" }),
     );
     expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(screen.getByText(/still at work on that pull request/)).toBeTruthy();
   });
 
   /// And a conversation that is ready says nothing at all: what the press does

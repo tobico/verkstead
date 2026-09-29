@@ -2498,9 +2498,16 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// answered before anything that costs a call to GitHub or to git. Then GitHub,
 /// which answers what the Target names — a number's pull request, or whichever
 /// one is open on a branch — and with that in hand the record says whether
-/// somebody is already on it: one Conversation per piece of work, so a pull
-/// request another Conversation is on is refused naming it and the refusal leads
-/// there, however the Target named it. Then git.
+/// somebody is already on it. Then git.
+///
+/// **One *open* Conversation per pull request**, open being neither Done nor
+/// Closed — see ADR-0020. So a pull request another Conversation has on its
+/// record is two different things: a Conversation still at work on it refuses
+/// this start and the refusal leads there, and a Conversation that has finished
+/// with it is closed to make way, by the ordinary [`close`], and the take-up
+/// carries on over the top of it. Either way, however the Target named the work.
+/// See [`making_way`] — and [`refused_having_made_way`] for what a refusal
+/// reached over a close that has already happened says.
 ///
 /// **Two roles rather than three, and one where the Process never reviews.** The
 /// work on a pull request is built, so there is no round for a grilling to open
@@ -2614,29 +2621,49 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         },
     };
 
-    // And whether somebody is already on it. There is one Conversation per piece
-    // of work, so a pull request another Conversation has on its record is a
-    // refusal that leads there rather than a second wrap-up over the same
-    // branch. Asked of the record rather than of git, and asked before the fetch:
-    // it is a row, and it is the last thing that costs nothing.
+    // And whether somebody is already on it. There is one *open* Conversation per
+    // pull request, so a pull request another Conversation has on its record is a
+    // refusal where that Conversation is still at work, and a Conversation to
+    // close where it has finished — see [`making_way`], which is where the whole
+    // of that reading is. Asked of the record rather than of git, and asked before
+    // the fetch: it is a row, and it is the last thing that costs nothing.
     //
     // **Asked of a branch too, and that is the whole of why the question above it
     // is asked.** A branch is the other name for the same piece of work — the
     // `submitting` session a branch take-up sends is told by its own skill that a
     // pull request already on the branch *is the job done* — so a branch would
-    // otherwise be the way round this refusal rather than a case it does not
-    // cover. A Conversation that has finished with a pull request and been Closed
-    // has let go of its worktree and kept its branch, so [`settled`] has nothing
-    // to say about the one case that matters most.
+    // otherwise be the way round both readings rather than a case neither covers.
+    //
+    // **And it is the last thing before git for a second reason now.** A Done
+    // holder keeps its Worktree, and git holds one checkout per branch: leaving it
+    // standing would refuse this take-up all over again as
+    // [`TakenUp::CheckedOutElsewhere`], so the close has to be finished before
+    // [`settled`] is asked anything. Which is why everything above this line is
+    // above it — nothing is closed for a start that was going to be refused
+    // anyway, for its Profiles, its Target, a fork or a pull request GitHub has
+    // nothing open under.
+    let mut made_way = None;
+
     if let Some(number) = number
         && let Some(other) =
             store::conversation_on_pull_request(pool, conversation.repo.id, number).await?
         && other != id
     {
-        return Ok(TakenUp::AlreadyHeld {
-            conversation: other,
-        });
+        match making_way(state, other).await? {
+            MadeWay::Closed(branch) => made_way = Some(branch),
+            MadeWay::NothingToGiveUp => {}
+            MadeWay::StillAtWork => {
+                return Ok(TakenUp::AlreadyHeld {
+                    conversation: other,
+                });
+            }
+        }
     }
+
+    // And from here on a refusal is one reached over a close that has already
+    // happened, which is a thing to say rather than a thing to undo — see
+    // [`refused_having_made_way`].
+    let refused = |refusal: TakenUp| refused_having_made_way(refusal, id, made_way.as_deref());
 
     // The branch the work is on: a pull request's head, or the name the field
     // held. Which is what everything below this turns on — the checkout, the
@@ -2704,7 +2731,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
     let (commit, checkouts, making) = match made {
         Ok(made) => made,
-        Err(refusal) => return Ok(refusal),
+        Err(refusal) => return Ok(refused(refusal)),
     };
 
     // And now the store, in the order the record is read in: the branch it is
@@ -2782,8 +2809,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
     match store::take_up(pool, id, &head, base, &path, &checkouts, entering).await? {
         store::Taking::Recorded => {}
-        store::Taking::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
-        store::Taking::NotDrafting => return Ok(TakenUp::NotDrafting),
+        store::Taking::NoSuchConversation => return Ok(refused(TakenUp::NoSuchConversation)),
+        store::Taking::NotDrafting => return Ok(refused(TakenUp::NotDrafting)),
     }
 
     if let Target::PullRequest(held) = &taking {
@@ -2814,8 +2841,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
         match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
             store::Wrapping::Started => {}
-            store::Wrapping::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
-            store::Wrapping::NothingToWrap => return Ok(TakenUp::NotDrafting),
+            store::Wrapping::NoSuchConversation => return Ok(refused(TakenUp::NoSuchConversation)),
+            store::Wrapping::NothingToWrap => return Ok(refused(TakenUp::NotDrafting)),
         }
     }
 
@@ -2831,7 +2858,9 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // directory.
     let stack = crate::stacks::walked(state, id).await;
 
-    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed, stack)).await {
+    let note = taken(&taking, &named, made_way.as_deref(), narrowed, stack);
+
+    if let Err(error) = store::note(pool, id, &note).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
     }
 
@@ -2875,6 +2904,118 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     crate::wrapping::watching(state, id, crate::wrapping::Reviewing::AsFound);
 
     Ok(TakenUp::TakenUp)
+}
+
+/// What became of asking the Conversation that has this pull request to make way.
+///
+/// One open Conversation per pull request, open being neither Done nor Closed —
+/// see ADR-0020. So the holder's state is the whole of what a take-up over
+/// somebody else's pull request turns on, and these are the three answers it can
+/// give.
+enum MadeWay {
+    /// It had finished with it, so it was closed and the take-up carries on. The
+    /// branch it went under, for the Timeline of the Conversation that took over:
+    /// a Conversation is called by its branch once anybody has named one, and
+    /// that is the name it will be found under in the sidebar.
+    Closed(String),
+
+    /// It was Closed already — or Archived, which is a Closed Conversation off
+    /// the sidebar rather than a state of its own. Nothing to give up and nothing
+    /// to do: the take-up carries on and the holder is left exactly as it was.
+    NothingToGiveUp,
+
+    /// It is still at work on it, which is the refusal: two live wrap-ups pushing
+    /// to one branch is what the rule is for, so the way on is that Conversation
+    /// rather than a second one over the same branch.
+    StillAtWork,
+}
+
+/// Ask the Conversation that has this pull request to make way for a take-up.
+///
+/// **By the ordinary Close**, which is [`close`] and nothing written beside it:
+/// the sessions and the terminals ended, the Worktree and the companions' given
+/// back, the record moved, the Sets it left open shut. A second way of closing a
+/// Conversation would be a second thing to keep in step with the first.
+///
+/// **And the Worktree is why the close cannot wait.** A Done Conversation keeps
+/// its checkout — a Follow-up steer picks the work up there — and git holds one
+/// checkout per branch, so a take-up over a branch somebody is still standing on
+/// is refused all over again as [`TakenUp::CheckedOutElsewhere`]. Lifting the
+/// first refusal without the close would have moved the refusal rather than
+/// removed it.
+///
+/// **A holder the record has lost makes way by not being there.** Nothing is
+/// standing on the branch and nothing is offering presses over the pull request,
+/// which is the whole of what the close was for.
+///
+/// **And a holder whose state word will not parse is read as still at work**,
+/// which is [`store::Lifecycle`]'s own reading of a word this Verkstead does not
+/// know: it is not Done, so it is not a Conversation to close. Which is the safe
+/// way round of it — the refusal leads the human to the Conversation, where the
+/// pane's own escape hatch can end it, and closing a record nothing can read on
+/// the strength of a take-up somewhere else would be Verkstead guessing.
+async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
+    let holder = match store::load_conversation(&state.pool, other).await {
+        Ok(Some(holder)) => holder,
+        Ok(None) => return Ok(MadeWay::NothingToGiveUp),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id = other,
+                "the Conversation holding a pull request could not be read, so it is taken as \
+                 still at work on it and the take-up is refused",
+            );
+
+            return Ok(MadeWay::StillAtWork);
+        }
+    };
+
+    match holder.state {
+        store::Lifecycle::Closed => return Ok(MadeWay::NothingToGiveUp),
+        store::Lifecycle::Done => {}
+        _ => return Ok(MadeWay::StillAtWork),
+    }
+
+    match close(state, other).await? {
+        ConversationClosed::Closed | ConversationClosed::AlreadyClosed => {}
+        ConversationClosed::NoSuchConversation => return Ok(MadeWay::NothingToGiveUp),
+    }
+
+    tracing::info!(
+        conversation_id = other,
+        branch = holder.branch,
+        "a Conversation that had finished with a pull request was closed to make way for a \
+         take-up of it",
+    );
+
+    Ok(MadeWay::Closed(holder.branch))
+}
+
+/// Say on the log that a take-up was refused after it had already closed the
+/// Conversation that held the pull request, and hand the refusal back.
+///
+/// Nothing is undone. A close is sessions ended and directories given back, so
+/// there is nothing to put back, and the way back into a Closed Conversation
+/// exists already: a Steer brings one into whichever state the work is in — see
+/// ADR-0020. What is owed is the *saying*, because the human pressed Start on one
+/// Conversation and a different one moved.
+///
+/// Only where something was closed. Every other refusal is what it has always
+/// been, and a log line about a close that never happened would be a log line
+/// about nothing.
+fn refused_having_made_way(refusal: TakenUp, id: i64, made_way: Option<&str>) -> TakenUp {
+    if let Some(branch) = made_way {
+        tracing::warn!(
+            conversation_id = id,
+            closed = branch,
+            refusal = ?refusal,
+            "a take-up was refused after the Conversation that held its pull request had been \
+             closed to make way for it, so that Conversation stays Closed — a Steer is the way \
+             back into it",
+        );
+    }
+
+    refusal
 }
 
 /// What a **Review**'s Target turned out to name.
@@ -3226,7 +3367,22 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// for the same reason turned around — a wrap-up over one pull request of a
 /// stack nobody knows the size of is as unreadable as the other way. `None` is a
 /// lone pull request, which is every take-up there was before there were stacks.
-fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) -> String {
+///
+/// **And what this take-up closed to get here, where it closed something.**
+/// `made_way` is the branch of the Conversation that had this pull request and had
+/// finished with it — see [`making_way`] — and it is named by its branch for the
+/// reason the stack note names a neighbour's holder by one: that is what a
+/// Conversation is called once anybody has named one. Worth saying because the
+/// human pressed Start on this Conversation and a different one moved, and this
+/// Timeline is the one they are looking at when it did. `None` is every take-up
+/// over a pull request nobody had, which is most of them.
+fn taken(
+    taking: &Target,
+    named: &str,
+    made_way: Option<&str>,
+    narrowed: bool,
+    stack: Option<String>,
+) -> String {
     let taken = match taking {
         Target::PullRequest(held) => format!(
             "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
@@ -3239,6 +3395,15 @@ fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) ->
              being opened against `{named}` before the wrap-up reads it. What this Timeline records \
              starts at that branch's head — the commits already on it are the work's own.",
         ),
+    };
+
+    let taken = match made_way {
+        Some(branch) => format!(
+            "{taken} The Conversation on `{branch}` had finished with this pull request, so it was \
+             closed to make way: there is one open Conversation per pull request, and a Steer is \
+             the way back into it.",
+        ),
+        None => taken,
     };
 
     let taken = match stack {

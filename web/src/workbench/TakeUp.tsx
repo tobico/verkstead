@@ -9,8 +9,9 @@
 //! them to the draft it made.
 //!
 //! One of them has a way out of itself inside it — a pull request another
-//! Conversation is already on — so there are two readings here: the sentence, and
-//! the sentence with the link. See [`takeUpRefusal`] and [`TakeUpRefusal`].
+//! Conversation is still at work on — so there are two readings here: the
+//! sentence, and the sentence with the link. See [`takeUpRefusal`] and
+//! [`TakeUpRefusal`].
 
 import { A } from "@solidjs/router";
 import { Show, type JSX } from "solid-js";
@@ -95,7 +96,7 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("AlreadyHeld" in outcome) {
-      return "That pull request is already another conversation's, and there is one conversation per piece of work.";
+      return "Another conversation is still at work on that pull request, so the way on is that conversation rather than a second one over the same branch.";
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;
@@ -107,10 +108,14 @@ export function takeUpRefusal(outcome: TakenUp): string {
 /// The same, as the line a composer draws under its press — which is the one
 /// place a refusal has room for a way out of itself.
 ///
-/// The pull request another conversation holds is what that is for: there is
-/// one conversation per piece of work, so what this refusal offers is the one
-/// that has it rather than a second wrap-up over the same branch. Every other
-/// refusal is the sentence and nothing else.
+/// The pull request another conversation is still at work on is what that is
+/// for: there is one open conversation per pull request, so what this refusal
+/// offers is the one that has it rather than a second wrap-up over the same
+/// branch. Every other refusal is the sentence and nothing else.
+///
+/// A conversation that has *finished* with the pull request is never this: the
+/// start closes it and takes the pull request up, so there is nothing to refuse
+/// and nothing to draw.
 export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
   const held = (): number | null =>
     typeof props.outcome === "object" && "AlreadyHeld" in props.outcome
@@ -121,9 +126,9 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
     <Show when={held()} fallback={takeUpRefusal(props.outcome)}>
       {(conversation) => (
         <>
-          That pull request is already{" "}
-          <A href={pathOf(conversation())}>another conversation's</A>, and there
-          is one conversation per piece of work.
+          <A href={pathOf(conversation())}>Another conversation</A> is still at
+          work on that pull request, so the way on is that conversation rather
+          than a second one over the same branch.
         </>
       )}
     </Show>

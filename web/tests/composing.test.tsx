@@ -1220,6 +1220,49 @@ describe("the target a compose page is pointed at", () => {
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
   });
 
+  /// And a refused take-up is carried to the draft the page made, in the plain
+  /// sentence — which is the other drawing of the one refusal that has two.
+  ///
+  /// The conversation still at work on the pull request is that one. The
+  /// composer's own line offers it as a link; here there is nowhere for a link to
+  /// go, so what the draft carries is the sentence, and it says the same thing:
+  /// one open conversation per pull request, and the way on is the one that has
+  /// it.
+  it("says on the draft it made that another conversation is still at work", async () => {
+    composedAsReview({ brief: "Wrap the limiter up.", target: "#41" });
+    creating(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({ AlreadyHeld: { conversation: 77 } } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /The pull request could not be taken up: Another conversation is still at work on that pull request/,
+        ),
+      ).toBeTruthy(),
+    );
+  });
+
   /// And a **Fix Merge Issues** page is the same press over the same field: it
   /// waits on a brief, a target and the one role its table names, and the
   /// kickoff behind it is the take-up rather than a grill start.
