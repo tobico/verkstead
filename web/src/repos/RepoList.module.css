@@ -278,6 +278,12 @@
   gap: 0.45rem;
   margin-top: 0.85rem;
   font-size: 0.9rem;
+
+  /* A row to press rather than words to sweep a caret over — see `rowPress` in
+     `src/rows.ts`, and `.check` in `Check.module.css` for the same two lines on
+     the control this row is one of. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .form .github input {

@@ -22,6 +22,15 @@ import { Check } from "../src/Check";
 import { Switch } from "../src/Switch";
 import { slidPress } from "./sliding";
 
+/// Every component under `src/`, as its source — for the sweep at the foot of
+/// this file, which is about which rows carry the handler rather than about what
+/// any of them draws.
+const COMPONENTS = import.meta.glob("../src/**/*.tsx", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
 /// One row, drawn as whichever of the two components is asked for, counting what
 /// its presses come to.
 ///
@@ -122,3 +131,69 @@ for (const [name, as] of [
     });
   });
 }
+
+/// And every row in the app that wraps a control is one of these, whether or not
+/// anybody thought of it while reading this file.
+///
+/// The sweep is here because the mistake is one of omission: the arrangement is
+/// invisible in the markup — a `<label>` round a control looks pressable whether
+/// or not anything answers the press — and the browser withholds the forwarding
+/// it used to ride on only when a hand slides, which nothing in a test
+/// environment does. So the next row written the old way would be a row that
+/// looks right, reads right, passes everything, and quietly does nothing for a
+/// press that was not perfectly still. Eleven of them were, and four of those
+/// were missed on a first reading of the same grep this does properly.
+///
+/// Read off the source rather than off a rendering, because what is being asked
+/// is about every row there is and not about the handful a test happens to mount.
+describe("every row in the app that wraps a control", () => {
+  /// One `<label>` that has a checkbox or a radio inside it, which is what makes
+  /// it a row rather than a field's name: its attributes, and the markup it
+  /// wraps. Labels do not nest, so the shallow match is the whole of it.
+  const ROWS = /<label\b([^>]*)>([\s\S]*?)<\/label>/g;
+
+  /// The comments out, as `hovering.test.ts` takes them out of a stylesheet and
+  /// for exactly its reason: the prose about this arrangement mentions `<label`
+  /// rather more often than the markup does, and one of those sentences was
+  /// read as a row with the handler missing.
+  const bare = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "");
+
+  /// A control that can never be pressed, which is a record of a tick rather
+  /// than a tick — `disabled` written bare, with no expression behind it to
+  /// change its mind. The browser refuses one whatever a label forwards it, so
+  /// there is no press for a row to answer and nothing for it to carry.
+  const NEVER = /\bdisabled\s*(?=\/?>|\s[a-zA-Z{])/;
+
+  const wrapping = Object.entries(COMPONENTS).flatMap(([file, whole]) => {
+    const source = bare(whole);
+
+    return [...source.matchAll(ROWS)]
+      .filter((row) => /type="(checkbox|radio)"/.test(row[2]!))
+      .map((row) => ({
+        where: `${file.replace("../src/", "")}:${
+          source.slice(0, row.index).split("\n").length
+        }`,
+        pressed: /onClick=\{rowPress\(/.test(row[1]!),
+        never: NEVER.test(row[2]!),
+      }));
+  });
+
+  it("finds them, so a sweep that found none cannot pass", () => {
+    expect(wrapping.length).toBeGreaterThan(10);
+  });
+
+  it("answers its own press, or is a tick nobody can press", () => {
+    expect(
+      wrapping
+        .filter((row) => !row.pressed && !row.never)
+        .map((row) => row.where),
+      "each of these wraps a control and leaves the press to the click a label " +
+        "forwards — which a browser withholds as soon as the pointer moves. " +
+        "Hang `rowPress` on the label, and give the row `cursor: pointer` and " +
+        "`user-select: none`",
+    ).toEqual([]);
+  });
+});

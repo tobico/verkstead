@@ -96,6 +96,13 @@
 
 /* The digest, which is a choice about the same round: kept in the brief's own
    block rather than set apart, and drawn as the interrupt's checkbox is. */
+/* And the one tick under the brief, pressed as a row like the rest — see
+   `.steerTarget label`. */
+.steerDigest {
+  cursor: pointer;
+  user-select: none;
+}
+
 .steerBrief .steerDigest {
   display: flex;
   gap: 0.5rem;
@@ -189,6 +196,11 @@
   margin-left: auto;
   font-weight: 600;
   color: var(--ink);
+
+  /* A row to press, so it says so and takes no selection — see `.steerTarget
+     label` above, which is the same two lines about the same gesture. */
+  cursor: pointer;
+  user-select: none;
 }
 
 /* And the branch it opens into, which takes the whole width under the line
@@ -233,6 +245,10 @@
   gap: 0.5rem;
   align-items: baseline;
   font-weight: 600;
+
+  /* A row to press, as every row on this form is — see `.steerTarget label`. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .steerAddConfig {
