@@ -49,13 +49,23 @@
 /// **A control that will not take a press takes none from the row either.** The
 /// browser refuses a disabled control whatever a label forwards it, and a row
 /// that answered for itself would otherwise be a way round the refusal.
+///
+/// **And the row stands out of a press that landed on something interactive
+/// inside it** — see [`interactive`]. Cancelling the forwarding cancels every
+/// other default the press carried with it, and a link in an Option's words is
+/// one of those: the whole of what the row does is skipped there, so the link
+/// opens the way it always did.
 export function rowPress(
   act: () => void,
 ): (event: MouseEvent & { currentTarget: HTMLElement }) => void {
   return (event) => {
     const control = event.currentTarget.querySelector("input");
 
-    if (event.target === control || control?.disabled) {
+    if (
+      event.target === control ||
+      control?.disabled ||
+      interactive(event.target, event.currentTarget)
+    ) {
       return;
     }
 
@@ -64,3 +74,52 @@ export function rowPress(
     act();
   };
 }
+
+/// Whether the press landed on something inside the row that answers a press of
+/// its own — a link above all: an Option's words are the agent's markdown, and a
+/// link is one of the marks the server keeps in it.
+///
+/// This is the browser's own rule about a `<label>`, which forwards nothing for
+/// a press on interactive content inside it, or on anything inside that. So a
+/// link in a row worked before the row began answering its own click, and
+/// skipping the whole handler is what keeps it working — standing out of one
+/// cannot count a gesture twice, there being no forwarded click to cancel.
+///
+/// The row itself is never asked: a `<label>` is interactive content, and a row
+/// that ruled itself out would answer nothing at all.
+function interactive(landed: EventTarget | null, row: HTMLElement): boolean {
+  for (
+    let element = landed instanceof Element ? landed : null;
+    element !== null && element !== row;
+    element = element.parentElement
+  ) {
+    if (element.matches(INTERACTIVE)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/// The interactive content of the HTML standard, as a selector: the elements a
+/// `<label>` refuses to forward a press from.
+///
+/// Written out whole rather than trimmed to what the rows hold today, because
+/// what a row holds is the caller's and the next one may hold any of it. An `a`
+/// or an `area` with no `href` is not interactive and is not here, which is the
+/// standard's own line.
+const INTERACTIVE = [
+  "a[href]",
+  "area[href]",
+  "audio[controls]",
+  "button",
+  "details",
+  "embed",
+  "iframe",
+  "img[usemap]",
+  "input",
+  "label",
+  "select",
+  "textarea",
+  "video[controls]",
+].join(", ");

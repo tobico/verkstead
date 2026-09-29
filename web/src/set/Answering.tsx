@@ -794,8 +794,8 @@ function Tabulated(props: {
 /// list's down to the handler they go through: a press anywhere in the row
 /// selects or clears, a press on the radio is the radio's own, and an arrow key
 /// only moves. See [`rowPress`], which is what makes the two shapes one
-/// arrangement — here it forwards nothing and cancels nothing, there being no
-/// label, and what it is here for is the focus.
+/// arrangement — here there is no label and so no forwarding to cancel, and
+/// what it is here for is the focus and the link it stands out of.
 function Row(props: {
   option: OptionView;
   group: string;

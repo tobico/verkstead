@@ -31,6 +31,7 @@ import {
   sent,
   texts,
   withHeading,
+  withLink,
   withPostscript,
   withTable,
 } from "./reading";
@@ -331,6 +332,24 @@ describe("selecting an Option", () => {
     expect(document.activeElement).toBe(option(page, "Q1", 2));
   });
 
+  it("leaves a link in the Option's words to open, and selects nothing", async () => {
+    const { page } = await answering(withLink(WAITING));
+
+    // An Option's words are the agent's markdown and the server keeps a link in
+    // them, so a row that cancelled every default a press carried would leave
+    // the human a link that could only select the Option it is written in.
+    // A `<label>` never forwarded a press from a link either — see `rowPress`.
+    const opened = pressing(
+      page.querySelector(`.${sheet.optionText} a[href]`)!,
+    );
+
+    expect(opened, "the link still opens").toBe(true);
+    expect(
+      option(page, "Q1", 1).checked,
+      "and the Option under it is not what was pressed",
+    ).toBe(false);
+  });
+
   it("selects the one clicked, and moves with a second click", async () => {
     const { page } = await answering(WAITING);
 
@@ -400,6 +419,16 @@ describe("the rows a Set is answered by", () => {
     ).not.toContain("user-select");
   });
 });
+
+/// A press on `on`, and whether anything was left of its default afterwards.
+///
+/// Which is the whole of what a link needs to open, and the one thing a test
+/// environment that navigates nowhere can ask about it.
+function pressing(on: Element): boolean {
+  const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+  on.dispatchEvent(click);
+  return !click.defaultPrevented;
+}
 
 /// A press on an Option's words that slid before it was let go — see
 /// [`slidPress`](./sliding.ts), which says what is staged and why.
@@ -550,6 +579,23 @@ describe("a question whose Options were declared as a table", () => {
     fireEvent.click(row(page, "Q1", 2).querySelector("td:nth-child(2)")!);
 
     expect(document.activeElement).toBe(option(page, "Q1", 2));
+  });
+
+  it("leaves a link in a cell to open, and selects nothing", async () => {
+    const { page } = await answering(withTable(withLink(WAITING)));
+
+    // The row has no label to forward anything, but it cancels a press all the
+    // same — so the link it holds needs standing out of for the same reason the
+    // list's does. A cell is the agent's inline HTML like an Option's words.
+    const opened = pressing(
+      row(page, "Q1", 1).querySelector(`.${sheet.optionText} a[href]`)!,
+    );
+
+    expect(opened, "the link still opens").toBe(true);
+    expect(
+      option(page, "Q1", 1).checked,
+      "and the row under it is not what was pressed",
+    ).toBe(false);
   });
 
   it("moves the selection on an arrow key without ever clearing it", async () => {

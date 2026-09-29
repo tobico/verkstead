@@ -19,6 +19,7 @@ import { fireEvent, render } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 
 import { Check } from "../src/Check";
+import { rowPress } from "../src/rows";
 import { Switch } from "../src/Switch";
 import { slidPress } from "./sliding";
 
@@ -131,6 +132,72 @@ for (const [name, as] of [
     });
   });
 }
+
+/// What the row does *not* answer: a press that landed on something inside it
+/// with a press of its own to answer.
+///
+/// A `<label>` forwards nothing from interactive content, so a link inside a row
+/// opened and picked nothing long before the row answered its own click. What
+/// would take that away is not the answering but the cancelling: the row cancels
+/// the forwarding, and a blanket cancel takes the link's own default with it.
+///
+/// Asked of the handler rather than of a component, because no row in the app
+/// draws a link today and the one that will is a Question Set's Options — the
+/// agent's markdown, which the server renders links in on purpose. `answering`'s
+/// suite asks it of that row; this asks it of the arrangement.
+describe("a press that landed on interactive content inside the row", () => {
+  /// A row holding whatever markup is handed to it, and a count of what its
+  /// presses came to.
+  function around(inside: string) {
+    const acted: number[] = [];
+    const { container } = render(() => (
+      <label onClick={rowPress(() => acted.push(1))}>
+        <input type="checkbox" />
+        <span innerHTML={inside} />
+      </label>
+    ));
+
+    return { container, acted: () => acted.length };
+  }
+
+  /// A press, and whether anything was left of its default — which is the whole
+  /// of what a link needs to open, and the one thing a test environment with no
+  /// navigation of its own can ask about.
+  function press(on: Element): boolean {
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    on.dispatchEvent(click);
+    return !click.defaultPrevented;
+  }
+
+  it("leaves a link in the row to open, and picks nothing", () => {
+    const { container, acted } = around(
+      'see <a href="https://example.com/pr">the pull request</a>',
+    );
+
+    expect(press(container.querySelector("a")!), "the link still opens").toBe(
+      true,
+    );
+    expect(acted(), "and the row is not what was pressed").toBe(0);
+  });
+
+  it("answers a press on the words beside that link as it always did", () => {
+    const { container, acted } = around(
+      'see <a href="https://example.com/pr">the pull request</a>',
+    );
+
+    expect(press(container.querySelector("span")!)).toBe(false);
+    expect(acted()).toBe(1);
+  });
+
+  it("leaves an anchor that goes nowhere to the row, as the standard does", () => {
+    const { container, acted } = around("an <a>anchor</a> with no href");
+
+    // Interactive content is an `a` *with* an `href`. One without is a name for
+    // a place on the page, and a row holding one is a row like any other.
+    expect(press(container.querySelector("a")!)).toBe(false);
+    expect(acted()).toBe(1);
+  });
+});
 
 /// And every row in the app that wraps a control is one of these, whether or not
 /// anybody thought of it while reading this file.
