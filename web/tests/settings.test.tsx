@@ -480,6 +480,7 @@ describe("saving", () => {
         // The rules ride along as an action rather than a value: nothing this
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
+        mcp_servers: "Keep",
         // The build cache rides along as it stands, because the endpoint
         // writes the whole of `config.yaml` and this form only means to
         // change the author.
@@ -509,6 +510,7 @@ describe("saving", () => {
       },
       verified: null,
       refused: [],
+      refused_servers: [],
     };
     theSettings(TOLD, json(rewritten));
     const { container } = mountBoth();
@@ -591,6 +593,7 @@ describe("saving", () => {
       settings: SAVED.settings,
       verified: { Account: { login: "ada", missing: ["gist"] } },
       refused: [],
+      refused_servers: [],
     };
     theSettings(UNSET, json(unscoped));
     const { container } = mountPane();
@@ -634,6 +637,7 @@ describe("saving", () => {
       settings: SAVED.settings,
       verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
       refused: [],
+      refused_servers: [],
     };
     theSettings(UNSET, json(unverified));
     mountPane();
@@ -725,10 +729,12 @@ describe("replacing and clearing the token", () => {
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
+        mcp_servers: TOLD.mcp_servers,
         instructions: TOLD.instructions,
       },
       verified: null,
       refused: [],
+      refused_servers: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
     const { container } = mountBoth();
@@ -743,6 +749,7 @@ describe("replacing and clearing the token", () => {
         // The rules ride along as an action rather than a value: nothing this
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
+        mcp_servers: "Keep",
         rust_build_cache: {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
@@ -801,7 +808,7 @@ describe("the ignore rules", () => {
   /// What the save was answered with where it was turned down: neither file
   /// touched, so the settings are how they stood, and one row named.
   function turnedDown(...refused: SettingsSaved["refused"]): SettingsSaved {
-    return { settings: TOLD, verified: null, refused };
+    return { settings: TOLD, verified: null, refused, refused_servers: [] };
   }
 
   const RULE = TOLD.ignored_comments[0]!;
@@ -1070,6 +1077,7 @@ describe("the ignore rules", () => {
       },
       verified: null,
       refused: [],
+      refused_servers: [],
     };
     theSettings(TOLD, json(written));
     mountPane();
@@ -1090,6 +1098,7 @@ const answering = (standing: SettingsView): SettingsSaved => ({
   settings: standing,
   verified: null,
   refused: [],
+  refused_servers: [],
 });
 
 /// The checkbox beside the token: whether Done shares the record to the pull
@@ -1135,6 +1144,7 @@ describe("sharing on Done", () => {
         // The rules ride along as an action rather than a value: a tick says
         // nothing about them — see [`ruleEdit`].
         ignored_comments: "Keep",
+        mcp_servers: "Keep",
         // And everything else in the file as it stands, because one request
         // writes the whole of it — the resolution the select beside it owns
         // included.
@@ -1255,6 +1265,7 @@ describe("how a conflict is resolved", () => {
         git_author: TOLD.git_author,
         github_token: "Keep",
         ignored_comments: "Keep",
+        mcp_servers: "Keep",
         conflict_resolution: "Merge",
         // And everything else in the file as it stands, the checkbox below it
         // included.

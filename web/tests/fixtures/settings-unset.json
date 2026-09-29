@@ -19,6 +19,7 @@
   "github_token": null,
   "ignored_comments": [],
   "instructions": "",
+  "mcp_servers": [],
   "paths": {
     "binds": []
   },

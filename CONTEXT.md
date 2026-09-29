@@ -399,6 +399,53 @@ in the Worktree is the repository's and is read as it always was, with this one
 above it the way the human's global file used to be.
 _Avoid_: global CLAUDE.md, system prompt, preamble, rules
 
+**MCP server**:
+A tool server an agent may call, **declared** once for the installation on the
+settings page and **attached** to a Conversation from the Attach button where
+its Brief is written. The one deliberate way an MCP server reaches a session at
+all: a **Built Root** has the account's own taken out for every harness, so a
+session has none until a Conversation asks for one — see
+[ADR-0021](docs/adr/0021-declared-mcp-servers.md), which amends ADR-0011 for
+this and records what the grilling turned down.
+**A declaration is a name, a URL and headers, spoken to over HTTP.** There is no
+command, no arguments and no transport to choose: a stdio server is a child
+process the agent starts inside its own sandbox, which is a hole in the sandbox
+rather than a setting. The headers are static values typed once — no OAuth,
+there being no browser at three in the morning — and they are **secrets**:
+written where a secret is written, never read back to the page, and readable by
+Verkstead because a session has to be handed them.
+**The name is the identity**, so it is lowercase letters, digits and hyphens and
+unique among the declarations, and it is what the agent sees in front of the
+server's tool names. A name that is neither is refused as it is typed, naming
+the field at fault. **A server is never renamed**: everything that refers to one
+refers to it by that name, so the settings page offers a name on a new
+declaration alone and changing one is deleting it and declaring another. The URL
+and the headers are edited.
+**Kept in `config.yaml`** beside the git author and the **Instructions** — a
+thing Verkstead is *told* rather than one it finds — and read at the moment a
+session is launched, so a corrected URL fixes every Conversation that attached
+that server. An absent key, an empty one and one nothing can parse are the same
+no servers, and an entry missing either half is dropped as the file is read. The
+section saves as an action rather than a value, the way the **Ignore rule**s do
+and for the same reason: it is one of the two things on that page a save can be
+*refused* over, so a section that is not about the declarations says nothing
+about them and cannot be turned down by one.
+**What a Conversation holds is the name**, drawn as a chip beside the attached
+files. A reference rather than a copy, read afresh at each launch, and it
+freezes when the Brief does — attached and removed while the round drafts, fixed
+once the work starts, and a read-only row afterwards, exactly as an
+**Attachment** is.
+**Every session of the Conversation** is launched with it, whichever of the four
+harnesses runs it and whichever role the session is in, and **all of a server's
+tools are allowed** — the decision to trust one was made when it was attached,
+and a per-tool list is one that goes stale the first time the server adds a
+tool.
+**An unreachable server never holds a launch**: the session starts, and what the
+harness makes of a server that will not answer is said inside it. A declaration
+is tried once on save, while the human is looking at the page, and that is a
+report rather than a refusal.
+_Avoid_: tool server, integration, plugin, extension, connector
+
 **Build Cache**:
 One directory of Verkstead's own that every Sandbox gets writable, so a Rust
 dependency is downloaded and compiled once for the machine rather than once per
@@ -1096,20 +1143,22 @@ _Avoid_: description, prompt, spec, issue body
 
 **Attachment**:
 A file the human put on a Conversation for its sessions to read: dropped onto
-the composer's box or picked through the paperclip beside its presses, drawn as
-a pill under the Brief text with a remove press on it, and copied into a
-directory of the Conversation's own under the Data Directory —
-`attachments/<id>/`, beside the handoff directories. Every session of the
-Conversation gets that directory **read-only** at `/verkstead/attachments`
-(the Conversation's own subdirectory, where `/verkstead` is the Data Directory
-itself), and its prompt ends with a neutral `# Attached files` listing of each
-file's path and size, in the tone of the companions listing: what is there and
-where, and nothing about what to do with it, because the Brief says what a
-file is for. **The listing is grouped under what each file was attached to** —
-the Brief's under one line, and an Answer's under the title of the Set it was
-put on and the label of the Question it answers — in the order they were
-attached, which puts the Brief's group first. The copy is the record, and an
-agent that wants to work on one copies it into the Worktree.
+the composer's box or picked through the Attach control beside its presses —
+which is a menu whose first entry is *Attach file* and whose others are the
+declared **MCP server**s — drawn as a pill under the Brief text with a remove
+press on it, and copied into a directory of the Conversation's own under the
+Data Directory — `attachments/<id>/`, beside the handoff directories. Every
+session of the Conversation gets that directory **read-only** at
+`/verkstead/attachments` (the Conversation's own subdirectory, where
+`/verkstead` is the Data Directory itself), and its prompt ends with a neutral
+`# Attached files` listing of each file's path and size, in the tone of the
+companions listing: what is there and where, and nothing about what to do with
+it, because the Brief says what a file is for. **The listing is grouped under
+what each file was attached to** — the Brief's under one line, and an Answer's
+under the title of the Set it was put on and the label of the Question it
+answers — in the order they were attached, which puts the Brief's group first.
+The copy is the record, and an agent that wants to work on one copies it into
+the Worktree.
 **The directory is there at every launch, made empty where nothing has been
 attached**, because a session blocked on an ask goes on running while the human
 answers it: a file put on an Answer an hour in lands in a directory that
@@ -1175,7 +1224,10 @@ and a startup sweep removes any directory under the attachments root that no
 Conversation in the record names — every candidate read out of that one
 directory, and nothing else ever a candidate.
 _Avoid_: upload, asset, resource, file (the thing attached is a file; the
-attaching is what this names)
+attaching is what this names). **An attached MCP server is not an Attachment**:
+it shares the control and it is drawn as a chip beside these pills, but what it
+is, is a reference by name to something declared in the settings rather than
+bytes copied into the Conversation's directory — see **MCP server**.
 
 **Timeline**:
 A Conversation's ordered record of what has happened to it, and the middle pane
@@ -1775,7 +1827,12 @@ Grok Build's `config.toml` holds `model`, `model_providers`, `auth_provider`,
 `endpoints`. OpenCode's `opencode.json`, the only file in its config
 directory, holds `provider`, read from `opencode.json` or `opencode.jsonc`.
 Nothing else of the account's configuration goes in: no hooks, plugins,
-permissions, rules or MCP servers. It is not written back.
+permissions, rules or MCP servers. It is not written back. **An MCP server the
+Conversation attached does go in**, and is the one thing a root holds that is
+neither the account's nor found: it is declared in `config.yaml` and written the
+way the configuration file is — see **MCP server**. A Conversation that attached
+none leaves the root with no MCP server at all, which is every root there was
+before there was such a declaration.
 **The settings page's Instructions text, written as the file that harness
 reads** for its global instructions: `CLAUDE.md` in a Claude root,
 `AGENTS.md` in a Codex or a Grok Build one, and `AGENTS.md` in OpenCode's
@@ -1786,11 +1843,12 @@ nothing of it written back. The account's own such file is left out with the
 rest of how the human works, and this stands in its place; a text nobody has
 typed is no file at all. See **Instructions**.
 Beside a Claude root, in the profile, `.claude.json` is a **copy** of the
-account's. The copy has the account's MCP servers taken out, and the Repo and
-the Worktree seeded as trusted. Codex's trust is said on its launch line
-instead. Everything else of an account is absent: plugins, commands, agents,
-skills, rules, the account's own global instructions file, history, databases
-outside the store, and whatever a harness adds next.
+account's. The copy has the account's MCP servers taken out — a declared one the
+Conversation attached is Verkstead's to write and goes in beside it rather than
+into it — and the Repo and the Worktree seeded as trusted. Codex's trust is said
+on its launch line instead. Everything else of an account is absent: plugins,
+commands, agents, skills, rules, the account's own global instructions file,
+history, databases outside the store, and whatever a harness adds next.
 **What a session changed is carried back as it ends**, on all three platforms.
 A login the session replaced, rather than wrote through, is written back over
 the account's own; one still the same file as the account's is left alone; and

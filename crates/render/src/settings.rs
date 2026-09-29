@@ -61,6 +61,24 @@
 //! somebody hand-edited into the file weeks ago. What comes back names the row
 //! and the box, because that is what the page has to draw the error at.
 //!
+//! And the MCP servers are the ignore rules' shape a second time, for the same
+//! reason: a name and a URL each, and the one other thing on this page a save
+//! can be *refused* over — a name that is not lowercase letters, digits and
+//! hyphens, or one another declaration already has, is a name nothing could
+//! refer to a server by. So they travel as an action too, and what comes back
+//! names the row and the box the error is drawn at.
+//!
+//! What is different is which way a refusal points. A rule that will not compile
+//! silences nothing while reading as though it silenced something; a name that
+//! is taken would leave a Conversation's chip pointing at either of two servers.
+//! Both are worth turning a save down over, and neither is something a section
+//! that is not about them should be able to be turned down by.
+//!
+//! **A declaration is never renamed here.** The name is what everything that
+//! refers to a server refers to it by, so what travels back is the list as it is
+//! to stand and the page offers a name field on a new row alone — renaming one
+//! is deleting it and declaring another.
+//!
 //! And the instructions are one text, both ways, and nothing else: the words
 //! every session is given whatever harness runs it, in place of the global
 //! `CLAUDE.md` a Built Root does not carry. A value like the binds — what is
@@ -120,6 +138,16 @@ pub struct SettingsView {
     /// included: this is what the editor draws back into its rows, and a rule
     /// quietly left out of the read would be one the human could not correct.
     pub ignored_comments: Vec<IgnoreRule>,
+
+    /// And the MCP servers declared for this installation, in the order they
+    /// were written down — empty on a Verkstead nobody has declared any on,
+    /// which is a Conversation with nothing to attach.
+    ///
+    /// Exactly as the file holds them, a name the page would have refused
+    /// included: this is what the section draws back into its rows, and a
+    /// declaration quietly left out of the read would be one the human could
+    /// neither use nor correct.
+    pub mcp_servers: Vec<McpServer>,
 
     /// And the one text every session is given, whatever harness runs it —
     /// empty on a Verkstead nobody has typed one into, which is a session told
@@ -430,6 +458,17 @@ pub struct SettingsEdit {
     /// left exactly where they are.
     pub ignored_comments: IgnoredCommentsEdit,
 
+    /// And what is to become of the declared MCP servers, which is an action for
+    /// the reason the rules above it are one: they are the other thing here a
+    /// save can be refused over, and a section that rode them along as values
+    /// could have its own save turned down by a name somebody hand-edited into
+    /// the file weeks ago.
+    ///
+    /// The whole list where it is sent, in the order it is to be read back in:
+    /// a row taken off the page is a declaration taken out of the file, and a
+    /// row whose URL was rewritten is that declaration with the new one.
+    pub mcp_servers: McpServersEdit,
+
     /// And the text every session is given, as a value again — the plainest one
     /// here. What is sent is what `config.yaml` holds afterwards, so a box
     /// cleared on the page is the key taken out of the file.
@@ -503,6 +542,17 @@ pub struct SettingsSaved {
     /// with it — draw the errors at the rows and leave what the human typed
     /// where it is.
     pub refused: Vec<RuleRefused>,
+
+    /// And the declarations that would not be written down, or empty where the
+    /// save landed — which is every save that did not send any.
+    ///
+    /// Its own list rather than the one above, because the two name different
+    /// things: a rule is refused by where it stood among the rules, and a
+    /// declaration by where it stood among the declarations. A save turned down
+    /// over either is the whole request refused and neither file touched, so
+    /// what this says and what `refused` says are both drawn over what the human
+    /// still has in front of them.
+    pub refused_servers: Vec<ServerRefused>,
 }
 
 /// One class of comment nobody wants an agent addressing.
@@ -542,6 +592,79 @@ pub enum IgnoredCommentsEdit {
     /// it is to be read back in, so a row taken off the page is a rule taken
     /// out of the file. An empty list is the human having removed the last one.
     Set { rules: Vec<IgnoreRule> },
+}
+
+/// One MCP server declared for this installation: a name, and the URL it is
+/// reached at.
+///
+/// The same shape both ways, the way [`IgnoreRule`] is: what the page draws back
+/// into its rows is what a save sends, and two shapes for one declaration would
+/// be two accounts of what one is.
+///
+/// **The name is the identity** — lowercase letters, digits and hyphens, unique
+/// among the declarations, and never changed. It is what a Conversation's chip
+/// refers to and what the agent sees in front of the server's tool names, so a
+/// renamed declaration would be one every chip pointing at it had lost.
+///
+/// **HTTP only.** There is no command, no arguments and no transport to choose:
+/// a stdio server is a child process an agent starts inside its own sandbox, and
+/// it was turned down in the grilling this was settled in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct McpServer {
+    pub name: String,
+    pub url: String,
+}
+
+/// What is to become of the declared MCP servers on a save.
+///
+/// An action for the reason [`IgnoredCommentsEdit`] is one: they are the other
+/// thing on this page a save can be refused over, so a section that is not about
+/// them says nothing about them and cannot be turned down by one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum McpServersEdit {
+    /// Leave whatever is declared alone. What every section but the servers'
+    /// own sends.
+    Keep,
+
+    /// Write these in place of whatever is there — the whole list, in the order
+    /// it is to be read back in, so a row taken off the page is a declaration
+    /// taken out of the file. An empty list is the human having removed the
+    /// last one.
+    Set { servers: Vec<McpServer> },
+}
+
+/// One declaration a save was turned down over, by where it stood in what was
+/// sent.
+///
+/// By position rather than by name, for the reason [`RuleRefused`] is by
+/// position: the row it names is the row the human is looking at, and one of the
+/// two things that can be wrong with a name is that it is the same as another's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ServerRefused {
+    /// Where it stood among the declarations that were sent, counting from zero.
+    pub server: u32,
+
+    /// Which of its two boxes the error is drawn at. Never absent, unlike a
+    /// rule's: every way a declaration goes wrong is a way one of its two halves
+    /// does, so there is always a box to say it at.
+    pub field: ServerField,
+
+    /// Why, in words to put on the row.
+    pub why: String,
+}
+
+/// Which of a declaration's two halves something is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ServerField {
+    /// The name a Conversation refers to the server by.
+    Name,
+
+    /// And the URL it is reached at.
+    Url,
 }
 
 /// One rule a save was turned down over, by where it stood in what was sent.

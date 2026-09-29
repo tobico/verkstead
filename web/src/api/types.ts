@@ -2522,6 +2522,34 @@ html: string, };
 export type Marked = "Untracked" | "Changed";
 
 /**
+ * One MCP server declared for this installation: a name, and the URL it is
+ * reached at.
+ *
+ * The same shape both ways, the way [`IgnoreRule`] is: what the page draws back
+ * into its rows is what a save sends, and two shapes for one declaration would
+ * be two accounts of what one is.
+ *
+ * **The name is the identity** — lowercase letters, digits and hyphens, unique
+ * among the declarations, and never changed. It is what a Conversation's chip
+ * refers to and what the agent sees in front of the server's tool names, so a
+ * renamed declaration would be one every chip pointing at it had lost.
+ *
+ * **HTTP only.** There is no command, no arguments and no transport to choose:
+ * a stdio server is a child process an agent starts inside its own sandbox, and
+ * it was turned down in the grilling this was settled in.
+ */
+export type McpServer = { name: string, url: string, };
+
+/**
+ * What is to become of the declared MCP servers on a save.
+ *
+ * An action for the reason [`IgnoredCommentsEdit`] is one: they are the other
+ * thing on this page a save can be refused over, so a section that is not about
+ * them says nothing about them and cannot be turned down by one.
+ */
+export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServer>, } };
+
+/**
  * And whether it merges into its base.
  *
  * The store's own word again, and two rather than GitHub's three for the reason
@@ -3957,6 +3985,35 @@ trouble: string, } | { "press": "Trouble", trouble: string, };
 export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, } | { "serve": "Unreadable", trouble: string, };
 
 /**
+ * Which of a declaration's two halves something is about.
+ */
+export type ServerField = "Name" | "Url";
+
+/**
+ * One declaration a save was turned down over, by where it stood in what was
+ * sent.
+ *
+ * By position rather than by name, for the reason [`RuleRefused`] is by
+ * position: the row it names is the row the human is looking at, and one of the
+ * two things that can be wrong with a name is that it is the same as another's.
+ */
+export type ServerRefused = { 
+/**
+ * Where it stood among the declarations that were sent, counting from zero.
+ */
+server: number, 
+/**
+ * Which of its two boxes the error is drawn at. Never absent, unlike a
+ * rule's: every way a declaration goes wrong is a way one of its two halves
+ * does, so there is always a box to say it at.
+ */
+field: ServerField, 
+/**
+ * Why, in words to put on the row.
+ */
+why: string, };
+
+/**
  * One stored Question Set as the browser receives it: the document where this
  * build can still read what was asked, and the record itself where it cannot.
  *
@@ -4152,6 +4209,18 @@ sandbox_binds: Array<string>,
  */
 ignored_comments: IgnoredCommentsEdit, 
 /**
+ * And what is to become of the declared MCP servers, which is an action for
+ * the reason the rules above it are one: they are the other thing here a
+ * save can be refused over, and a section that rode them along as values
+ * could have its own save turned down by a name somebody hand-edited into
+ * the file weeks ago.
+ *
+ * The whole list where it is sent, in the order it is to be read back in:
+ * a row taken off the page is a declaration taken out of the file, and a
+ * row whose URL was rewritten is that declaration with the new one.
+ */
+mcp_servers: McpServersEdit, 
+/**
  * And the text every session is given, as a value again — the plainest one
  * here. What is sent is what `config.yaml` holds afterwards, so a box
  * cleared on the page is the key taken out of the file.
@@ -4195,7 +4264,19 @@ verified: Verified | null,
  * with it — draw the errors at the rows and leave what the human typed
  * where it is.
  */
-refused: Array<RuleRefused>, };
+refused: Array<RuleRefused>, 
+/**
+ * And the declarations that would not be written down, or empty where the
+ * save landed — which is every save that did not send any.
+ *
+ * Its own list rather than the one above, because the two name different
+ * things: a rule is refused by where it stood among the rules, and a
+ * declaration by where it stood among the declarations. A save turned down
+ * over either is the whole request refused and neither file touched, so
+ * what this says and what `refused` says are both drawn over what the human
+ * still has in front of them.
+ */
+refused_servers: Array<ServerRefused>, };
 
 /**
  * The settings as they stand, read off the two files at the moment they are
@@ -4249,6 +4330,17 @@ paths: PathsView,
  * quietly left out of the read would be one the human could not correct.
  */
 ignored_comments: Array<IgnoreRule>, 
+/**
+ * And the MCP servers declared for this installation, in the order they
+ * were written down — empty on a Verkstead nobody has declared any on,
+ * which is a Conversation with nothing to attach.
+ *
+ * Exactly as the file holds them, a name the page would have refused
+ * included: this is what the section draws back into its rows, and a
+ * declaration quietly left out of the read would be one the human could
+ * neither use nor correct.
+ */
+mcp_servers: Array<McpServer>, 
 /**
  * And the one text every session is given, whatever harness runs it —
  * empty on a Verkstead nobody has typed one into, which is a session told

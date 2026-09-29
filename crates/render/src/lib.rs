@@ -83,8 +83,9 @@ pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemo
 pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
     CleanupStepView, CleanupView, CompileCaching, ConflictResolution, IgnoreRule,
-    IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
-    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
+    IgnoredCommentsEdit, McpServer, McpServersEdit, PathResolution, PathSource, PathsView,
+    RuleField, RuleRefused, ServerField, ServerRefused, SettingsEdit, SettingsSaved, SettingsView,
+    TokenEdit, TokenSaved, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

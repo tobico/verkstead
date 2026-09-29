@@ -57,6 +57,7 @@ const REST = {
   // The rules ride along as an action rather than a value: nothing this form
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
+  mcp_servers: "Keep",
   rust_build_cache: {
     enabled: TOLD.rust_build_cache.enabled,
     size: TOLD.rust_build_cache.size,
@@ -128,7 +129,7 @@ function theSettings(
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null, refused: [] };
+  return { settings: standing, verified: null, refused: [], refused_servers: [] };
 }
 
 function sent(fetching: ReturnType<typeof serving>): unknown {

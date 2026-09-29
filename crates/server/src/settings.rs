@@ -41,6 +41,9 @@
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing
+//! mcp_servers:
+//!   - name: docs
+//!     url: https://mcp.example.com/docs
 //! instructions: |
 //!   Prefer the smallest change that does the job.
 //! ```
@@ -610,6 +613,30 @@ pub struct Config {
     )]
     ignored_comments: Vec<IgnoreRule>,
 
+    /// And the MCP servers declared for this installation: a name and a URL
+    /// each, spoken to over HTTP, out of which a Conversation attaches the ones
+    /// its sessions are launched with.
+    ///
+    /// Declared here rather than beside a Conversation because a declaration is
+    /// a thing Verkstead is *told*, like the binds above it and the
+    /// instructions below: said once for the machine, read at the moment it is
+    /// needed, and referred to by name from wherever it is attached. What a
+    /// Conversation holds is that name.
+    ///
+    /// Read the way everything else in this file is, and refused the way the
+    /// rules above it are. An absent key, an absent file and one nothing can
+    /// parse all mean no servers, and an entry missing either half is dropped
+    /// as it is read — a declaration with no name is one nothing could refer
+    /// to, and one with no URL reaches nothing. What is *refused* rather than
+    /// dropped is a save from the settings page, so that a name nobody could
+    /// use is said at the moment somebody types it — see [`trouble_among`].
+    #[serde(
+        default,
+        deserialize_with = "servers_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    mcp_servers: Vec<McpServer>,
+
     /// And the one text every session is given, whatever harness runs it: what
     /// a human would have put in their own global `CLAUDE.md`, said once here
     /// because a Built Root holds none of the account's own files.
@@ -664,6 +691,9 @@ impl Config {
             sandbox_binds: entries_written(config.sandbox_binds),
             session_path: entries_written(config.session_path),
             ignored_comments: rules_kept(config.ignored_comments),
+            // And the declarations, with the blanks taken out of each and the
+            // ones that came to nothing dropped — see [`servers_kept`].
+            mcp_servers: servers_kept(config.mcp_servers),
             // Whitespace and all, bar a text that is nothing but whitespace —
             // see [`prose_written`].
             instructions: config.instructions.and_then(prose_written),
@@ -684,6 +714,7 @@ impl Config {
         share_on_done: bool,
         sandbox_binds: Vec<String>,
         ignored_comments: Vec<IgnoreRule>,
+        mcp_servers: Vec<McpServer>,
         instructions: String,
     ) -> Config {
         Config {
@@ -715,6 +746,11 @@ impl Config {
             // and dropping one here would be a save that quietly wrote fewer
             // rules than the page sent.
             ignored_comments,
+            // And the declared servers, whole and undropped, for the reason the
+            // rules above are: what reaches here has already been through
+            // [`trouble_among`] at the endpoint, which refuses what the reading
+            // half would merely skip.
+            mcp_servers,
             // As it was typed, and away altogether where the box was cleared:
             // there is nothing to configure in an empty text, and a key holding
             // one would read as a setting somebody made.
@@ -808,6 +844,14 @@ impl Config {
     /// is every comment on every pull request being somebody's to address.
     pub fn ignored_comments(&self) -> &[IgnoreRule] {
         &self.ignored_comments
+    }
+
+    /// And the MCP servers declared for this installation, in the order they
+    /// were written down. Empty where nobody has declared any, which is a
+    /// Conversation with nothing to attach — and what every installation before
+    /// this one looks like.
+    pub fn mcp_servers(&self) -> &[McpServer] {
+        &self.mcp_servers
     }
 
     /// And the text every session is given, which is empty where nobody has
@@ -1247,6 +1291,178 @@ fn rules_kept(rules: Vec<IgnoreRule>) -> Vec<IgnoreRule> {
         .collect()
 }
 
+/// One MCP server declared for this installation: a name, and the URL it is
+/// reached at.
+///
+/// **The name is the identity.** It is what a Conversation's chip refers to and
+/// what the agent sees in front of its tool names, so it is lowercase letters,
+/// digits and hyphens and unique among the declarations — and it is never
+/// changed, because everything that refers to a server refers to it by that
+/// name. Changing one is deleting the declaration and making another.
+///
+/// **HTTP and nothing else.** There is no command, no arguments and no choice
+/// of transport here: a stdio server is a child process an agent starts inside
+/// its own sandbox, which is a hole in the sandbox rather than a setting, and
+/// it was turned down in the grilling this was settled in — see ADR-0021.
+///
+/// Both halves optional for the reason [`IgnoreRule`]'s are: the human
+/// hand-edits this file, and a half-written entry is not worth taking the whole
+/// of the settings away over. One with either half missing is no declaration at
+/// all, and is dropped as the file is read — see [`servers_kept`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct McpServer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+}
+
+impl McpServer {
+    /// The declaration a settings page has just been told, each blank half
+    /// nothing at all — see [`blank_is_nothing`].
+    pub fn of(name: Option<String>, url: Option<String>) -> McpServer {
+        McpServer {
+            name: name.and_then(blank_is_nothing),
+            url: url.and_then(blank_is_nothing),
+        }
+    }
+
+    /// What a Conversation refers to this server by, and what the agent sees in
+    /// front of its tool names.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// And where it is spoken to, which is an HTTP URL.
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+}
+
+/// What would stop each of `servers` being written down, by where it stands in
+/// the list — and empty where there is nothing wrong with any of them.
+///
+/// Over the whole list rather than one declaration at a time, because one of
+/// the two things that can be wrong with a name is that another declaration has
+/// it: a server is referred to by name, so two of a name would be a chip
+/// pointing at either.
+///
+/// Every entry at fault rather than the first, for the reason [`IgnoreRule`]'s
+/// refusals name every row: the page draws the error at the row, and a human
+/// who mistyped two names should be told about both rather than finding the
+/// second after fixing the first.
+///
+/// The first of two names that are the same is not at fault. What is refused is
+/// the one that takes a name already spoken for, which is the row the human
+/// just typed — and refusing both would leave them correcting a declaration
+/// that was there before they arrived.
+pub fn trouble_among(servers: &[McpServer]) -> Vec<(usize, ServerTrouble)> {
+    servers
+        .iter()
+        .enumerate()
+        .filter_map(|(at, server)| Some((at, trouble(server, &servers[..at])?)))
+        .collect()
+}
+
+/// What is wrong with one declaration, given the ones written down before it.
+fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
+    let Some(name) = server.name() else {
+        return Some(ServerTrouble::Name(
+            "a server is referred to by name, so it needs one".to_owned(),
+        ));
+    };
+
+    if !named_plainly(name) {
+        return Some(ServerTrouble::Name(
+            "a name is lowercase letters, digits and hyphens: it is what the agent sees in front              of the server's tool names"
+                .to_owned(),
+        ));
+    }
+
+    if above.iter().any(|earlier| earlier.name() == Some(name)) {
+        return Some(ServerTrouble::Name(format!(
+            "a server is already declared as {name}, and the name is what tells two of them apart"
+        )));
+    }
+
+    if server.url().is_none() {
+        return Some(ServerTrouble::Url(
+            "a server is reached over HTTP, so it needs a URL".to_owned(),
+        ));
+    }
+
+    None
+}
+
+/// Whether a name is the lowercase letters, digits and hyphens a server's is —
+/// and something rather than nothing, an empty name having been read as no name
+/// at all long before this.
+///
+/// ASCII throughout rather than Unicode's own idea of a lowercase letter: what
+/// the name is for is a tool name an agent reads and a human types on a phone,
+/// and two names that differ by a character nobody can see would be two servers
+/// nobody can tell apart.
+fn named_plainly(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|letter| letter.is_ascii_lowercase() || letter.is_ascii_digit() || letter == '-')
+}
+
+/// What is wrong with a server somebody tried to declare.
+///
+/// Which of the two fields, always: the page draws the error at the box it is
+/// about, and every way a declaration goes wrong is a way one of its two halves
+/// does. Which is what tells this from [`RuleTrouble`], where a rule giving
+/// neither field is wrong as a whole and has no box to be drawn at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerTrouble {
+    /// The name is missing, is not lowercase letters, digits and hyphens, or is
+    /// one another declaration already has — in words to put on the row.
+    Name(String),
+
+    /// And the URL is missing.
+    Url(String),
+}
+
+/// A list of declarations as somebody left them, with the rows they emptied out
+/// taken away.
+///
+/// Written for the reason [`rows_written`] is: a row with nothing after its
+/// `-` is YAML's null, and a `Vec<McpServer>` reading one would refuse the whole
+/// file — which under this module's own rule would throw the author and the
+/// build cache away over a half-deleted line.
+fn servers_written<'de, D: serde::Deserializer<'de>>(
+    servers: D,
+) -> Result<Vec<McpServer>, D::Error> {
+    Ok(Vec::<Option<McpServer>>::deserialize(servers)?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// A written list of declarations with the blanks taken out of each and the
+/// ones that came to nothing dropped.
+///
+/// A declaration wants both halves to be one at all: a name is what everything
+/// refers to it by, and a URL is where it is. So an entry missing either is
+/// dropped as the file is read, the way a rule constraining nothing is — and it
+/// fails in the safe direction, a server nobody can reach simply not being
+/// there to attach.
+///
+/// A name this would not have been given by the settings page — one with a
+/// capital in it, or one a second entry repeats — is kept exactly as it was
+/// hand-edited. The refusing is the save's, and a read that dropped it would be
+/// a declaration the human could neither use nor see to correct.
+fn servers_kept(servers: Vec<McpServer>) -> Vec<McpServer> {
+    servers
+        .into_iter()
+        .map(|server| McpServer::of(server.name, server.url))
+        .filter(|server| server.name.is_some() && server.url.is_some())
+        .collect()
+}
+
 /// A list of rows as somebody left them, with the ones they emptied out taken
 /// away.
 ///
@@ -1299,8 +1515,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule,
-        RuleTrouble, RustBuildCache, Secrets, Settings,
+        Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule, McpServer,
+        RuleTrouble, RustBuildCache, Secrets, ServerTrouble, Settings, trouble_among,
     };
 
     #[test]
@@ -1525,6 +1741,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -1541,6 +1758,7 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -1622,6 +1840,7 @@ mod tests {
                 true,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -1635,6 +1854,7 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -1758,6 +1978,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -1793,6 +2014,7 @@ mod tests {
                 ),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -2020,6 +2242,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2053,6 +2276,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2084,6 +2308,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2106,6 +2331,7 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -2177,6 +2403,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2207,6 +2434,7 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -2273,6 +2501,7 @@ mod tests {
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2291,6 +2520,7 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
                 String::new(),
@@ -2374,6 +2604,7 @@ mod tests {
             Cleanup::default(),
             ConflictResolution::Merge,
             false,
+            vec![],
             vec![],
             vec![],
             String::new(),
@@ -2501,6 +2732,7 @@ mod tests {
             false,
             vec![],
             vec![],
+            vec![],
             instructions.to_owned(),
         )
     }
@@ -2579,6 +2811,7 @@ mod tests {
                     Some("coderabbitai".to_owned()),
                     Some("billing".to_owned()),
                 )],
+                vec![],
                 String::new(),
             ))
             .unwrap();
@@ -2662,5 +2895,184 @@ mod tests {
 
         assert!(!why.contains('\n'), "{why:?}");
         assert!(!why.is_empty());
+    }
+
+    #[test]
+    fn the_declared_servers_are_what_the_config_file_says() {
+        let config = Config::read(
+            "mcp_servers:\n  - name: docs\n    url: https://mcp.example.com/docs\n  - name: tickets\n    url: https://mcp.example.com/tickets\n",
+        )
+        .unwrap();
+
+        let servers = config.mcp_servers();
+
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name(), Some("docs"));
+        assert_eq!(servers[0].url(), Some("https://mcp.example.com/docs"));
+        assert_eq!(servers[1].name(), Some("tickets"));
+        assert_eq!(servers[1].url(), Some("https://mcp.example.com/tickets"));
+    }
+
+    /// The three ways of saying nothing, which all say the same thing: no
+    /// servers, and no failure to report.
+    #[test]
+    fn a_file_with_no_declared_servers_says_none() {
+        assert!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .mcp_servers()
+                .is_empty()
+        );
+        assert!(Config::read("").unwrap().mcp_servers().is_empty());
+        assert!(
+            Config::read("mcp_servers:\n")
+                .unwrap()
+                .mcp_servers()
+                .is_empty()
+        );
+    }
+
+    /// And a key nothing can parse is no servers as well, rather than a read
+    /// that fails: what [`Settings::config`] does with a file it cannot read is
+    /// log it and configure nothing, which is this module's rule about
+    /// everything it is told.
+    #[test]
+    fn a_servers_key_nothing_can_parse_reads_as_no_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), "mcp_servers: what\n").unwrap();
+
+        assert!(settings.config().mcp_servers().is_empty());
+    }
+
+    /// A row somebody half-deleted, and a declaration missing either half: all
+    /// of them nothing rather than a file that will not read.
+    #[test]
+    fn half_a_declaration_is_no_declaration() {
+        let config = Config::read(
+            "mcp_servers:\n  -\n  - {}\n  - name: docs\n  - url: https://mcp.example.com/docs\n  - name: '  '\n    url: https://mcp.example.com/docs\n  - name: tickets\n    url: https://mcp.example.com/tickets\n",
+        )
+        .unwrap();
+
+        let servers = config.mcp_servers();
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name(), Some("tickets"));
+    }
+
+    /// A name the settings page would have refused is kept exactly as it was
+    /// hand-edited, the way a pattern that will not compile is: the human has to
+    /// be able to see it on the page to correct it.
+    #[test]
+    fn a_hand_edited_name_the_page_would_refuse_is_kept() {
+        let config =
+            Config::read("mcp_servers:\n  - name: Docs Server\n    url: https://example.com\n")
+                .unwrap();
+
+        assert_eq!(config.mcp_servers()[0].name(), Some("Docs Server"));
+    }
+
+    #[test]
+    fn a_saved_declaration_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Cleanup::default(),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![McpServer::of(
+                    Some("docs".to_owned()),
+                    Some("https://mcp.example.com/docs".to_owned()),
+                )],
+                String::new(),
+            ))
+            .unwrap();
+
+        let config = settings.config();
+        let servers = config.mcp_servers();
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name(), Some("docs"));
+        assert_eq!(servers[0].url(), Some("https://mcp.example.com/docs"));
+    }
+
+    /// What the settings page is refused over: a name that is not a name, a name
+    /// somebody else has, and a server with nowhere to be reached.
+    #[test]
+    fn a_declaration_says_what_is_wrong_with_it() {
+        assert_eq!(
+            trouble_among(&[declared("docs", "https://example.com")]),
+            []
+        );
+
+        assert!(matches!(
+            trouble_among(&[declared("Docs", "https://example.com")]).as_slice(),
+            [(0, ServerTrouble::Name(_))]
+        ));
+        assert!(matches!(
+            trouble_among(&[declared("docs server", "https://example.com")]).as_slice(),
+            [(0, ServerTrouble::Name(_))]
+        ));
+        assert!(matches!(
+            trouble_among(&[declared("docs_server", "https://example.com")]).as_slice(),
+            [(0, ServerTrouble::Name(_))]
+        ));
+        assert!(matches!(
+            trouble_among(&[McpServer::of(None, Some("https://example.com".to_owned()))])
+                .as_slice(),
+            [(0, ServerTrouble::Name(_))]
+        ));
+        assert!(matches!(
+            trouble_among(&[McpServer::of(Some("docs".to_owned()), None)]).as_slice(),
+            [(0, ServerTrouble::Url(_))]
+        ));
+
+        // A hyphen and a digit are a name, which is what the rule allows and
+        // what every declaration anybody actually writes looks like.
+        assert_eq!(
+            trouble_among(&[declared("docs-2", "https://example.com")]),
+            []
+        );
+    }
+
+    /// The second of two of a name is the one at fault: it is the row the human
+    /// just typed, and refusing both would send them to correct a declaration
+    /// that was there before they arrived.
+    #[test]
+    fn the_name_that_takes_one_already_declared_is_the_one_refused() {
+        let trouble = trouble_among(&[
+            declared("docs", "https://example.com/one"),
+            declared("docs", "https://example.com/two"),
+        ]);
+
+        assert!(matches!(trouble.as_slice(), [(1, ServerTrouble::Name(_))]));
+    }
+
+    /// Every row at fault rather than the first, because the page draws the
+    /// error at the row.
+    #[test]
+    fn every_declaration_at_fault_is_named() {
+        let trouble = trouble_among(&[
+            declared("Docs", "https://example.com"),
+            declared("tickets", "https://example.com"),
+            McpServer::of(Some("notes".to_owned()), None),
+        ]);
+
+        assert!(matches!(
+            trouble.as_slice(),
+            [(0, ServerTrouble::Name(_)), (2, ServerTrouble::Url(_))]
+        ));
+    }
+
+    /// One declaration, for the tests above.
+    fn declared(name: &str, url: &str) -> McpServer {
+        McpServer::of(Some(name.to_owned()), Some(url.to_owned()))
     }
 }

@@ -40,13 +40,14 @@ use verkstead_render::{
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView,
-    Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Locked, McpServer, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, PairingView, Parked, PendingSteerView, Process, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, ServeEdit, ServePress, ServerField, ServerRefused, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
+    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
     TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
@@ -4907,7 +4908,27 @@ async fn save_settings(
             }
         };
 
-        if !refused.is_empty() {
+        // And the declared MCP servers, the same way and for the same reason:
+        // both lists are decided, and both are checked, before either file is
+        // touched. A save turned down over a name is the whole request refused,
+        // like one turned down over a pattern.
+        let (servers, refused_servers) = match &edit.mcp_servers {
+            // Whatever is declared, carried through untouched — a name this page
+            // would have refused included. The reading half keeps one of those
+            // and this half is not entitled to drop it: a save about the build
+            // cache has no business rewriting a declaration, and no business
+            // being refused over one either.
+            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), Vec::new()),
+
+            McpServersEdit::Set { servers } => {
+                let servers: Vec<_> = servers.iter().map(as_declared).collect();
+                let refused = server_refusals(&servers);
+
+                (servers, refused)
+            }
+        };
+
+        if !refused.is_empty() || !refused_servers.is_empty() {
             return Ok(SettingsSaved {
                 // How things stand, which is how they stood: nothing was
                 // written, and the page draws the errors over what the human
@@ -4915,6 +4936,7 @@ async fn save_settings(
                 settings: as_told(&settings, caches_compiles, &installed),
                 verified: None,
                 refused,
+                refused_servers,
             });
         }
 
@@ -4953,6 +4975,9 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
+                // And the declared servers, decided the same way and above the
+                // same refusal.
+                servers,
                 // And the text every session is given, as it was typed: a value
                 // like the binds above it, so what the page sent is what the
                 // file holds afterwards and a box cleared is a key taken away.
@@ -5006,8 +5031,9 @@ async fn save_settings(
             settings: as_told(&settings, caches_compiles, &installed),
             verified,
             // Nothing turned down: a save that got this far was one there was
-            // nothing wrong with.
+            // nothing wrong with — of either list.
             refused: Vec::new(),
+            refused_servers: Vec::new(),
         })
     })
     .await;
@@ -5155,6 +5181,12 @@ fn as_told(
         // could not correct.
         ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
 
+        // And the declared MCP servers exactly as the file holds them, a name
+        // this page would have refused included: this is what the section draws
+        // back into its rows, and a declaration left out of the read would be
+        // one the human could neither use nor correct.
+        mcp_servers: config.mcp_servers().iter().map(as_declared_row).collect(),
+
         // And the text every session is given, empty where nobody has typed
         // one: the box on the page holds a string either way, and there is no
         // third state between an unwritten key and a text of nothing.
@@ -5183,6 +5215,51 @@ fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
         author: rule.author().unwrap_or_default().to_owned(),
         body: rule.body().unwrap_or_default().to_owned(),
     }
+}
+
+/// One MCP server as the settings file holds it, out of what the page sent: a
+/// name and a URL, each blank one nothing at all.
+fn as_declared(server: &McpServer) -> crate::settings::McpServer {
+    crate::settings::McpServer::of(Some(server.name.clone()), Some(server.url.clone()))
+}
+
+/// And the other way round, for the read: a half the file does not hold is an
+/// empty box on the page, which is the same thing said in the shape a form
+/// holds.
+///
+/// Which is only ever a hand-edit. A declaration missing either half is dropped
+/// as the file is read — see `settings::servers_kept` — so what reaches here has
+/// both, and the fallbacks are what keeps this honest rather than what it is
+/// for.
+fn as_declared_row(server: &crate::settings::McpServer) -> McpServer {
+    McpServer {
+        name: server.name().unwrap_or_default().to_owned(),
+        url: server.url().unwrap_or_default().to_owned(),
+    }
+}
+
+/// What is wrong with the declarations a save is asking for, one entry per row
+/// at fault, and empty where there is nothing wrong with any of them.
+///
+/// Over the whole list rather than one at a time, because one of the two things
+/// that can be wrong with a name is that another declaration has it — see
+/// `settings::trouble_among`, which is where that is decided.
+fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused> {
+    crate::settings::trouble_among(servers)
+        .into_iter()
+        .map(|(at, trouble)| {
+            let (field, why) = match trouble {
+                crate::settings::ServerTrouble::Name(why) => (ServerField::Name, why),
+                crate::settings::ServerTrouble::Url(why) => (ServerField::Url, why),
+            };
+
+            ServerRefused {
+                server: at as u32,
+                field,
+                why,
+            }
+        })
+        .collect()
 }
 
 /// What is wrong with the rules a save is asking for, one entry per row at

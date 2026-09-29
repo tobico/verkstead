@@ -1,5 +1,6 @@
 {
   "refused": [],
+  "refused_servers": [],
   "settings": {
     "cleanup": {
       "delete": {
@@ -29,6 +30,12 @@
       }
     ],
     "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
+    "mcp_servers": [
+      {
+        "name": "docs",
+        "url": "https://mcp.example.com/docs"
+      }
+    ],
     "paths": {
       "binds": [
         {

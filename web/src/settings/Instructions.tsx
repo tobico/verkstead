@@ -174,6 +174,12 @@ export function InstructionsPane(props: {
         // own save refused over a pattern it never showed anybody — see
         // [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
+        // And the declared MCP servers left where they are, for the reason
+        // beside it: they are the other setting that travels as an action, and a
+        // section that spoke for them could have its own save refused over a
+        // name somebody hand-edited into the file weeks ago — see
+        // [`McpServersEdit`].
+        mcp_servers: "Keep",
         // And the one thing this form is about, exactly as it was typed: what
         // is sent is what the file holds afterwards, so an emptied box is the
         // text taken away.

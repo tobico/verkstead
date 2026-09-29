@@ -3150,6 +3150,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
             },
 
+            // And one MCP server declared, for that reason again: the
+            // declarations are the other setting sent as an action rather than a
+            // value, and this is the section that owns them.
+            "mcp_servers": {
+                "Set": { "servers": [{ "name": "docs", "url": "https://mcp.example.com/docs" }] }
+            },
+
             // And a text for every session, for the reason the size above is
             // typed. Two paragraphs rather than a line, because what the pane
             // has to draw is prose with its line breaks in it, and a fixture

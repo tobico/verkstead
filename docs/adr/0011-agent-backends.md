@@ -15,6 +15,15 @@ rule, and every Profile has a memory switch.** Transcript discovery reads the
 store where it really is on the host: the account's with memory on, the root's
 with it off. See *As built for Codex, Grok Build and OpenCode*.
 
+Amended by [ADR-0021](0021-declared-mcp-servers.md) (2026-09-29): **a session may
+be given an MCP server after all — Verkstead's own, never the account's.** The
+strip and the write-back below stand word for word: the account's `mcpServers`
+are taken out of the copy and are never written or removed on the way back. What
+is new is a server *declared* in `config.yaml` and attached to a Conversation,
+which every session of that Conversation is launched with. So wherever this
+decision says a session has no MCP servers, it means none of the **account's**
+rather than none at all.
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to
@@ -304,7 +313,10 @@ repository's, Codex's and Grok's `sessions/`, OpenCode's data directory — shar
 when the Profile's memory switch says so, on by default; a **configuration
 file Verkstead writes**, carrying only what names a model provider; and an
 **instructions file** from the settings page, in place of the human's own
-global one. Nothing else of the account is there. Claude's `.claude.json` is
+global one. Nothing else of the account is there — and an MCP server a
+Conversation attached is Verkstead's own rather than the account's, which is why
+it is not an exception to that; see
+[ADR-0021](0021-declared-mcp-servers.md). Claude's `.claude.json` is
 copied rather than linked, pre-seeded with the Repo's trust, and written back
 at session end as ADR-0014 decided, because a re-login from inside a run has
 to reach the account. ADR-0014 built that write-back for Windows's hard links
@@ -324,7 +336,10 @@ the paragraph above in three places:
   back.
 - **The `.claude.json` copy has `mcpServers` taken out**, at the top level and
   under each `projects` entry. Those are the human's own MCP servers, the same
-  leak as plugins.
+  leak as plugins. Which is not the same as a session having none: a server
+  Verkstead was *told* about and a Conversation attached is written into the root
+  by Verkstead, and this strip is what keeps it the only one there — see
+  [ADR-0021](0021-declared-mcp-servers.md).
 - **The write-back of `.claude.json` is a merge by key, not a copy of the
   whole file.** A copy never shares an identity with the account's file, so
   the identity check alone would write it back after every session. Sessions
