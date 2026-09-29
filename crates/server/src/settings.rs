@@ -1663,7 +1663,8 @@ fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
 
     if !named_plainly(name) {
         return Some(ServerTrouble::Name(
-            "a name is lowercase letters, digits and hyphens: it is what the agent sees in front              of the server's tool names"
+            "a name is lowercase letters, digits and hyphens: it is what the agent sees in \
+             front of the server's tool names"
                 .to_owned(),
         ));
     }
