@@ -1641,7 +1641,9 @@ fn configured(configured: store::Configured, repo: &str) -> anyhow::Result<()> {
 ///
 /// Nothing is left checked out by the time this can run, so there is nothing to
 /// clean up but the row: the stage's worktree and its companions' are made in
-/// one act that unmakes whatever it managed before it halted — see [`make`].
+/// one act that unmakes whatever it managed before it halted — see [`make`], and
+/// `crate::conversations::unwind` for the one caller that halts after that act
+/// has succeeded and takes them back itself before calling in here.
 ///
 /// **Before the notice, every time.** Each of these halts ends by saying on the
 /// settled Conversation's Timeline that nothing was started and nothing was left

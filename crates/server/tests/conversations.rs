@@ -9008,6 +9008,71 @@ async fn a_typed_companion_branch_does_not_follow_the_stages_started_beside() {
     ));
 }
 
+/// A stage that cannot be started beside the adopted one is **said** on the
+/// Timeline the human pressed on, and leaves nothing behind.
+///
+/// Each start is its own act: the press has already succeeded for the stage they
+/// composed, so a sibling git will not cut a companion branch for halts itself
+/// and no more. And it is said, because the pane named it *and beside it* a
+/// moment ago — a stage that quietly never appeared, with the reason in the
+/// server log alone, is the one thing an offer that names its stages must not
+/// come to.
+#[tokio::test]
+async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timeline() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    // The branch stage 02 would mirror into the companion, already there. Stage
+    // 01's is free, so what this stops is the one start rather than the press.
+    let companion = elsewhere.path().join("askance");
+    git(&companion, &["branch", "roadmaps/mvp/02-grilling"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed started, its sibling's trouble being its own.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the halt is on the Timeline they were standing on, naming the stage,
+    // the repository it could not be given and what is in the way of it.
+    let said = notices(&first).join("\n");
+
+    assert!(
+        said.contains("Stage 02")
+            && said.contains("askance")
+            && said.contains("already a branch of that repository")
+            && said.contains("nothing was left behind"),
+        "which stage, which repository and what stopped it: {said:?}",
+    );
+
+    // Nothing left behind: the half-made row is closed rather than left drafting
+    // for somebody to find and wonder about — see `continuing::gave_up` — with
+    // nothing checked out under it, and no branch in the Repo the stage would
+    // have been worked in.
+    let halted = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("the half-made row is closed rather than gone");
+
+    let halted = opened(&app, halted.id).await;
+
+    assert_eq!(halted.state, Lifecycle::Closed);
+    assert_eq!(halted.worktree, None);
+    assert!(
+        !has_branch(&repo, "roadmaps/mvp/02-grilling"),
+        "and no branch in the Repo the stage would have been worked in",
+    );
+}
+
 /// And a roadmap with a stage in flight is continued for the ones that are
 /// ready: the guard that refused the whole roadmap for it has gone.
 ///

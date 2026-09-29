@@ -2592,9 +2592,16 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 /// succeeded, so what stops one of these is a notice on the Timeline of the
 /// Conversation they pressed it on rather than an answer to the press.
 ///
-/// **Nothing left behind.** A halt at any point closes the half-made
-/// Conversation and unmakes whatever checkouts it got as far as, exactly as a
-/// refused press does — see [`make`], which unwinds its own.
+/// **Nothing left behind, and nothing left unsaid.** A halt at any point closes
+/// the half-made Conversation and unmakes whatever checkouts it got as far as,
+/// exactly as a refused press does — see [`make`], which unwinds its own, and
+/// [`unwind`], which is what takes them back once it has not. And every one of
+/// those halts says so on the pressed Timeline, through [`halted`]: a stage the
+/// pane named a moment ago is not something to let vanish into the server log.
+///
+/// The one halt that cannot promise the first half is the blocking task coming
+/// apart, there being no plan back out here to unwind — which says so in as many
+/// words rather than claiming otherwise.
 #[allow(clippy::too_many_arguments)]
 async fn alongside(
     state: &AppState,
@@ -2621,12 +2628,24 @@ async fn alongside(
                 "the Repo the stage would be against has gone, so nothing was started"
             );
 
-            return;
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Repo it would be against has been taken off the registry since the press",
+            )
+            .await;
         }
         Err(error) => {
             tracing::error!(error = ?error, pressed, "starting a stage beside the adopted one failed");
 
-            return;
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("its own Conversation could not be started: {error}"),
+            )
+            .await;
         }
     };
 
@@ -2666,14 +2685,26 @@ async fn alongside(
                 "a stage started beside the adopted one has gone"
             );
 
-            return;
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Conversation it had just been given has gone from the record",
+            )
+            .await;
         }
         Err(error) => {
             tracing::error!(error = ?error, pressed, stage = id, "reading back what a stage beside the adopted one inherited failed");
 
             crate::continuing::gave_up(state, id).await;
 
-            return;
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("what it inherits could not be read back: {error}"),
+            )
+            .await;
         }
     };
 
@@ -2715,24 +2746,47 @@ async fn alongside(
 
             let cleared = clearing(&planned, &named, &author)?;
 
-            Ok::<_, Unmade>((recorded(&planned), cleared, making))
+            // The plan itself comes back out, which is what lets a halt below
+            // this take the checkouts back: everything above unwinds its own, and
+            // from here on they are made and nothing else knows what they are.
+            Ok::<_, Unmade>((planned, cleared, making))
         }
     })
     .await;
 
-    let (checkouts, cleared, making) = match made {
+    let (planned, cleared, making) = match made {
         Ok(Ok(made)) => made,
         Ok(Err(unmade)) => {
             crate::continuing::gave_up(state, id).await;
 
             return halted(state, pressed, &stage, &unmade.said()).await;
         }
+
+        // The one halt here that cannot promise nothing was left behind: a task
+        // that came apart got as far as whatever it got as far as, and there is no
+        // plan back out here to unwind. The Conversation is closed all the same,
+        // which is what leaves the directories to the sweep of orphaned worktrees.
         Err(error) => {
             tracing::error!(error = ?error, pressed, stage = id, "making a stage's worktrees beside the adopted one failed");
+
+            crate::continuing::say(
+                state,
+                pressed,
+                &format!(
+                    "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, \
+                     and making its checkouts failed outright. Nothing was started for it and \
+                     the server log says what happened; a directory it got as far as making is \
+                     one the sweep of orphaned worktrees takes.",
+                    stage.label, stage.roadmap, stage.title,
+                ),
+            )
+            .await;
 
             return crate::continuing::gave_up(state, id).await;
         }
     };
+
+    let checkouts = recorded(&planned);
 
     let base = store::Base {
         commit,
@@ -2753,6 +2807,11 @@ async fn alongside(
     )
     .await;
 
+    // And the last halt there is, which is the one the checkouts are already made
+    // for: taken back here rather than left standing, because a stage that never
+    // got set working is a Drafting row nothing would ever pick up and a pair of
+    // directories nothing would ever open. Still under `making`, so the sweep never
+    // sees them half-taken.
     match staged {
         Ok(store::Staged::Started) => {}
         Ok(refused) => {
@@ -2763,12 +2822,29 @@ async fn alongside(
                 "a stage started beside the adopted one could not be set working",
             );
 
-            return;
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "its Conversation could not be set working, the record having moved under the \
+                 press",
+            )
+            .await;
         }
         Err(error) => {
             tracing::error!(error = ?error, pressed, stage = id, "recording a stage beside the adopted one failed");
 
-            return;
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("it could not be recorded as under way: {error}"),
+            )
+            .await;
         }
     }
 
@@ -2816,6 +2892,27 @@ async fn alongside(
     ));
 }
 
+/// Take a made stage back: its checkouts, and the half-made Conversation with
+/// them.
+///
+/// The unwind for a halt **after** [`make`] has succeeded, which is the one place
+/// nothing else does it — everything above that point unwinds its own, and from
+/// there the directories and their branches exist and only the plan knows where.
+/// Directory and branch together, for [`unmake`]'s reason: a branch cut moments
+/// ago by a start that then refused holds nothing worth keeping.
+///
+/// Off the runtime's threads, the way the making was — a `git worktree remove`
+/// and a branch delete apiece — and the Conversation closed after them, so that
+/// what the sweep of orphaned worktrees might read as nobody's is gone before the
+/// row that claimed it is.
+async fn unwind(state: &AppState, id: i64, planned: Vec<Checkout>) {
+    if let Err(error) = tokio::task::spawn_blocking(move || unmake(&planned)).await {
+        tracing::error!(error = ?error, stage = id, "taking a half-made stage's worktrees back failed");
+    }
+
+    crate::continuing::gave_up(state, id).await;
+}
+
 /// Say on the pressed Conversation's Timeline that a stage which would have
 /// started beside it did not, and why.
 ///
@@ -2824,6 +2921,11 @@ async fn alongside(
 /// the one they are looking at. The stage that would have carried it has been
 /// closed by the time this is said, so there is no Timeline of its own worth
 /// saying it on.
+///
+/// **Every path out of [`alongside`] that is not a start says this**, which is
+/// what the press owes a human who was shown *and beside it* a moment ago: a
+/// stage that simply never appeared, with the reason in the server log alone, is
+/// the one thing an offer that names its stages must never come to.
 async fn halted(state: &AppState, pressed: i64, stage: &crate::stages::Stage, why: &str) {
     crate::continuing::say(
         state,
