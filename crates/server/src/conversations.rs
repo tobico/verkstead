@@ -2972,7 +2972,17 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
         None => None,
     };
 
-    let note = taken(&taking, &named, made_way.as_deref(), narrowed, stack);
+    // The branch given up, with the pull request it was given up over beside it:
+    // a holder is only ever found through a number, so where there is one there is
+    // the other — and a branch take-up needs the number said, its own sentence
+    // having recorded no pull request of its own.
+    let note = taken(
+        &taking,
+        &named,
+        made_way.as_deref().zip(number),
+        narrowed,
+        stack,
+    );
 
     if let Err(error) = store::note(pool, id, &note).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
@@ -3897,7 +3907,8 @@ fn standing(head: &str, upstream: String) -> Holds {
 ///
 /// **And what this take-up closed to get here, where it closed something.**
 /// `made_way` is the branch of the Conversation that had this pull request and had
-/// finished with it — see [`making_way`] — and it is named by its branch for the
+/// finished with it, paired with the number of the pull request it had — see
+/// [`making_way`] — and it is named by its branch for the
 /// reason the stack note names a neighbour's holder by one: that is what a
 /// Conversation is called once anybody has named one. The pull request that was
 /// *named* and nothing else: the Conversations that were standing on the rest of
@@ -3909,7 +3920,7 @@ fn standing(head: &str, upstream: String) -> Holds {
 fn taken(
     taking: &Target,
     named: &str,
-    made_way: Option<&str>,
+    made_way: Option<(&str, i64)>,
     narrowed: bool,
     stack: Option<String>,
 ) -> String {
@@ -3927,12 +3938,25 @@ fn taken(
         ),
     };
 
+    // Named by its number where the Target was a branch, rather than as *this
+    // pull request*. A branch take-up records none of its own, so the sentence
+    // above has just said so — and it is still asked which one GitHub has open on
+    // the branch, that being how a holder is found there at all, so the pull
+    // request the holder gave up is one this note has not named yet. See
+    // [`opened_on`].
     let taken = match made_way {
-        Some(branch) => format!(
-            "{taken} The Conversation on `{branch}` had finished with this pull request, so it was \
-             closed to make way: there is one open Conversation per pull request, and a Steer is \
-             the way back into it.",
-        ),
+        Some((branch, number)) => {
+            let which = match taking {
+                Target::PullRequest(_) => "this pull request".to_owned(),
+                Target::Branch(_) => format!("pull request #{number} on that branch"),
+            };
+
+            format!(
+                "{taken} The Conversation on `{branch}` had finished with {which}, so it was \
+                 closed to make way: there is one open Conversation per pull request, and a Steer \
+                 is the way back into it.",
+            )
+        }
         None => taken,
     };
 

@@ -10259,6 +10259,24 @@ async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_close
         2,
         "the repository and this Conversation's own, the holder's having gone",
     );
+
+    // And the Timeline names the pull request the holder gave up by its number.
+    // Not *this pull request*: a branch take-up records none of its own and has
+    // just said so, so the number is the only thing that says which one was
+    // finished with.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "The Conversation on <code>rate-limiting</code> had finished with pull request #41 on \
+             that branch"
+        ),
+        "the Timeline names what was given up, by its number: {said}",
+    );
+    assert!(
+        !said.contains("had finished with this pull request"),
+        "and not as this pull request, there being no pull request on this record to mean: {said}",
+    );
 }
 
 /// A holder that is Closed already — or Archived, which is a Closed Conversation
