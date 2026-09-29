@@ -11,7 +11,7 @@
 //!
 //! What says a stage is done is **Verkstead's own record where it has a row for
 //! that stage, and the checkbox in `ROADMAP.md` where it has none** — see
-//! [`left`], which is the whole of that rule, and
+//! [`done`], which is the whole of that rule, and
 //! [ADR-0021](../../../../docs/adr/0021-parallel-stages.md). A stage settled is a
 //! stage done however its box reads on the branch being read, because with
 //! branches side by side each Worktree holds a `ROADMAP.md` of its own and the
@@ -279,18 +279,31 @@ fn stacking(workflow: &str) -> bool {
 /// settled.
 ///
 /// *Which* roadmap is the record's — named by the caller and settled when the
-/// stage started. What it has left comes from the record and the boxes together:
-/// the entries and the briefs are the Worktree's, read as the pinned stage list
-/// reads them, and whether each of those entries is done is [`left`]'s question.
+/// stage started. What it has ready comes from its declarations, the record and
+/// the boxes together: the entries and the briefs are the Worktree's, read as the
+/// pinned stage list reads them, and which of those entries may start now is
+/// [`ready`]'s question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Next {
-    /// This one: the lowest-numbered stage still to do.
+    /// This one: the lowest-numbered stage that may start now.
     Stage(Box<Stage>),
 
-    /// Nothing is left to start. Every stage of it is done, or the only ones left
-    /// are stages somebody is on — and either way the roadmap's directory stays
+    /// Every stage of it is done. The roadmap finished, and its directory stays
     /// where it is as the record of what it was.
     Complete {
+        /// What it is called, for saying so.
+        roadmap: String,
+    },
+
+    /// Nothing may start and the roadmap has not finished: what is left of it is
+    /// in flight, or stands on something that is.
+    ///
+    /// The third answer, and the one that used to be folded into
+    /// [`Next::Complete`] — a roadmap whose only unfinished stages are stages
+    /// somebody is on has nothing to start and has not finished, and saying it
+    /// was complete is how a roadmap worked side by side would announce itself
+    /// finished half way through.
+    InFlight {
         /// What it is called, for saying so.
         roadmap: String,
     },
@@ -446,12 +459,15 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
 /// roadmap somebody else is carrying on: what the branch touched decides
 /// nothing at all.
 ///
-/// What it has left is not just *the lowest unchecked box*: whether an entry is
-/// done is [`left`]'s question, and `record` is the half of it the repository does
+/// What it has left is not the lowest unchecked box: which of its stages may start
+/// now is [`ready`]'s question, and `record` is the half of it the repository does
 /// not hold — what Verkstead's own record says about each stage of this roadmap in
 /// this Repo. The Conversation's own stage settling is what brought this reading
 /// about, so the record is what skips it, and the annotation the roadmap keeps
 /// beside the line is the fallback where the record has no label for it.
+///
+/// **One stage still**, which is the lowest of the ready ones: what changes here is
+/// *which* stage that is rather than how many start.
 ///
 /// A value rather than a lookup, so this stays a reading: the rows are read once,
 /// by the caller, and nothing in here asks the database.
@@ -482,9 +498,7 @@ pub(crate) fn next_stage(
         };
     };
 
-    let mut entries = list.lines().filter_map(checklist::entry).peekable();
-
-    if entries.peek().is_none() {
+    if list.lines().filter_map(checklist::entry).next().is_none() {
         // A directory under `docs/roadmaps/` with an index that plans nothing is
         // not a roadmap, exactly as it is not one to pin — and the record saying
         // this Conversation is a stage of it is what makes that worth saying out
@@ -497,15 +511,26 @@ pub(crate) fn next_stage(
         };
     }
 
-    let Some(entry) = entries.find(|entry| left(entry, record.of(roadmap, entry.label), branch))
-    else {
-        // Every stage of it is done — or the only ones left are stages the record
-        // says somebody is on, which is this Conversation's own where there is no
-        // stage after it. Either way there is nothing here to start, and another
-        // roadmap in this Worktree having work left is not a reason to start it.
-        return Next::Complete {
-            roadmap: roadmap.to_owned(),
-        };
+    // Which of its stages may start is [`ready`]'s answer, and nothing starts more
+    // than one of them yet: the lowest is what this carries on with. Another
+    // roadmap in this Worktree having work left is not a reason to start any of
+    // it.
+    let entry = match ready(roadmap, &list, record, branch) {
+        Ready::Stages(lowest, _) => lowest,
+        Ready::Complete => {
+            return Next::Complete {
+                roadmap: roadmap.to_owned(),
+            };
+        }
+        Ready::InFlight => {
+            return Next::InFlight {
+                roadmap: roadmap.to_owned(),
+            };
+        }
+        // Refused rather than repaired, and never run in order instead — see
+        // [`declarations::judge`], which is where the sentence is written. Saying
+        // it where the press can see it is the other half of the refusal.
+        Ready::Misdeclared(why) => return Next::Unstartable { why },
     };
 
     let brief = directory.join(entry.link);
@@ -530,36 +555,164 @@ pub(crate) fn next_stage(
     }))
 }
 
-/// Whether one entry of a roadmap is a stage still to start, as the Conversation
-/// that has just settled asks it.
+/// What one roadmap may start now: the stages that are ready, or which of the
+/// ways it has none.
 ///
-/// [`done`] is the rule that joins the record to the boxes, and this is that rule
-/// with the two things only this reading knows in front of it:
+/// Three answers beside the stages, and the third of them is the one that used to
+/// be missing — see [`Ready::InFlight`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Ready<'a> {
+    /// The stages that may start now, lowest number first: the lowest of them,
+    /// and the rest behind it.
+    ///
+    /// Split that way because the answer is never *no stages* — that is one of
+    /// the three below — and because nothing starts more than one stage yet:
+    /// both readings take the lowest and leave the rest where they are.
+    Stages(checklist::Entry<'a>, Vec<checklist::Entry<'a>>),
+
+    /// Every stage of it is done: the roadmap finished.
+    Complete,
+
+    /// Nothing may start and the roadmap has not finished. What is left of it is
+    /// in flight, or stands on something that is.
+    ///
+    /// **A third answer rather than the roadmap complete**, which is what it used
+    /// to be folded into. A roadmap whose only unfinished stages are stages
+    /// somebody is on has nothing to start *now* and will have something to start
+    /// the moment one of them settles, and the two readings say so in their own
+    /// words.
+    ///
+    /// Nothing ready and something left over is always this: the stages that are
+    /// left either are in flight or stand on one that is not done, and walking
+    /// down what is not done through a graph with no cycle in it — a cycle being
+    /// refused — reaches a stage whose every dependency is done. That stage would
+    /// be ready were somebody not on it.
+    InFlight,
+
+    /// The roadmap declares badly, so nothing of it may start anywhere — with the
+    /// fault in the words [`declarations::judge`] refuses it in.
+    ///
+    /// Refused rather than repaired, and never run in order instead: falling back
+    /// to running in order runs a roadmap in a way nobody wrote down.
+    Misdeclared(String),
+}
+
+/// Which stages of `roadmap` may **start now**, lowest number first.
 ///
-/// - **A stage in flight is no stage to start either.** Which is the one place the
-///   two readings part company: the adoption refuses a stage in flight by name,
-///   there being a human at the press waiting to be told why, and this one passes
-///   over it and looks at what comes after.
-/// - **And the annotation stays as the fallback in front of all of it.** The
-///   Conversation whose settling brought the reading about has a row of its own
-///   saying so — but every stage started between ADR-0017 landing and the label
-///   being written down has a row holding a roadmap and no label, and for one of
-///   those the annotation naming its branch is the only thing that keeps it from
-///   being offered its own stage back.
-fn left(
-    entry: &checklist::Entry<'_>,
-    standing: Option<store::StageStanding>,
+/// The one reading both starts go through — the carry-on that runs when a stage
+/// settles, and the adoption's, which answers the roadmap notice, the compose page
+/// and the press. Three things go into it and all three were already there: what
+/// each stage's line declares it stands on, Verkstead's own record of what each
+/// stage of this roadmap has got to, and the boxes the roadmap keeps.
+///
+/// A stage is **ready** when every stage it stands on has **settled** and it is
+/// itself neither done nor in flight. Settled is [`done`]'s question, which is the
+/// rule that joins the record to the boxes — and settled rather than merged: a
+/// stage whose pull request is open and whose wrap-up reached Done is a stage the
+/// ones above it stand on, which is the whole of how a roadmap runs.
+///
+/// **An undeclared roadmap is read as each stage standing on the one before it**,
+/// as the roadmap lists them. That is what *in order* means to the scheduler, and
+/// it is what keeps this one reading rather than two: every roadmap written before
+/// any of this runs exactly as it did, and a stage in flight now holds up what
+/// stands on it rather than being stepped over.
+///
+/// **Nothing ready does not mean the roadmap is complete** — see
+/// [`Ready::InFlight`], which is that third answer.
+///
+/// `branch` is the Conversation whose settling brought the reading about, and it
+/// is empty where none did: the adoption reads a roadmap that belongs to nobody
+/// yet. A stage the roadmap's annotation says is on that branch counts as
+/// settled, and that is the fallback in front of all of it — the Conversation
+/// whose settling brought the reading about has a row of its own saying so, but
+/// every stage started between ADR-0017 landing and the label being written down
+/// has a row holding a roadmap and no label, and for one of those the annotation
+/// naming its branch is the only thing that keeps it from being offered its own
+/// stage back.
+///
+/// A reading: the record comes in as a value and nothing here asks the database or
+/// git. Which is what lets one function answer for a Worktree as it stands and for
+/// a Repo at a commit alike — the bytes are the caller's to fetch.
+pub(crate) fn ready<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
     branch: &str,
-) -> bool {
-    if ours(entry.after, branch) {
-        return false;
-    }
+) -> Ready<'a> {
+    let entries: Vec<checklist::Entry<'a>> = list.lines().filter_map(checklist::entry).collect();
 
-    if standing == Some(store::StageStanding::InFlight) {
-        return false;
-    }
+    // What each stage stands on, by where in the list that stage is. The labels
+    // are the roadmap's and the indices are ours: a declaration names stages of
+    // its own roadmap, which the judging has already checked, so every label here
+    // is one of these entries.
+    let stands_on: Vec<Vec<usize>> = match declarations::judge(roadmap, list) {
+        declarations::Judgement::Refused(why) => return Ready::Misdeclared(why),
 
-    !done(entry, standing)
+        // Each stage standing on the one before it, which is what *in order* means
+        // — and the first stage of one standing on nothing at all.
+        declarations::Judgement::Undeclared => (0..entries.len())
+            .map(|at| match at.checked_sub(1) {
+                Some(before) => vec![before],
+                None => Vec::new(),
+            })
+            .collect(),
+
+        declarations::Judgement::Declared(declared) => entries
+            .iter()
+            .map(|entry| {
+                declared
+                    .iter()
+                    .find(|one| one.label == entry.label)
+                    .map(|one| {
+                        one.stands_on
+                            .iter()
+                            .filter_map(|label| entries.iter().position(|one| one.label == *label))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect(),
+    };
+
+    // And what the record and the boxes say about each of them, once each: whether
+    // it is done, and whether somebody is on it. The annotation comes first, so a
+    // stage the record holds no label for is the settling Conversation's own rather
+    // than a stage nothing stands on.
+    let settled: Vec<bool> = entries
+        .iter()
+        .map(|entry| ours(entry.after, branch) || done(entry, record.of(roadmap, entry.label)))
+        .collect();
+
+    let on_it: Vec<bool> = entries
+        .iter()
+        .zip(&settled)
+        .map(|(entry, settled)| {
+            !settled && record.of(roadmap, entry.label) == Some(store::StageStanding::InFlight)
+        })
+        .collect();
+
+    let mut ready: Vec<checklist::Entry<'a>> = entries
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| !settled[*at] && !on_it[*at])
+        .filter(|(at, _)| stands_on[*at].iter().all(|stood| settled[*stood]))
+        .map(|(_, entry)| *entry)
+        .collect();
+
+    // The roadmap's order is still the roadmap's own, and lowest first is what
+    // decides which of them start where there are more than places for. A stable
+    // sort, so a roadmap that numbers two lines alike keeps them as it wrote them.
+    ready.sort_by_key(|entry| entry.number);
+
+    let mut ready = ready.into_iter();
+
+    match ready.next() {
+        Some(lowest) => Ready::Stages(lowest, ready.collect()),
+        None => match settled.iter().all(|settled| *settled) {
+            true => Ready::Complete,
+            false => Ready::InFlight,
+        },
+    }
 }
 
 /// Whether one stage of a roadmap is **done**: the rule that joins Verkstead's
@@ -570,11 +723,12 @@ fn left(
 /// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), which is where that
 /// was settled, and `store::stage_standings`, which is where the record is read.
 ///
-/// One rule in one function, because both readings of a roadmap have to agree
-/// about what is done: [`left`], which is the carry-on's and reads a Worktree as
-/// it stands, and [`startable`], which is the adoption's and reads a Repo at a
-/// commit. A stage that is done to one of them and open to the other is a notice
-/// offering work somebody has finished, or a roadmap that stops advancing.
+/// One rule in one function, spent by [`ready`] on every stage of a roadmap: what
+/// is done is what the stages above it stand on, and what is not done is what may
+/// yet start. Both readings of a roadmap go through that one reading — the
+/// carry-on's, off a Worktree as it stands, and the adoption's, off a Repo at a
+/// commit — because a stage that is done to one of them and open to the other is a
+/// notice offering work somebody has finished, or a roadmap that stops advancing.
 ///
 /// - **Settled** is done, whatever the box on the branch being read says. This is
 ///   the whole point of the record: with stages worked side by side each Worktree
@@ -909,9 +1063,14 @@ pub(crate) enum Startable {
     /// where it is as the record of what it was.
     Complete,
 
-    /// Somebody — or some unattended run — is on the next stage: the record says
-    /// so, or, where it says nothing about that stage, its annotation names a
+    /// Somebody — or some unattended run — is on what is left of it: the record
+    /// says so of every stage that could otherwise have started, or, where it says
+    /// nothing about the stage this reading landed on, its annotation names a
     /// branch that is still there.
+    ///
+    /// Not the roadmap complete and not a stage to offer, which is why it is an
+    /// answer of its own: one of them settling is what gives this roadmap something
+    /// to start again.
     InFlight,
 
     /// The next stage names a brief that cannot be read at this commit — or
@@ -1247,12 +1406,13 @@ fn indexed(path: &str) -> Option<&str> {
 /// clause refused it, because the press is the one of the three with a human
 /// waiting on an answer.
 ///
-/// Which stage it is, is [`done`]'s question: the lowest-numbered one that is not
-/// done, by the record where it has a row for the stage and by the box where it
-/// has none. The roadmap's order is the roadmap's own and its stages are strictly
-/// sequential, so there is nothing else to decide — and there is no Conversation
-/// of this reading's own to skip either, so the branch-skipping [`ours`] does for
-/// the settling path has no part in it: a roadmap read here belongs to nobody yet.
+/// Which stage it is, is [`ready`]'s question: the lowest-numbered one that may
+/// start now, which is one whose every dependency has settled and that is itself
+/// neither done nor in flight. The roadmap's order is still the roadmap's own, and
+/// an undeclared roadmap is read as each stage standing on the one before it — so
+/// what this offers of one is the lowest unticked box it always offered. There is
+/// no Conversation of this reading's own to skip, so the branch the settling path
+/// hands [`ready`] is empty here: a roadmap read here belongs to nobody yet.
 ///
 /// `record` is what Verkstead knows about the stages of this Repo's roadmaps. A
 /// value rather than a lookup, so this stays a reading — the rows are read once
@@ -1272,57 +1432,52 @@ pub(crate) fn startable(
         return Startable::NoRoadmap;
     };
 
-    let mut entries = index.lines().filter_map(checklist::entry).peekable();
-
     // A directory under `docs/roadmaps/` whose index plans nothing is not a
     // roadmap at all, exactly as it is not one to pin.
-    if entries.peek().is_none() {
+    if index.lines().filter_map(checklist::entry).next().is_none() {
         return Startable::NoRoadmap;
     }
 
-    // Clause 1: a stage left to do — the record's answer where it has a row for
-    // the stage and the box's where it has none, which is what keeps this reading
-    // and the carry-on's saying the same thing about one roadmap. Every stage done
-    // is a roadmap that finished, and its directory stays where it is as the
-    // record of what it was.
+    // Clause 1: a stage that may start — [`ready`]'s answer, which is the one
+    // reading the carry-on goes through too, so that what is offered here and what
+    // an unattended run would start are one rule. Every stage done is a roadmap
+    // that finished, and its directory stays where it is as the record of what it
+    // was; nothing ready with a stage still in flight is neither that nor a stage
+    // to offer.
     //
-    // What is passed over on the way is worth one bit: a stage counted as done by
+    // The lowest of them, nothing starting more than one stage yet.
+    let entry = match ready(name, &index, record, "") {
+        Ready::Stages(lowest, _) => lowest,
+        Ready::Complete => return Startable::Complete,
+        Ready::InFlight => return Startable::InFlight,
+        // Nothing of a roadmap that declares badly may start, here as anywhere.
+        // Naming the fault where the press can see it is a clause of its own, and
+        // the press is where it is worth wording.
+        Ready::Misdeclared(_) => return Startable::NoRoadmap,
+    };
+
+    // What was passed over on the way is worth one bit: a stage counted as done by
     // the record while its box is still unticked *here* is a stage whose finish
     // commit has not reached this commit, so neither has its work — see
     // [`Abandoned::behind`], which is what that is for.
-    let mut behind = false;
-    let mut found = None;
+    let behind = index
+        .lines()
+        .filter_map(checklist::entry)
+        .take_while(|one| one.label != entry.label)
+        .any(|one| !one.checked && done(&one, record.of(name, one.label)));
 
-    for entry in entries {
-        let standing = record.of(name, entry.label);
-
-        if !done(&entry, standing) {
-            found = Some((standing, entry));
-            break;
-        }
-
-        behind |= !entry.checked;
-    }
-
-    let Some((standing, entry)) = found else {
-        return Startable::Complete;
-    };
-
-    // Clause 3: nobody on it. In flight is the record saying so outright, and it
-    // says it whatever the roadmap has written on the line.
+    // Clause 3: nobody on it. The record saying so outright is [`ready`]'s
+    // business, a stage it says is in flight being no stage to start.
     //
-    // **Anything else leaves the annotation to speak**, which is where an
-    // abandoned stage goes with a stage the record has no row for at all: the
-    // record saying a Conversation was closed part-way through says nothing about
-    // whether anybody is on the stage *now*, and somebody carrying that work on by
-    // hand says so where the score is kept — the one way an unwanted row is
-    // silenced in the repository, the other being the box. Prose a human may have
-    // rewritten, so the branch inside the backticks is the fact, and one whose
-    // branch is gone is a note about an attempt that was abandoned too.
-    let on_it = standing == Some(store::StageStanding::InFlight)
-        || annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch));
-
-    if on_it {
+    // **What is left here is the annotation**, which is where an abandoned stage
+    // goes with a stage the record has no row for at all: the record saying a
+    // Conversation was closed part-way through says nothing about whether anybody
+    // is on the stage *now*, and somebody carrying that work on by hand says so
+    // where the score is kept — the one way an unwanted row is silenced in the
+    // repository, the other being the box. Prose a human may have rewritten, so the
+    // branch inside the backticks is the fact, and one whose branch is gone is a
+    // note about an attempt that was abandoned too.
+    if annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)) {
         return Startable::InFlight;
     }
 
@@ -2273,6 +2428,21 @@ Turns this askance clone into Verkstead.
 - [ ] 03: Implementation — [brief](03-implementation.md)
 ";
 
+    /// And the same four stages declaring what they stand on, in the shape of the
+    /// roadmap that built this: 01 and 02 stand on nothing and are reorderable with
+    /// each other, 03 stands on 02, and 04 waits for both 01 and 03.
+    ///
+    /// Which is what a declaring roadmap is for: the lowest unticked box is never
+    /// the answer here unless 01 is what is ready.
+    const DECLARED: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
+";
+
     /// What Verkstead's record says about the stages of this Repo's roadmaps.
     fn record<'a>(
         rows: impl IntoIterator<Item = (&'a str, &'a str, store::StageStanding)>,
@@ -2334,13 +2504,18 @@ Turns this askance clone into Verkstead.
     }
 
     /// A stage the record says is in flight is neither done nor one to start,
-    /// however its box reads.
+    /// however its box reads — and what stands on it is not started either.
     ///
     /// Which is newly load-bearing, and load-bearing in the other direction from
     /// the box: a stage ticks its own box in its finish commit, before its pull
     /// request has even opened, so a ticked box says *its tasks are done* rather
     /// than *it settled*. Both readings of the box are here — 01 ticked and 02 not
     /// — and neither is started.
+    ///
+    /// Nor is 03, which used to be: the reading walked past a stage in flight and
+    /// started whatever came after it. In an undeclared roadmap 03 stands on 02, so
+    /// a stage somebody is on holds up what stands on it rather than being stepped
+    /// over.
     #[test]
     fn a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads() {
         let repo = Repo::with(&[]);
@@ -2358,15 +2533,18 @@ Turns this askance clone into Verkstead.
             ("mvp", "02", store::StageStanding::InFlight),
         ]);
 
-        let Next::Stage(stage) = repo.next_with("mvp", "anything-else", &in_flight) else {
-            panic!("the two stages somebody is on are not stages to start");
-        };
-
-        assert_eq!(stage.label, "03");
+        assert_eq!(
+            repo.next_with("mvp", "anything-else", &in_flight),
+            Next::InFlight {
+                roadmap: "mvp".to_owned()
+            },
+            "the two stages somebody is on are not stages to start, and the stage that \
+             stands on one of them is not either",
+        );
 
         // And in flight is not done either: a roadmap whose only unstarted stage is
         // the one this reading just refused has nothing to start, which is not the
-        // same statement as a stage having been skipped.
+        // same statement as the roadmap being complete.
         repo.write(
             "mvp",
             "# MVP roadmap\n\n\
@@ -2375,9 +2553,180 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(
             repo.next_with("mvp", "anything-else", &in_flight),
+            Next::InFlight {
+                roadmap: "mvp".to_owned()
+            },
+        );
+    }
+
+    /// The stage a declaring roadmap carries on with is the one whose dependency
+    /// settled, rather than the lowest unticked box.
+    ///
+    /// This is the whole of the change, written as the roadmap that built it: 01
+    /// and 02 stand on nothing, 03 stands on 02 and 04 on both 01 and 03. With 02
+    /// settled and 01 still in flight, 03 is what starts — and the lowest unticked
+    /// box is 01, which is the answer this reading used to give.
+    #[test]
+    fn a_declared_roadmap_carries_on_with_the_stage_whose_dependency_settled() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next_with(
+            "mvp",
+            "roadmaps/mvp/02-grilling",
+            &record([
+                ("mvp", "01", store::StageStanding::InFlight),
+                ("mvp", "02", store::StageStanding::Settled),
+            ]),
+        ) else {
+            panic!("stage 03 stands on 02 alone, and 02 has settled");
+        };
+
+        assert_eq!(stage.label, "03");
+    }
+
+    /// And a stage whose dependency is in flight is no stage to start, in a
+    /// declaring roadmap and in an undeclared one alike.
+    ///
+    /// Declared here — 04 stands on 01 and 03, and 01 is in flight — and undeclared
+    /// in [`a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads`],
+    /// which is the same rule read off a roadmap that declares nothing.
+    #[test]
+    fn a_stage_whose_dependency_is_in_flight_is_not_started() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "04-wrap-up.md", "# 04. Wrap-up\n");
+
+        assert_eq!(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/03-implementation",
+                &record([
+                    ("mvp", "01", store::StageStanding::InFlight),
+                    ("mvp", "02", store::StageStanding::Settled),
+                    ("mvp", "03", store::StageStanding::Settled),
+                ]),
+            ),
+            Next::InFlight {
+                roadmap: "mvp".to_owned()
+            },
+            "04 stands on 01 as well as on 03, and 01 has not settled",
+        );
+    }
+
+    /// Nothing ready and nothing in flight is the roadmap complete, and nothing
+    /// ready with a stage still in flight is not: two answers rather than one.
+    ///
+    /// Which used to be one answer, and announcing a roadmap complete while three
+    /// of its stages were being worked is what that would have come to.
+    #[test]
+    fn nothing_ready_is_the_roadmap_complete_only_where_nothing_is_in_flight() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let settled = [
+            ("mvp", "01", store::StageStanding::Settled),
+            ("mvp", "02", store::StageStanding::Settled),
+            ("mvp", "03", store::StageStanding::Settled),
+        ];
+
+        assert_eq!(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/03-implementation",
+                &record(
+                    settled
+                        .into_iter()
+                        .chain([("mvp", "04", store::StageStanding::InFlight,)])
+                ),
+            ),
+            Next::InFlight {
+                roadmap: "mvp".to_owned()
+            },
+            "the one stage left is one somebody is on, so there is nothing to start",
+        );
+
+        assert_eq!(
+            repo.next_with(
+                "mvp",
+                "roadmaps/mvp/04-wrap-up",
+                &record(
+                    settled
+                        .into_iter()
+                        .chain([("mvp", "04", store::StageStanding::Settled,)])
+                ),
+            ),
             Next::Complete {
                 roadmap: "mvp".to_owned()
             },
+            "and with that one settled there is nothing left at all",
+        );
+    }
+
+    /// The ready stages come back lowest number first, and a declaring roadmap can
+    /// have several of them: 01 and 02 stand on nothing, so both may start.
+    ///
+    /// Nothing starts more than one of them yet — the readings take the lowest —
+    /// but the order is what will decide which of them start where there are more
+    /// than places, so it is the reading's own and is asserted here.
+    #[test]
+    fn the_ready_stages_of_a_declaring_roadmap_come_back_lowest_first() {
+        let Ready::Stages(lowest, rest) =
+            ready("mvp", DECLARED, &store::StageStandings::default(), "")
+        else {
+            panic!("both roots of this roadmap may start");
+        };
+
+        assert_eq!(lowest.label, "01");
+        assert_eq!(
+            rest.iter().map(|entry| entry.label).collect::<Vec<_>>(),
+            ["02"],
+            "and 03 stands on 02, which has not settled",
+        );
+    }
+
+    /// And an undeclared roadmap has one ready stage at most, whatever the record
+    /// says: each stage stands on the one before it, so the one below the lowest
+    /// unticked box has to have settled before anything above it is ready.
+    #[test]
+    fn an_undeclared_roadmap_has_one_ready_stage_at_most() {
+        let Ready::Stages(lowest, rest) =
+            ready("mvp", UNTICKED, &store::StageStandings::default(), "")
+        else {
+            panic!("the first stage of it stands on nothing");
+        };
+
+        assert_eq!(lowest.label, "01");
+        assert!(
+            rest.is_empty(),
+            "02 stands on 01, which nothing says has settled: {:?}",
+            rest.iter().map(|entry| entry.label).collect::<Vec<_>>(),
+        );
+    }
+
+    /// And a roadmap that declares badly has nothing ready at all, with the fault
+    /// in the words the judgement refuses it in.
+    ///
+    /// Refused rather than repaired, and never read in order instead: what the
+    /// reading answers is what stops every start, and where that sentence is said
+    /// is each of the three readings' own.
+    #[test]
+    fn a_roadmap_that_declares_badly_has_nothing_ready() {
+        let Ready::Misdeclared(why) = ready(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+            &store::StageStandings::default(),
+            "",
+        ) else {
+            panic!("a declaration on one line and not the other is refused");
+        };
+
+        assert!(
+            why.contains("mvp") && why.contains("02"),
+            "which roadmap, and which line to go and read: {why:?}",
         );
     }
 
@@ -3394,6 +3743,45 @@ Turns this askance clone into Verkstead.
             ),
             Startable::InFlight,
             "stage 01 settled, and stage 02 is annotated on a branch that is there",
+        );
+    }
+
+    /// And what the adoption offers of a declaring roadmap is the lowest stage that
+    /// **may start**, which is not the lowest unticked box: a stage somebody is on
+    /// no longer takes the whole roadmap out of the notice, because a stage standing
+    /// on nothing beside it may still start.
+    ///
+    /// The same reading the carry-on goes through, which is what keeps the two
+    /// saying one thing about one roadmap.
+    #[test]
+    fn the_adoption_offers_the_lowest_stage_of_a_declaring_roadmap_that_may_start() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+
+        let Startable::Stage(abandoned) = repo.startable_with(
+            "mvp",
+            &record([("mvp", "01", store::StageStanding::InFlight)]),
+        ) else {
+            panic!("stage 02 stands on nothing, so somebody being on 01 does not hold it up");
+        };
+
+        assert_eq!(abandoned.stage.label, "02");
+
+        // And with both roots taken there is nothing to offer: 03 stands on 02 and
+        // 04 on 01 and 03, so nothing may start until one of the two settles —
+        // which is the roadmap holding its breath rather than the roadmap complete.
+        assert_eq!(
+            repo.startable_with(
+                "mvp",
+                &record([
+                    ("mvp", "01", store::StageStanding::InFlight),
+                    ("mvp", "02", store::StageStanding::InFlight),
+                ]),
+            ),
+            Startable::InFlight,
         );
     }
 

@@ -21,7 +21,7 @@ Roadmap stage: [04: The scheduler](docs/roadmaps/parallel-stages/04-the-schedule
 
 ## Tasks
 
-- [ ] 01: What a declared roadmap has ready — [details](01-what-is-ready.md)
+- [x] 01: What a declared roadmap has ready — [details](01-what-is-ready.md)
 - [ ] 02: Read afresh off the top of the chain — [details](02-off-the-top-of-the-chain.md)
 - [ ] 03: A settle starts every ready stage — [details](03-a-settle-starts-them-all.md)
 - [ ] 04: The roadmap's limit — [details](04-the-roadmaps-limit.md)

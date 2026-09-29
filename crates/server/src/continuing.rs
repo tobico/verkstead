@@ -26,12 +26,14 @@
 //! `docs/roadmaps/`: touching a roadmap is not what makes a Conversation a stage
 //! of it, and it used to be.
 //!
-//! **What that roadmap has left comes from the record and the boxes together** —
-//! see [`crate::stages::left`], which is the whole of that rule. The entries and
-//! the briefs are read off the Worktree, by the same rule the pinned stage list is
-//! drawn by; whether each of them is done is the record's answer wherever it has a
-//! row for the stage, because a stage that settled ticked its own box on its own
-//! branch and this one may never have seen it. The pinned block draws every
+//! **What that roadmap has ready comes from its declarations, the record and the
+//! boxes together** — see [`crate::stages::ready`], which is the whole of that
+//! rule. The entries and the briefs are read off the Worktree, by the same rule the
+//! pinned stage list is drawn by; whether each of them is done is the record's
+//! answer wherever it has a row for the stage, because a stage that settled ticked
+//! its own box on its own branch and this one may never have seen it; and what each
+//! of them stands on is its own line's to declare, an undeclared roadmap being read
+//! as each stage standing on the one before it. The pinned block draws every
 //! roadmap the branch touched, which is the wider question and stays that way: one
 //! of those cards is this Conversation's own effort and the rest are roadmaps it
 //! edited in passing.
@@ -227,6 +229,27 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
             );
 
             return;
+        }
+        Next::InFlight { roadmap } => {
+            tracing::info!(
+                conversation_id,
+                roadmap,
+                "nothing of the roadmap is ready to start, and it has not finished either",
+            );
+
+            // No news for the devices: the roadmap has not finished and nothing
+            // started, so there is no milestone here — what there is is a roadmap
+            // that will start something the moment one of the stages somebody is on
+            // settles, which is the settle that will say so.
+            return say(
+                &state,
+                conversation_id,
+                &format!(
+                    "No stage of the `{roadmap}` roadmap can start yet: every stage it has left \
+                     is in flight, or stands on one that is. The roadmap is not complete."
+                ),
+            )
+            .await;
         }
         Next::Unstartable { why } => {
             tracing::warn!(conversation_id, why, "the next stage could not be started");
