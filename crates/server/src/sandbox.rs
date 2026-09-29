@@ -3530,19 +3530,25 @@ pub struct Sandbox {
     /// file at all.
     instructions: String,
 
-    /// And the MCP servers this Conversation attached, each as its name and the
-    /// URL it is reached at, read at the same moment and for the same reason.
+    /// And the MCP servers this Conversation attached, each as its name, the
+    /// URL it is reached at and the headers it is spoken to with, read at the
+    /// same moment and for the same reason.
     ///
     /// Written into a Claude root's `.claude.json` copy, which is the whole of
     /// how a session is launched with one — see [`root::config`]. Which servers
     /// comes off the Conversation and what each of them *is* comes off the
     /// settings, so a URL corrected there reaches the next session and a name
     /// nothing declares any more is simply not in this list — see
-    /// [`crate::settings::Config::servers_among`].
+    /// [`crate::settings::Config::attached_among`].
+    ///
+    /// **The header values are in it**, which is why it is built where the
+    /// token beside it is: they are in `secrets.yaml`, kept from the page and
+    /// the wire rather than from the agent, and a session cannot send a header
+    /// it was not handed.
     ///
     /// Empty is the ordinary Conversation, and the root it built before there
     /// were any.
-    mcp_servers: Vec<(String, String)>,
+    mcp_servers: Vec<crate::settings::AttachedServer>,
 
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
@@ -3842,11 +3848,7 @@ impl Sandbox {
             // reading of the settings a launch makes is the one every part of
             // it works off — and so that a name the settings no longer declare
             // is gone before anything can be built around it.
-            mcp_servers: config
-                .servers_among(&conversation.mcp_servers)
-                .into_iter()
-                .map(|(name, url)| (name.to_owned(), url.to_owned()))
-                .collect(),
+            mcp_servers: config.attached_among(&conversation.mcp_servers, secrets),
             server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,

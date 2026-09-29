@@ -96,6 +96,7 @@ function declaring(...names: string[]): SettingsView {
     mcp_servers: names.map((name) => ({
       name,
       url: `https://mcp.example.com/${name}`,
+      headers: [],
     })),
   };
 }

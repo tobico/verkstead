@@ -39,17 +39,18 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, McpServer, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, PairingView, Parked, PendingSteerView, Process, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
-    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked, PendingSteerView,
+    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -4988,19 +4989,29 @@ async fn save_settings(
         // both lists are decided, and both are checked, before either file is
         // touched. A save turned down over a name is the whole request refused,
         // like one turned down over a pattern.
-        let (servers, refused_servers) = match &edit.mcp_servers {
+        //
+        // And what is to become of the header values with them, which is the
+        // one thing this section writes into the *other* file: a declaration is
+        // a name, a URL and the names of its headers, and every value is a
+        // secret kept where the token is kept — see [`header_actions`].
+        let (servers, headers, refused_servers) = match &edit.mcp_servers {
             // Whatever is declared, carried through untouched — a name this page
             // would have refused included. The reading half keeps one of those
             // and this half is not entitled to drop it: a save about the build
             // cache has no business rewriting a declaration, and no business
             // being refused over one either.
-            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), Vec::new()),
+            //
+            // And nothing at all about the headers, which is what leaves every
+            // key where it is: a section that says nothing about the
+            // declarations says nothing about their secrets either.
+            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), None, Vec::new()),
 
-            McpServersEdit::Set { servers } => {
-                let servers: Vec<_> = servers.iter().map(as_declared).collect();
+            McpServersEdit::Set { servers: sent } => {
+                let servers: Vec<_> = sent.iter().map(as_declared).collect();
                 let refused = server_refusals(&servers);
+                let headers = header_actions(&servers, sent);
 
-                (servers, refused)
+                (servers, Some(headers), refused)
             }
         };
 
@@ -5068,27 +5079,51 @@ async fn save_settings(
         )?;
 
         // On what the file already holds rather than on nothing: a save writes
-        // the whole of `secrets.yaml`, and the session account's password is in
-        // there beside the token on a Windows machine — see
+        // the whole of `secrets.yaml`, and there are two other secrets in there
+        // beside the token — the session account's password on a Windows
+        // machine, and the MCP servers' header values — see
         // [`crate::settings::Settings::save_secrets`]. A page that has been
-        // told about one secret has no business rewriting the other.
+        // told about one secret has no business rewriting another, which is why
+        // each of these is a `with_` on the secrets that are already there.
+        //
+        // Once for both of them rather than a write apiece: what the file holds
+        // afterwards is one thing, and two writes would be a window in which it
+        // held half of it.
+        let mut secrets = settings.secrets();
+        let mut writing = false;
+
+        // The headers first, where this save was about the declarations: the
+        // servers the section did not send are the ones whose keys go, which is
+        // how deleting a declaration takes its secrets with it.
+        if let Some(headers) = &headers {
+            secrets = secrets.with_mcp_headers(headers);
+            writing = true;
+        }
+
         let verifying = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => {
-                settings.save_secrets(&settings.secrets().with_token(Some(token.clone())))?;
+                secrets = secrets.with_token(Some(token.clone()));
+                writing = true;
 
-                // Read back rather than taken from the request: a token that was
-                // only whitespace is nothing configured, and verifying what was
-                // typed would announce an account for a token no session will
-                // ever be given.
-                settings.secrets().github_token().map(str::to_owned)
+                // Read back off the secrets that are to be written rather than
+                // taken from the request: a token that was only whitespace is
+                // nothing configured, and verifying what was typed would
+                // announce an account for a token no session will ever be
+                // given.
+                secrets.github_token().map(str::to_owned)
             }
             TokenEdit::Clear => {
-                settings.save_secrets(&settings.secrets().with_token(None))?;
+                secrets = secrets.with_token(None);
+                writing = true;
 
                 None
             }
         };
+
+        if writing {
+            settings.save_secrets(&secrets)?;
+        }
 
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot
@@ -5261,7 +5296,11 @@ fn as_told(
         // this page would have refused included: this is what the section draws
         // back into its rows, and a declaration left out of the read would be
         // one the human could neither use nor correct.
-        mcp_servers: config.mcp_servers().iter().map(as_declared_row).collect(),
+        mcp_servers: config
+            .mcp_servers()
+            .iter()
+            .map(|server| as_declared_row(server, &secrets))
+            .collect(),
 
         // And the text every session is given, empty where nobody has typed
         // one: the box on the page holds a string either way, and there is no
@@ -5293,10 +5332,68 @@ fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
     }
 }
 
-/// One MCP server as the settings file holds it, out of what the page sent: a
-/// name and a URL, each blank one nothing at all.
-fn as_declared(server: &McpServer) -> crate::settings::McpServer {
-    crate::settings::McpServer::of(Some(server.name.clone()), Some(server.url.clone()))
+/// One MCP server as `config.yaml` holds it, out of what the page sent: a name,
+/// a URL and the names of its headers, each blank one nothing at all.
+///
+/// The header *values* are not here. They are secrets and they are in
+/// `secrets.yaml` — see [`header_actions`], which is the other half of one of
+/// these.
+fn as_declared(server: &McpServerEdit) -> crate::settings::McpServer {
+    crate::settings::McpServer::of(
+        Some(server.name.clone()),
+        Some(server.url.clone()),
+        server
+            .headers
+            .iter()
+            .map(|header| header.name.clone())
+            .collect(),
+    )
+}
+
+/// And what is to become of each of their values, by the name the declaration
+/// ended up with: what [`crate::settings::Secrets::with_mcp_headers`] writes.
+///
+/// Read off `declared` rather than off `sent`, so that the two halves of a
+/// declaration cannot come apart: a header whose name was blank, or one written
+/// twice, is one header or none by the time the file holds it — see
+/// [`crate::settings::McpServer::of`] — and a secret written under a name no
+/// declaration carries would be one nothing could ever send or take away.
+///
+/// A declared header the page said nothing about is kept. That is only ever a
+/// hand-edited `config.yaml`, this being built out of what the page sent; and
+/// keeping is what every other untouched value does.
+fn header_actions(
+    declared: &[crate::settings::McpServer],
+    sent: &[McpServerEdit],
+) -> Vec<(String, Vec<(String, crate::settings::HeaderValue)>)> {
+    declared
+        .iter()
+        .zip(sent)
+        .filter_map(|(declared, sent)| {
+            let headers = declared
+                .headers()
+                .iter()
+                .map(|header| {
+                    let wanted = sent
+                        .headers
+                        .iter()
+                        .find(|edit| edit.name.trim() == header)
+                        .map(|edit| match &edit.value {
+                            HeaderEdit::Keep => crate::settings::HeaderValue::Keep,
+                            HeaderEdit::Set { value } => {
+                                crate::settings::HeaderValue::Set(value.clone())
+                            }
+                            HeaderEdit::Clear => crate::settings::HeaderValue::Clear,
+                        })
+                        .unwrap_or(crate::settings::HeaderValue::Keep);
+
+                    (header.clone(), wanted)
+                })
+                .collect();
+
+            Some((declared.name()?.to_owned(), headers))
+        })
+        .collect()
 }
 
 /// And the other way round, for the read: a half the file does not hold is an
@@ -5307,10 +5404,27 @@ fn as_declared(server: &McpServer) -> crate::settings::McpServer {
 /// as the file is read — see `settings::servers_kept` — so what reaches here has
 /// both, and the fallbacks are what keeps this honest rather than what it is
 /// for.
-fn as_declared_row(server: &crate::settings::McpServer) -> McpServer {
+fn as_declared_row(
+    server: &crate::settings::McpServer,
+    secrets: &crate::settings::Secrets,
+) -> McpServer {
+    let name = server.name().unwrap_or_default();
+
     McpServer {
-        name: server.name().unwrap_or_default().to_owned(),
+        name: name.to_owned(),
         url: server.url().unwrap_or_default().to_owned(),
+        // The names of its headers, each saying whether anything is kept to
+        // send in it, and no part of a value: that is what the token's own view
+        // gives of the token, and the whole of why the two directions of this
+        // section are different shapes.
+        headers: server
+            .headers()
+            .iter()
+            .map(|header| McpHeader {
+                name: header.clone(),
+                set: secrets.mcp_header(name, header).is_some(),
+            })
+            .collect(),
     }
 }
 

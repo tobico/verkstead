@@ -49,6 +49,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::platform::Platform;
+use crate::settings::AttachedServer;
 
 /// The file Claude keeps a login in, inside `~/.claude`.
 ///
@@ -239,6 +240,19 @@ const URL: &str = "url";
 
 /// And the key the transport is under.
 const TYPE: &str = "type";
+
+/// And the key the headers a server is spoken to with are under: the names the
+/// declaration carries, each with the value `secrets.yaml` keeps for it.
+///
+/// Written only where there are any, so that a Conversation whose servers want
+/// none builds the entry it built before there were headers at all.
+///
+/// **The values are in the root in the clear**, which is the limit of the
+/// secrecy and was said out loud in the grilling: a header value is kept from
+/// the page and the wire rather than from the agent, which can read its own
+/// configuration whatever this file did — see ADR-0021. What keeps it is the
+/// root, which is no more readable than the login beside it.
+const HEADERS: &str = "headers";
 
 /// Of the account's `.claude.json`, the key its per-path entries are under.
 const PROJECTS_CONFIG: &str = "projects";
@@ -629,12 +643,12 @@ impl Root {
     /// and not into the account. What the session changes goes back as it ends
     /// — see [`merged_back`].
     ///
-    /// `servers` is what the Conversation attached, each as its name and its
-    /// URL, and empty is the ordinary Conversation — see
-    /// [`crate::settings::Config::servers_among`].
+    /// `servers` is what the Conversation attached, each as its name, its URL
+    /// and the headers it is spoken to with, and empty is the ordinary
+    /// Conversation — see [`crate::settings::Config::attached_among`].
     ///
     /// Blocking: one read.
-    pub(crate) fn config(&self, config_file: &Path, servers: &[(String, String)]) -> Vec<u8> {
+    pub(crate) fn config(&self, config_file: &Path, servers: &[AttachedServer]) -> Vec<u8> {
         let trusted = match &self.harness {
             Harness::Claude { trusted, .. } => trusted.as_slice(),
             Harness::Codex | Harness::Grok | Harness::OpenCode => &[],
@@ -970,7 +984,7 @@ type Object = serde_json::Map<String, serde_json::Value>;
 ///
 /// An account whose file is not there, or does not read as a JSON object, is
 /// given the seeding and nothing else.
-fn config(account: Option<&[u8]>, trusted: &[String], servers: &[(String, String)]) -> Vec<u8> {
+fn config(account: Option<&[u8]>, trusted: &[String], servers: &[AttachedServer]) -> Vec<u8> {
     let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
         Some(serde_json::Value::Object(own)) => own,
         _ => Object::new(),
@@ -984,11 +998,25 @@ fn config(account: Option<&[u8]>, trusted: &[String], servers: &[(String, String
     if !servers.is_empty() {
         let mut ours = Object::new();
 
-        for (name, url) in servers {
-            ours.insert(
-                name.clone(),
-                serde_json::json!({ TYPE: HTTP, URL: url.clone() }),
-            );
+        for server in servers {
+            let mut entry = serde_json::json!({ TYPE: HTTP, URL: server.url() });
+
+            // And the headers it is spoken to with, where it has any: an API
+            // key or a bearer token, which is the only authentication a
+            // declaration has. Left out altogether otherwise, so that a server
+            // that wants none is written the way it was before there were
+            // headers to write.
+            if !server.headers().is_empty() {
+                let sent: Object = server
+                    .headers()
+                    .iter()
+                    .map(|(header, value)| (header.clone(), value.as_str().into()))
+                    .collect();
+
+                entry[HEADERS] = serde_json::Value::Object(sent);
+            }
+
+            ours.insert(server.name().to_owned(), entry);
         }
 
         copy.insert(MCP_SERVERS.to_owned(), serde_json::Value::Object(ours));
@@ -1480,9 +1508,10 @@ mod tests {
         );
     }
 
-    /// A server as a Conversation's attachment comes to one at a launch.
-    fn attached(name: &str, url: &str) -> (String, String) {
-        (name.to_owned(), url.to_owned())
+    /// A server as a Conversation's attachment comes to one at a launch, with
+    /// no headers on it — which is the ordinary declaration.
+    fn attached(name: &str, url: &str) -> AttachedServer {
+        AttachedServer::of(name, url, &[])
     }
 
     /// The copy holds one entry per server the Conversation attached, each with
@@ -1510,6 +1539,52 @@ mod tests {
                     "tickets": { "type": "http", "url": "https://mcp.example.com/tickets" },
                 },
                 "projects": { "/repo": { "hasTrustDialogAccepted": true } },
+            })
+        );
+    }
+
+    /// And the headers a server is spoken to with sit beside its URL, values and
+    /// all: the harness has to send them, and it sends what this file says.
+    #[test]
+    fn a_servers_headers_are_written_beside_its_url() {
+        assert_eq!(
+            read(&config(
+                None,
+                &[],
+                &[AttachedServer::of(
+                    "docs",
+                    "https://mcp.example.com/docs",
+                    &[
+                        ("Authorization", "Bearer sk-averysecretkey"),
+                        ("X-Tenant", "verkstead"),
+                    ],
+                )],
+            ))["mcpServers"],
+            serde_json::json!({
+                "docs": {
+                    "type": "http",
+                    "url": "https://mcp.example.com/docs",
+                    "headers": {
+                        "Authorization": "Bearer sk-averysecretkey",
+                        "X-Tenant": "verkstead",
+                    },
+                },
+            })
+        );
+    }
+
+    /// And a server that wants none has no key for them, so a Conversation whose
+    /// servers want none builds the entry it built before there were headers.
+    #[test]
+    fn a_server_with_no_headers_has_no_key_for_them() {
+        assert_eq!(
+            read(&config(
+                None,
+                &[],
+                &[attached("docs", "https://mcp.example.com/docs")],
+            ))["mcpServers"],
+            serde_json::json!({
+                "docs": { "type": "http", "url": "https://mcp.example.com/docs" },
             })
         );
     }

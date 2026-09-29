@@ -3220,10 +3220,29 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // composer's Attach menu offers what is declared here minus what the
             // Conversation there already has, and two fixtures that disagreed
             // would be a menu with nothing in it.
+            // The first of them carries headers and the second carries none,
+            // because both are shapes the pane draws. And of its two, one has a
+            // value kept for it and one is a name with nothing behind it yet:
+            // that is the whole of what comes back about a header, the value
+            // itself going where the token goes and never coming back.
             "mcp_servers": {
                 "Set": { "servers": [
-                    { "name": "docs", "url": "https://mcp.example.com/docs" },
-                    { "name": "tickets", "url": "https://mcp.example.com/tickets" },
+                    {
+                        "name": "docs",
+                        "url": "https://mcp.example.com/docs",
+                        "headers": [
+                            {
+                                "name": "Authorization",
+                                "value": { "Set": { "value": "Bearer sk-averysecretkey" } },
+                            },
+                            { "name": "X-Tenant", "value": "Keep" },
+                        ],
+                    },
+                    {
+                        "name": "tickets",
+                        "url": "https://mcp.example.com/tickets",
+                        "headers": [],
+                    },
                 ] }
             },
 

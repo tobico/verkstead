@@ -13,6 +13,9 @@
 //!
 //! ```yaml
 //! github_token: ghp_...
+//! mcp_headers:
+//!   docs:
+//!     Authorization: Bearer ...
 //! ```
 //!
 //! and `config.yaml` is the one that could be read over anybody's shoulder:
@@ -44,6 +47,8 @@
 //! mcp_servers:
 //!   - name: docs
 //!     url: https://mcp.example.com/docs
+//!     headers:
+//!       - Authorization
 //! instructions: |
 //!   Prefer the smallest change that does the job.
 //! ```
@@ -90,6 +95,7 @@
 //! and neither is a thing to do to somebody who has never been to the settings
 //! page — see [`Config::share_on_done`].
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -381,14 +387,16 @@ fn unreadable(path: &Path, error: &serde_saphyr::Error) {
 /// and a key from a later Verkstead — or a comment they left as a key by mistake
 /// — is not worth taking a session's credentials away over.
 ///
-/// **Two secrets now, and they are written by different hands.** The token is
+/// **Three secrets now, and they are written by different hands.** The token is
 /// the settings page's, typed and retyped and cleared; the session account's
 /// password is an elevated verb's, written once when the account is made and
-/// read by every Windows session after that. Neither may take the other away,
-/// which is why there is no constructor here that says what the whole file is —
-/// only [`Secrets::with_token`] and
-/// [`Secrets::with_session_account_password`], each of which is the secrets
-/// that are already there with one of them replaced.
+/// read by every Windows session after that; and the header values the declared
+/// MCP servers are spoken to with are the settings page's again, from another
+/// section of it. None of them may take another away, which is why there is no
+/// constructor here that says what the whole file is — only
+/// [`Secrets::with_token`], [`Secrets::with_session_account_password`] and
+/// [`Secrets::with_mcp_headers`], each of which is the secrets that are already
+/// there with one of them replaced.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
     /// The GitHub token every session and every host-side `gh` authenticates
@@ -412,6 +420,34 @@ pub struct Secrets {
     /// it back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_account_password: Option<String>,
+
+    /// And the header values each declared MCP server is spoken to with, by
+    /// the server's name and then by the headers: `{"docs": {"Authorization":
+    /// "Bearer ..."}}`, and empty on an installation that has declared none.
+    ///
+    /// **Here because every one of them is a secret.** A header is what an
+    /// API key or a bearer token is sent in, and static headers are the only
+    /// authentication a declaration has — OAuth was turned down in the
+    /// grilling this was settled in, there being no browser at three in the
+    /// morning. So there is no plain kind: a value typed into this section
+    /// goes where the GitHub token goes, and what comes back to the page is
+    /// the names and nothing else.
+    ///
+    /// **The names are in `config.yaml` and the values are here**, which is
+    /// the one thing in either file said in both. A header name is nobody's
+    /// secret and it is part of the declaration — what the page draws, and
+    /// what says which headers a server has at all — so it is written where
+    /// the declaration is. This holds what may not be read back, and holds it
+    /// under the name that declared it: a header the declaration does not
+    /// name is not sent, and a server that is no longer declared has nothing
+    /// left here at all — see [`Secrets::with_mcp_headers`].
+    ///
+    /// A map rather than the declaration's own order, because the order of
+    /// headers on a request is nobody's business and a map is what is read
+    /// back by name. Sorted, so that what a save writes is the same file
+    /// twice over.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    mcp_headers: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl Secrets {
@@ -430,6 +466,13 @@ impl Secrets {
         Ok(Secrets {
             github_token: secrets.github_token.and_then(blank_is_nothing),
             session_account_password: secrets.session_account_password.and_then(blank_is_nothing),
+            // And the headers with the blanks taken out of them: a value
+            // somebody emptied by hand is a header nothing is sent in, and a
+            // server left holding none of them is not declared here at all —
+            // which is what a save writes when the last of them is cleared, so
+            // that a file written by hand and a file written by the page read
+            // alike.
+            mcp_headers: headers_kept(secrets.mcp_headers),
         })
     }
 
@@ -465,6 +508,58 @@ impl Secrets {
         }
     }
 
+    /// And these secrets with the header values of every server in `declared`
+    /// written down — each header's own action applied to what is kept for it,
+    /// and the headers of every server *not* in `declared` gone.
+    ///
+    /// Which is what a save of the MCP servers section writes. `declared` is
+    /// that section as it is to stand: one entry per server, holding the header
+    /// names that server declares and what is to become of each of their values
+    /// — see [`HeaderValue`].
+    ///
+    /// **A server left out loses its headers**, which is how a declaration
+    /// deleted on the page takes its secrets with it: the section sends the
+    /// whole list, so a server that is not in it is one nobody declares any
+    /// more, and declaring that name again starts with nothing kept for it.
+    ///
+    /// **A header with no value is no header.** One cleared, one set to
+    /// whitespace and one never typed come to the same nothing, and nothing is
+    /// what is written down — the name stays declared in `config.yaml`, and
+    /// there is simply nothing here to send in it. A server whose headers all
+    /// come to nothing is dropped, so that an empty map never reaches the file.
+    pub fn with_mcp_headers(&self, declared: &[(String, Vec<(String, HeaderValue)>)]) -> Secrets {
+        let written = declared
+            .iter()
+            .map(|(server, headers)| {
+                let kept = self.mcp_headers.get(server);
+
+                let headers = headers
+                    .iter()
+                    .filter_map(|(header, value)| {
+                        let value = match value {
+                            // What is kept, which is what a value box left
+                            // blank means: a save correcting a URL is not one
+                            // that takes a key away.
+                            HeaderValue::Keep => kept.and_then(|kept| kept.get(header)).cloned(),
+                            HeaderValue::Set(typed) => blank_is_nothing(typed.clone()),
+                            HeaderValue::Clear => None,
+                        };
+
+                        Some((header.clone(), value?))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+
+                (server.clone(), headers)
+            })
+            .filter(|(_, headers)| !headers.is_empty())
+            .collect();
+
+        Secrets {
+            mcp_headers: written,
+            ..self.clone()
+        }
+    }
+
     /// The configured GitHub token, or `None` where there is none.
     pub fn github_token(&self) -> Option<&str> {
         self.github_token.as_deref()
@@ -476,6 +571,21 @@ impl Secrets {
         self.session_account_password.as_deref()
     }
 
+    /// And what is sent in `header` to the server declared as `server`, or
+    /// `None` where nothing is kept for it — a header declared and never given
+    /// a value, or one that was cleared.
+    ///
+    /// By name both ways round, because that is what this file holds: the
+    /// declaration says which headers a server has and in what order, and this
+    /// says what goes in each of them — see [`Config::attached_among`], which
+    /// is where the two are put together.
+    pub fn mcp_header(&self, server: &str, header: &str) -> Option<&str> {
+        self.mcp_headers
+            .get(server)?
+            .get(header)
+            .map(String::as_str)
+    }
+
     /// Whether anything at all is configured here, which is what says a save
     /// writes a file rather than empties one.
     ///
@@ -485,9 +595,10 @@ impl Secrets {
         let Secrets {
             github_token,
             session_account_password,
+            mcp_headers,
         } = self;
 
-        github_token.is_some() || session_account_password.is_some()
+        github_token.is_some() || session_account_password.is_some() || !mcp_headers.is_empty()
     }
 }
 
@@ -877,6 +988,40 @@ impl Config {
                     .iter()
                     .find(|server| server.name() == Some(name.as_str()))
                     .and_then(|server| Some((server.name()?, server.url()?)))
+            })
+            .collect()
+    }
+
+    /// And the same again with the header values `secrets` keeps for each of
+    /// them, which is what a Built Root is written out of.
+    ///
+    /// The one place the two files are put together. [`Config::servers_among`]
+    /// answers which servers and where, which is what a prompt names and what a
+    /// page could be shown; this answers what is *sent* to them, and a caller
+    /// that wanted only the names should ask the other.
+    ///
+    /// A header the declaration names and the secrets keep nothing for is left
+    /// out rather than sent empty: an empty header is not the credential the
+    /// service asked for, and a request without one fails where a request with
+    /// an empty one fails obscurely — which is [`blank_is_nothing`]'s reason
+    /// said about a header.
+    pub fn attached_among(&self, attached: &[String], secrets: &Secrets) -> Vec<AttachedServer> {
+        self.servers_among(attached)
+            .into_iter()
+            .map(|(name, url)| AttachedServer {
+                name: name.to_owned(),
+                url: url.to_owned(),
+                headers: self
+                    .mcp_servers
+                    .iter()
+                    .find(|server| server.name() == Some(name))
+                    .map(McpServer::headers)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|header| {
+                        Some((header.clone(), secrets.mcp_header(name, header)?.to_owned()))
+                    })
+                    .collect(),
             })
             .collect()
     }
@@ -1343,15 +1488,50 @@ pub struct McpServer {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+
+    /// And the headers it is spoken to with, by name and in the order they are
+    /// sent — `Authorization`, an API key's own header, whatever the service's
+    /// documentation gives. Empty is a server that wants none, which is the
+    /// ordinary declaration.
+    ///
+    /// **The names only.** Every value is a secret and is in `secrets.yaml`
+    /// under this server's name — see [`Secrets::mcp_header`]. What is here is
+    /// what may be read back to the page and what says which headers there are
+    /// at all; a name declared with nothing kept for it is a header nothing is
+    /// sent in.
+    ///
+    /// Read as leniently as the rows above are, and a blank one is no header:
+    /// a row somebody emptied by hand says what an emptied bind says. A name
+    /// written twice is one header, because a request has one value per header
+    /// and the file has one value per name — see [`McpServer::of`].
+    #[serde(
+        default,
+        deserialize_with = "rows_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    headers: Vec<String>,
 }
 
 impl McpServer {
     /// The declaration a settings page has just been told, each blank half
     /// nothing at all — see [`blank_is_nothing`].
-    pub fn of(name: Option<String>, url: Option<String>) -> McpServer {
+    ///
+    /// The header names with the blanks taken out and the repeats dropped,
+    /// first written first: what is kept for a header is kept under its name,
+    /// so two rows of one name are one header whatever the page drew.
+    pub fn of(name: Option<String>, url: Option<String>, headers: Vec<String>) -> McpServer {
+        let mut kept: Vec<String> = Vec::new();
+
+        for header in entries_written(headers) {
+            if !kept.contains(&header) {
+                kept.push(header);
+            }
+        }
+
         McpServer {
             name: name.and_then(blank_is_nothing),
             url: url.and_then(blank_is_nothing),
+            headers: kept,
         }
     }
 
@@ -1364,6 +1544,87 @@ impl McpServer {
     /// And where it is spoken to, which is an HTTP URL.
     pub fn url(&self) -> Option<&str> {
         self.url.as_deref()
+    }
+
+    /// And the names of the headers it is spoken to with, in the order they are
+    /// sent. Empty is a server that wants none.
+    pub fn headers(&self) -> &[String] {
+        &self.headers
+    }
+}
+
+/// What is to become of one header's value on a save: the token's three
+/// actions, one per header.
+///
+/// An action rather than a value for the reason [`crate::settings`]'s token is
+/// one, and it is the same reason: the value is write-only, so a page cannot
+/// send back what it was never shown, and a blank box read as *clear this*
+/// would take a key away every time somebody corrected a URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeaderValue {
+    /// Leave whatever is kept for this header alone, which is what a value box
+    /// left blank means.
+    Keep,
+
+    /// Send this in it from now on, in place of whatever is kept.
+    Set(String),
+
+    /// And take away what is kept, leaving the header declared with nothing to
+    /// send in it.
+    Clear,
+}
+
+/// One attached server as a launch needs it: a name, a URL, and every header it
+/// is spoken to with, value and all.
+///
+/// The two files put together, which is the one place they are — see
+/// [`Config::attached_among`], which is the only thing that makes one. A
+/// declaration says which headers there are and in what order, and the secrets
+/// say what goes in each; what comes out is what is written into a Built Root.
+///
+/// **The values are here in the clear**, and that is the limit of the secrecy:
+/// they are kept from the page and the wire rather than from the agent, which
+/// reads its own configuration — see ADR-0021.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachedServer {
+    name: String,
+    url: String,
+    headers: Vec<(String, String)>,
+}
+
+impl AttachedServer {
+    /// One as a caller outside the settings would have it: what a test declares
+    /// and attaches in one breath, and what a harness that composes its own
+    /// configuration out of these is written against.
+    ///
+    /// The ordinary way to one is [`Config::attached_among`], which is the two
+    /// files put together and the only thing a launch uses.
+    pub fn of(name: &str, url: &str, headers: &[(&str, &str)]) -> AttachedServer {
+        AttachedServer {
+            name: name.to_owned(),
+            url: url.to_owned(),
+            headers: headers
+                .iter()
+                .map(|(header, value)| ((*header).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    /// What the agent sees in front of this server's tool names.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// And where it is spoken to.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// And what is sent with every request to it, in the order the declaration
+    /// names them. Empty is a server that wants none, and a header declared
+    /// with nothing kept for it is not among them.
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
     }
 }
 
@@ -1485,8 +1746,38 @@ fn servers_written<'de, D: serde::Deserializer<'de>>(
 fn servers_kept(servers: Vec<McpServer>) -> Vec<McpServer> {
     servers
         .into_iter()
-        .map(|server| McpServer::of(server.name, server.url))
+        .map(|server| McpServer::of(server.name, server.url, server.headers))
         .filter(|server| server.name.is_some() && server.url.is_some())
+        .collect()
+}
+
+/// The header values in `secrets.yaml` with the blanks taken out of them: a
+/// value somebody emptied by hand is a header nothing is sent in, and a server
+/// left holding none is dropped.
+///
+/// Which is exactly what [`Secrets::with_mcp_headers`] writes, said again for
+/// the file it reads: what a hand-edit leaves behind and what a save leaves
+/// behind have to mean the same thing, or a header would be sent empty on a
+/// machine somebody had opened the file on.
+///
+/// The names are not touched. A header the declaration does not name is never
+/// looked up, so one left here by an edit to `config.yaml` is spent rather than
+/// wrong — and dropping it would be throwing away a value the human could not
+/// type again.
+fn headers_kept(
+    headers: BTreeMap<String, BTreeMap<String, String>>,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    headers
+        .into_iter()
+        .map(|(server, sent)| {
+            let sent: BTreeMap<String, String> = sent
+                .into_iter()
+                .filter_map(|(header, value)| Some((header, blank_is_nothing(value)?)))
+                .collect();
+
+            (server, sent)
+        })
+        .filter(|(server, sent)| !server.trim().is_empty() && !sent.is_empty())
         .collect()
 }
 
@@ -1542,8 +1833,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule, McpServer,
-        RuleTrouble, RustBuildCache, Secrets, ServerTrouble, Settings, trouble_among,
+        AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor,
+        HeaderValue, IgnoreRule, McpServer, RuleTrouble, RustBuildCache, Secrets, ServerTrouble,
+        Settings, trouble_among,
     };
 
     #[test]
@@ -1606,6 +1898,155 @@ mod tests {
             settings.secrets().session_account_password(),
             Some("Vk1-hunter2"),
             "clearing a token should not have taken the session account's password with it",
+        );
+    }
+
+    /// The header values are read under the server's name and then the
+    /// header's, which is the shape that lets a declaration be deleted by
+    /// leaving its name out of the next save.
+    #[test]
+    fn the_header_values_are_read_under_the_server_that_declared_them() {
+        let secrets = Secrets::read(concat!(
+            "github_token: ghp_thetoken\n",
+            "mcp_headers:\n",
+            "  docs:\n",
+            "    Authorization: Bearer sk-averysecretkey\n",
+            "    X-Tenant: verkstead\n",
+        ))
+        .unwrap();
+
+        assert_eq!(
+            secrets.mcp_header("docs", "Authorization"),
+            Some("Bearer sk-averysecretkey")
+        );
+        assert_eq!(secrets.mcp_header("docs", "X-Tenant"), Some("verkstead"));
+        assert_eq!(secrets.mcp_header("docs", "X-Nothing"), None);
+        assert_eq!(secrets.mcp_header("tickets", "Authorization"), None);
+        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+    }
+
+    /// And a value somebody emptied by hand is a header nothing is sent in,
+    /// which is what a save writes when one is cleared.
+    #[test]
+    fn a_blank_header_value_is_no_header() {
+        let secrets = Secrets::read(concat!(
+            "mcp_headers:\n",
+            "  docs:\n",
+            "    Authorization: ''\n",
+            "  tickets:\n",
+            "    X-Tenant: verkstead\n",
+        ))
+        .unwrap();
+
+        assert_eq!(secrets.mcp_header("docs", "Authorization"), None);
+        assert_eq!(secrets.mcp_header("tickets", "X-Tenant"), Some("verkstead"));
+    }
+
+    /// Each header is kept, set or cleared on its own, and a server left out of
+    /// the save loses what was kept for it — which is how deleting a
+    /// declaration takes its secrets with it.
+    #[test]
+    fn a_header_is_kept_set_or_cleared_and_a_server_left_out_loses_its_own() {
+        let kept = Secrets::read(concat!(
+            "mcp_headers:\n",
+            "  docs:\n",
+            "    Authorization: Bearer sk-thefirstkey\n",
+            "    X-Tenant: verkstead\n",
+            "  tickets:\n",
+            "    Authorization: Bearer sk-thetickets\n",
+        ))
+        .unwrap();
+
+        let written = kept.with_mcp_headers(&[(
+            "docs".to_owned(),
+            vec![
+                (
+                    "Authorization".to_owned(),
+                    HeaderValue::Set("Bearer sk-thesecondkey".to_owned()),
+                ),
+                ("X-Tenant".to_owned(), HeaderValue::Keep),
+                ("X-Spent".to_owned(), HeaderValue::Clear),
+            ],
+        )]);
+
+        assert_eq!(
+            written.mcp_header("docs", "Authorization"),
+            Some("Bearer sk-thesecondkey")
+        );
+        assert_eq!(written.mcp_header("docs", "X-Tenant"), Some("verkstead"));
+        assert_eq!(written.mcp_header("docs", "X-Spent"), None);
+        assert_eq!(
+            written.mcp_header("tickets", "Authorization"),
+            None,
+            "a server the save did not send is one nobody declares any more"
+        );
+    }
+
+    /// And the token beside them is neither read nor written by that: the file
+    /// is written whole, and the two hands that write it may not take each
+    /// other's work away.
+    #[test]
+    fn writing_the_headers_leaves_the_token_and_the_password_where_they_are() {
+        let kept = Secrets::read(concat!(
+            "github_token: ghp_thetoken\n",
+            "session_account_password: Vk1-hunter2\n",
+        ))
+        .unwrap();
+
+        let written = kept.with_mcp_headers(&[(
+            "docs".to_owned(),
+            vec![(
+                "Authorization".to_owned(),
+                HeaderValue::Set("Bearer sk-averysecretkey".to_owned()),
+            )],
+        )]);
+
+        assert_eq!(written.github_token(), Some("ghp_thetoken"));
+        assert_eq!(written.session_account_password(), Some("Vk1-hunter2"));
+
+        // And the other way about.
+        let cleared = written.with_token(None);
+
+        assert_eq!(
+            cleared.mcp_header("docs", "Authorization"),
+            Some("Bearer sk-averysecretkey")
+        );
+    }
+
+    /// A file holding nothing but headers that have all been cleared says what
+    /// an unwritten one says, which is what [`Settings::save_secrets`] empties
+    /// it over.
+    #[test]
+    fn headers_cleared_to_nothing_leave_nothing_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&settings.secrets().with_mcp_headers(&[(
+                "docs".to_owned(),
+                vec![(
+                    "Authorization".to_owned(),
+                    HeaderValue::Set("Bearer sk-averysecretkey".to_owned()),
+                )],
+            )]))
+            .unwrap();
+
+        assert_eq!(
+            settings.secrets().mcp_header("docs", "Authorization"),
+            Some("Bearer sk-averysecretkey")
+        );
+
+        settings
+            .save_secrets(&settings.secrets().with_mcp_headers(&[(
+                "docs".to_owned(),
+                vec![("Authorization".to_owned(), HeaderValue::Clear)],
+            )]))
+            .unwrap();
+
+        assert!(
+            std::fs::read_to_string(settings.secrets_path())
+                .unwrap()
+                .is_empty()
         );
     }
 
@@ -3017,6 +3458,7 @@ mod tests {
                 vec![McpServer::of(
                     Some("docs".to_owned()),
                     Some("https://mcp.example.com/docs".to_owned()),
+                    vec![],
                 )],
                 String::new(),
             ))
@@ -3052,12 +3494,16 @@ mod tests {
             [(0, ServerTrouble::Name(_))]
         ));
         assert!(matches!(
-            trouble_among(&[McpServer::of(None, Some("https://example.com".to_owned()))])
-                .as_slice(),
+            trouble_among(&[McpServer::of(
+                None,
+                Some("https://example.com".to_owned()),
+                vec![]
+            )])
+            .as_slice(),
             [(0, ServerTrouble::Name(_))]
         ));
         assert!(matches!(
-            trouble_among(&[McpServer::of(Some("docs".to_owned()), None)]).as_slice(),
+            trouble_among(&[McpServer::of(Some("docs".to_owned()), None, vec![])]).as_slice(),
             [(0, ServerTrouble::Url(_))]
         ));
 
@@ -3089,7 +3535,7 @@ mod tests {
         let trouble = trouble_among(&[
             declared("Docs", "https://example.com"),
             declared("tickets", "https://example.com"),
-            McpServer::of(Some("notes".to_owned()), None),
+            McpServer::of(Some("notes".to_owned()), None, vec![]),
         ]);
 
         assert!(matches!(
@@ -3100,7 +3546,7 @@ mod tests {
 
     /// One declaration, for the tests above.
     fn declared(name: &str, url: &str) -> McpServer {
-        McpServer::of(Some(name.to_owned()), Some(url.to_owned()))
+        McpServer::of(Some(name.to_owned()), Some(url.to_owned()), vec![])
     }
 
     /// What a Conversation's chips come to at a launch: the declarations they
@@ -3126,6 +3572,56 @@ mod tests {
         assert!(
             config.servers_among(&[]).is_empty(),
             "and a Conversation with nothing attached has nothing to launch with"
+        );
+    }
+
+    /// And what a launch is actually handed: the declaration's headers in the
+    /// order it names them, each with the value the secrets keep for it — the
+    /// one place the two files are put together.
+    #[test]
+    fn an_attached_server_carries_the_headers_the_secrets_keep_for_it() {
+        let config = Config::read(concat!(
+            "mcp_servers:\n",
+            "  - name: docs\n",
+            "    url: https://mcp.example.com/docs\n",
+            "    headers:\n",
+            "      - Authorization\n",
+            "      - X-Tenant\n",
+            "      - X-Nothing-Kept\n",
+            "  - name: tickets\n    url: https://mcp.example.com/tickets\n",
+        ))
+        .unwrap();
+
+        let secrets = Secrets::read(concat!(
+            "mcp_headers:\n",
+            "  docs:\n",
+            "    Authorization: Bearer sk-averysecretkey\n",
+            "    X-Tenant: verkstead\n",
+            // A value kept under a name no declaration carries is spent rather
+            // than sent: what says which headers there are is `config.yaml`.
+            "    X-Forgotten: from-an-older-declaration\n",
+            "  tickets:\n",
+            "    Authorization: Bearer sk-thetickets\n",
+        ))
+        .unwrap();
+
+        let attached = config.attached_among(&["docs".to_owned(), "tickets".to_owned()], &secrets);
+
+        assert_eq!(
+            attached,
+            vec![
+                AttachedServer::of(
+                    "docs",
+                    "https://mcp.example.com/docs",
+                    &[
+                        ("Authorization", "Bearer sk-averysecretkey"),
+                        ("X-Tenant", "verkstead"),
+                    ],
+                ),
+                // Declared with no headers at all, so nothing kept under its
+                // name is sent.
+                AttachedServer::of("tickets", "https://mcp.example.com/tickets", &[]),
+            ],
         );
     }
 

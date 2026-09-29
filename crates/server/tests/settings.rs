@@ -46,8 +46,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, IgnoreRule, McpServer, PathResolution, PathSource,
-    RuleField, ServerField, SettingsSaved, SettingsView, Verified,
+    CompileCaching, ConflictResolution, IgnoreRule, McpHeader, McpServer, PathResolution,
+    PathSource, RuleField, ServerField, SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -1733,15 +1733,58 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
 }
 
 fn server(name: &str, url: &str) -> serde_json::Value {
-    serde_json::json!({ "name": name, "url": url })
+    with_headers(name, url, serde_json::json!([]))
 }
 
-/// And the declaration as it comes back, for comparing against.
+/// And one with headers on it, each of them a name and what is to become of the
+/// value sent in it — see [`set`], [`keep`] and [`clear`].
+fn with_headers(name: &str, url: &str, headers: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "name": name, "url": url, "headers": headers })
+}
+
+/// A header given a value, which is the only way one is ever typed.
+fn set(name: &str, value: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": { "Set": { "value": value } } })
+}
+
+/// And one whose value box was left alone, which is what every header of a
+/// server somebody only corrected the URL of sends.
+fn keep(name: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": "Keep" })
+}
+
+/// And one whose value is being taken away, the header staying declared with
+/// nothing to send in it.
+fn clear(name: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": "Clear" })
+}
+
+/// And the declaration as it comes back, for comparing against: a name, a URL
+/// and the names of its headers.
 fn declared(name: &str, url: &str) -> McpServer {
+    declaring(name, url, &[])
+}
+
+/// And one with headers on it, each its name and whether a value is kept to
+/// send in it.
+fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
     McpServer {
         name: name.to_owned(),
         url: url.to_owned(),
+        headers: headers
+            .iter()
+            .map(|(header, set)| McpHeader {
+                name: (*header).to_owned(),
+                set: *set,
+            })
+            .collect(),
     }
+}
+
+/// What `secrets.yaml` holds now, as text — which is where a header value is
+/// and the one place it can be read back from.
+fn secrets(dir: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap_or_default()
 }
 
 #[tokio::test]
@@ -2073,4 +2116,452 @@ async fn a_config_file_nothing_can_parse_reads_as_no_servers() {
     std::fs::write(dir.path().join("config.yaml"), "mcp_servers: [oh\n").unwrap();
 
     assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+/// A header is added to a declaration by name and value, and what comes back is
+/// the name alone: the value is a secret, and the page is never shown one again.
+#[tokio::test]
+async fn a_headers_name_comes_back_and_its_value_never_does() {
+    let (dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-averysecretkey"),
+                set("X-Tenant", "verkstead"),
+            ]),
+        )]),
+    )
+    .await;
+
+    assert!(
+        saved.refused_servers.is_empty(),
+        "{:?}",
+        saved.refused_servers
+    );
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true), ("X-Tenant", true)],
+        )],
+        "the names, in the order they were declared in"
+    );
+
+    // And a read of its own says the same, which is the half that survives a
+    // reload.
+    assert_eq!(settings(&app).await.mcp_servers, saved.settings.mcp_servers,);
+
+    // The values went where a secret goes, rather than nowhere at all: what the
+    // page cannot read back is still what a session will be handed.
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("verkstead"), "{written}");
+
+    // And `config.yaml` holds the names and no part of either value, the two
+    // files being split by what is secret rather than by what it configures.
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(config.contains("Authorization"), "{config}");
+    assert!(!config.contains("sk-averysecretkey"), "{config}");
+}
+
+/// The promise the token's own test makes, made again for a header: a value that
+/// has gone in is never in a response body again, whichever body it is.
+#[tokio::test]
+async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
+    let (_dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+
+    let saving = save_body(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": { "Set": { "servers": [with_headers(
+                "docs",
+                "https://mcp.example.com/docs",
+                serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+            )] } },
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert!(
+        !saving.contains("sk-averysecretkey"),
+        "the save answered with the header value: {saving}"
+    );
+
+    let reading = settings_body(&app).await;
+
+    assert!(
+        !reading.contains("sk-averysecretkey"),
+        "the read answered with the header value: {reading}"
+    );
+
+    // Not even a tail of it, which is the one thing the token does give back:
+    // there is nothing a human does with part of an API key, and the name is
+    // what tells one header from another.
+    assert!(!reading.contains("secretkey"), "{reading}");
+}
+
+/// A value box left blank keeps what is there, so correcting a URL does not take
+/// a key away — the token's rule, said once per header.
+#[tokio::test]
+async fn a_blank_value_box_keeps_the_value_that_was_there() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://docs.internal/mcp",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://docs.internal/mcp",
+            &[("Authorization", true)]
+        )]
+    );
+    assert!(
+        secrets(&dir).contains("Bearer sk-averysecretkey"),
+        "the URL was corrected and the key stayed: {}",
+        secrets(&dir)
+    );
+}
+
+/// And each header is its own: one set, one kept and one cleared in the one
+/// save, each of them doing what it was told and nothing to the others.
+#[tokio::test]
+async fn a_header_is_kept_set_or_cleared_on_its_own() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-thefirstkey"),
+                set("X-Tenant", "verkstead"),
+                set("X-Spent", "gone-by-the-next-save"),
+            ]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-thesecondkey"),
+                keep("X-Tenant"),
+                clear("X-Spent"),
+            ]),
+        )]),
+    )
+    .await;
+
+    // Every one of them is still declared: clearing a value is not taking the
+    // header off, and the page draws all three.
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[
+                ("Authorization", true),
+                ("X-Tenant", true),
+                ("X-Spent", false)
+            ],
+        )]
+    );
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-thesecondkey"), "{written}");
+    assert!(!written.contains("sk-thefirstkey"), "{written}");
+    assert!(written.contains("verkstead"), "{written}");
+    assert!(!written.contains("gone-by-the-next-save"), "{written}");
+}
+
+/// And a header taken off the row is one the declaration no longer names, its
+/// value gone with it.
+#[tokio::test]
+async fn a_header_taken_off_the_declaration_takes_its_value_with_it() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declared("docs", "https://mcp.example.com/docs")]
+    );
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
+}
+
+/// Deleting a declaration takes its headers with it, so declaring that name
+/// again starts with none — the secrets are held under the name that declared
+/// them, and a name nobody declares holds nothing.
+#[tokio::test]
+async fn deleting_a_server_takes_its_header_values_with_it() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    save_servers(&app, serde_json::json!([])).await;
+
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
+
+    // And the name declared again is a server with nothing kept for it: a header
+    // named now is one with no value until somebody types one.
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", false)]
+        )],
+        "the header is declared with nothing kept for it"
+    );
+    assert!(
+        !secrets(&dir).contains("Authorization"),
+        "and nothing is kept for it: {}",
+        secrets(&dir)
+    );
+}
+
+/// `secrets.yaml` is written whole, so the two hands that write it may not take
+/// each other's work away: saving a server leaves the token where it was, and
+/// saving the token leaves every server's headers where they were.
+#[tokio::test]
+async fn a_server_and_the_token_are_saved_without_taking_each_other_away() {
+    let (dir, app) = app().await;
+
+    save_token(&app, "ghp_thetoken").await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        settings(&app)
+            .await
+            .github_token
+            .expect("the token survived the server's save")
+            .last_four,
+        "oken"
+    );
+
+    // And the other way about, which is the save this endpoint makes most often.
+    let saved = save_token(&app, "ghp_anothertoken").await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true)]
+        )]
+    );
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("ghp_anothertoken"), "{written}");
+
+    // And a save from a section that is about neither leaves both.
+    save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("ghp_anothertoken"), "{written}");
+}
+
+/// A header value cleared where it was the only secret leaves the file saying
+/// what an unwritten one says — which is what the token's own clearing does, and
+/// what keeps a Verkstead that has been to the page and back looking like one
+/// that never went.
+#[tokio::test]
+async fn clearing_the_last_header_leaves_nothing_configured() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([clear("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert!(secrets(&dir).trim().is_empty(), "{}", secrets(&dir));
+}
+
+/// A blank header name is no header, the way an emptied bind row is no bind: the
+/// rows are the page's and an empty one is a row somebody added and left.
+#[tokio::test]
+async fn a_blank_header_name_is_not_a_header() {
+    let (dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("   ", "Bearer sk-averysecretkey"),
+                set("X-Tenant", "verkstead")
+            ]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("X-Tenant", true)]
+        )]
+    );
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "and nothing was written under a name nothing declares: {}",
+        secrets(&dir)
+    );
+}
+
+/// The file rather than the process, for the headers as for the declarations: a
+/// second server over the same Data Directory reads back the names the first one
+/// wrote, and is handed the values it wrote beside them.
+#[tokio::test]
+async fn the_headers_outlive_the_server() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let restarted = app_over(dir.path()).await;
+
+    assert_eq!(
+        settings(&restarted).await.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true)]
+        )]
+    );
+
+    // And a save made by *that* server keeps what it never saw, which is the
+    // whole of why a value box left blank is a keeping.
+    save_servers(
+        &restarted,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://docs.internal/mcp",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert!(
+        secrets(&dir).contains("Bearer sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
 }

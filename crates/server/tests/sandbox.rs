@@ -154,6 +154,10 @@ const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 /// made, and the Conversation is a row the store wrote — because what the
 /// sandbox binds is read off those, and a fixture that hand-built the paths
 /// would prove the probe works rather than that the sandbox does.
+/// One MCP server as [`Grilling::declaring_headers`] is told about it: a name,
+/// the URL it is reached at, and the headers it is spoken to with.
+type Declaring<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-probe would fail obscurely.
@@ -489,12 +493,62 @@ fi
     /// section is: the declarations the page sent are the declarations there
     /// are, so this is also how one is edited and how one is deleted.
     fn declaring(&self, servers: &[(&str, &str)]) {
+        let with_none: Vec<_> = servers
+            .iter()
+            .map(|(name, url)| (*name, *url, &[][..]))
+            .collect();
+
+        self.declaring_headers(&with_none);
+    }
+
+    /// And the same with the headers each is spoken to with, which is the pair
+    /// of files that section writes: the names in `config.yaml` beside the
+    /// declaration, and the values in `secrets.yaml` under the server's name.
+    ///
+    /// Both written again rather than added to, for [`Grilling::declaring`]'s
+    /// reason — and the token is not written here, this being the arrangement
+    /// that lets one be saved without the other being disturbed.
+    fn declaring_headers(&self, servers: &[Declaring]) {
         let declared: String = servers
             .iter()
-            .map(|(name, url)| format!("  - name: {name}\n    url: {url}\n"))
+            .map(|(name, url, headers)| {
+                let names: String = headers
+                    .iter()
+                    .map(|(header, _)| format!("      - {header}\n"))
+                    .collect();
+
+                let names = match names.is_empty() {
+                    true => String::new(),
+                    false => format!("    headers:\n{names}"),
+                };
+
+                format!("  - name: {name}\n    url: {url}\n{names}")
+            })
             .collect();
 
         self.configure(&format!("mcp_servers:\n{declared}"));
+
+        let kept: String = servers
+            .iter()
+            .filter(|(_, _, headers)| !headers.is_empty())
+            .map(|(name, _, headers)| {
+                let values: String = headers
+                    .iter()
+                    .map(|(header, value)| format!("    {header}: {value}\n"))
+                    .collect();
+
+                format!("  {name}:\n{values}")
+            })
+            .collect();
+
+        std::fs::write(
+            self.settings.secrets_path(),
+            match kept.is_empty() {
+                true => String::new(),
+                false => format!("mcp_headers:\n{kept}"),
+            },
+        )
+        .unwrap();
     }
 
     /// And attach each of them to the Conversation, the way the draft
@@ -3909,6 +3963,164 @@ async fn a_second_session_is_given_the_declarations_as_they_stand_then() {
         serde_json::json!({ "docs": {"type": "http", "url": "https://docs.internal/mcp"} }),
         "and the next one is given the corrected URL, with the deleted declaration \
          simply left out"
+    );
+}
+
+/// And the headers a server is spoken to with are in the root beside its URL,
+/// values and all: the harness has to send them, so the session has to be handed
+/// them.
+///
+/// That is the limit of the secrecy, and it was settled in the grilling: a
+/// header value is kept from the page and the wire rather than from the agent,
+/// which reads its own configuration — see ADR-0021. What keeps it is the root,
+/// which is no more readable than the login beside it.
+#[tokio::test]
+async fn a_claude_sessions_servers_carry_the_headers_they_are_spoken_to_with() {
+    let mut fixture = grilling().await;
+
+    fixture.declaring_headers(&[
+        (
+            "docs",
+            "https://mcp.example.com/docs",
+            &[
+                ("Authorization", "Bearer sk-averysecretkey"),
+                ("X-Tenant", "verkstead"),
+            ],
+        ),
+        ("tickets", "https://mcp.example.com/tickets", &[]),
+    ]);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({
+            "docs": {
+                "type": "http",
+                "url": "https://mcp.example.com/docs",
+                "headers": {
+                    "Authorization": "Bearer sk-averysecretkey",
+                    "X-Tenant": "verkstead",
+                },
+            },
+            // And a server that wants none is written the way it was before
+            // there were headers to write: no key at all.
+            "tickets": { "type": "http", "url": "https://mcp.example.com/tickets" },
+        }),
+    );
+}
+
+/// And a header the declaration names with nothing kept for it is left out
+/// rather than sent empty: an empty credential is not the credential the service
+/// asked for, and a request without one fails plainly where a request with an
+/// empty one fails obscurely.
+#[tokio::test]
+async fn a_header_with_no_value_kept_for_it_is_not_sent() {
+    let mut fixture = grilling().await;
+
+    fixture.configure(concat!(
+        "mcp_servers:\n",
+        "  - name: docs\n",
+        "    url: https://mcp.example.com/docs\n",
+        "    headers:\n",
+        "      - Authorization\n",
+    ));
+    fixture.attaching(&["docs"]).await;
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({
+            "docs": { "type": "http", "url": "https://mcp.example.com/docs" },
+        }),
+    );
+}
+
+/// And a request made with what the root carries arrives at the server with
+/// them.
+///
+/// `curl` inside the sandbox is standing in for the harness, the way it stands
+/// in for the bundled CLI where a session puts a Set: it reads the URL and the
+/// header out of the `.claude.json` the session was given and asks for them,
+/// which is what Claude Code does with that file. The server is a real listener
+/// on the host's loopback, which the sandbox shares — see
+/// [`the_network_is_the_hosts_own`].
+#[tokio::test]
+async fn a_request_to_an_attached_server_arrives_with_its_headers() {
+    let mut fixture = grilling().await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let asked = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("the probe connects");
+
+        let mut asked = Vec::new();
+
+        // To the end of the request line and its headers, which is all this is
+        // about — and no further, a read to the end of the stream waiting on a
+        // close the probe makes only once it has been answered.
+        loop {
+            let mut byte = [0u8; 1];
+
+            if std::io::Read::read(&mut stream, &mut byte).unwrap_or(0) == 0 {
+                break;
+            }
+
+            asked.push(byte[0]);
+
+            if asked.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+            .unwrap();
+
+        String::from_utf8_lossy(&asked).into_owned()
+    });
+
+    fixture.declaring_headers(&[(
+        "docs",
+        &format!("http://127.0.0.1:{port}/mcp"),
+        &[("Authorization", "Bearer sk-averysecretkey")],
+    )]);
+    fixture.attaching(&["docs"]).await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            config="$HOME/.claude.json"
+            url=$({sed} -n 's/.*"url": "\(.*\)".*/\1/p' "$config")
+            auth=$({sed} -n 's/.*"Authorization": "\(.*\)".*/\1/p' "$config")
+
+            say url "$url"
+
+            if {curl} --silent --max-time 10 --output /dev/null \
+                --header "Authorization: $auth" "$url"; then
+                say asked yes
+            else
+                say asked no
+            fi
+            "#,
+            curl = quoted(&on_the_host("curl")),
+            sed = quoted(&on_the_host("sed")),
+        ),
+    );
+
+    assert_eq!(
+        reported["url"],
+        format!("http://127.0.0.1:{port}/mcp"),
+        "the session reads the server's URL out of its own configuration"
+    );
+    assert_eq!(reported["asked"], "yes", "and reaches it");
+
+    let asked = asked.join().unwrap();
+
+    assert!(
+        asked.contains("Authorization: Bearer sk-averysecretkey"),
+        "the request arrived with the header the declaration is spoken to \
+         with: {asked}"
     );
 }
 

@@ -156,6 +156,37 @@ function save() {
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 }
 
+/// The name box of the header standing at `which` on the row at `at`.
+function headerBox(at: number, which: number): HTMLInputElement {
+  const box = document.querySelector<HTMLInputElement>(
+    `#mcp-header-${at}-${which}`,
+  );
+  expect(box, `expected a header box at ${at}.${which}`).not.toBeNull();
+  return box!;
+}
+
+/// And the write-only box beside it, which never holds a value that came back.
+function valueBox(at: number, which: number): HTMLInputElement {
+  const box = document.querySelector<HTMLInputElement>(
+    `#mcp-value-${at}-${which}`,
+  );
+  expect(box, `expected a value box at ${at}.${which}`).not.toBeNull();
+  return box!;
+}
+
+/// One declaration as a save sends it with every value box untouched: each
+/// header named and kept, which is what stops a corrected URL taking a key away.
+function keeping(server: McpServer, url: string = server.url) {
+  return {
+    name: server.name,
+    url,
+    headers: server.headers.map((header) => ({
+      name: header.name,
+      value: "Keep",
+    })),
+  };
+}
+
 describe("the card", () => {
   /// What somebody scanning the page is after: how many are declared, and what
   /// that comes to for a Conversation.
@@ -254,7 +285,11 @@ describe("the pane", () => {
   });
 
   it("sends the declaration that was added, with the rest of the file", async () => {
-    const declared = { name: "tickets", url: "https://mcp.example.com/tickets" };
+    const declared = {
+      name: "tickets",
+      url: "https://mcp.example.com/tickets",
+      headers: [],
+    };
     const fetching = theSettings(UNSET, json(holding(UNSET, [declared])));
     mountPane();
 
@@ -289,20 +324,25 @@ describe("the pane", () => {
   /// The URL is the half that is edited, and editing it sends the whole list
   /// with that one changed: the server writes the declarations as one list.
   it("sends the whole list with a rewritten URL in it", async () => {
-    const moved = { name: DECLARED.name, url: "https://docs.example.com/mcp" };
+    const url = "https://docs.example.com/mcp";
+    const moved = { ...DECLARED, url };
     const fetching = theSettings(TOLD, json(holding(TOLD, [moved, BESIDE])));
     mountPane();
     await waitFor(() => urlBox(0));
 
-    fireEvent.input(urlBox(0), { target: { value: moved.url } });
+    fireEvent.input(urlBox(0), { target: { value: url } });
     save();
 
     // The one that was typed in, and the one beside it exactly as it was read:
-    // what travels is the list as it is to stand.
+    // what travels is the list as it is to stand. Every header of both of them
+    // is kept, which is the whole point of a value box that is blank until
+    // somebody types in it: correcting a URL does not take a key away.
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: [moved, BESIDE] } },
+        mcp_servers: {
+          Set: { servers: [keeping(DECLARED, url), keeping(BESIDE)] },
+        },
       }),
     );
   });
@@ -365,7 +405,7 @@ describe("the pane", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: TOLD.mcp_servers } },
+        mcp_servers: { Set: { servers: TOLD.mcp_servers.map((s) => keeping(s)) } },
       }),
     );
   });
@@ -467,7 +507,11 @@ describe("the pane", () => {
   /// And the rows follow the server again once a save lands: what was new is a
   /// declaration now, so its name stops being a field.
   it("lets go of what was typed once the save lands", async () => {
-    const declared = { name: "tickets", url: "https://mcp.example.com/tickets" };
+    const declared = {
+      name: "tickets",
+      url: "https://mcp.example.com/tickets",
+      headers: [],
+    };
     const fetching = theSettings(UNSET, json(holding(UNSET, [declared])));
     mountPane();
 
@@ -498,5 +542,190 @@ describe("the pane", () => {
 
     await waitFor(() => screen.getByText(/The settings could not be saved/));
     expect(urlBox(0).value).toBe("https://moved.example");
+  });
+
+  /// A header is drawn by name with an empty box beside it, whatever is kept for
+  /// it: a value goes in and never comes back, so what the box says in place of
+  /// one is whether there is one.
+  it("draws each header by name and never a value", async () => {
+    theSettings(TOLD);
+    mountPane();
+
+    await waitFor(() => urlBox(0));
+
+    expect(headerBox(0, 0).value).toBe(DECLARED.headers[0]!.name);
+    expect(valueBox(0, 0).value).toBe("");
+    expect(valueBox(0, 0).placeholder).toContain("Kept");
+    expect(screen.getByText(/A value is kept for it/)).toBeTruthy();
+
+    // And the one beside it, which the declaration names with nothing kept to
+    // send in it.
+    expect(headerBox(0, 1).value).toBe(DECLARED.headers[1]!.name);
+    expect(valueBox(0, 1).placeholder).toContain("Nothing is sent");
+
+    // A declaration with no headers says so rather than drawing nothing.
+    expect(screen.getByText(/None, so requests to it carry nothing/)).toBeTruthy();
+  });
+
+  /// The three actions, in one save: a value typed is a `Set`, a box left alone
+  /// is a `Keep`, and one cleared is a `Clear`.
+  it("sends a typed value, an untouched one and a cleared one apart", async () => {
+    const fetching = theSettings(TOLD, json(holding(TOLD, TOLD.mcp_servers)));
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(valueBox(0, 0), {
+      target: { value: "Bearer sk-averysecretkey" },
+    });
+    save();
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        mcp_servers: {
+          Set: {
+            servers: [
+              {
+                name: DECLARED.name,
+                url: DECLARED.url,
+                headers: [
+                  {
+                    name: DECLARED.headers[0]!.name,
+                    value: { Set: { value: "Bearer sk-averysecretkey" } },
+                  },
+                  { name: DECLARED.headers[1]!.name, value: "Keep" },
+                ],
+              },
+              keeping(BESIDE),
+            ],
+          },
+        },
+      }),
+    );
+  });
+
+  /// And the one thing a blank box cannot say, which is why it is a press:
+  /// taking a value away is asked for rather than typed.
+  it("sends Clear where the value was cleared", async () => {
+    const fetching = theSettings(TOLD, json(holding(TOLD, TOLD.mcp_servers)));
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear its value" }));
+
+    // And the row says what is about to happen to it, the press having no other
+    // effect until the save goes out.
+    await waitFor(() => screen.getByText(/will be taken away when this is saved/));
+
+    save();
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        mcp_servers: {
+          Set: {
+            servers: [
+              {
+                name: DECLARED.name,
+                url: DECLARED.url,
+                headers: [
+                  { name: DECLARED.headers[0]!.name, value: "Clear" },
+                  { name: DECLARED.headers[1]!.name, value: "Keep" },
+                ],
+              },
+              keeping(BESIDE),
+            ],
+          },
+        },
+      }),
+    );
+  });
+
+  /// A clearing thought better of, which is the press again — and typing a value
+  /// settles it too, because typing is unambiguous.
+  it("takes a clearing back when its value is typed again", async () => {
+    const fetching = theSettings(TOLD, json(holding(TOLD, TOLD.mcp_servers)));
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear its value" }));
+    await waitFor(() => screen.getByText(/will be taken away/));
+
+    fireEvent.input(valueBox(0, 0), { target: { value: "Bearer sk-again" } });
+    save();
+
+    await waitFor(() => {
+      const written = sent(fetching) as {
+        mcp_servers: { Set: { servers: Array<{ headers: unknown[] }> } };
+      };
+
+      expect(written.mcp_servers.Set.servers[0]!.headers[0]).toEqual({
+        name: DECLARED.headers[0]!.name,
+        value: { Set: { value: "Bearer sk-again" } },
+      });
+    });
+  });
+
+  /// A header added is a name with a value to set, and one removed is a header
+  /// the declaration no longer names — the list travelling as the list, the way
+  /// the declarations themselves do.
+  it("sends a header added and leaves out one removed", async () => {
+    const fetching = theSettings(TOLD, json(holding(TOLD, TOLD.mcp_servers)));
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    // The second of the two, so that what is left is the first rather than
+    // whatever the page happened to draw last.
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Remove header" })[1]!,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Add a header" })[0]!);
+    fireEvent.input(headerBox(0, 1), { target: { value: "X-Api-Key" } });
+    fireEvent.input(valueBox(0, 1), { target: { value: "sk-anotherkey" } });
+
+    save();
+
+    await waitFor(() => {
+      const written = sent(fetching) as {
+        mcp_servers: { Set: { servers: Array<{ headers: unknown[] }> } };
+      };
+
+      expect(written.mcp_servers.Set.servers[0]!.headers).toEqual([
+        { name: DECLARED.headers[0]!.name, value: "Keep" },
+        { name: "X-Api-Key", value: { Set: { value: "sk-anotherkey" } } },
+      ]);
+    });
+  });
+
+  /// A header renamed is a header nothing is kept for, whatever was kept for the
+  /// name it used to have: the box says so rather than going on claiming a value
+  /// that belongs to a name the declaration no longer carries.
+  it("stops claiming a kept value once the header is renamed", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    expect(valueBox(0, 0).placeholder).toContain("Kept");
+
+    fireEvent.input(headerBox(0, 0), { target: { value: "X-Api-Key" } });
+
+    await waitFor(() =>
+      expect(valueBox(0, 0).placeholder).toContain("Nothing is sent"),
+    );
+  });
+
+  /// And what the section says about all of it, where somebody is about to type
+  /// a key into it.
+  it("says a header value is kept the way the token is", async () => {
+    theSettings(TOLD);
+    mountPane();
+
+    const note = await waitFor(() =>
+      screen.getByText(/Declared here for the whole installation/),
+    );
+
+    expect(note.textContent).toContain("never shown again");
+    expect(note.textContent).toContain("keeps what is there");
   });
 });

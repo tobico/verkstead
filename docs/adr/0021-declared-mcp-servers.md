@@ -56,16 +56,17 @@ and the alternative named is what was turned down.
   secret kept from the machine, and it is not hashed.
 
 - **A chip is a reference by name, read at each launch.** What a Conversation
-  stores is the name it attached, and the URL and headers are read out of
-  `config.yaml` at the moment a session starts. So correcting a URL fixes every
-  Conversation that attached that server, and nothing goes stale. Which is why
-  **the name is the identity** — lowercase letters, digits and hyphens, unique
-  among the declarations, refused at the moment it is typed if it is neither —
-  and why **a server is never renamed**: every chip pointing at it refers to it
-  by that name, and changing one is deleting the declaration and making another.
-  The alternative was copying the URL and headers onto the Conversation, which
-  would have frozen a credential into a record and left a rotated one broken
-  everywhere.
+  stores is the name it attached, and the URL and the headers are read out of
+  the settings at the moment a session starts — the declaration out of
+  `config.yaml`, and the header values out of `secrets.yaml` beside it. So
+  correcting a URL fixes every Conversation that attached that server, and
+  nothing goes stale. Which is why **the name is the identity** — lowercase
+  letters, digits and hyphens, unique among the declarations, refused at the
+  moment it is typed if it is neither — and why **a server is never renamed**:
+  every chip pointing at it refers to it by that name, and changing one is
+  deleting the declaration and making another. The alternative was copying the
+  URL and headers onto the Conversation, which would have frozen a credential
+  into a record and left a rotated one broken everywhere.
 
 - **Servers belong to the Conversation, and freeze with its Brief.** Attached
   and removed while the round drafts, fixed once the work starts, and drawn as a

@@ -2452,6 +2452,15 @@ at: string,
 html: string, };
 
 /**
+ * What is to become of one header's value.
+ *
+ * [`TokenEdit`]'s three actions, once per header and for the same reason: the
+ * value is write-only, so a blank box is the human not touching it rather than
+ * the human emptying it. Correcting a URL leaves every key where it is.
+ */
+export type HeaderEdit = "Keep" | { "Set": { value: string, } } | "Clear";
+
+/**
  * One class of comment nobody wants an agent addressing.
  *
  * Two patterns, either of which may be empty for *no constraint on that part*
@@ -2569,12 +2578,40 @@ html: string, };
 export type Marked = "Untracked" | "Changed";
 
 /**
- * One MCP server declared for this installation: a name, and the URL it is
- * reached at.
+ * One header of a declaration, as the page is told about it: its name, and
+ * whether there is a value kept to send in it.
  *
- * The same shape both ways, the way [`IgnoreRule`] is: what the page draws back
- * into its rows is what a save sends, and two shapes for one declaration would
- * be two accounts of what one is.
+ * **Whether, and nothing more.** That is exactly what the token's own view
+ * gives — see [`TokenSaved`] — and it is what the page has to know to draw the
+ * box: a header with a value kept says so and offers to replace or clear it, a
+ * header declared and never given one says that instead. Neither says what the
+ * value is.
+ */
+export type McpHeader = { name: string, 
+/**
+ * Whether anything is kept to send in it. False is a header the
+ * declaration names with nothing behind it — which is a header nothing is
+ * sent in, rather than one sent empty.
+ */
+set: boolean, };
+
+/**
+ * One header on a declaration a save is sending: its name, and what is to
+ * become of the value sent in it.
+ */
+export type McpHeaderEdit = { name: string, value: HeaderEdit, };
+
+/**
+ * One MCP server declared for this installation, as the page is told about it:
+ * a name, the URL it is reached at, and the names of the headers it is spoken
+ * to with.
+ *
+ * **The names of the headers, and no part of a value.** Every header value is
+ * a secret and goes the way the GitHub token goes — written where a secret is
+ * written and never returned. What the page has to draw is which headers a
+ * server has, so that one can be kept, rewritten or taken away; what it does
+ * with a value is send a new one. So this is not the shape a save sends, unlike
+ * [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
  *
  * **The name is the identity** — lowercase letters, digits and hyphens, unique
  * among the declarations, and never changed. It is what a Conversation's chip
@@ -2585,7 +2622,27 @@ export type Marked = "Untracked" | "Changed";
  * a stdio server is a child process an agent starts inside its own sandbox, and
  * it was turned down in the grilling this was settled in.
  */
-export type McpServer = { name: string, url: string, };
+export type McpServer = { name: string, url: string, 
+/**
+ * The headers it is spoken to with, in the order they are sent. Empty is a
+ * server that wants none.
+ */
+headers: Array<McpHeader>, };
+
+/**
+ * And one as a save sends it: the same two halves, and an action per header
+ * rather than a value.
+ *
+ * Its own shape because a value never comes back. What the page was shown is
+ * the header names — see [`McpServer`] — so what it can say about a value is
+ * what is to *become* of it, which is the token's three actions said once per
+ * header.
+ *
+ * The whole list of headers, in the order they are to be read back in: a header
+ * taken off the row is one the declaration no longer names, and one added is a
+ * name with a value to set.
+ */
+export type McpServerEdit = { name: string, url: string, headers: Array<McpHeaderEdit>, };
 
 /**
  * What is to become of the declared MCP servers on a save.
@@ -2594,7 +2651,7 @@ export type McpServer = { name: string, url: string, };
  * thing on this page a save can be refused over, so a section that is not about
  * them says nothing about them and cannot be turned down by one.
  */
-export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServer>, } };
+export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
 
 /**
  * And whether it merges into its base.

@@ -91,13 +91,59 @@
   font-size: 0.85rem;
 }
 
+/* The headers a declaration is spoken to with, under its URL: a block of its
+   own inside the row, because what is being read there is one declaration and
+   the headers are a list inside it. Quieter than the row's own labels — it is a
+   heading for a list rather than a label for a box. */
+.headersHead {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.headers {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+/* One header. Set in from the declaration's own boxes and ruled off on the left,
+   so that a row with three of them reads as one declaration rather than as four
+   things side by side. */
+.header {
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--edge);
+}
+
+.header + .header {
+  margin-top: 0.5rem;
+}
+
+/* A declaration with no headers at all, which is the ordinary one: said rather
+   than drawn as a gap. */
+.none {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* And what the write-only box cannot say for itself: that a value is kept, or
+   that the one kept is about to be taken away. Under the box it is about, the
+   way a refusal sits under the box it names. */
+.standingBy {
+  margin: -0.2rem 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* The two small acts: taking a row away, and adding another. Outlines rather
    than fills, because the Save at the foot of the form is what saves and these
    only change what it will send — which is what `QuietButton` already draws, and
    what the rule for a `button` below would otherwise paint over. The remove
    takes the colour of what it does. */
 .servers .remove,
-.servers .add {
+.servers .add,
+.servers .clear {
   padding: 0.35rem 0.75rem;
   font-weight: inherit;
   font-size: 0.9rem;
@@ -107,6 +153,13 @@
 }
 
 .servers .remove {
+  color: var(--removed);
+}
+
+/* Taking a value away is a removal, and says so in the colour the removals on
+   this pane are in. */
+.servers .clear {
+  margin-bottom: 0.5rem;
   color: var(--removed);
 }
 

@@ -18,6 +18,19 @@
 //! own sandbox, which is a hole in the sandbox rather than a setting, and it was
 //! turned down in the grilling this was settled in.
 //!
+//! **Static headers are the whole of the authentication**, OAuth having been
+//! turned down there too: there is no browser at three in the morning. So a
+//! declaration carries headers, and **every value is a secret** — it goes where
+//! the GitHub token goes, and the page is never shown one again. What comes back
+//! about a header is its name and whether anything is kept to send in it, which
+//! is exactly what comes back about the token.
+//!
+//! Which is why a header travels as an *action* rather than as a value, one per
+//! header: keep what is there, set a new one, or clear it. **A value box left
+//! blank keeps what is there** — a page that read an empty write-only box as
+//! *clear this* would take a key away every time somebody corrected a URL, which
+//! is the token's rule said once per header.
+//!
 //! **The name is the identity, and a server is never renamed.** It is what a
 //! chip refers to and what the agent sees in front of the server's tool names,
 //! so it is lowercase letters, digits and hyphens and unique among the
@@ -55,7 +68,7 @@ import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
-  McpServer,
+  HeaderEdit,
   McpServersEdit,
   ServerField,
   ServerRefused,
@@ -79,7 +92,67 @@ const TITLE = "MCP servers";
 /// read, because a row added and not yet saved has no name to look up — and a
 /// name typed to match one already declared would otherwise stop being editable
 /// under the hand that was typing it.
-type Editing = McpServer & { fresh: boolean };
+type Editing = {
+  name: string;
+  url: string;
+  fresh: boolean;
+  headers: EditingHeader[];
+};
+
+/// And one header of one: its name, what has been typed into its value box, and
+/// what the server said about the value it already holds.
+///
+/// `declared` is the name this header was read back under, or `null` on one
+/// somebody has just added. What it is for is knowing whether `set` is still
+/// about *this* header: a name rewritten is a header the declaration no longer
+/// names, so whatever was kept under the old one is gone and the box has nothing
+/// to keep.
+///
+/// `cleared` is the human having asked for the value to be taken away, which is
+/// the one thing a blank box cannot say — blank is *keep*, so clearing is a
+/// press of its own.
+type EditingHeader = {
+  name: string;
+  value: string;
+  declared: string | null;
+  set: boolean;
+  cleared: boolean;
+};
+
+/// Whether anything is kept to send in this header, which is what its value box
+/// says in place of a value.
+///
+/// Only while the name is the one it was read back under: a header renamed is a
+/// header nothing is kept for, whatever was kept for the name it used to have.
+function kept(header: EditingHeader): boolean {
+  return header.set && header.name.trim() === header.declared;
+}
+
+/// And what is to become of its value, which is the whole of what a save says
+/// about one.
+///
+/// Typed wins, because typing is unambiguous. A blank box is `Keep` — the
+/// token's rule, said once per header — unless the human pressed the press that
+/// says otherwise.
+function becomes(header: EditingHeader): HeaderEdit {
+  if (header.value !== "") {
+    return { Set: { value: header.value } };
+  }
+
+  return header.cleared ? "Clear" : "Keep";
+}
+
+/// A header as it is drawn when the pane first reads one off the server: the
+/// name it is declared under, and no value, because a value never comes back.
+function reading(header: { name: string; set: boolean }): EditingHeader {
+  return {
+    name: header.name,
+    value: "",
+    declared: header.name,
+    set: header.set,
+    cleared: false,
+  };
+}
 
 /// The settings as they stand, read once for the two panes that draw them — the
 /// same read, by the same key, that every other section of this page makes.
@@ -187,15 +260,64 @@ export function McpServersPane(props: {
   /// The rows as they are drawn: what has been edited, or what is declared while
   /// nothing has been.
   const drawn = (): Editing[] =>
-    rows() ?? (told()?.mcp_servers ?? []).map((server) => ({ ...server, fresh: false }));
+    rows() ??
+    (told()?.mcp_servers ?? []).map((server) => ({
+      name: server.name,
+      url: server.url,
+      fresh: false,
+      headers: server.headers.map(reading),
+    }));
 
   /// One box rewritten, which is what makes the next save a `Set` of the whole
   /// list — the server writes the declarations as one list, so a row edited is
   /// the list sent.
-  const rewrite = (at: number, part: Partial<McpServer>) =>
+  const rewrite = (at: number, part: Partial<Editing>) =>
     setRows(
       drawn().map((row, which) => (which === at ? { ...row, ...part } : row)),
     );
+
+  /// The headers of the row at `at`, rewritten by `change` — which is
+  /// [`rewrite`] said a level down, and how each of the three presses below
+  /// changes one.
+  const rewriteHeaders = (
+    at: number,
+    change: (headers: EditingHeader[]) => EditingHeader[],
+  ) =>
+    setRows(
+      drawn().map((row, which) =>
+        which === at ? { ...row, headers: change(row.headers) } : row,
+      ),
+    );
+
+  /// One header's own box rewritten.
+  const rewriteHeader = (
+    at: number,
+    which: number,
+    part: Partial<EditingHeader>,
+  ) =>
+    rewriteHeaders(at, (headers) =>
+      headers.map((header, index) =>
+        index === which ? { ...header, ...part } : header,
+      ),
+    );
+
+  /// A header added to a row, empty, for a name and a value to be typed into.
+  const addHeader = (at: number) => {
+    setRefusals([]);
+    rewriteHeaders(at, (headers) => [
+      ...headers,
+      { name: "", value: "", declared: null, set: false, cleared: false },
+    ]);
+  };
+
+  /// And one taken off, which is the declaration no longer naming it — and, the
+  /// next time this is saved, the value kept for it gone with it.
+  const removeHeader = (at: number, which: number) => {
+    setRefusals([]);
+    rewriteHeaders(at, (headers) =>
+      headers.filter((_, index) => index !== which),
+    );
+  };
 
   /// A row added, empty, for the human to write a declaration into — and the one
   /// row on the page whose name is a field, this being the only moment a name is
@@ -207,7 +329,7 @@ export function McpServersPane(props: {
   /// are still the rows the server was talking about.
   const add = () => {
     setRefusals([]);
-    setRows([...drawn(), { name: "", url: "", fresh: true }]);
+    setRows([...drawn(), { name: "", url: "", fresh: true, headers: [] }]);
   };
 
   const remove = (at: number) => {
@@ -257,7 +379,22 @@ export function McpServersPane(props: {
 
     return edited === null
       ? "Keep"
-      : { Set: { servers: edited.map(({ name, url }) => ({ name, url })) } };
+      : {
+          Set: {
+            servers: edited.map(({ name, url, headers }) => ({
+              name,
+              url,
+              // Each header by name, with what is to become of the value sent
+              // in it: the names are what the declaration carries, and the
+              // values go where a secret goes. A blank one nobody typed into is
+              // a `Keep`.
+              headers: headers.map((header) => ({
+                name: header.name,
+                value: becomes(header),
+              })),
+            })),
+          },
+        };
   };
 
   const save = useMutation(() => ({
@@ -338,7 +475,9 @@ export function McpServersPane(props: {
               Declared here for the whole installation, over HTTP, and given to a
               session only where its conversation has attached one. A name is
               lowercase letters, digits and hyphens, and cannot be changed
-              afterwards.
+              afterwards. A header value is kept the way the GitHub token is: it
+              is never shown again, and a value box left blank keeps what is
+              there.
             </Note>
 
             <Show
@@ -399,6 +538,127 @@ export function McpServersPane(props: {
                           <ErrorLine class={styles.trouble}>{why()}</ErrorLine>
                         )}
                       </Show>
+
+                      {/* And the headers it is spoken to with: an API key or a
+                          bearer token, which is the whole of the
+                          authentication there is. A value goes in and never
+                          comes back, so the box beside a header that has one
+                          says so and is empty. */}
+                      <p class={styles.headersHead}>Headers</p>
+
+                      <Show
+                        when={row().headers.length > 0}
+                        fallback={
+                          <p class={styles.none}>
+                            None, so requests to it carry nothing.
+                          </p>
+                        }
+                      >
+                        <ul class={styles.headers}>
+                          <Index each={row().headers}>
+                            {(header, which) => (
+                              <li class={styles.header}>
+                                <label for={`mcp-header-${at}-${which}`}>
+                                  Name
+                                </label>
+                                <input
+                                  id={`mcp-header-${at}-${which}`}
+                                  type="text"
+                                  autocapitalize="off"
+                                  autocorrect="off"
+                                  spellcheck={false}
+                                  placeholder="Authorization"
+                                  value={header().name}
+                                  onInput={(ev) =>
+                                    rewriteHeader(at, which, {
+                                      name: ev.currentTarget.value,
+                                    })
+                                  }
+                                />
+
+                                <label for={`mcp-value-${at}-${which}`}>
+                                  Value
+                                </label>
+                                <input
+                                  id={`mcp-value-${at}-${which}`}
+                                  type="password"
+                                  autocapitalize="off"
+                                  autocorrect="off"
+                                  spellcheck={false}
+                                  autocomplete="off"
+                                  placeholder={
+                                    kept(header())
+                                      ? "Kept as it is"
+                                      : "Nothing is sent in it"
+                                  }
+                                  value={header().value}
+                                  onInput={(ev) =>
+                                    rewriteHeader(at, which, {
+                                      value: ev.currentTarget.value,
+                                      // Typing is unambiguous, so it settles a
+                                      // clearing somebody asked for and then
+                                      // thought better of.
+                                      cleared: false,
+                                    })
+                                  }
+                                />
+
+                                {/* What a blank box cannot say. Blank is
+                                    *keep* — that is what stops a corrected URL
+                                    taking a key away — so taking a value away
+                                    is a press of its own. */}
+                                <Show
+                                  when={
+                                    kept(header()) && header().value === ""
+                                  }
+                                >
+                                  <p class={styles.standingBy}>
+                                    <Show
+                                      when={header().cleared}
+                                      fallback={
+                                        <>
+                                          A value is kept for it. Typing one
+                                          replaces it.
+                                        </>
+                                      }
+                                    >
+                                      Its value will be taken away when this is
+                                      saved.
+                                    </Show>
+                                  </p>
+
+                                  <QuietButton
+                                    class={styles.clear}
+                                    onClick={() =>
+                                      rewriteHeader(at, which, {
+                                        cleared: !header().cleared,
+                                      })
+                                    }
+                                  >
+                                    {header().cleared
+                                      ? "Keep its value"
+                                      : "Clear its value"}
+                                  </QuietButton>
+                                </Show>
+
+                                <QuietButton
+                                  class={styles.remove}
+                                  onClick={() => removeHeader(at, which)}
+                                >
+                                  Remove header
+                                </QuietButton>
+                              </li>
+                            )}
+                          </Index>
+                        </ul>
+                      </Show>
+
+                      <QuietButton
+                        class={styles.add}
+                        onClick={() => addHeader(at)}
+                      >
+                        Add a header
+                      </QuietButton>
 
                       <QuietButton
                         class={styles.remove}

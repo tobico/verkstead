@@ -62,11 +62,22 @@
 //! and the box, because that is what the page has to draw the error at.
 //!
 //! And the MCP servers are the ignore rules' shape a second time, for the same
-//! reason: a name and a URL each, and the one other thing on this page a save
-//! can be *refused* over — a name that is not lowercase letters, digits and
-//! hyphens, or one another declaration already has, is a name nothing could
-//! refer to a server by. So they travel as an action too, and what comes back
-//! names the row and the box the error is drawn at.
+//! reason: a name, a URL and the headers each is spoken to with, and the one
+//! other thing on this page a save can be *refused* over — a name that is not
+//! lowercase letters, digits and hyphens, or one another declaration already
+//! has, is a name nothing could refer to a server by. So they travel as an
+//! action too, and what comes back names the row and the box the error is drawn
+//! at.
+//!
+//! **And their header values go the way the token goes.** They are what an API
+//! key is sent in, static headers being the only authentication a declaration
+//! has, so every one of them is a secret: what comes back about a server's
+//! headers is their names, and nothing here can be made to hand over a value.
+//! Which is why the declarations are the one thing on this page whose two
+//! directions are different shapes — [`McpServer`] going out and
+//! [`McpServerEdit`] coming in, with the token's three actions said once per
+//! header. A value box left blank keeps what is there, so correcting a URL does
+//! not take a key away.
 //!
 //! What is different is which way a refusal points. A rule that will not compile
 //! silences nothing while reading as though it silenced something; a name that
@@ -594,12 +605,16 @@ pub enum IgnoredCommentsEdit {
     Set { rules: Vec<IgnoreRule> },
 }
 
-/// One MCP server declared for this installation: a name, and the URL it is
-/// reached at.
+/// One MCP server declared for this installation, as the page is told about it:
+/// a name, the URL it is reached at, and the names of the headers it is spoken
+/// to with.
 ///
-/// The same shape both ways, the way [`IgnoreRule`] is: what the page draws back
-/// into its rows is what a save sends, and two shapes for one declaration would
-/// be two accounts of what one is.
+/// **The names of the headers, and no part of a value.** Every header value is
+/// a secret and goes the way the GitHub token goes — written where a secret is
+/// written and never returned. What the page has to draw is which headers a
+/// server has, so that one can be kept, rewritten or taken away; what it does
+/// with a value is send a new one. So this is not the shape a save sends, unlike
+/// [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
 ///
 /// **The name is the identity** — lowercase letters, digits and hyphens, unique
 /// among the declarations, and never changed. It is what a Conversation's chip
@@ -614,6 +629,79 @@ pub enum IgnoredCommentsEdit {
 pub struct McpServer {
     pub name: String,
     pub url: String,
+
+    /// The headers it is spoken to with, in the order they are sent. Empty is a
+    /// server that wants none.
+    pub headers: Vec<McpHeader>,
+}
+
+/// One header of a declaration, as the page is told about it: its name, and
+/// whether there is a value kept to send in it.
+///
+/// **Whether, and nothing more.** That is exactly what the token's own view
+/// gives — see [`TokenSaved`] — and it is what the page has to know to draw the
+/// box: a header with a value kept says so and offers to replace or clear it, a
+/// header declared and never given one says that instead. Neither says what the
+/// value is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct McpHeader {
+    pub name: String,
+
+    /// Whether anything is kept to send in it. False is a header the
+    /// declaration names with nothing behind it — which is a header nothing is
+    /// sent in, rather than one sent empty.
+    pub set: bool,
+}
+
+/// And one as a save sends it: the same two halves, and an action per header
+/// rather than a value.
+///
+/// Its own shape because a value never comes back. What the page was shown is
+/// the header names — see [`McpServer`] — so what it can say about a value is
+/// what is to *become* of it, which is the token's three actions said once per
+/// header.
+///
+/// The whole list of headers, in the order they are to be read back in: a header
+/// taken off the row is one the declaration no longer names, and one added is a
+/// name with a value to set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct McpServerEdit {
+    pub name: String,
+    pub url: String,
+    pub headers: Vec<McpHeaderEdit>,
+}
+
+/// One header on a declaration a save is sending: its name, and what is to
+/// become of the value sent in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct McpHeaderEdit {
+    pub name: String,
+    pub value: HeaderEdit,
+}
+
+/// What is to become of one header's value.
+///
+/// [`TokenEdit`]'s three actions, once per header and for the same reason: the
+/// value is write-only, so a blank box is the human not touching it rather than
+/// the human emptying it. Correcting a URL leaves every key where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum HeaderEdit {
+    /// Leave whatever is kept for this header alone. What an untouched value box
+    /// sends, and what every header of a server somebody only renamed a URL on
+    /// sends.
+    Keep,
+
+    /// Send this in it from now on.
+    Set { value: String },
+
+    /// And take away what is kept, leaving the header declared with nothing to
+    /// send in it — which is how a key is withdrawn without the header being
+    /// taken off the declaration.
+    Clear,
 }
 
 /// What is to become of the declared MCP servers on a save.
@@ -632,7 +720,7 @@ pub enum McpServersEdit {
     /// it is to be read back in, so a row taken off the page is a declaration
     /// taken out of the file. An empty list is the human having removed the
     /// last one.
-    Set { servers: Vec<McpServer> },
+    Set { servers: Vec<McpServerEdit> },
 }
 
 /// One declaration a save was turned down over, by where it stood in what was

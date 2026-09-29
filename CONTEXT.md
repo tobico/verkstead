@@ -425,11 +425,21 @@ and the headers are edited.
 thing Verkstead is *told* rather than one it finds — and read at the moment a
 session is launched, so a corrected URL fixes every Conversation that attached
 that server. An absent key, an empty one and one nothing can parse are the same
-no servers, and an entry missing either half is dropped as the file is read. The
-section saves as an action rather than a value, the way the **Ignore rule**s do
-and for the same reason: it is one of the two things on that page a save can be
-*refused* over, so a section that is not about the declarations says nothing
-about them and cannot be turned down by one.
+no servers, and an entry missing either half is dropped as the file is read.
+**Except the header values, which are in `secrets.yaml`** under the server's
+name, where the GitHub token is: the names are part of the declaration and are
+written with it, and what goes in each of them is a secret. So a header is
+edited as an *action* rather than as a value, one apiece — keep it, set it, or
+clear it — and a value box left blank keeps what is there, the way the token's
+does. A header the declaration names with nothing kept for it is one nothing is
+sent in, and deleting a declaration takes its values with it, so the same name
+declared again starts with none.
+The section saves as an action rather than a value, the way the **Ignore rule**s
+do and for the same reason: it is one of the two things on that page a save can
+be *refused* over, so a section that is not about the declarations says nothing
+about them and cannot be turned down by one — and says nothing about their
+secrets either, `secrets.yaml` being written whole and the token in it nobody
+else's to take away.
 **What a Conversation holds is the name**, drawn as a chip beside the attached
 files. A reference rather than a copy, read afresh at each launch, and it
 freezes when the Brief does — attached and removed while the round drafts, fixed
