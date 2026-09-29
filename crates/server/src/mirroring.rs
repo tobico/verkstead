@@ -307,6 +307,13 @@ async fn pruned(state: &AppState, members: &[String]) {
 /// picker, and what is left behind is a file to sweep rather than a press to
 /// refuse — the next removal of that member's is not held up by it.
 async fn swept(state: &AppState, gone: &[i64]) {
+    // Nothing went, which is every refresh but the one after a removal — and
+    // this runs once per member per Nudge, so it is the case to answer before
+    // borrowing a thread to do nothing on.
+    if gone.is_empty() {
+        return;
+    }
+
     let Some(agents) = state.sessions.agents() else {
         return;
     };
