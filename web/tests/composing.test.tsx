@@ -2502,6 +2502,58 @@ describe("continuing a roadmap from the compose page", () => {
     expect(rows[0]!.textContent).not.toContain("on ");
   });
 
+  /// And a declaring roadmap with more than one stage ready names them all: the
+  /// press starts every one whose dependencies have settled, so the row offers
+  /// every one of them rather than the lowest.
+  it("names every stage the press would start, where there is more than one", async () => {
+    const [first, ...rest] = ABANDONED;
+    const [roadmap, ...others] = first!.roadmaps;
+
+    adopting(
+      whenever(
+        "/api/ui/abandoned-roadmaps",
+        json([
+          {
+            ...first,
+            roadmaps: [
+              {
+                ...roadmap,
+                beside: [
+                  {
+                    label: "05",
+                    title: "Packaging",
+                    brief_path: "docs/roadmaps/mvp/05-packaging.md",
+                    branch: "roadmaps/mvp/05-packaging",
+                  },
+                ],
+              },
+              ...others,
+            ],
+          },
+          ...rest,
+        ]),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const rows = await roadmapRows(container);
+    const said = rows[0]!.textContent!;
+
+    expect(said).toContain(roadmap!.stage);
+    expect(said).toContain(roadmap!.stage_title);
+    expect(said).toContain("05");
+    expect(said).toContain("Packaging");
+
+    // And the card the row loads names them too, this being the same offer one
+    // press further on.
+    fireEvent.click(rows[0]!);
+
+    const card = await drawn(container, `.${composer.loaded}`);
+    expect(card.textContent).toContain(roadmap!.stage_title);
+    expect(card.textContent).toContain("05: Packaging");
+  });
+
   /// Nothing to continue is a level greyed rather than a menu gone: what there
   /// is to do here is not a list the human can see, so a control that came and
   /// went with one would change shape between one visit and the next.

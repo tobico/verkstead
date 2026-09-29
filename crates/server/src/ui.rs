@@ -978,6 +978,9 @@ async fn create_repo(
         &creation.parent,
         &creation.name,
         creation.github,
+        // What the Repo pane this comes back with says is waiting in it, which is
+        // bounded by the same setting the notice is — see [`crate::stages::waiting`].
+        author.at_once().roadmap_stages(),
     )
     .await
     {
@@ -1031,7 +1034,12 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    Json(crate::stages::abandoned(&state.pool, repos).await).into_response()
+    // And how many stages of one roadmap run at once, which is what bounds the
+    // stages each row names: the press starts every ready stage there is a place
+    // for, so the row offers every ready stage there is a place for.
+    let at_once = state.settings.config().at_once().roadmap_stages();
+
+    Json(crate::stages::abandoned(&state.pool, repos, at_once).await).into_response()
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
@@ -1574,6 +1582,7 @@ pub(crate) async fn conversation_view(
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
                 roadmap,
+                state.settings.config().at_once().roadmap_stages(),
             )
             .await,
         ),

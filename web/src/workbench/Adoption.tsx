@@ -24,7 +24,7 @@
 //! invented name.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { createSignal, type JSX, Show } from "solid-js";
+import { createSignal, For, type JSX, Show } from "solid-js";
 
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
@@ -149,6 +149,28 @@ export function Adoption(props: {
               conversation's brief, and the work is done on{" "}
               <code>{stage().branch}</code>, branched from the base commit.
             </Note>
+
+            {/* And every stage the press would start beside it, which is what
+                makes the offer honest: a declaring roadmap starts every stage
+                whose dependencies have settled, so what is named here is what
+                pressing does rather than the lowest of it. */}
+            <Show when={props.adopting.beside.length}>
+              <p class={styles.stage}>And beside it:</p>
+              <ul class={styles.beside}>
+                <For each={props.adopting.beside}>
+                  {(beside) => (
+                    <li>
+                      Stage {beside.label}: {beside.title} — on{" "}
+                      <code>{beside.branch}</code>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <Note>
+                Each of those starts as a conversation of its own, off the same
+                base commit and with the same profiles and repos alongside.
+              </Note>
+            </Show>
           </>
         )}
       </Show>

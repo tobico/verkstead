@@ -71,6 +71,20 @@ const CONFIG: &str = "config.yaml";
 /// away.
 const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
 
+/// How many stages of one roadmap this workbench runs side by side.
+///
+/// Written into the file rather than saved through the settings page, for the
+/// reason the author above is: what these tests are about is the press that reads
+/// it, and the page has a suite of its own. Read afresh at every press, so a
+/// number written between two of them is in force for the second.
+fn at_once(dir: &tempfile::TempDir, stages: usize) {
+    std::fs::write(
+        dir.path().join(CONFIG),
+        format!("{THE_AUTHOR}at_once:\n  roadmap_stages: {stages}\n"),
+    )
+    .unwrap();
+}
+
 /// Take the author back off a workbench, leaving one configured the way a
 /// machine that skipped the settings page is.
 fn no_author(dir: &tempfile::TempDir) {
@@ -7389,6 +7403,22 @@ Turns this askance clone into Verkstead.
 - [ ] 02: Grilling — [brief](02-grilling.md)
 ";
 
+/// And a declaring roadmap with two stages standing on nothing, which is the
+/// shape the scheduler is for: 01 and 02 are both ready from the start, 03 stands
+/// on 02 and 04 waits for both 01 and 03.
+const TWO_ROOTS: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
+";
+
 /// And with that stage ticked off, which is what the stage after it leaves.
 const OPEN_AT_FOUR: &str = "\
 # MVP roadmap
@@ -8795,6 +8825,229 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
         worktrees(&askance).len(),
         1,
         "only the companion repository itself",
+    );
+}
+
+/// *Continue a roadmap* starts **every** stage of it that is ready, not the
+/// lowest of them: the first becomes the Conversation the human composed and the
+/// rest start beside it, each as a Conversation of its own.
+///
+/// The press stands in for whatever would otherwise have started them, so what it
+/// starts is what a settle would have — and everything the human settled on the
+/// composer is settled for all of them at once: the same Pairings, the same
+/// companions and the same base commit.
+#[tokio::test]
+async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let alongside = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, alongside).await;
+
+    // The pane names both of them before the press, which is the whole of what
+    // makes the press honest: what is offered is what pressing does.
+    let pane = opened(&app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(stage_of(&opened(&app, id).await).label, "01");
+    assert_eq!(
+        pane.beside
+            .iter()
+            .map(|stage| (stage.label.as_str(), stage.branch.as_str()))
+            .collect::<Vec<_>>(),
+        [("02", "roadmaps/mvp/02-grilling")],
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The lowest is this Conversation, exactly as it has always been.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the other is a Conversation of its own, on its own branch.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(beside.state, Lifecycle::Implementing);
+    assert_eq!(beside.repo.id, repo_id);
+
+    // The same base the human settled on the composer, which is the one act that
+    // settled it for both.
+    assert_eq!(beside.base_commit.as_deref(), Some(tip.as_str()));
+    assert_eq!(first.base_commit, beside.base_commit);
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/roadmaps/mvp/02-grilling"]).trim(),
+        tip,
+    );
+
+    // The same Pairings, every one of them.
+    assert_eq!(beside.grilling_pairing, first.grilling_pairing);
+    assert_eq!(beside.implementation_pairing, first.implementation_pairing);
+    assert_eq!(beside.review_pairing, first.review_pairing);
+
+    // The same companions, checked out beside it rather than merely recorded.
+    assert_eq!(companions(&app, second.id).await, ["askance"]);
+    assert!(checked_out(&beside, "askance").starts_with(dir.path()));
+
+    // Its own Brief is its own stage's, read at the same commit.
+    assert!(brief(&beside).markdown.contains("02-grilling.md"));
+
+    // And the record says which stage of which roadmap each of them is.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, second.id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("02".to_owned()),
+        }),
+    );
+
+    // The Conversation the human pressed on says so on its Timeline, that being
+    // where they were standing when it happened.
+    assert!(
+        notices(&opened(&app, id).await)
+            .iter()
+            .any(|notice| notice.contains("started beside it")),
+        "the press says what it started beside this one",
+    );
+}
+
+/// And a companion branch the human typed on the composer is the **first**
+/// stage's alone: the stages that start beside it mirror their own branches.
+///
+/// The rule a stage started by a settle has kept all along — two stages sharing
+/// one companion branch would be two review units on one branch with two pull
+/// requests fighting over it, and git would refuse the second checkout anyway. So
+/// what each of these is planned off is the row inheritance wrote for it rather
+/// than the row it was copied from.
+#[tokio::test]
+async fn a_typed_companion_branch_does_not_follow_the_stages_started_beside() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+    companion_branch(&app, id, writing, "alongside").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed gets the name they typed, as it always has.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(
+        git(
+            &checked_out(&first, "askance"),
+            &["symbolic-ref", "--short", "HEAD"]
+        )
+        .trim(),
+        "alongside",
+    );
+
+    // And the one started beside it mirrors its own, which is the only way both
+    // of them can have a companion checkout at all.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(
+        git(
+            &checked_out(&beside, "askance"),
+            &["symbolic-ref", "--short", "HEAD"],
+        )
+        .trim(),
+        "roadmaps/mvp/02-grilling",
+    );
+    assert!(has_branch(
+        &elsewhere.path().join("askance"),
+        "roadmaps/mvp/02-grilling",
+    ));
+}
+
+/// And a roadmap with a stage in flight is continued for the ones that are
+/// ready: the guard that refused the whole roadmap for it has gone.
+///
+/// What that guard protected against — a second Conversation on a stage already
+/// under way — is still refused, by the record saying the stage is in flight and
+/// by its branch being taken.
+#[tokio::test]
+async fn a_roadmap_with_a_stage_in_flight_is_continued_for_the_one_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    // One at a time to begin with, so the first press starts stage 01 and leaves
+    // 02 where it is — which is the roadmap this is about: one stage under way,
+    // and one standing on nothing beside it.
+    at_once(&dir, 1);
+
+    // Stage 01 under way: adopted a moment ago, which is the record saying so and
+    // its branch being cut in the one act.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench"
+    );
+
+    // And the limit back to three, so that what holds 02 up now is only what the
+    // record says about 01 rather than the places the roadmap has.
+    at_once(&dir, 3);
+
+    // The roadmap is still offered, and for stage 02 alone — 01 is somebody's,
+    // and 03 and 04 stand on what has not settled.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    let pane = opened(&app, second)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(
+        pane.stage.expect("stage 02 stands on nothing").label,
+        "02",
+        "the stage the press would start",
+    );
+    assert!(
+        pane.beside.is_empty(),
+        "and nothing beside it: 01 is under way and holding a place of its own",
+    );
+
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.branch, "roadmaps/mvp/02-grilling");
+    assert_eq!(view.state, Lifecycle::Implementing);
+
+    assert_eq!(
+        sidebar(&app)
+            .await
+            .iter()
+            .filter(|entry| entry.branch.starts_with("roadmaps/mvp/"))
+            .count(),
+        2,
+        "one Conversation per stage, and neither stage started twice",
     );
 }
 

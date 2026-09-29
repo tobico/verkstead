@@ -29,11 +29,12 @@ repo: string,
 roadmaps: Array<AbandonedRoadmap>, };
 
 /**
- * One abandoned roadmap, named with the stage that would be adopted.
+ * One abandoned roadmap, named with the stages that would be adopted.
  *
- * The stage is the lowest-numbered unchecked one, which is the roadmap's own
- * order rather than anybody's choice — see the abandoned rule in the server's
- * `stages` module.
+ * The stage is the lowest-numbered one that may **start now**, which is the
+ * roadmap's own order rather than anybody's choice — see the abandoned rule in
+ * the server's `stages` module — and [`beside`](Self::beside) is the rest of
+ * what the press would start with it.
  */
 export type AbandonedRoadmap = { 
 /**
@@ -54,6 +55,17 @@ stage: string,
  * And what that stage is called.
  */
 stage_title: string, 
+/**
+ * The rest of the stages the press would start beside that one, in the
+ * roadmap's own order and empty where there is only the one.
+ *
+ * A declaring roadmap has as many stages ready as it has lines standing on
+ * work that has settled, and the press starts every one of them there is a
+ * place for — so the row names them all. The first is the one the
+ * Conversation being composed becomes; these are the ones started beside
+ * it, each as a Conversation of its own.
+ */
+beside: Array<AdoptedStage>, 
 /**
  * The branch this reading came off, or empty where it came off the default
  * branch.
@@ -164,14 +176,26 @@ roadmap: string,
  */
 title: string, 
 /**
- * The stage adopting would start: the lowest-numbered unchecked one, read
- * at the base commit.
+ * The stage adopting would start: the lowest-numbered one that may start
+ * now, read at the base commit.
  *
  * `null` where there is none to start there — the roadmap is finished, or
  * gone, or its next stage is somebody else's already. The press says which
  * of those it is; this is only what the page can name.
  */
-stage: AdoptedStage | null, };
+stage: AdoptedStage | null, 
+/**
+ * And the rest of the stages the press would start beside it, in the
+ * roadmap's own order.
+ *
+ * Empty where the roadmap has one stage ready, which is every roadmap that
+ * declares nothing — and empty where it has none at all, there being no
+ * press to name anything for. Each of these becomes a Conversation of its
+ * own at the press, with this one's Pairings, its companions and its base:
+ * the press is the one act that settles all of that, and a stage started
+ * beside the first has no draft moment of its own either.
+ */
+beside: Array<AdoptedStage>, };
 
 /**
  * A session's output as the Timeline carries it: how far its conversation has

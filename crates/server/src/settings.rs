@@ -1370,6 +1370,7 @@ impl GitAuthor {
 ///
 /// Here beside [`GitAuthor`] rather than in either of them, because it is the
 /// same identity under the same rule and one rule wants one place to live.
+#[derive(Clone)]
 pub(crate) struct Author {
     name: String,
     email: String,

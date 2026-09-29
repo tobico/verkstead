@@ -142,6 +142,7 @@ pub(crate) async fn create(
     parent: &str,
     name: &str,
     github: bool,
+    at_once: usize,
 ) -> Result<Created> {
     // Both halves or neither, which is the one shape git will take an identity
     // in — see [`Author`], the rule everything Verkstead commits on its own
@@ -212,7 +213,7 @@ pub(crate) async fn create(
     // The whole opened Repo rather than the row it was registered as — see
     // [`Created::Made`]. `None` is a Repo taken off the registry between the two
     // reads, which is nothing that happens to somebody making one.
-    Ok(match opened(pool, repo.id).await? {
+    Ok(match opened(pool, repo.id, at_once).await? {
         Some(repo) => match unpushed {
             Some(why) => Created::MadeWithoutRemote { repo, why },
             None => Created::Made(repo),
@@ -477,7 +478,7 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
 /// branches move without Verkstead hearing about it and a roadmap somebody picks
 /// up stops being abandoned the moment they do, so both are asked afresh — a
 /// kept copy would be a second opinion that went wrong on somebody else's push.
-async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
+async fn opened(pool: &SqlitePool, id: i64, at_once: usize) -> Result<Option<RepoView>> {
     let Some(repo) = store::registered_repo(pool, id).await? else {
         return Ok(None);
     };
@@ -493,7 +494,7 @@ async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
     let (branches, roadmaps) = tokio::task::spawn_blocking(move || {
         (
             crate::worktrees::branches(&read.path),
-            crate::stages::waiting(&read, &record),
+            crate::stages::waiting(&read, &record, at_once),
         )
     })
     .await?;

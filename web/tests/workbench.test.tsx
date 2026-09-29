@@ -2459,6 +2459,35 @@ describe("the adoption page", () => {
     expect(panel.textContent).toContain(ADOPTION.stage!.branch);
   });
 
+  /// And where the roadmap declares and has more than one stage ready, the page
+  /// names every one the press would start: the first becomes this conversation
+  /// and the rest start beside it, so what is offered is what pressing does.
+  it("names every stage the press would start", async () => {
+    const beside = [
+      {
+        label: "05",
+        title: "Packaging",
+        brief_path: "docs/roadmaps/mvp/05-packaging.md",
+        branch: "roadmaps/mvp/05-packaging",
+      },
+    ];
+
+    theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}`,
+        json({ ...ADOPTING, adopting: { ...ADOPTION, beside } }),
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, `.${adoption.adoption}`);
+
+    expect(panel.textContent).toContain(ADOPTION.stage!.label);
+    expect(panel.textContent).toContain("05");
+    expect(panel.textContent).toContain("Packaging");
+    expect(panel.textContent).toContain("roadmaps/mvp/05-packaging");
+  });
+
   it("offers both profiles, the base commit and one continue press", async () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);

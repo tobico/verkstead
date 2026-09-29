@@ -316,6 +316,7 @@ function Compose(props: {
         title: roadmap.title,
         stage: roadmap.stage,
         stage_title: roadmap.stage_title,
+        beside: roadmap.beside,
         base: roadmap.base,
       })),
     );
@@ -1020,9 +1021,31 @@ function Loaded(props: {
         Stage {props.roadmap.stage}: {props.roadmap.stage_title}
       </p>
 
+      {/* And every stage the press would start beside it: a declaring roadmap
+          starts every stage whose dependencies have settled, so the card names
+          what pressing does rather than the lowest of it. */}
+      <Show when={props.roadmap.beside?.length}>
+        <p class={styles.stage}>
+          And beside it:{" "}
+          <For each={props.roadmap.beside}>
+            {(beside, at) => (
+              <>
+                {at() > 0 ? ", " : ""}
+                {beside.label}: {beside.title}
+              </>
+            )}
+          </For>
+        </p>
+      </Show>
+
       <Note>
         The stage's own brief becomes this conversation's brief when the stage is
         adopted, and the work is done on the branch the stage is named for.
+        <Show when={props.roadmap.beside?.length}>
+          {" "}
+          Each stage beside it starts as a conversation of its own, off the same
+          base and with the same profiles and repos alongside.
+        </Show>
       </Note>
     </div>
   );
@@ -1112,7 +1135,18 @@ function RoadmapRows(props: {
             <span class={styles.in}>in {held.repo}</span>
           </span>
           <span class={styles.next}>
-            next is stage {held.stage}: {held.stage_title}
+            {/* Every stage the press would start, rather than the lowest of
+                them: a declaring roadmap starts every one whose dependencies
+                have settled, and what the row offers is what pressing does. */}
+            {held.beside?.length ? "next are stages " : "next is stage "}
+            {held.stage}: {held.stage_title}
+            <For each={held.beside}>
+              {(beside) => (
+                <>
+                  , {beside.label}: {beside.title}
+                </>
+              )}
+            </For>
           </span>
           <Show when={held.base}>
             {(base) => (

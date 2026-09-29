@@ -1523,7 +1523,7 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// stages sharing one companion branch would be two review units on one branch
 /// with two pull requests fighting over it. So the row is left mirroring, and
 /// the stage's own branch is what its companion branches are called.
-async fn settle(
+pub(crate) async fn settle(
     state: &AppState,
     id: i64,
     conversation: &store::Conversation,
@@ -1648,7 +1648,7 @@ fn configured(configured: store::Configured, repo: &str) -> anyhow::Result<()> {
 /// behind, and that notice is what anybody watching sees first — the workbench,
 /// a device, a test. Closing after it would leave a window in which the promise
 /// is on the Timeline and the half-made record is still drafting.
-async fn gave_up(state: &AppState, id: i64) {
+pub(crate) async fn gave_up(state: &AppState, id: i64) {
     if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
     }
@@ -1700,7 +1700,7 @@ async fn taken(repo: &Path, branch: &str) -> bool {
 /// Nothing is refused for: by the time anything here has something to say, what
 /// it is saying has already happened. A notice that could not be written is a
 /// line in the log and no more.
-async fn say(state: &AppState, conversation_id: i64, markdown: &str) {
+pub(crate) async fn say(state: &AppState, conversation_id: i64, markdown: &str) {
     match store::note(&state.pool, conversation_id, markdown).await {
         Ok(true) => state.nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
