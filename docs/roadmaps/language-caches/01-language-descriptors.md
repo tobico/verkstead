@@ -32,8 +32,10 @@ the stage turns on them.
   built-in whole, so an installer changing one variable still gets every later
   fix to the rest.
 - **The Sandbox's own variables are refused by name at load.**
-- **A descriptor that does not load turns that language off**, the page says
-  why, and everything else carries on. Not a refusal to start.
+- **A descriptor that does not load falls back to the built-in of that name**,
+  and off only where there is no built-in; the page says why either way, and
+  everything else carries on. Not a refusal to start, and not the loss of a
+  cache that was already working.
 - **`rust_build_cache` is still read** as Rust's `enabled` and `size`. Which of
   the two wins where both are written was not asked; the new map winning is
   the obvious reading, and the stage's own grilling confirms it.
@@ -55,9 +57,12 @@ stage's to settle.
 ## Proposed tasks (provisional)
 
 1. **The grammar and the loader.** Parse a descriptor, embed the built-ins,
-   merge `config.yaml` over them. AC: a `null` takes a variable out; a refused
-   variable turns its language off with a reason naming the variable; a
-   descriptor that does not parse leaves the others loaded.
+   merge `config.yaml` over them. AC: a `null` takes a variable out; an entry
+   naming a refused variable falls back to the built-in of that name, with a
+   reason naming the variable, and turns the language off only where there is no
+   built-in; an entry that does not parse does the same and leaves the others
+   loaded; a refused override of Rust leaves a session with exactly the
+   variables it had before that file was written.
 2. **Rust as a descriptor.** The session environment is built from the loaded
    descriptors, and Rust's says what `sandbox.rs` sets today. AC: the
    environment of a session is byte for byte what it was; the Compile Server
@@ -70,9 +75,10 @@ stage's to settle.
    from the page preserves descriptor keys the page never drew.
 4. **The settings API and page.** The view lists languages rather than holding
    one cache; the pane draws a checkbox each, the size still hanging off
-   Rust's, and a language that failed to load with its reason. AC: every pane
-   that carries the cache along on its own save still does; generated
-   TypeScript is up to date; a custom language appears with its label.
+   Rust's, and, for a language whose entry did not load, its reason and whether
+   it is running on its built-in or off altogether. AC: every pane that carries
+   the cache along on its own save still does; generated TypeScript is up to
+   date; a custom language appears with its label.
 5. **The docs.** CONTEXT.md's **Build Cache** entry stops saying Rust alone and
    gains the descriptor as a term; the adoption doc gains the grammar, with the
    built-ins as its examples.
