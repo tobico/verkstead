@@ -1,6 +1,6 @@
 //! The roadmaps Verkstead reads: a Conversation's Worktree, drawn as stage-list
-//! Events, and a registered Repo's, read at a commit for the ones nothing is
-//! driving.
+//! Events, and a registered Repo's, read at a commit — for the roadmaps nothing
+//! is driving, and for what a roadmap being driven has left to start.
 //!
 //! What a roadmap *says* is not stored, for the reason nothing about a backlog
 //! is — see [`crate::tasks`], which is also where the one row that *is* stored
@@ -48,13 +48,17 @@
 //!
 //! ## The other reading
 //!
-//! [`abandoned`] and what hangs off it read a **Repo** instead, at a commit,
-//! with no Worktree anywhere in it. That is what adoption needs: a roadmap the
-//! old tools or a human wrote is committed on the default branch and was
-//! touched by no branch Verkstead knows, so the reading above sees nothing of
-//! it. The entries, the stage and the branch-naming rule are the same ones;
-//! only the way the bytes are fetched differs — `ls-tree` and `show` against
-//! the Repo's own git directory rather than files off a checkout.
+//! [`next_stage`], [`abandoned`] and what hangs off them read a **Repo** instead,
+//! at a commit, with no Worktree anywhere in it. That is what adoption needs: a
+//! roadmap the old tools or a human wrote is committed on the default branch and
+//! was touched by no branch Verkstead knows, so the reading above sees nothing of
+//! it. And it is what the **carry-on** needs, for the other half of the same
+//! reason: with stages worked side by side the Worktree of the one that has just
+//! settled holds a `ROADMAP.md` cut before the newest declarations were written, so
+//! what it has left is read at the top of its roadmap's chain — see [`Declaring`].
+//! The entries, the stage and the branch-naming rule are the same ones; only the
+//! way the bytes are fetched differs — `ls-tree` and `show` against the Repo's own
+//! git directory rather than files off a checkout.
 //!
 //! And the record is the same record: what is done there is [`done`] too, one
 //! Repo's rows read once and handed to a reading that never asks the database.
@@ -280,9 +284,9 @@ fn stacking(workflow: &str) -> bool {
 ///
 /// *Which* roadmap is the record's — named by the caller and settled when the
 /// stage started. What it has ready comes from its declarations, the record and
-/// the boxes together: the entries and the briefs are the Worktree's, read as the
-/// pinned stage list reads them, and which of those entries may start now is
-/// [`ready`]'s question.
+/// the boxes together: the entries and the briefs are read at a commit, off the
+/// branch holding the newest of that roadmap's declarations — see [`Declaring`] —
+/// and which of those entries may start now is [`ready`]'s question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Next {
     /// This one: the lowest-numbered stage that may start now.
@@ -449,15 +453,47 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// **Where** a roadmap's declarations are read: the branch holding the newest of
+/// them, and the commit that branch is at.
+///
+/// Two halves of one fact, passed together rather than as two strings in a row
+/// for the reason `store::RoadmapStage`'s two are: the commit is what is read and
+/// the branch is what the reading is named after, and a caller that put them the
+/// other way round would read a roadmap at a branch name.
+///
+/// Which branch that is, is the carry-on's to decide — see
+/// `crate::continuing::declaring`, which is the whole of that rule: the top of the
+/// roadmap's chain, its own Conversation's branch while nothing has joined, and
+/// the branch that has just settled where git holds neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Declaring<'a> {
+    /// The branch the reading came off, for saying so. Nothing is looked up by
+    /// it: what is read is the commit beside it, this being the name that commit
+    /// was resolved from.
+    pub(crate) branch: &'a str,
+
+    /// And the commit itself, which is what every byte here is read at.
+    pub(crate) commit: &'a str,
+}
+
 /// What `roadmap` has left to start, with `branch` the Conversation that has
 /// just finished.
 ///
-/// One roadmap, named by the caller and read off `worktree`. *Which* one is not
-/// a question this asks: it was settled when the stage started and is read back
-/// out of the record — see `store::stage_roadmap` and the module doc. So a
-/// roadmap this branch amended in passing is never read here, and neither is a
-/// roadmap somebody else is carrying on: what the branch touched decides
-/// nothing at all.
+/// One roadmap, named by the caller. *Which* one is not a question this asks: it
+/// was settled when the stage started and is read back out of the record — see
+/// `store::stage_roadmap` and the module doc. So a roadmap this branch amended in
+/// passing is never read here, and neither is a roadmap somebody else is carrying
+/// on: what the branch touched decides nothing at all.
+///
+/// **Read at a commit out of the Repo's own git directory**, the way [`startable`]
+/// reads one for the adoption, rather than out of the settling stage's checkout.
+/// With stages worked side by side each Worktree holds a `ROADMAP.md` of its own,
+/// and the settling stage's was very likely cut before a dependency was edited or
+/// a stage added — so **declarations are read afresh at every start**, off the
+/// branch holding the newest of them. Which branch that is, is [`Declaring`]'s,
+/// and the reading is the index, the declarations on its lines and the stage's
+/// brief together: all three at the one commit, so that what starts and what it is
+/// primed with cannot come from two readings of the roadmap.
 ///
 /// What it has left is not the lowest unchecked box: which of its stages may start
 /// now is [`ready`]'s question, and `record` is the half of it the repository does
@@ -475,25 +511,27 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
 /// A roadmap that is not there to read is [`Next::Unstartable`], which is the
 /// treatment a stage naming a brief nobody wrote gets and for the same reason:
 /// the record says this Conversation is a stage of it, so the directory being
-/// renamed away or emptied on this branch is the human's to look at rather than
-/// Verkstead's to guess past. Falling back to whatever else the branch touched
-/// is exactly the guess this stopped making.
+/// renamed away or emptied where the declarations are read is the human's to look
+/// at rather than Verkstead's to guess past. Falling back to whatever else the
+/// branch touched is exactly the guess this stopped making — and so is falling
+/// back to a reading of the same roadmap somewhere older.
 ///
-/// Blocking work: one file read, and one more for the brief.
+/// Blocking work: one git read, and one more for the brief.
 pub(crate) fn next_stage(
-    worktree: &Path,
+    repo: &Path,
+    read: Declaring<'_>,
     roadmap: &str,
     branch: &str,
     record: &store::StageStandings,
 ) -> Next {
-    let directory = worktree.join(ROADMAPS).join(roadmap);
+    let index = format!("{ROADMAPS}/{roadmap}/{INDEX}");
 
-    let Ok(list) = std::fs::read_to_string(directory.join(INDEX)) else {
+    let Some(list) = at(repo, read.commit, &index) else {
         return Next::Unstartable {
             why: format!(
-                "this Conversation is a stage of the {roadmap} roadmap, and there is no {}/{}/{} \
-                 on this branch to read what it has left",
-                ROADMAPS, roadmap, INDEX,
+                "this Conversation is a stage of the {roadmap} roadmap, and there is no {index} \
+                 on `{}` — the branch its declarations are read off — to read what it has left",
+                read.branch,
             ),
         };
     };
@@ -505,16 +543,16 @@ pub(crate) fn next_stage(
         // loud rather than passing over.
         return Next::Unstartable {
             why: format!(
-                "this Conversation is a stage of the {roadmap} roadmap, and its {INDEX} on this \
-                 branch has no stages in it"
+                "this Conversation is a stage of the {roadmap} roadmap, and its {INDEX} on \
+                 `{}` has no stages in it",
+                read.branch,
             ),
         };
     }
 
     // Which of its stages may start is [`ready`]'s answer, and nothing starts more
     // than one of them yet: the lowest is what this carries on with. Another
-    // roadmap in this Worktree having work left is not a reason to start any of
-    // it.
+    // roadmap in this Repo having work left is not a reason to start any of it.
     let entry = match ready(roadmap, &list, record, branch) {
         Ready::Stages(lowest, _) => lowest,
         Ready::Complete => {
@@ -533,21 +571,32 @@ pub(crate) fn next_stage(
         Ready::Misdeclared(why) => return Next::Unstartable { why },
     };
 
-    let brief = directory.join(entry.link);
-
-    let Ok(markdown) = std::fs::read_to_string(&brief) else {
+    // An entry naming no brief at all, which is a line to say something about
+    // rather than a path to go and read: `<commit>:docs/roadmaps/<name>/` is the
+    // roadmap's own directory, and git would hand back a listing of it.
+    if entry.link.is_empty() {
         return Next::Unstartable {
             why: format!(
-                "stage {} of the {roadmap} roadmap names the brief {}, and there is nothing \
-                 there to read",
+                "stage {} of the {roadmap} roadmap names no brief to start it from",
                 entry.label,
-                brief.display(),
+            ),
+        };
+    }
+
+    let brief_path = format!("{ROADMAPS}/{roadmap}/{}", entry.link);
+
+    let Some(markdown) = at(repo, read.commit, &brief_path) else {
+        return Next::Unstartable {
+            why: format!(
+                "stage {} of the {roadmap} roadmap names the brief {brief_path}, and there is \
+                 nothing there to read on `{}`",
+                entry.label, read.branch,
             ),
         };
     };
 
     Next::Stage(Box::new(Stage {
-        brief_path: format!("{ROADMAPS}/{roadmap}/{}", entry.link),
+        brief_path,
         roadmap: roadmap.to_owned(),
         label: entry.label.to_owned(),
         title: entry.title.to_owned(),
@@ -1787,8 +1836,66 @@ Turns this askance clone into Verkstead.
         /// And the same reading with a record behind it: what Verkstead knows
         /// about the stages of this Repo's roadmaps, which is what decides whether
         /// a stage is done wherever it says anything at all.
+        ///
+        /// Committed first, because the reading is off a commit rather than off a
+        /// checkout: what a session has written and not committed is not the
+        /// roadmap yet, and the branch the declarations are read off may be one
+        /// nothing is checked out of at all.
         fn next_with(&self, roadmap: &str, branch: &str, record: &store::StageStandings) -> Next {
-            next_stage(self.path(), roadmap, branch, record)
+            let commit = self.committed();
+
+            self.next_at("main", &commit, roadmap, branch, record)
+        }
+
+        /// And the same reading at a named branch of this repository, which is
+        /// what the carry-on actually asks: the roadmap at the top of its chain
+        /// rather than wherever the branch that settled left it.
+        fn next_at(
+            &self,
+            at: &str,
+            commit: &str,
+            roadmap: &str,
+            branch: &str,
+            record: &store::StageStandings,
+        ) -> Next {
+            next_stage(
+                self.path(),
+                Declaring { branch: at, commit },
+                roadmap,
+                branch,
+                record,
+            )
+        }
+
+        /// Everything written so far committed to the branch checked out, and the
+        /// commit that made.
+        ///
+        /// `--allow-empty`, so that a test asking the same reading twice is not a
+        /// commit git refuses the second time.
+        fn committed(&self) -> String {
+            run(self.path(), &["add", "-A"]);
+            run(
+                self.path(),
+                &[
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "docs: the roadmap as it stands",
+                ],
+            );
+
+            run(self.path(), &["rev-parse", "HEAD"]).trim().to_owned()
+        }
+
+        /// And the commit a named branch of it is at, which is what a reading off
+        /// that branch is read at.
+        fn commit_of(&self, branch: &str) -> String {
+            run(
+                self.path(),
+                &["rev-parse", "--verify", "--end-of-options", branch],
+            )
+            .trim()
+            .to_owned()
         }
 
         /// And which roadmaps this branch created since the base commit, which
@@ -3068,6 +3175,156 @@ Turns this askance clone into Verkstead.
         assert!(
             why.contains("03") && why.contains("03-implementation.md"),
             "which stage and which brief: {why:?}",
+        );
+    }
+
+    /// And a stage naming no brief at all is said rather than read: at a commit,
+    /// the roadmap's own directory is a path git will happily hand back a listing
+    /// of, so the entry with nothing in its link is stopped by name.
+    #[test]
+    fn a_stage_naming_no_brief_is_not_startable() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", "# MVP roadmap\n\n- [ ] 03: Implementation\n");
+
+        let Next::Unstartable { why } = repo.next("mvp", "anything-else") else {
+            panic!("stage 03 names no brief to be primed from");
+        };
+
+        assert!(
+            why.contains("03") && why.contains("no brief"),
+            "which stage, and what its line is missing: {why:?}",
+        );
+    }
+
+    /// A roadmap as the branch that has just settled holds it: stage 03 stands on
+    /// 02, which is the stage somebody is still on.
+    const BEFORE_THE_EDIT: &str = "\
+# Rate limiting roadmap
+
+- [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies
+- [ ] 02: The window — [brief](02-the-window.md) — no dependencies
+- [ ] 03: The limiter — [brief](03-the-limiter.md) — after 02
+";
+
+    /// And the same roadmap with one dependency edited by hand: stage 03 stands on
+    /// 01, which has settled. One line different, and a different stage starts.
+    const AFTER_THE_EDIT: &str = "\
+# Rate limiting roadmap
+
+- [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies
+- [ ] 02: The window — [brief](02-the-window.md) — no dependencies
+- [ ] 03: The limiter — [brief](03-the-limiter.md) — after 01
+";
+
+    /// Where a roadmap being driven is read: the branch at the top of its chain,
+    /// which is where the newest of its declarations are.
+    ///
+    /// A dependency edited by hand and committed there is what decides what starts
+    /// next. The settling stage's own branch was cut before the edit and says
+    /// nothing may start; the edit says stage 03 may, and the edit is the reading.
+    #[test]
+    fn a_dependency_edited_at_the_top_of_the_chain_decides_what_starts() {
+        let repo = Repo::with(&[]);
+        repo.write("rate-limiting", BEFORE_THE_EDIT);
+        repo.brief("rate-limiting", "03-the-limiter.md", "# 03. The limiter\n");
+
+        // What the stage that has just settled holds, and what it settled first.
+        let cut_before = repo.committed();
+
+        repo.write("rate-limiting", AFTER_THE_EDIT);
+        repo.commit_on(
+            "roadmaps/rate-limiting/02-the-window",
+            "docs: 03 stands on 01 after all",
+        );
+
+        let record = store::StageStandings::from_rows([
+            ("rate-limiting", "01", store::StageStanding::Settled),
+            ("rate-limiting", "02", store::StageStanding::InFlight),
+        ]);
+
+        let top = "roadmaps/rate-limiting/02-the-window";
+
+        let Next::Stage(stage) = repo.next_at(
+            top,
+            &repo.commit_of(top),
+            "rate-limiting",
+            "roadmaps/rate-limiting/01-the-counter",
+            &record,
+        ) else {
+            panic!("the edit at the top of the chain has 03 standing on the stage that settled");
+        };
+
+        assert_eq!(stage.label, "03");
+
+        assert_eq!(
+            repo.next_at(
+                "main",
+                &cut_before,
+                "rate-limiting",
+                "roadmaps/rate-limiting/01-the-counter",
+                &record,
+            ),
+            Next::InFlight {
+                roadmap: "rate-limiting".to_owned()
+            },
+            "and the branch that settled was cut before the edit, where 03 stands on the \
+             stage somebody is still on",
+        );
+    }
+
+    /// And a stage *added* by hand at the top of the chain starts, brief and all —
+    /// the whole reading being at that one commit, so an entry the settling
+    /// branch has never seen is started from a brief it has never held.
+    #[test]
+    fn a_stage_added_at_the_top_of_the_chain_is_started_from_there() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "rate-limiting",
+            "# Rate limiting roadmap\n\n\
+             - [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies\n",
+        );
+
+        let cut_before = repo.committed();
+
+        // The stage somebody added while this one was working, brief beside it.
+        repo.write(
+            "rate-limiting",
+            "# Rate limiting roadmap\n\n\
+             - [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies\n\
+             - [ ] 02: The window — [brief](02-the-window.md) — after 01\n",
+        );
+        repo.brief("rate-limiting", "02-the-window.md", "# 02. The window\n");
+        repo.commit_on(
+            "roadmaps/rate-limiting/01-the-counter",
+            "docs: a window to count in",
+        );
+
+        let record = store::StageStandings::from_rows([(
+            "rate-limiting",
+            "01",
+            store::StageStanding::Settled,
+        )]);
+
+        let top = "roadmaps/rate-limiting/01-the-counter";
+
+        let Next::Stage(stage) =
+            repo.next_at(top, &repo.commit_of(top), "rate-limiting", top, &record)
+        else {
+            panic!("stage 02 was added at the top of the chain and stands on the one that settled");
+        };
+
+        assert_eq!(stage.label, "02");
+        assert_eq!(
+            stage.brief, "# 02. The window\n",
+            "and its brief is read at the same commit as the line that names it",
+        );
+
+        assert_eq!(
+            repo.next_at("main", &cut_before, "rate-limiting", top, &record),
+            Next::Complete {
+                roadmap: "rate-limiting".to_owned()
+            },
+            "where the branch that settled would have called the roadmap finished",
         );
     }
 

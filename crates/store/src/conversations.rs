@@ -6027,6 +6027,52 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
         .collect())
 }
 
+/// The branch of a roadmap's **own Conversation**: the one that wrote it.
+///
+/// The **foot** of the chain, and the one thing about a roadmap there was no read
+/// for. [`stage_chain`] answers for the stages that have joined; while none has,
+/// the newest the roadmap has ever been written down is on the branch of the
+/// Conversation that planned it, whose pull request is very likely still open — so
+/// the default branch does not hold it and neither does any stage.
+///
+/// What says a row is that Conversation's rather than a stage's is **a roadmap
+/// with no stage label beside it and the Roadmap direction** — see
+/// [`StageOf::stage`], where the two rows that hold no label are told apart, and
+/// the `stage_roadmaps` statement in `apply_schema`. A stage started before the
+/// label was written down holds no label either and is not this one: it has the
+/// direction its own work runs under.
+///
+/// One Repo's, for the reason [`stage_chain`] is one Repo's: two Repos may hold
+/// roadmaps of the same name, and the Conversation that planned `mvp` over there
+/// says nothing about this one. The newest where somehow there are two — a roadmap
+/// planned twice is two Conversations, and the later of them is the one whose
+/// declarations are the newest.
+pub async fn roadmap_branch(
+    pool: &SqlitePool,
+    repo_id: i64,
+    roadmap: &str,
+) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT COALESCE(c.named_branch, c.branch)
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         JOIN directions d ON d.conversation_id = r.conversation_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NULL AND d.direction = ?
+         ORDER BY r.conversation_id DESC
+         LIMIT 1",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .bind(direction_stored(Direction::Roadmap))
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading the branch the {roadmap} roadmap in Repo {repo_id} was written on")
+    })?;
+
+    Ok(row.map(|(branch,)| branch))
+}
+
 /// One stage **queued to join** its roadmap's chain: the Conversation it is, and
 /// which stage of the roadmap.
 ///

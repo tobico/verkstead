@@ -28,15 +28,22 @@
 //!
 //! **What that roadmap has ready comes from its declarations, the record and the
 //! boxes together** — see [`crate::stages::ready`], which is the whole of that
-//! rule. The entries and the briefs are read off the Worktree, by the same rule the
-//! pinned stage list is drawn by; whether each of them is done is the record's
-//! answer wherever it has a row for the stage, because a stage that settled ticked
-//! its own box on its own branch and this one may never have seen it; and what each
-//! of them stands on is its own line's to declare, an undeclared roadmap being read
-//! as each stage standing on the one before it. The pinned block draws every
-//! roadmap the branch touched, which is the wider question and stays that way: one
-//! of those cards is this Conversation's own effort and the rest are roadmaps it
-//! edited in passing.
+//! rule. Whether each stage of it is done is the record's answer wherever it has a
+//! row for the stage, because a stage that settled ticked its own box on its own
+//! branch and this one may never have seen it; and what each of them stands on is
+//! its own line's to declare, an undeclared roadmap being read as each stage
+//! standing on the one before it. The pinned block draws every roadmap the branch
+//! touched, which is the wider question and stays that way: one of those cards is
+//! this Conversation's own effort and the rest are roadmaps it edited in passing.
+//!
+//! **And the declarations are read afresh at every start, off the top of the
+//! roadmap's chain** — see [`declaring`], which is the whole of that rule, and
+//! [`crate::stages::next_stage`], which reads the index, the lines and the stage's
+//! brief together at that one commit out of the Repo's own git directory. Not off
+//! the settling stage's Worktree: with stages worked side by side each Worktree
+//! holds a `ROADMAP.md` of its own, and this one's was very likely cut before a
+//! dependency was edited or a stage added. So a hand edit committed to a running
+//! roadmap is what decides what starts next.
 //!
 //! **What is decided is where the branch goes**, and only that — see
 //! [`cut_from`] and [`Stands`], which are the whole of the rule. A stage is cut
@@ -177,17 +184,70 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
 
     let base = cut_from(&chain, &record, &roadmap, &conversation.branch).to_owned();
 
-    let branch = conversation.branch.clone();
+    // And the branch the roadmap's own **declarations** are read off, which is not
+    // the same question — see [`declaring`]. Where a stage is cut from is about what
+    // its work stands on; what is read here is the roadmap as it is newest written,
+    // and while nothing has joined that is the branch of the Conversation that
+    // planned it. A read that fails leaves the chain and the settling branch to
+    // answer, which is what a roadmap whose foot has merged already comes to.
+    let wrote = match store::roadmap_branch(&state.pool, conversation.repo.id, &roadmap).await {
+        Ok(wrote) => wrote,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading the branch this roadmap was written on failed",
+            );
+            None
+        }
+    };
 
-    // Both readings together, off the runtime's threads: a handful of file
-    // reads.
+    let branch = conversation.branch.clone();
+    let repo = conversation.repo.path.clone();
+
+    let reading: Vec<String> = declaring(&chain, wrote.as_deref(), &conversation.branch)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+    // Both readings together, off the runtime's threads: a handful of git reads
+    // against a local directory, and a file read for the workflow.
     let read = tokio::task::spawn_blocking({
         let worktree = worktree.clone();
         move || {
-            (
-                stages::next_stage(&worktree, &roadmap, &branch, &record),
-                stages::stacks(&worktree),
-            )
+            // The first of them git still holds, which is what makes the list an
+            // order of preference rather than a guess: a branch deleted once its
+            // pull request merged is no longer somewhere a roadmap can be read,
+            // and the one below it in the chain is the next newest.
+            let at = reading
+                .into_iter()
+                .find_map(|named| worktrees::resolve(&repo, &named).map(|commit| (named, commit)));
+
+            let next = match at {
+                Some((named, commit)) => stages::next_stage(
+                    &repo,
+                    stages::Declaring {
+                        branch: &named,
+                        commit: &commit,
+                    },
+                    &roadmap,
+                    &branch,
+                    &record,
+                ),
+
+                // Nothing left to read the roadmap at: not the top of its chain,
+                // not the branch it was planned on, and not even the branch that
+                // has just settled. Said rather than guessed past, for the reason
+                // a roadmap that is not there at all is said.
+                None => Next::Unstartable {
+                    why: format!(
+                        "this Conversation is a stage of the {roadmap} roadmap, and this \
+                         repository holds no branch its declarations could be read off"
+                    ),
+                },
+            };
+
+            (next, stages::stacks(&worktree))
         }
     })
     .await;
@@ -308,6 +368,53 @@ fn cut_from<'a>(
         .rev()
         .find(|link| record.of(roadmap, &link.stage) == Some(store::StageStanding::Settled))
         .map_or(settled, |link| link.branch.as_str())
+}
+
+/// Which branch the roadmap's **declarations** are read off, best first: the top
+/// of its chain, then the branch it was planned on, then the branch that has just
+/// settled.
+///
+/// **Declarations are read afresh at every start**, and this is where *afresh*
+/// means: the newest the roadmap has ever been written down, so that a dependency
+/// somebody edited by hand and committed to a running roadmap takes effect. With
+/// stages worked side by side the settling stage's own Worktree is exactly the
+/// wrong place to ask — its branch may well have been cut before that edit, or
+/// before the stage that edit is about was added — and every stage that has
+/// joined the chain since holds a newer copy.
+///
+/// **The top of the chain** is the branch of the last stage to have joined, which
+/// is the newest `ROADMAP.md` there is: a stage joins by pushing its branch and
+/// opening its pull request, and it rebased onto everything below it to get there.
+/// Walked from the top down rather than taken as one name, so that a link whose
+/// branch has gone gives way to the one below it instead of throwing the whole
+/// chain away.
+///
+/// **Then the branch the roadmap was planned on** — see `store::roadmap_branch`,
+/// which is the read for it. That Conversation is the **foot** of the chain while
+/// its pull request is unmerged, and with no stage joined yet it is the only
+/// branch the roadmap exists on at all: the default branch does not hold it, and
+/// neither does anything Verkstead has cut since.
+///
+/// **And then the branch that has just settled**, which is today's answer and the
+/// right one for a roadmap's first stage — the Conversation that wrote the
+/// roadmap is the one that settled, so the two are the same branch.
+///
+/// An order of preference rather than one answer, because a branch is a thing git
+/// may no longer hold: whoever calls in takes the first of these git still has.
+/// Nothing here asks git or the database — the chain and the planning branch are
+/// read by the caller, and this puts them in order.
+fn declaring<'a>(
+    chain: &'a [store::Joined],
+    wrote: Option<&'a str>,
+    settled: &'a str,
+) -> Vec<&'a str> {
+    chain
+        .iter()
+        .rev()
+        .map(|link| link.branch.as_str())
+        .chain(wrote)
+        .chain(std::iter::once(settled))
+        .collect()
 }
 
 /// What happens when a settling Conversation has no roadmap recorded against it:
@@ -1901,5 +2008,43 @@ mod tests {
             base(&chain, &record, "roadmap/rate-limiting"),
             "roadmaps/rate-limiting/01",
         );
+    }
+
+    /// The top of the chain is where a running roadmap's declarations are read,
+    /// and the whole chain is offered from the top down: a link whose branch git
+    /// no longer holds gives way to the one below it rather than to the foot.
+    #[test]
+    fn a_running_roadmaps_declarations_are_read_at_the_top_of_its_chain() {
+        let chain = [link(7, "01"), link(9, "02")];
+
+        assert_eq!(
+            declaring(&chain, Some("rate-limiting"), "roadmaps/rate-limiting/01"),
+            [
+                "roadmaps/rate-limiting/02",
+                "roadmaps/rate-limiting/01",
+                "rate-limiting",
+                "roadmaps/rate-limiting/01",
+            ],
+        );
+    }
+
+    /// A roadmap no stage has joined yet is read off the branch it was planned
+    /// on, which is the foot of its chain while that pull request is unmerged —
+    /// and the only branch the roadmap is written on at all.
+    #[test]
+    fn a_roadmap_nothing_has_joined_is_read_off_the_branch_it_was_planned_on() {
+        assert_eq!(
+            declaring(&[], Some("rate-limiting"), "roadmaps/rate-limiting/01"),
+            ["rate-limiting", "roadmaps/rate-limiting/01"],
+            "the planning branch first, and the stage that settled behind it",
+        );
+    }
+
+    /// And one with neither falls back to the branch that settled, which is
+    /// today's answer: a roadmap's own first stage settles on the branch that
+    /// wrote the roadmap, so the two are one branch.
+    #[test]
+    fn a_roadmap_with_neither_is_read_off_the_branch_that_settled() {
+        assert_eq!(declaring(&[], None, "rate-limiting"), ["rate-limiting"]);
     }
 }

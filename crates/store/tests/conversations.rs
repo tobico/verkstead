@@ -4,18 +4,19 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_schema::Direction;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Joined, Lifecycle,
     ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState, StageOf, StageStanding,
     Staged, Steer, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
     any_archived, archive_conversation, archived, close_conversation, conversation_branch,
     conversations, create_profile, follow_branch, hold_pull_request, join_queue, load_conversation,
-    open_database, queue_to_join, record_another_pull_request, record_pull_request, record_roadmap,
-    register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
-    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
-    stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
-    start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
-    steer_conversation, switch_repo, target, timeline, unarchive_conversation,
+    open_database, pick_direction, queue_to_join, record_another_pull_request, record_pull_request,
+    record_roadmap, register_repo, reinvent_branch, rename_branch, roadmap_branch, save_brief,
+    set_base_commit, set_grilling_pairing, set_state, set_target, settle_naming, show_archived,
+    showing_archived, stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption,
+    start_conversation, start_grilling, start_stage, start_tinkering, start_unnamed_conversation,
+    state, steer_conversation, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1833,6 +1834,29 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
     assert_eq!(stacks_on(&pool, never).await.unwrap(), None);
 }
 
+/// A Conversation that has picked a direction, which is the one thing a pick
+/// needs: [`pick_direction`] is refused for anything but a grilling.
+async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Direction) -> i64 {
+    let id = start_conversation(pool, repo_id, branch)
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        pool,
+        id,
+        "c0ffee",
+        &Path::new("/data/worktrees").join(branch.replace('/', "-")),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    pick_direction(pool, id, direction).await.unwrap();
+
+    id
+}
+
 /// A stage Conversation of `roadmap`, started as a stage and left implementing.
 ///
 /// The branch is named after the label rather than read off it, which is what the
@@ -2342,5 +2366,64 @@ async fn a_queue_holds_no_other_repos_stages_no_other_roadmaps_and_no_unlabelled
             .collect::<Vec<_>>(),
         vec![mine],
         "one roadmap of one Repo, and no row that is not a stage of it",
+    );
+}
+
+/// The Conversation that *wrote* a roadmap comes back by its branch, which is the
+/// foot of that roadmap's chain while its pull request is unmerged.
+///
+/// What says a row is that Conversation's is the roadmap with no stage label
+/// beside it *and* the Roadmap direction — so a stage of the same roadmap is not
+/// it, and neither is an unlabelled row left by a Conversation headed somewhere
+/// else, which is what a stage started before the label was written down is.
+#[tokio::test]
+async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    // A stage of it, which holds a label and is nobody's planning branch.
+    stage(&pool, ours, "mvp", "01").await;
+
+    // A row with no label and another direction: a stage Verkstead started
+    // before it wrote the label down.
+    let before = directed(&pool, ours, "mvp/02-grilling", Direction::TaskList).await;
+    record_roadmap(&pool, before, Some("mvp")).await.unwrap();
+
+    // Somebody else's repository, planning a roadmap of the same name.
+    let elsewhere = directed(&pool, theirs, "the-mvp-roadmap", Direction::Roadmap).await;
+    record_roadmap(&pool, elsewhere, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        roadmap_branch(&pool, ours, "mvp").await.unwrap(),
+        None,
+        "nothing in this Repo has planned it: a label is not it, and neither is a direction \
+         of something else",
+    );
+
+    let wrote = directed(&pool, ours, "roadmaps/mvp", Direction::Roadmap).await;
+    record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        roadmap_branch(&pool, ours, "mvp").await.unwrap().as_deref(),
+        Some("roadmaps/mvp"),
+    );
+
+    assert_eq!(
+        roadmap_branch(&pool, ours, "public-release").await.unwrap(),
+        None,
+        "and one roadmap's planning branch says nothing about another's",
+    );
+
+    // And the name a session renamed the branch to is the name that comes back,
+    // for the reason the chain's links come back under theirs: what the record
+    // holds now is what git holds now.
+    follow_branch(&pool, wrote, "roadmaps/the-mvp")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        roadmap_branch(&pool, ours, "mvp").await.unwrap().as_deref(),
+        Some("roadmaps/the-mvp"),
     );
 }
