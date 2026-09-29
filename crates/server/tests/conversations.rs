@@ -1641,6 +1641,26 @@ async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> Con
     .await
 }
 
+/// And the submit that confirms one a submit before it stopped over: the
+/// Conversations whose uncommitted changes may go with the close that makes way.
+async fn steer_into_confirming(
+    app: &Router,
+    id: i64,
+    target: &str,
+    discarding: &[i64],
+) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": target,
+            "interrupt": false,
+            "discarding": discarding,
+        }),
+    )
+    .await
+}
+
 /// And the submit into Implementing with something written, which is the other
 /// payload: what the session it starts is sent off to do.
 async fn steer_instructed(app: &Router, id: i64, instruction: &str) -> ConversationSteered {
@@ -12217,6 +12237,366 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
         opened(&app, id).await.state,
         Lifecycle::Wrapping,
         "and a holder still at work is refused for rather than closed",
+    );
+}
+
+/// A pull request that has changed hands: the Conversation that had it, closed,
+/// and the one that took it over, finished with it.
+///
+/// Which is the shape the way back is written for — see ADR-0020. Every pull
+/// request Verkstead opens is some Conversation's, so a Review pointed at one
+/// closes the holder and takes it up; the human then wants the first Conversation
+/// back, and the second is standing on its branch.
+///
+/// Both walked through the presses that reach them rather than written into the
+/// row, because what is under test is a record two take-ups really made.
+#[cfg(unix)]
+async fn handed_over(app: &Router, repo_id: i64, implementation: i64, review: i64) -> (i64, i64) {
+    let first = ready_to_review_under(app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(app, first).await, TakenUp::TakenUp);
+    finished_with_it(app, first).await;
+    assert_eq!(close(app, first).await, ConversationClosed::Closed);
+
+    let second = ready_to_review_under(
+        app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(app, second).await, TakenUp::TakenUp);
+    finished_with_it(app, second).await;
+
+    (first, second)
+}
+
+/// A Closed Conversation steered back into a wrap-up closes the Done Conversation
+/// that took its pull request over, and has its checkout made from the branch.
+///
+/// The rule read the other way round — one *open* Conversation per pull request,
+/// open being neither Done nor Closed. Before this the steer made its checkout
+/// from a branch somebody was still standing on and answered *git would not make
+/// the worktree*, which is the one refusal described as having nothing for the
+/// human to correct; here there was something.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_request_over() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::Steered,
+        "the holder had finished with it, so it made way",
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(
+        holder.worktree, None,
+        "closed by the ordinary Close, so its checkout went with it",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+    assert!(
+        view.worktree.is_some(),
+        "and the checkout it had let go of is made again from the branch",
+    );
+
+    // And this Conversation's Timeline says what it closed, naming it by its
+    // branch the way the take-up's own note names a holder.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "The Conversation on <code>rate-limiting</code> had taken this pull request over"
+        ),
+        "the Timeline names the Conversation this steer closed: {said}",
+    );
+}
+
+/// And a steer into Follow-up the same, that being the other target the way back
+/// leads to.
+///
+/// A follow-up is the human taking something up about work that is already on a
+/// pull request, so it turns on the same fact the wrap-up does and wants the same
+/// checkout. Which is the whole of what is under test: the target is not what the
+/// rule reads.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_back_into_a_follow_up_makes_way_the_same() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_following_up(&app, first, Some("What did the limiter end up doing?\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert!(view.worktree.is_some());
+}
+
+/// A steer onto a pull request another Conversation is still at work on is
+/// refused naming it, and nothing is closed and nothing is made.
+///
+/// Still at work being everything that is neither Done nor Closed. Two live
+/// wrap-ups pushing to one branch is what the rule is for, so the way on is that
+/// Conversation rather than this one beside it — and the refusal leads there.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    // The one that took it over is left wrapping it up, which is where a take-up
+    // leaves one.
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::AlreadyHeld {
+            conversation: second,
+        },
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(
+        holder.state,
+        Lifecycle::Wrapping,
+        "the Conversation that has it is exactly where the submit found it",
+    );
+    assert!(
+        holder.worktree.is_some(),
+        "with the checkout it was working in still its own",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert_eq!(view.worktree, None, "with nothing made");
+    assert!(
+        view.pending_steer.is_some(),
+        "and the pending steer stands, the form being somewhere to come back to",
+    );
+}
+
+/// Where the Conversation that would be closed holds uncommitted changes the
+/// submit stops naming it, the pending steer still standing, and the submit after
+/// it goes ahead.
+///
+/// The one thing a close cannot give back, asked about here exactly as it is at
+/// the take-up: a Worktree goes by force, so whatever was left uncommitted in it
+/// goes with it. Nothing else is asked about.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let left = left_uncommitted(&app, second, Change::Modified).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: second,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+
+    let holder = opened(&app, second).await;
+    let worktree = holder.worktree.clone().expect("nothing was closed");
+
+    assert_eq!(
+        holder.state,
+        Lifecycle::Done,
+        "nothing is closed by the ask"
+    );
+    assert_eq!(
+        changed(Path::new(&worktree.path)),
+        vec![left],
+        "and what it is holding is where it was left",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert!(
+        view.pending_steer.is_some(),
+        "and the pending steer stands, so the submit that confirms has a form to send",
+    );
+
+    assert_eq!(
+        steer_into_confirming(&app, first, "Wrapping", &[second]).await,
+        ConversationSteered::Steered,
+        "and the submit that names it goes ahead",
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Wrapping);
+}
+
+/// And a confirmation that does not name what is held stops the submit all over
+/// again, with the list as it stands.
+///
+/// The checkouts are read again on every submit rather than trusted from the one
+/// before: what a confirmation says is which Conversations *may* lose something,
+/// and one holding something it does not name has not been asked about at all.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steers_confirmation_that_names_nobody_stops_it_again() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    left_uncommitted(&app, second, Change::Untracked).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into_confirming(&app, first, "Wrapping", &[]).await,
+        ConversationSteered::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: second,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+}
+
+/// A steer into Done closes nothing: it runs nothing, so it wants no checkout and
+/// has nobody to want it from.
+///
+/// Which is why the question is asked of the target rather than of the
+/// Conversation. A Conversation is steered into Done to say the human is finished
+/// with it, and taking somebody else's Conversation away for that would be a close
+/// nothing needed.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_into_done_closes_nothing() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(holder.state, Lifecycle::Done, "nothing was closed");
+    assert!(
+        holder.worktree.is_some(),
+        "and nothing was taken away from it",
+    );
+
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+}
+
+/// And a steer by a Conversation nobody else shares a pull request with is the
+/// steer it has always been: the checkout made again from the branch, and nothing
+/// closed anywhere.
+///
+/// The ordinary case, which is nearly every steer there is — and the one this has
+/// to leave alone. A Closed Conversation whose pull request nobody took over is
+/// what the way back was already for.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_over_a_pull_request_nobody_else_has_is_unchanged() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let id = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+    finished_with_it(&app, id).await;
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, id, "Wrapping", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert!(view.worktree.is_some());
+    assert!(
+        !notices(&view).join("\n").contains("closed to make way"),
+        "and nothing says a Conversation was closed, because none was",
     );
 }
 

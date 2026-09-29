@@ -11530,6 +11530,9 @@ describe("steering a conversation", () => {
         follow_up: "Does it count the 429s it sends?",
         // Nor is the question beside it: each payload goes under its own target.
         investigation: null,
+        // And nothing to discard: the list is what a submit that has been
+        // stopped sends back, and a first submit has been stopped over nothing.
+        discarding: [],
       }),
     );
   });
@@ -11615,6 +11618,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: "Where does the 429 count come from?",
+        discarding: [],
       }),
     );
   });
@@ -11792,6 +11796,7 @@ describe("steering a conversation", () => {
         instruction: "Note the window the count is against.",
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -11862,6 +11867,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -11924,6 +11930,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -12082,6 +12089,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
 
@@ -12172,6 +12180,88 @@ describe("steering a conversation", () => {
     const refused = await drawn(document.body, `.${steerForm.steerConversation} .${steerForm.failure}`);
 
     expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// And the refusal about the pull request leads to the conversation that has
+  /// it, which is the whole of what makes it actionable.
+  ///
+  /// There is one open conversation per pull request, so a conversation steered
+  /// back onto one somebody is still wrapping up is refused and the way on is
+  /// that conversation rather than a second one beside it.
+  it("leads to the conversation still at work on the pull request", async () => {
+    theGrillingSteering(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json({ AlreadyHeld: { conversation: 77 } } satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "Another conversation" }),
+    );
+
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/still at work on this pull request/),
+    ).toBeTruthy();
+  });
+
+  /// And the one that is not a refusal at all draws the conversation it names as
+  /// a link, and turns the press into the one that goes ahead.
+  ///
+  /// A steer that would close a finished conversation holding uncommitted
+  /// changes stops and asks: the link is who would lose something, and the button
+  /// is how the human answers. The submit after it sends that conversation back,
+  /// which is what says the loss is agreed to — and the pending steer stood
+  /// through it, or there would have been no form left to submit.
+  it("names what a steer would discard, and presses through it", async () => {
+    const fetching = theGrillingSteering(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json({
+          WouldDiscard: {
+            uncommitted: [{ conversation: 77, branch: "rate-limiting" }],
+          },
+        } satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    const press = await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`);
+
+    fireEvent.click(press);
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "rate-limiting" }),
+    );
+
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/uncommitted changes in its worktree would go with it/),
+    ).toBeTruthy();
+
+    // And the press now reads as going ahead, which is the whole of the second
+    // answer: the same steer with what it would discard named back.
+    await waitFor(() => expect(press.textContent).toContain("Steer anyway"));
+
+    fireEvent.click(press);
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT, 1)).toMatchObject({
+        discarding: [77],
+      }),
+    );
   });
 
   /// The form is drawn from the pending steer rather than opened empty, which is

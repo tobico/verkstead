@@ -1100,11 +1100,47 @@ pub async fn conversation_on_pull_request(
     repo_id: i64,
     number: i64,
 ) -> Result<Option<i64>> {
+    on_pull_request(pool, repo_id, number, None).await
+}
+
+/// The same question with one Conversation left out of the answer: who *else*
+/// has this pull request on their record.
+///
+/// What a Steer asks — see ADR-0020, and the paragraph in it about the way back.
+/// A take-up is pressed by a Draft, and a Draft has no pull request on its
+/// record, so the question there can only ever be about somebody else; a steer is
+/// made by the Conversation whose pull request it is, so the one row that is
+/// never the answer is its own.
+///
+/// **And the leaving out is the query's rather than the caller's**, because the
+/// ordering above is what decides between two rows. A Closed Conversation steered
+/// back onto its pull request is often the newest row on it — it took the pull
+/// request over and was closed afterwards — so an answer that came back as itself
+/// and was then thrown away would be an answer that never named the Done holder
+/// standing on the branch.
+pub async fn other_conversation_on_pull_request(
+    pool: &SqlitePool,
+    repo_id: i64,
+    number: i64,
+    besides: i64,
+) -> Result<Option<i64>> {
+    on_pull_request(pool, repo_id, number, Some(besides)).await
+}
+
+/// The one query both of those are, `besides` being the Conversation to leave out
+/// of it where there is one to leave out.
+async fn on_pull_request(
+    pool: &SqlitePool,
+    repo_id: i64,
+    number: i64,
+    besides: Option<i64>,
+) -> Result<Option<i64>> {
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT p.conversation_id
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          WHERE p.repo_id = ? AND p.number = ?
+           AND (? IS NULL OR p.conversation_id <> ?)
            AND p.event_id = (SELECT MIN(q.event_id) FROM pull_requests q
                              WHERE q.conversation_id = p.conversation_id
                                AND q.repo_id = p.repo_id)
@@ -1113,6 +1149,8 @@ pub async fn conversation_on_pull_request(
     )
     .bind(repo_id)
     .bind(number)
+    .bind(besides)
+    .bind(besides)
     .bind(Lifecycle::Done.stored())
     .bind(Lifecycle::Closed.stored())
     .fetch_optional(pool)

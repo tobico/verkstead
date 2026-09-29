@@ -21,11 +21,12 @@ use verkstead_store::{
     AdoptedPullRequest, Entering, Event, Finished, Landing, Lifecycle, Merging, PullRequest,
     Rebuilding, Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
     close_conversation, conversation_on_pull_request, finish_wrap_up, hold_pull_request,
-    implement_again, load_conversation, merges, merging, open_database, pick_direction,
-    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
-    record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
-    resolve_conflicts, rollups, save_brief, settle_wrap_up, stack, standing, start_conversation,
-    start_grilling, start_tinkering, take_up, timeline, unfinished_pull_requests, wrap_up_settled,
+    implement_again, load_conversation, merges, merging, open_database,
+    other_conversation_on_pull_request, pick_direction, pull_request, pull_request_repo,
+    pull_requests, record_another_pull_request, record_check_rollup, record_merging,
+    record_pull_request, record_standing, register_repo, resolve_conflicts, rollups, save_brief,
+    settle_wrap_up, stack, standing, start_conversation, start_grilling, start_tinkering, take_up,
+    timeline, unfinished_pull_requests, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1872,6 +1873,51 @@ async fn the_conversation_a_pull_request_leads_to_is_the_open_one() {
         conversation_on_pull_request(&pool, own, 41).await.unwrap(),
         Some(second),
         "and Closed as well, it is the newest still",
+    );
+
+    // And asked who *else* is on it, the answer is the other one — which is the
+    // whole of why the leaving-out is the query's rather than the caller's: both
+    // are shut, so the newest wins, and the newest is the one asking.
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, second)
+            .await
+            .unwrap(),
+        Some(first),
+        "the Conversation steering back is never the answer to who else has it",
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, first)
+            .await
+            .unwrap(),
+        Some(second),
+        "and asked the other way round it is the one that took it over",
+    );
+}
+
+/// And a pull request only one Conversation ever had has nobody else on it.
+///
+/// Which is every Conversation that has not handed its work over, and so nearly
+/// all of them: a steer by one of those asks the question and finds nobody, and
+/// goes on being the steer it has always been.
+#[tokio::test]
+async fn a_pull_request_one_conversation_has_leads_to_nobody_else() {
+    let (_dir, pool) = fresh_pool().await;
+    let only = implementing(&pool).await;
+    let own = own(&pool, only).await;
+
+    record_pull_request(&pool, only, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(only),
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, only)
+            .await
+            .unwrap(),
+        None,
     );
 }
 

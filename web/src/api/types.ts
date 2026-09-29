@@ -1247,8 +1247,27 @@ unseen: boolean, };
  * where it goes, so the source is not something to be refused for. What is left
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
+ *
+ * **Which one other Conversation's state is among**, and only one: a steer into
+ * a state something runs in wants the branch, and the pull request this
+ * Conversation is on may by now be somebody else's — see [`Self::AlreadyHeld`]
+ * and [`Self::WouldDiscard`], and ADR-0020. That is still a fact about whether
+ * the target's work can be set going rather than about where the work has got
+ * to here.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
+/**
+ * The Conversation that has it, for the way there.
+ */
+conversation: number, } } | { "WouldDiscard": { 
+/**
+ * Every Conversation that would lose something.
+ *
+ * A list rather than one, for the shape's sake: a steer is about the
+ * Conversation's own pull request and nobody else's, so there is one of
+ * them here. Stacks are a Fix Merge Issues start's to clear.
+ */
+uncommitted: Array<Uncommitted>, } } | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -4998,7 +5017,27 @@ added: Array<CompanionAddition>,
  * Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
  * nothing runs in has no sandbox to open up.
  */
-upgraded: Array<CompanionUpgrade>, };
+upgraded: Array<CompanionUpgrade>, 
+/**
+ * And the Conversation whose uncommitted changes may go with the close that
+ * makes way for this steer, sent back by the submit that confirms it.
+ *
+ * **The take-up's [`Confirming::discarding`] on the other press** — see
+ * ADR-0020. A steer back into a state something runs in closes the
+ * Conversation that took this pull request over and has finished with it, and
+ * a close takes the Worktree away with whatever was left uncommitted in it.
+ * So a submit stopped over that comes back naming who would lose something —
+ * [`ConversationSteered::WouldDiscard`] — and the submit after it names them
+ * here, which is the human saying to go ahead.
+ *
+ * **What may be lost rather than what will be.** The server reads the
+ * checkouts again on that submit, so a Conversation that is clean by then is
+ * closed without this having meant anything, and one that is dirty and not
+ * named here stops the submit all over again.
+ *
+ * Empty on a first submit, which is every submit that has not been stopped.
+ */
+discarding: Array<number>, };
 
 /**
  * Where a steer can send a Conversation.

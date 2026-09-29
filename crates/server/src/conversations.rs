@@ -3023,11 +3023,16 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
 /// What became of asking the Conversation that has this pull request to make way.
 ///
 /// One open Conversation per pull request, open being neither Done nor Closed —
-/// see ADR-0020. So the holder's state is the whole of what a take-up over
-/// somebody else's pull request turns on, and these are the three answers it can
-/// give.
-enum MadeWay {
-    /// It had finished with it, so it is a Conversation to close and the take-up
+/// see ADR-0020. So the holder's state is the whole of what a press over somebody
+/// else's pull request turns on, and these are the three answers it can give.
+///
+/// **Both doors ask it.** A take-up is pointed at a pull request that is already
+/// somebody's, and a Steer takes a Conversation back onto the pull request it is
+/// on and finds somebody else there — see [`crate::steering::submit`]. The rule
+/// is the same rule read in either direction, so this is one reading rather than
+/// two.
+pub(crate) enum MadeWay {
+    /// It had finished with it, so it is a Conversation to close and the press
     /// carries on over the top of it.
     ///
     /// The record rather than the id, because what happens to it next is two
@@ -3042,7 +3047,7 @@ enum MadeWay {
 
     /// It was Closed already — or Archived, which is a Closed Conversation off
     /// the sidebar rather than a state of its own. Nothing to give up and nothing
-    /// to do: the take-up carries on and the holder is left exactly as it was.
+    /// to do: the press carries on and the holder is left exactly as it was.
     NothingToGiveUp,
 
     /// It is still at work on it, which is the refusal: two live wrap-ups pushing
@@ -3052,7 +3057,7 @@ enum MadeWay {
 }
 
 /// Read the Conversation that has this pull request, and say whether it can make
-/// way for a take-up.
+/// way.
 ///
 /// **A holder the record has lost makes way by not being there.** Nothing is
 /// standing on the branch and nothing is offering presses over the pull request,
@@ -3063,11 +3068,11 @@ enum MadeWay {
 /// know: it is not Done, so it is not a Conversation to close. Which is the safe
 /// way round of it — the refusal leads the human to the Conversation, where the
 /// pane's own escape hatch can end it, and closing a record nothing can read on
-/// the strength of a take-up somewhere else would be Verkstead guessing.
+/// the strength of a press somewhere else would be Verkstead guessing.
 ///
 /// Nothing is closed here. What closing costs is read first — see [`to_lose`] —
 /// and the close itself is [`close_to_make_way`].
-async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
+pub(crate) async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
     let holder = match store::load_conversation(&state.pool, other).await {
         Ok(Some(holder)) => holder,
         Ok(None) => return Ok(MadeWay::NothingToGiveUp),
@@ -3076,7 +3081,7 @@ async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
                 error = ?error,
                 conversation_id = other,
                 "the Conversation holding a pull request could not be read, so it is taken as \
-                 still at work on it and the take-up is refused",
+                 still at work on it and the press is refused",
             );
 
             return Ok(MadeWay::StillAtWork);
@@ -3113,7 +3118,10 @@ async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
 ///
 /// Blocking, all of it — `git status` per checkout — so it goes to a worker of
 /// its own, the way the Diff's own reading does.
-async fn to_lose(giving_way: &[Box<store::Conversation>], discarding: &[i64]) -> Vec<Uncommitted> {
+pub(crate) async fn to_lose(
+    giving_way: &[Box<store::Conversation>],
+    discarding: &[i64],
+) -> Vec<Uncommitted> {
     let asking = giving_way
         .iter()
         .map(|holder| {
@@ -3158,7 +3166,7 @@ async fn to_lose(giving_way: &[Box<store::Conversation>], discarding: &[i64]) ->
 }
 
 /// Close a Conversation that has finished with a pull request, to make way for a
-/// take-up of it.
+/// take-up of it — or for a Steer back onto it.
 ///
 /// **By the ordinary Close**, which is [`close`] and nothing written beside it:
 /// the sessions and the terminals ended, the Worktree and the companions' given
@@ -3167,17 +3175,17 @@ async fn to_lose(giving_way: &[Box<store::Conversation>], discarding: &[i64]) ->
 ///
 /// **And the Worktree is why the close cannot wait.** A Done Conversation keeps
 /// its checkout — a Follow-up steer picks the work up there — and git holds one
-/// checkout per branch, so a take-up over a branch somebody is still standing on
-/// is refused all over again as [`TakenUp::CheckedOutElsewhere`]. Lifting the
-/// first refusal without the close would have moved the refusal rather than
-/// removed it.
+/// checkout per branch, so a press over a branch somebody is still standing on
+/// is refused all over again as [`TakenUp::CheckedOutElsewhere`], or as the steer's
+/// own *git would not make the worktree*. Lifting the first refusal without the
+/// close would have moved the refusal rather than removed it.
 ///
 /// Hands back the branch it went under, for the Timeline of the Conversation that
 /// took over: a Conversation is called by its branch once anybody has named one,
 /// and that is the name it will be found under in the sidebar. `None` where the
 /// record lost it between the read and the close, which is a holder that has made
 /// way by not being there.
-async fn close_to_make_way(
+pub(crate) async fn close_to_make_way(
     state: &AppState,
     holder: Box<store::Conversation>,
 ) -> Result<Option<String>> {
@@ -3189,8 +3197,8 @@ async fn close_to_make_way(
     tracing::info!(
         conversation_id = holder.id,
         branch = holder.branch,
-        "a Conversation that had finished with a pull request was closed to make way for a \
-         take-up of it",
+        "a Conversation that had finished with a pull request was closed to make way for \
+         somebody else on it",
     );
 
     Ok(Some(holder.branch))

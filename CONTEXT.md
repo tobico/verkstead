@@ -2181,7 +2181,11 @@ one, and the newest where none is. One from a fork is refused too, its
 head branch being nowhere origin can be pushed to. Every refusal that costs
 nothing comes first, so nothing is closed for a start that was going to be
 refused anyway — and a close is never undone: a take-up refused after one says so
-on the server log, and a **Steer** is the way back into what was closed. Taking
+on the server log, and a **Steer** is the way back into what was closed. **The
+rule runs both ways**, so that Steer reads it in the other direction: a
+Conversation steered back into work on its pull request closes the one that took
+it over and has finished with it, and is refused where that one is still at work —
+see **Steer**. Taking
 it up puts the
 Conversation on the pull request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
@@ -2476,6 +2480,23 @@ the record holds with nothing on disk is checked out again beside it, which is
 what a steered Draft and a Conversation steered back out of Closed both need:
 without it either would reach a running state with companions the sandbox skips
 in silence.
+
+**And somebody else may be standing on the branch, so a steer asks who.** There
+is one *open* Conversation per pull request, so a Conversation closed to make way
+for a **Review** or a **Fix Merge Issues** — or closed by hand long before — is
+steered back onto a pull request that has been taken over since, and git holds
+one checkout per branch. A steer into a state something runs in asks who else is
+on that pull request before it plans a checkout: a Conversation that has finished
+with it is closed by the ordinary Close and the steer carries on, one already
+Closed or Archived has nothing to give up, and one still at work refuses the
+steer, naming it and leading there. **The close is asked about where it would
+discard something**, exactly as at the take-up: the submit stops naming the
+Conversation that would lose it, the pending steer stands, and the submit under
+it reads *Steer anyway*. What was closed is named on this Conversation's own
+Timeline, because the human submitted a form about one Conversation and a
+different one moved. Into **Done** nothing runs and nothing is asked — and
+stacks are not walked here, a steer being about the Conversation's own pull
+request and the neighbours being a Fix Merge Issues start's to clear.
 
 **What a target takes is what it has to be about.** Grilling takes a new Brief,
 optional, empty being the round starting on the one already there; and a choice

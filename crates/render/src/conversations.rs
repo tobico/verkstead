@@ -4056,6 +4056,26 @@ pub struct SteerSubmission {
     /// nothing runs in has no sandbox to open up.
     #[serde(default)]
     pub upgraded: Vec<CompanionUpgrade>,
+
+    /// And the Conversation whose uncommitted changes may go with the close that
+    /// makes way for this steer, sent back by the submit that confirms it.
+    ///
+    /// **The take-up's [`Confirming::discarding`] on the other press** — see
+    /// ADR-0020. A steer back into a state something runs in closes the
+    /// Conversation that took this pull request over and has finished with it, and
+    /// a close takes the Worktree away with whatever was left uncommitted in it.
+    /// So a submit stopped over that comes back naming who would lose something —
+    /// [`ConversationSteered::WouldDiscard`] — and the submit after it names them
+    /// here, which is the human saying to go ahead.
+    ///
+    /// **What may be lost rather than what will be.** The server reads the
+    /// checkouts again on that submit, so a Conversation that is clean by then is
+    /// closed without this having meant anything, and one that is dirty and not
+    /// named here stops the submit all over again.
+    ///
+    /// Empty on a first submit, which is every submit that has not been stopped.
+    #[serde(default)]
+    pub discarding: Vec<i64>,
 }
 
 /// One registered Repo a steer puts on a Conversation, with everything a setup
@@ -4110,6 +4130,13 @@ pub struct CompanionUpgrade {
 /// where it goes, so the source is not something to be refused for. What is left
 /// to be wrong about is the *target* — a state whose work cannot be set going
 /// from what the record holds.
+///
+/// **Which one other Conversation's state is among**, and only one: a steer into
+/// a state something runs in wants the branch, and the pull request this
+/// Conversation is on may by now be somebody else's — see [`Self::AlreadyHeld`]
+/// and [`Self::WouldDiscard`], and ADR-0020. That is still a fact about whether
+/// the target's work can be set going rather than about where the work has got
+/// to here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationSteered {
@@ -4181,6 +4208,48 @@ pub enum ConversationSteered {
 
     /// Or a model that Profile does not list, for the same reason.
     NoSuchModel,
+
+    /// Another Conversation is still at work on this Conversation's pull request,
+    /// and there is one *open* Conversation per pull request — see ADR-0020.
+    ///
+    /// The way back is the rule turned around. A Conversation closed to make way
+    /// for a take-up — or closed by hand long before — is steered back into work
+    /// on the pull request it is on, and the Conversation that took it over may
+    /// still be wrapping it up. Which one that is, is the whole of what the human
+    /// needs: two live wrap-ups pushing to one branch is what the rule is for, so
+    /// the way on is that Conversation rather than this one beside it.
+    ///
+    /// Only a holder that is still at work. One that has finished with the pull
+    /// request is closed to make way and the steer carries on, so a Done, Closed
+    /// or Archived Conversation on it is no refusal at all — and a steer into
+    /// Done, which runs nothing and needs no checkout, asks none of this.
+    AlreadyHeld {
+        /// The Conversation that has it, for the way there.
+        conversation: i64,
+    },
+
+    /// The Conversation this steer would close has uncommitted changes in a
+    /// checkout it may write in, so the submit stops and names it. Nothing is
+    /// closed and nothing is made, and the pending steer stands.
+    ///
+    /// **Which is the one thing a close is asked about**, here as at the take-up
+    /// — see [`TakenUp::WouldDiscard`], which is this outcome on the other press.
+    /// A close takes the Worktree away by force, so whatever was left uncommitted
+    /// in it goes with it, and that is the only part of making way that cannot be
+    /// undone.
+    ///
+    /// The submit that follows is the confirming one: it sends these Conversations
+    /// back as [`SteerSubmission::discarding`], and the server closes and steers.
+    /// The checkouts are read again on that submit rather than trusted from this
+    /// one, so a Conversation written in since stops it all over again.
+    WouldDiscard {
+        /// Every Conversation that would lose something.
+        ///
+        /// A list rather than one, for the shape's sake: a steer is about the
+        /// Conversation's own pull request and nobody else's, so there is one of
+        /// them here. Stacks are a Fix Merge Issues start's to clear.
+        uncommitted: Vec<Uncommitted>,
+    },
 
     /// The branch has never been made and nothing in the repository answers to
     /// what it would come off.
