@@ -19988,6 +19988,46 @@ async fn a_look_that_started_nothing_does_not_say_a_stage_is_waiting_again() {
     );
 }
 
+/// Every Conversation of this bench but the fixture's own, once each of them is
+/// **Closed**, and the ids they are.
+///
+/// What a halted start leaves behind, for the tests about a stage that got as far
+/// as a record and no further. Waited on rather than read as it stands, and read
+/// as a set rather than as one: a stage halted for something no place coming free
+/// would fix is tried again at the next look and halted again, so a bench can hold
+/// several of these and the newest of them is Draft for as long as the go that is
+/// making it takes.
+///
+/// Which is the whole of what is being asked — that none of them is left running.
+/// A Draft is a Conversation waiting for a human to write a Brief and press
+/// something, and a stage nobody is going to start by hand has no business
+/// sitting in one.
+async fn every_half_made(fixture: &Grilling) -> Vec<i64> {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let rows: Vec<_> = conversations(&fixture.app)
+            .await
+            .into_iter()
+            .filter(|entry| entry.id != fixture.id)
+            .collect();
+
+        if !rows.is_empty() && rows.iter().all(|entry| entry.state == Lifecycle::Closed) {
+            return rows.into_iter().map(|entry| entry.id).collect();
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "a half-made stage Conversation was left running: {:?}",
+            rows.iter()
+                .map(|entry| (entry.id, entry.state))
+                .collect::<Vec<_>>(),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// How many of the server's places the settings page says are taken.
 ///
 /// The one number on that page that is out of neither `config.yaml` nor
@@ -21170,36 +21210,38 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     // The record the stage got as far as is closed rather than left drafting:
     // drafting is a Conversation waiting for a human to write a Brief and press
     // something, and this is a stage nobody is going to start by hand.
-    let half_made = conversations(&fixture.app)
-        .await
-        .into_iter()
-        .find(|entry| entry.id != fixture.id)
-        .expect("the stage got as far as a record before git was asked anything");
+    //
+    // **However many of them there are**, and there may be more than one: the
+    // branch in the companion's way is still in its way at the next look for a
+    // free place, so the stage is tried again and halted again, each go leaving a
+    // record of its own. What is being asked is that none of them is left
+    // running — see [`every_half_made`], which waits for the one being made as
+    // this is read.
+    let half_made = every_half_made(&fixture).await;
 
-    assert_eq!(
-        half_made.state,
-        Lifecycle::Closed,
-        "no half-made stage Conversation is left running",
-    );
-
-    let closed: ConversationView = get(
-        &fixture.app,
-        &format!("/api/ui/conversations/{}", half_made.id),
-    )
-    .await;
-
-    // Its rows say what it would have worked alongside, as any closed
-    // Conversation's do — and none of them says a directory, nothing having
-    // been checked out anywhere.
     assert!(
-        closed.worktree.is_none()
-            && closed
-                .companions
-                .iter()
-                .all(|companion| companion.worktree.is_none()),
-        "with nothing checked out anywhere: {:?}",
-        (closed.worktree, closed.companions),
+        !half_made.is_empty(),
+        "the stage got as far as a record before git was asked anything",
     );
+
+    // And its rows say what it would have worked alongside, as any closed
+    // Conversation's do — and none of them says a directory, nothing having
+    // been checked out anywhere. Of each of them, a go that left a directory
+    // behind being exactly what this is about.
+    for id in &half_made {
+        let closed: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        assert!(
+            closed.worktree.is_none()
+                && closed
+                    .companions
+                    .iter()
+                    .all(|companion| companion.worktree.is_none()),
+            "with nothing checked out anywhere: {:?}",
+            (closed.worktree, closed.companions),
+        );
+    }
 
     assert!(
         !planning.exists(),
