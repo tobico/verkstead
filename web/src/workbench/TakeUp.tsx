@@ -106,7 +106,7 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("WouldDiscard" in outcome) {
-      return `${held(outcome.WouldDiscard.uncommitted)} ${WOULD_DISCARD}`;
+      return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)}`;
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;
@@ -121,8 +121,16 @@ export function takeUpRefusal(outcome: TakenUp): string {
 /// One sentence rather than two readings of it, because the way out of this one
 /// is the press itself rather than anywhere to go: the links say who, and this
 /// says what pressing again does.
-const WOULD_DISCARD =
-  "would be closed to make way, and the uncommitted changes in the worktree would go with it. Press start again to go ahead.";
+///
+/// Agreeing with how many were named, because a stack is asked about in one list:
+/// every conversation standing on a link of it is named by the one press, so
+/// several of them and one worktree between them is the sentence a chain of five
+/// would have read.
+function closingThem(count: number): string {
+  return count === 1
+    ? "would be closed to make way, and the uncommitted changes in its worktree would go with it. Press start again to go ahead."
+    : "would each be closed to make way, and the uncommitted changes in their worktrees would go with them. Press start again to go ahead.";
+}
 
 /// Who is holding something, as the plain sentence names them: by branch, in the
 /// order the server gave, and as one clause whether there is one of them or four.
@@ -217,7 +225,7 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
               </>
             )}
           </For>{" "}
-          {WOULD_DISCARD}
+          {closingThem(uncommitted().length)}
         </>
       )}
     </Show>

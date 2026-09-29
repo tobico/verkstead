@@ -7350,7 +7350,7 @@ describe("starting the work", () => {
     );
     expect(way.getAttribute("href")).toBe("/conversations/77");
     expect(
-      screen.getByText(/uncommitted changes in the worktree would go with it/),
+      screen.getByText(/uncommitted changes in its worktree would go with it/),
     ).toBeTruthy();
 
     // And the press now reads as going ahead, which is the whole of the second
@@ -7364,6 +7364,46 @@ describe("starting the work", () => {
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 1),
       ).toEqual({ discarding: [77] }),
     );
+  });
+
+  /// And a stack named in the one list reads as several conversations rather than
+  /// as one with several names.
+  ///
+  /// Which is the case the list is for: every conversation standing on a link of a
+  /// chain is named by the one press, so a sentence about *the worktree* would be
+  /// four conversations sharing one.
+  it("names a whole stack of them as several", async () => {
+    theWorkbenchWith(
+      { process: "FixMergeIssues" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldDiscard: {
+            uncommitted: [
+              { conversation: 77, branch: "stage-01" },
+              { conversation: 78, branch: "stage-03" },
+            ],
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    for (const branch of ["stage-01", "stage-03"]) {
+      const way = await waitFor(() => screen.getByRole("link", { name: branch }));
+      expect(way.getAttribute("href")).toBeTruthy();
+    }
+
+    expect(
+      screen.getByText(
+        /would each be closed to make way, and the uncommitted changes in their worktrees would go with them/,
+      ),
+    ).toBeTruthy();
   });
 
   /// And a conversation that is ready says nothing at all: what the press does
