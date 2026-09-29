@@ -18,13 +18,15 @@
 //! and nothing already running is stopped by it.
 //!
 //! **And up to as many Conversations across the whole server**, whatever roadmap
-//! or Process they belong to — four where nobody has said, which is
-//! [`stages::CONVERSATIONS_AT_ONCE`]. A place there is held by every Conversation
-//! with a session running or a driver registered, so a grilling somebody else
-//! started, a Review and another roadmap's stage are all standing in front of
-//! this one. The two limits are both in force and a stage that starts spends one
-//! of each; the counting is done here, off the two registers as they stand at the
-//! settle — see [`stages::next_stage`], which is handed what is left of them.
+//! or Process they belong to — a setting as well, four where nobody has said,
+//! which is [`stages::CONVERSATIONS_AT_ONCE`]. Both numbers come off the one read
+//! of `config.yaml` below, for the reason either of them is read here at all. A
+//! place on the server is held by every Conversation with a session running or a
+//! driver registered, so a grilling somebody else started, a Review and another
+//! roadmap's stage are all standing in front of this one. The two limits are both
+//! in force and a stage that starts spends one of each; the counting is done here,
+//! off the two registers as they stand at the settle — see
+//! [`stages::next_stage`], which is handed what is left of them.
 //!
 //! **And a settle is not the only thing that brings this reading about.** A
 //! place on the server comes free when a Conversation of any kind finishes or
@@ -382,22 +384,24 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
         .map(str::to_owned)
         .collect();
 
-    // And how many stages of one roadmap may be under way together, which is a
-    // setting: read at the moment of the start rather than held from startup, so a
-    // limit changed on the settings page is in force at the next settle and
-    // nothing already running is stopped by it. The read is a file read, so it
-    // happens on the blocking thread below with the git reads.
+    // And how much Verkstead runs at once, which is a setting on both counts: read
+    // at the moment of the start rather than held from startup, so a limit changed
+    // on the settings page is in force at the next settle and nothing already
+    // running is stopped by it. The read is a file read, so it happens on the
+    // blocking thread below with the git reads.
     let settings = state.settings.clone();
 
-    // And how many places the whole server has left, which is the other limit in
-    // front of a start — see [`stages::CONVERSATIONS_AT_ONCE`]. Counted here
-    // rather than inside the reading, so that where a start is permitted stays the
-    // one place and how many are permitted stays this caller's to say.
+    // And how many of the server's places are **taken**, which is the other limit
+    // in front of a start — see [`stages::CONVERSATIONS_AT_ONCE`] for how many
+    // there are. Counted here rather than inside the reading, so that where a start
+    // is permitted stays the one place and how many are permitted stays this
+    // caller's to say.
     //
     // Two in-process registers read as they stand this moment, which is why it
     // happens on the runtime's threads rather than on the blocking one below: a
     // count taken before a handful of git reads would be a count taken a moment
-    // too early, and both are locks rather than syscalls.
+    // too early, and both are locks rather than syscalls. How many places there
+    // are is the file's, and that is read below beside the roadmap's own limit.
     let mut taking = state.drivers.taking(&state.sessions.working());
 
     // The Conversation whose settle brought this reading about is holding one of
@@ -414,13 +418,19 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
         taking.remove(&conversation_id);
     }
 
-    let server_places = stages::CONVERSATIONS_AT_ONCE.saturating_sub(taking.len());
+    let taken = taking.len();
 
     // Both readings together, off the runtime's threads: a handful of git reads
     // against a local directory, and a file read for the workflow.
     let read = tokio::task::spawn_blocking({
         let worktree = worktree.clone();
         move || {
+            // One read of `config.yaml` for both limits: they are two answers to
+            // the one question and a start weighed against a file read twice could
+            // be weighed against two different files.
+            let config = settings.config();
+            let at_once = config.at_once();
+
             // The first of them git still holds, which is what makes the list an
             // order of preference rather than a guess: a branch deleted once its
             // pull request merged is no longer somewhere a roadmap can be read,
@@ -443,11 +453,12 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
                     // as it stands this moment — three where nobody has said, and
                     // never fewer than one whatever the file holds. See
                     // [`crate::settings::AtOnce`].
-                    settings.config().at_once().roadmap_stages(),
-                    // And how many places the server has left over, counted off
-                    // its two registers a moment ago. Four where nobody has said,
-                    // whatever roadmap or Process is holding them.
-                    server_places,
+                    at_once.roadmap_stages(),
+                    // And how many places the server has left over: how many it
+                    // has, off the same read of the same file, less the ones its
+                    // two registers were holding a moment ago. Four where nobody
+                    // has said, whatever roadmap or Process is holding them.
+                    at_once.conversations().saturating_sub(taken),
                 ),
 
                 // Nothing left to read the roadmap at: not the top of its chain,

@@ -53,10 +53,10 @@ const CLEANUP = {
   delete: { enabled: true, days: "90" },
 };
 
-/// And how much Verkstead runs at once as a save puts it back: the number as the
-/// string a form holds, carried by every section for that reason again — see
-/// [`heldAtOnce`].
-const AT_ONCE = { roadmap_stages: "1" };
+/// And how much Verkstead runs at once as a save puts it back: both numbers as
+/// the strings a form holds, carried by every section for that reason again —
+/// see [`heldAtOnce`].
+const AT_ONCE = { roadmap_stages: "1", conversations: "2" };
 const UNSET = unset as SettingsView;
 
 /// The same settings with an sccache the server did find, which no fixture

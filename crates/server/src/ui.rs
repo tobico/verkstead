@@ -4958,8 +4958,21 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.settings,
         state.sessions.caches_compiles(),
         &state.binds,
+        taken(&state),
     ))
     .into_response()
+}
+
+/// How many of the server's places are taken this moment — see
+/// [`crate::drivers::Drivers::taking`], which is the one place they are counted.
+///
+/// Read here rather than inside [`as_told`] because it is the one thing on that
+/// page which is not out of the files: two in-process registers, and the settings
+/// page draws them beside the limit they are measured against so that a server
+/// holding every place looks like a server holding every place rather than a
+/// stall.
+fn taken(state: &AppState) -> usize {
+    state.drivers.taking(&state.sessions.working()).len()
 }
 
 /// `POST /api/ui/settings` — write the author and the paths down, and set or
@@ -5007,6 +5020,11 @@ async fn save_settings(
     // the save: the page draws both sources, and this is not anything a save
     // can touch.
     let installed = state.binds.clone();
+
+    // And how many of the server's places are taken, for the same read — counted
+    // out here because it is two in-process registers rather than a file, and
+    // nothing a save touches either.
+    let taking = taken(&state);
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -5068,7 +5086,7 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed),
+                    settings: as_told(&settings, caches_compiles, &installed, taking),
                     verified: None,
                     refused,
                     refused_servers,
@@ -5099,13 +5117,17 @@ async fn save_settings(
                     CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
                     CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
                 ),
-                // And how much Verkstead runs at once, as the number was typed:
-                // an empty field is the default asked for back, and so is
-                // anything that is not a whole number of places. The page
-                // refuses a limit below one rather than sending it — a roadmap
-                // with no places starts nothing — and a save carrying one
-                // anyway configures nothing, which is that default again.
-                AtOnce::of(Some(edit.at_once.roadmap_stages)),
+                // And how much Verkstead runs at once, as the two numbers were
+                // typed: an empty field is the default asked for back, and so is
+                // anything that is not a whole number of places. The page refuses
+                // a limit below one in either field rather than sending it — a
+                // roadmap with no places starts nothing and a server with none
+                // starts nothing at all — and a save carrying one anyway
+                // configures nothing, which is that default again.
+                AtOnce::of(
+                    Some(edit.at_once.roadmap_stages),
+                    Some(edit.at_once.conversations),
+                ),
                 // And how a conflict is resolved, in every Repo there is, which
                 // is one of two words and never absent: there is no third state
                 // for a page to send.
@@ -5223,7 +5245,7 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed),
+                settings: as_told(&settings, caches_compiles, &installed, taking),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -5319,7 +5341,9 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
     }
 }
 
-/// How the settings stand, read off the files.
+/// How the settings stand, read off the files — and, beside them, `taking`: how
+/// many of the server's places are held this moment, which is the one thing here
+/// no file says.
 ///
 /// The token comes back as its last four characters and the moment the file was
 /// written, and never as itself — see [`verkstead_render::SettingsView`]. A
@@ -5330,6 +5354,7 @@ fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
     binds: &crate::sandbox::SandboxConfig,
+    taking: usize,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
@@ -5371,12 +5396,18 @@ fn as_told(
                 days_configured: cleanup.delete_after_configured().is_some(),
             },
         },
-        // And how much Verkstead runs at once, read the way the Cleanup's
-        // durations are: the number either way, and the flag beside it saying
-        // whether it is one somebody chose.
+        // And how much Verkstead runs at once, both numbers read the way the
+        // Cleanup's durations are: the number either way, and the flag beside it
+        // saying whether it is one somebody chose.
         at_once: AtOnceView {
             roadmap_stages: at_once.roadmap_stages(),
             roadmap_stages_configured: at_once.roadmap_stages_configured().is_some(),
+            conversations: at_once.conversations(),
+            conversations_configured: at_once.conversations_configured().is_some(),
+            // And the one thing on this page that is out of neither file: how many
+            // of those places are taken this moment, counted off the two registers
+            // a place is counted off — see [`taken`].
+            places_taken: taking,
         },
 
         // Where the setting sits rather than whether anybody has been here:

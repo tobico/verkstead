@@ -3,6 +3,9 @@
   "refused_servers": [],
   "settings": {
     "at_once": {
+      "conversations": 2,
+      "conversations_configured": true,
+      "places_taken": 0,
       "roadmap_stages": 1,
       "roadmap_stages_configured": true
     },

@@ -149,10 +149,16 @@ pub(crate) const AT_ONCE: usize = 3;
 /// see [`startable`], which is what a press is offered and reads [`AT_ONCE`]
 /// alone.
 ///
+/// The default rather than the rule, the way [`AT_ONCE`] is: what it is on this
+/// machine is `at_once.conversations` in `config.yaml`, read afresh at every
+/// start and at every look — see [`crate::settings::AtOnce::conversations`],
+/// which falls back to this.
+///
 /// Passed in rather than read here, for the reason [`AT_ONCE`] is: where a start
 /// is permitted stays the one place, and how many are permitted is the caller's
 /// to say. What counts the places is the carry-on — see
-/// [`crate::continuing::carry_on`].
+/// [`crate::continuing::carry_on`] — and the look that spends the ones that come
+/// free, [`crate::places`].
 pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has

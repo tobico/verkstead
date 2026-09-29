@@ -36,6 +36,7 @@
 //!     days: 30
 //! at_once:
 //!   roadmap_stages: 3
+//!   conversations: 4
 //! conflict_resolution: merge
 //! share_on_done: false
 //! sandbox_binds:
@@ -85,13 +86,20 @@
 //! it on every pass.
 //!
 //! `at_once` is written that way as well, and it is the one section here about
-//! *how much* Verkstead runs rather than about what it runs or what it is told:
+//! *how much* Verkstead runs rather than about what it runs or what it is told.
+//! Two numbers, because there are two limits and both are in force:
 //! `roadmap_stages` is how many stages of one roadmap may be under way together,
 //! three where nobody has said otherwise — see [`AtOnce`], and
-//! [`crate::stages::next_stage`], which is handed it at every start. A whole
-//! number of at least one, because a limit that would start nothing is not a
-//! state worth having: the settings page refuses one, and a hand-edit that wrote
-//! one is read as a key nobody set, which is three.
+//! [`crate::stages::next_stage`], which is handed it at every start — and
+//! `conversations` is how many Conversations take a place across the **whole
+//! server**, whatever roadmap or Process they belong to, four where nobody has
+//! said otherwise. The second sits beside the first so that one roadmap cannot
+//! take the whole server by default, and it is there for the machine rather than
+//! for the human: a stage may be a heavy build and a test run, and the hardware
+//! is shared by everything the server runs. Both are a whole number of at least
+//! one, because a limit that would start nothing is not a state worth having —
+//! the settings page refuses one, and a hand-edit that wrote one is read as a key
+//! nobody set, which is the default again.
 //!
 //! `conflict_resolution` is written that way too, and the default it falls back
 //! to is the safe half of the choice: a conflicted pull request has its base
@@ -647,14 +655,17 @@ pub struct Config {
     cleanup: Cleanup,
 
     /// And how much Verkstead runs at once: how many stages of one roadmap may be
-    /// under way together — see [`AtOnce`], and [`crate::stages::next_stage`],
-    /// which is handed the number at every start.
+    /// under way together, and how many Conversations take a place across the
+    /// whole server — see [`AtOnce`], [`crate::stages::next_stage`], which is
+    /// handed both numbers at every start, and [`crate::places`], which counts the
+    /// second at every look.
     ///
     /// Written the way the two above it are: an absent key, an absent file and one
-    /// nothing can parse all mean [`crate::stages::AT_ONCE`]. A section of its own
-    /// rather than a key beside the build cache because what it holds is a class of
-    /// setting rather than one setting — how much of the machine Verkstead helps
-    /// itself to — and the settings page draws it as one card for that reason.
+    /// nothing can parse all mean [`crate::stages::AT_ONCE`] and
+    /// [`crate::stages::CONVERSATIONS_AT_ONCE`]. A section of its own rather than
+    /// a key beside the build cache because what it holds is a class of setting
+    /// rather than one setting — how much of the machine Verkstead helps itself to
+    /// — and the settings page draws it as one card for that reason.
     #[serde(default)]
     at_once: AtOnce,
 
@@ -920,7 +931,8 @@ impl Config {
     }
 
     /// And how much Verkstead runs at once, which is three stages of one roadmap
-    /// where nobody has said otherwise.
+    /// and four Conversations across the whole server where nobody has said
+    /// otherwise.
     pub fn at_once(&self) -> &AtOnce {
         &self.at_once
     }
@@ -1247,53 +1259,68 @@ fn days_typed(days: String) -> Option<u32> {
 
 /// How much Verkstead runs at once, as the human left it.
 ///
-/// One number so far: how many stages of **one roadmap** may be under way
-/// together — see [`crate::stages::next_stage`], which is handed it at every
-/// start, and ADR-0021, which is where the three came from. A section rather
-/// than a key on its own because the question is *how much of this machine does
-/// Verkstead help itself to*, and there is more than one answer to it.
+/// Two numbers, because there are two limits and both are in force: how many
+/// stages of **one roadmap** may be under way together — see
+/// [`crate::stages::next_stage`], which is handed it at every start — and how
+/// many Conversations take a place across the **whole server**, whatever roadmap
+/// or Process they belong to, which the same reading is handed beside it and
+/// [`crate::places`] counts at every look. ADR-0021 is where the three and the
+/// four came from, and why the second sits beside the first: one roadmap cannot
+/// take the whole server by default.
 ///
-/// Optional and absent on a machine nobody has been to the settings page of,
-/// which is [`crate::stages::AT_ONCE`] — the shape [`RustBuildCache`] has and
-/// for the same reason: a human should never have a worse experience for not
+/// A section rather than two keys on their own because the question both answer
+/// is *how much of this machine does Verkstead help itself to*, and the settings
+/// page draws it as one card for that reason.
+///
+/// Both optional and both absent on a machine nobody has been to the settings
+/// page of, which is [`crate::stages::AT_ONCE`] and
+/// [`crate::stages::CONVERSATIONS_AT_ONCE`] — the shape [`RustBuildCache`] has
+/// and for the same reason: a human should never have a worse experience for not
 /// having checked the settings.
 ///
-/// **And never less than one.** A roadmap with no places starts nothing, ever,
-/// and a roadmap that has silently stopped is the failure this whole pipeline is
-/// about — so the settings page refuses a number below one rather than writing
-/// it, and a hand-edit that wrote one anyway is read as nobody having said. Which
-/// is the same three every other way of saying nothing here means.
+/// **And neither is ever less than one.** A roadmap with no places starts
+/// nothing, ever, and a server with none starts nothing at all; a pipeline that
+/// has silently stopped is the failure this whole thing is about — so the
+/// settings page refuses a number below one rather than writing it, and a
+/// hand-edit that wrote one anyway is read as nobody having said. Which is the
+/// same default every other way of saying nothing here means.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AtOnce {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     roadmap_stages: Option<usize>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conversations: Option<usize>,
 }
 
 impl AtOnce {
-    /// What a settings page has just been told: the number where one was typed.
+    /// What a settings page has just been told: each number where one was typed.
     ///
     /// An empty box is nothing configured, the way an empty build cache size is:
     /// clearing it is how the human asks for the default back. So is anything
     /// that is not a whole number of at least one — the page refuses those
     /// rather than sending them, and a save that carried one anyway is a save
     /// that configured nothing.
-    pub fn of(roadmap_stages: Option<String>) -> AtOnce {
+    pub fn of(roadmap_stages: Option<String>, conversations: Option<String>) -> AtOnce {
         AtOnce {
             roadmap_stages: roadmap_stages.and_then(limit_typed),
+            conversations: conversations.and_then(limit_typed),
         }
     }
 
     /// And the same section tidied as the file is read: a limit of none at all is
-    /// nobody having said.
+    /// nobody having said, whichever of the two it was written against.
     ///
     /// The one thing in this section that can be wrong, and it is wrong the way
     /// everything in these files is wrong — quietly, and never as an error. What
-    /// `roadmap_stages: 0` asks for is a roadmap that never starts anything,
-    /// which is not a thing to configure; read as unset it is the three the key
-    /// would have meant if it had not been there at all.
+    /// `roadmap_stages: 0` asks for is a roadmap that never starts anything and
+    /// what `conversations: 0` asks for is a server that never does, neither of
+    /// which is a thing to configure; read as unset they are the numbers the keys
+    /// would have meant if they had not been there at all.
     fn read(self) -> AtOnce {
         AtOnce {
             roadmap_stages: self.roadmap_stages.filter(|places| *places >= 1),
+            conversations: self.conversations.filter(|places| *places >= 1),
         }
     }
 
@@ -1308,6 +1335,24 @@ impl AtOnce {
     /// value somebody chose.
     pub fn roadmap_stages_configured(&self) -> Option<usize> {
         self.roadmap_stages
+    }
+
+    /// How many Conversations take a place across the whole server, which is
+    /// [`crate::stages::CONVERSATIONS_AT_ONCE`] where nobody has said.
+    ///
+    /// Read afresh at every start and at every look rather than held from
+    /// startup, the way the git author and the build cache are: a number changed
+    /// on the settings page is in force at the next start, and nothing already
+    /// running is stopped by it.
+    pub fn conversations(&self) -> usize {
+        self.conversations
+            .unwrap_or(crate::stages::CONVERSATIONS_AT_ONCE)
+    }
+
+    /// And that number exactly as it is written down, for the reason the one
+    /// above it is read that way.
+    pub fn conversations_configured(&self) -> Option<usize> {
+        self.conversations
     }
 }
 
@@ -2325,7 +2370,7 @@ mod tests {
 
         for typed in ["", "   ", "0", "lots", "2.5", "-1"] {
             assert_eq!(
-                AtOnce::of(Some(typed.to_owned())).roadmap_stages_configured(),
+                AtOnce::of(Some(typed.to_owned()), None).roadmap_stages_configured(),
                 None,
                 "nothing a roadmap could run in {typed:?}",
             );
@@ -2344,7 +2389,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
-                AtOnce::of(Some("1".to_owned())),
+                AtOnce::of(Some("1".to_owned()), Some("2".to_owned())),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2361,6 +2406,14 @@ mod tests {
                 .roadmap_stages(),
             1,
         );
+        assert_eq!(
+            Settings::in_data_dir(dir.path())
+                .config()
+                .at_once()
+                .conversations(),
+            2,
+            "and the server's places beside it, out of the one section",
+        );
 
         // And cleared is the default back rather than a number of nothing written
         // down: the field standing empty is how the human asks for it.
@@ -2369,7 +2422,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Cleanup::default(),
-                AtOnce::of(Some(String::new())),
+                AtOnce::of(Some(String::new()), Some(String::new())),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -2382,7 +2435,7 @@ mod tests {
         let written = std::fs::read_to_string(settings.config_path()).unwrap();
 
         assert!(
-            !written.contains("roadmap_stages"),
+            !written.contains("roadmap_stages") && !written.contains("conversations"),
             "a limit nobody typed is not in the file: {written}",
         );
         assert_eq!(
@@ -2392,6 +2445,92 @@ mod tests {
                 .roadmap_stages(),
             crate::stages::AT_ONCE,
         );
+        assert_eq!(
+            Settings::in_data_dir(dir.path())
+                .config()
+                .at_once()
+                .conversations(),
+            crate::stages::CONVERSATIONS_AT_ONCE,
+        );
+    }
+
+    /// How many Conversations take a place across the whole server is the human's
+    /// number too, and it sits in the one section beside the roadmap's.
+    ///
+    /// The two are independent: a machine told one of them is told that one, and
+    /// the other is still the default it would have been.
+    #[test]
+    fn how_many_conversations_the_server_runs_at_once_is_what_the_config_file_says() {
+        let config = Config::read("at_once:\n  conversations: 1\n").unwrap();
+
+        assert_eq!(config.at_once().conversations(), 1);
+        assert_eq!(
+            config.at_once().conversations_configured(),
+            Some(1),
+            "and the page is told it is a number somebody chose, not the default",
+        );
+        assert_eq!(
+            config.at_once().roadmap_stages(),
+            crate::stages::AT_ONCE,
+            "and the limit beside it is untouched",
+        );
+
+        let both = Config::read("at_once:\n  roadmap_stages: 2\n  conversations: 6\n").unwrap();
+
+        assert_eq!(both.at_once().roadmap_stages(), 2);
+        assert_eq!(both.at_once().conversations(), 6);
+    }
+
+    /// And nothing said is four, which is the other number ADR-0021 settled: an
+    /// absent key, an absent section, an absent file and one nothing can parse all
+    /// say it, and so does a number that would start nothing.
+    #[test]
+    fn a_server_nobody_has_said_a_number_for_runs_four_conversations_at_once() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "at_once:\n",
+            "at_once:\n  conversations:\n",
+            "at_once:\n  conversations: 0\n",
+        ] {
+            let config = Config::read(text).unwrap();
+
+            assert_eq!(
+                config.at_once().conversations(),
+                crate::stages::CONVERSATIONS_AT_ONCE,
+                "nothing said here is the default: {text:?}",
+            );
+            assert_eq!(
+                config.at_once().conversations_configured(),
+                None,
+                "and the page draws it as a placeholder: {text:?}",
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(
+            settings.config().at_once().conversations(),
+            crate::stages::CONVERSATIONS_AT_ONCE,
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "at_once: [oh\n").unwrap();
+
+        assert_eq!(
+            settings.config().at_once().conversations(),
+            crate::stages::CONVERSATIONS_AT_ONCE,
+            "and so is a file nothing can parse",
+        );
+
+        for typed in ["", "   ", "0", "lots", "2.5", "-1"] {
+            assert_eq!(
+                AtOnce::of(None, Some(typed.to_owned())).conversations_configured(),
+                None,
+                "nothing a server could run in {typed:?}",
+            );
+        }
     }
 
     /// How a conflict is resolved is the human's word for it, and what they

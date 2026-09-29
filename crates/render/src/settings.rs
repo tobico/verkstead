@@ -139,8 +139,9 @@ pub struct SettingsView {
     /// after the archiving it does it.
     pub cleanup: CleanupView,
 
-    /// And how much Verkstead runs at once, which is one number so far: how many
-    /// stages of one roadmap may be under way together.
+    /// And how much Verkstead runs at once: how many stages of one roadmap may
+    /// be under way together, how many Conversations take a place across the
+    /// whole server, and how many of those places are taken as this was drawn.
     pub at_once: AtOnceView,
 
     /// And how a conflicted pull request is resolved in every Repo that has not
@@ -409,10 +410,16 @@ pub struct CleanupStepEdit {
 
 /// How much Verkstead runs at once, as the settings page draws it.
 ///
-/// One number so far, with room beside it: how many stages of one roadmap may be
-/// under way together. The number is always there, the way the Cleanup's days
-/// are, with the flag beside it saying whether it is one somebody chose — which
-/// is what lets the field draw the default as a placeholder.
+/// Two numbers: how many stages of one roadmap may be under way together, and
+/// how many Conversations take a place across the whole server. Each is always
+/// there, the way the Cleanup's days are, with the flag beside it saying whether
+/// it is one somebody chose — which is what lets the field draw the default as a
+/// placeholder.
+///
+/// And **how many of the server's places are taken**, which is neither a setting
+/// nor a default but a reading: a server whose places are all held by stages
+/// waiting on answers starts nothing more until one is answered, and the pane
+/// draws that beside the limit rather than leaving it to look like a stall.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct AtOnceView {
@@ -426,23 +433,42 @@ pub struct AtOnceView {
     /// Whether that number is one somebody typed, rather than the default being
     /// shown.
     pub roadmap_stages_configured: bool,
+
+    /// And how many Conversations take a place across the whole server, whatever
+    /// roadmap or Process they belong to. At least one for the reason above it: a
+    /// server with no places would start nothing at all.
+    pub conversations: usize,
+
+    /// And whether *that* number is one somebody typed.
+    pub conversations_configured: bool,
+
+    /// How many of those places are taken, **as of the moment the page asked**.
+    ///
+    /// Off the two registers a place is counted from — a Conversation with a
+    /// session running or a driver registered — so it is the same count the next
+    /// unattended start will be measured against, and not a reading of anything
+    /// stored. It may stand above `conversations`: a press goes ahead over the
+    /// limit and is counted from then on.
+    pub places_taken: usize,
 }
 
 /// And how much Verkstead is to run at once, as the human has just set it.
 ///
-/// A string because that is what a form holds, and an empty one is *nothing
+/// Strings because that is what a form holds, and an empty one is *nothing
 /// configured* rather than a limit of nothing — which is what clearing the field
 /// means and what puts the default back.
 ///
-/// What the page will not send is a number below one. Every other field here
-/// sends whatever was typed and lets the server read what it can of it; this one
-/// has a floor, because what a limit of nought asks for is a roadmap that never
-/// starts anything and there is no reading of that worth writing down. A save
-/// carrying one anyway configures nothing, which is the default again.
+/// What the page will not send is a number below one, in either field. Every
+/// other field here sends whatever was typed and lets the server read what it can
+/// of it; these two have a floor, because what a limit of nought asks for is a
+/// roadmap — or a server — that never starts anything, and there is no reading of
+/// that worth writing down. A save carrying one anyway configures nothing, which
+/// is the default again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct AtOnceEdit {
     pub roadmap_stages: String,
+    pub conversations: String,
 }
 
 /// Who a session's commits are by.
@@ -493,7 +519,7 @@ pub struct SettingsEdit {
     /// of them is to stand.
     pub cleanup: CleanupEdit,
 
-    /// And how much Verkstead is to run at once, as a value again: what is sent is
+    /// And how much Verkstead is to run at once, as values again: what is sent is
     /// what the file holds afterwards, and an empty field is the default asked for
     /// back.
     pub at_once: AtOnceEdit,

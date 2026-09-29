@@ -1,9 +1,9 @@
 /* How much Verkstead runs at once — see `AtOnce.tsx`.
 
-   Two halves in two panes, like the sections around it: the card carries how
-   much runs at once, and the field that changes it stands in the details pane
-   beside it. One field there so far, with room under it for the limit across the
-   whole server.
+   Two halves in two panes, like the sections around it: the card carries both
+   the numbers, and the fields that change them stand in the details pane beside
+   it — the roadmap's limit, the server's, and under the server's what it is
+   measured against.
 
    What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
    while its pane is open, and what it does under the pointer. What is here is
@@ -18,12 +18,16 @@
   font-size: 1.1rem;
 }
 
-/* How much, in a line: the same quiet the sections around it say how they stand
-   in. */
+/* How much, a line each: the same quiet the sections around it say how they
+   stand in. */
 .standing {
   margin: 0;
   font-size: 0.9rem;
   color: var(--ink-soft);
+}
+
+.standing + .standing {
+  margin-top: 0.3rem;
 }
 
 /* The number itself in the face a number is read in here, the way the Cleanup's
@@ -33,8 +37,8 @@
   color: var(--ink);
 }
 
-/* And the details pane: the line about what holds a place, the field, and the
-   press. */
+/* And the details pane: the line about what holds a place, then a field and a
+   press each. */
 .atOnce {
   margin-top: 0.85rem;
 }
@@ -84,6 +88,20 @@
 
 .field input:disabled {
   cursor: not-allowed;
+}
+
+/* And what the server's limit is measured against, under its field: the same
+   quiet as the card's lines, close enough to the box to read as being about it
+   rather than as a section of its own. */
+.taken {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.taken .places {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
 }
 
 .failure {

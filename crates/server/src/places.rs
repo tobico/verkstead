@@ -1,7 +1,7 @@
 //! The look that starts what waited for a place on the server.
 //!
 //! A ready stage that fits under its roadmap's limit and not under the server's
-//! is held rather than started — see [`crate::stages::CONVERSATIONS_AT_ONCE`],
+//! is held rather than started — see [`crate::settings::AtOnce::conversations`],
 //! which is how many places there are, and [`crate::continuing`], which spends
 //! them. That hold is only half a limit on its own. **Nothing that frees a place
 //! is a settle**: a Conversation reaches Done, a run stops, a grilling ends, the
@@ -60,7 +60,6 @@ use tokio::sync::watch;
 
 use crate::AppState;
 use crate::continuing::{self, Brought};
-use crate::stages;
 use crate::store;
 
 /// How often the roadmaps being driven are looked over for one with a stage
@@ -115,9 +114,9 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
 /// One look: start what the free places hold, across every roadmap being driven.
 ///
 /// **Nothing at all while the places are full**, which is the ordinary answer on
-/// a busy server and costs two register reads to reach. Every roadmap below it
-/// would be read only to be told the same thing. Which is also what makes a
-/// stage held for a place inside a look worth saying out loud — see
+/// a busy server and costs a file read and two register reads to reach. Every
+/// roadmap below it would be read only to be told the same thing. Which is also
+/// what makes a stage held for a place inside a look worth saying out loud — see
 /// [`crate::continuing::Brought::held`]: the first roadmap read always has a
 /// place to give, so a later one finding none means a stage started in this very
 /// look.
@@ -143,11 +142,18 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
 /// nobody watching, and what it has to say it says on a Timeline when it starts
 /// something and in the log when it does not.
 async fn look(state: &AppState) {
+    // How many places there are, off `config.yaml` as it stands this moment — four
+    // where nobody has said. Read afresh at every look rather than held from
+    // startup, the way the carry-on reads it at every settle: a number changed on
+    // the settings page is in force at the next look, and a place that a lowered
+    // limit has taken away is one nothing already running is stopped over.
+    let places = state.settings.config().at_once().conversations();
     let taking = state.drivers.taking(&state.sessions.working());
 
-    if taking.len() >= stages::CONVERSATIONS_AT_ONCE {
+    if taking.len() >= places {
         tracing::debug!(
             taking = taking.len(),
+            places,
             "every place on the server is taken, so there is nothing for a look to start",
         );
 

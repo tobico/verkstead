@@ -19418,6 +19418,107 @@ async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
     );
 }
 
+/// And how many Conversations the whole server runs at once is a **setting**
+/// too: set to one, Verkstead starts nothing by itself while anything at all is
+/// running, and starts what it held back when that one finishes.
+///
+/// One place is the number somebody reaches for on a machine that is doing too
+/// much, and it is the shape in which the limit is easiest to be sure of: the
+/// investigation running beside the roadmap is holding the server's only place,
+/// so the settle that would ordinarily start both roots starts neither.
+///
+/// The roadmap's own limit is left where it is — three, against two roots — so
+/// nothing held back here is its doing. And the number is written into
+/// `config.yaml` after the server came up, which is the human at the settings
+/// page on their phone while the work was going on: it is read afresh at every
+/// start and at every look, so what the file says then is what both go by,
+/// without a restart and without stopping what was already running.
+#[tokio::test]
+async fn the_settings_say_how_many_conversations_the_server_runs_at_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    // The roadmap's own stub with an investigating session in front of it, the way
+    // the tests about the server's places have it: one `case` inside another,
+    // because what tells every session here apart is the skill its prompt names.
+    let stub = format!(
+        r#"
+case "$2" in
+*investigating/SKILL.md*)
+    SAYING='finding out where the 429s come from'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'that is that, then\n'
+    ;;
+*)
+{roadmap}
+    ;;
+esac
+"#,
+        roadmap = a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+    );
+
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), *LOOKING, &[]).await;
+
+    // One place across the whole server, said while the roadmap was being planned
+    // — nothing was restarted for it, and nothing had to be.
+    configure(&fixture, "at_once:\n  conversations: 1\n");
+
+    // And the investigation, started before the roadmap settles so that it is
+    // already holding that one place when the carry-on counts them. A press, so
+    // the limit never stood in front of it.
+    let investigating = composed_beside(&fixture, Process::Investigate).await;
+
+    grilled(&fixture, investigating).await;
+
+    // Waited for as a session actually running, which is what takes a place: a
+    // row that exists is a Conversation the register has not heard of yet.
+    until_working(&fixture, investigating).await;
+
+    staged_and_settled(&fixture).await;
+
+    // Said after the settle that started nothing, and about the lowest-numbered
+    // root: the roadmap's own places are all free, so the one it is waiting on is
+    // the server's.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 01"),
+        "the lowest-numbered root is the one waiting: {said:?}",
+    );
+    assert!(
+        !said.contains("this roadmap runs"),
+        "and not on its roadmap, which has three places and two roots: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "the roadmap's own Conversation and the investigation, and no stage at all",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"],
+        )
+        .contains("01-counter"),
+        "and no branch was cut for the root that waited",
+    );
+
+    // And now the one place comes free, with nobody pressing anything: the
+    // investigation ends, and the look spends what it let go of.
+    ends(&fixture, investigating).await;
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(
+        stages[0].branch, "roadmaps/rate-limiting/01-counter",
+        "the stage that waited started when the place came free",
+    );
+}
+
 /// And a server restarted while a stage was waiting starts it when a place comes
 /// free, nothing about the waiting having been written down.
 ///

@@ -97,17 +97,24 @@ export function heldCache(told: SettingsView | undefined): {
 }
 
 /// And how much Verkstead runs at once, as it stands, ready to be sent by a
-/// section that is not about it.
+/// section that is not about it — both numbers, because both are in the one
+/// section and a save writes the section whole.
 ///
 /// A number nobody typed goes back as the empty string rather than as the default
 /// it is being shown as — see [`heldCleanup`], which says the same about a
 /// duration: the number that comes back is always there, and a section that
 /// echoed it would be writing a choice into the file on behalf of somebody who
 /// never made it.
+///
+/// How many places are *taken* goes back nowhere. It is a reading rather than a
+/// setting, and there is nothing in the edit for it to be sent as.
 export function heldAtOnce(told: SettingsView | undefined): AtOnceEdit {
   return {
     roadmap_stages: told?.at_once.roadmap_stages_configured
       ? String(told.at_once.roadmap_stages)
+      : "",
+    conversations: told?.at_once.conversations_configured
+      ? String(told.at_once.conversations)
       : "",
   };
 }
