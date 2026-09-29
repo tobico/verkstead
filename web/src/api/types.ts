@@ -119,7 +119,11 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+/**
+ * Why, as the judgement put it.
+ */
+why: string, } } | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
 /**
  * The branch that is in the way.
  */

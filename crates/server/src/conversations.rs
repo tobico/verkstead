@@ -2359,6 +2359,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                     Ok((commit, named, abandoned.stage, abandoned.beside, stacks_on))
                 }
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
+                Startable::Misdeclared { why } => Err(Adopted::Misdeclared { why }),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
                 Startable::NoBrief => Err(Adopted::NoBrief),

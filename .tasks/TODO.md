@@ -26,5 +26,5 @@ Roadmap stage: [04: The scheduler](docs/roadmaps/parallel-stages/04-the-schedule
 - [x] 03: A settle starts every ready stage — [details](03-a-settle-starts-them-all.md)
 - [x] 04: The roadmap's limit — [details](04-the-roadmaps-limit.md)
 - [x] 05: Continue a roadmap starts every ready stage — [details](05-continue-a-roadmap.md)
-- [ ] 06: A bad roadmap, refused at both ends — [details](06-a-bad-roadmap-refused.md)
+- [x] 06: A bad roadmap, refused at both ends — [details](06-a-bad-roadmap-refused.md)
 - [ ] 07: The words — [details](07-the-words.md)

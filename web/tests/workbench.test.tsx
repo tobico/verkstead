@@ -2694,6 +2694,40 @@ describe("the adoption page", () => {
       ),
     );
   });
+
+  /// And a roadmap that declares badly says what its lines got wrong, in the
+  /// server's own words.
+  ///
+  /// The other refusal that carries more than a name, and for the same reason:
+  /// what there is to go and do about it is in a line of `ROADMAP.md`, and no
+  /// phrasing here could say which line or what is wrong with it. The sentence is
+  /// the judgement's, so a roadmap refused at this press and the same roadmap
+  /// refused on a timeline read as one fault rather than two — which is why
+  /// nothing here rewords it.
+  it("says what a roadmap that declares badly got wrong", async () => {
+    theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json({
+          Misdeclared: {
+            why: "stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09",
+          },
+        } satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
+      ).toBe(
+        "That roadmap declares badly, so nothing of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
+      ),
+    );
+  });
 });
 
 /// And the page of a **Draft from before there were Processes** — one started off

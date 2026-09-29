@@ -1267,6 +1267,25 @@ pub(crate) enum Startable {
     /// plans nothing — which is a directory rather than a roadmap.
     NoRoadmap,
 
+    /// The roadmap declares badly, so nothing of it may start — with the fault
+    /// in the words [`declarations::judge`] refuses it in.
+    ///
+    /// A clause of its own rather than folded into [`Startable::NoRoadmap`],
+    /// because the roadmap is there and readable and what is wrong with it is a
+    /// line the human can go and fix. The notice and the page draw nothing off
+    /// it either way — both keep only [`Startable::stage`] — and it is the press
+    /// this carries a sentence for: that is the one path with somebody waiting
+    /// on the answer, and a roadmap written by hand or by the old tools, which
+    /// is what adoption is for, is the likeliest to declare badly.
+    ///
+    /// The judgement's own sentence, word for word, so that a roadmap refused
+    /// here and the same roadmap refused on a Timeline or at `verkstead done`
+    /// read as one fault rather than three.
+    Misdeclared {
+        /// Why, as [`declarations::Judgement::Refused`] put it.
+        why: String,
+    },
+
     /// Every stage of it is done. The roadmap finished, and its directory stays
     /// where it is as the record of what it was.
     Complete,
@@ -1716,7 +1735,7 @@ pub(crate) fn startable(
         // Nothing of a roadmap that declares badly may start, here as anywhere.
         // Naming the fault where the press can see it is a clause of its own, and
         // the press is where it is worth wording.
-        Ready::Misdeclared(_) => return Startable::NoRoadmap,
+        Ready::Misdeclared(why) => return Startable::Misdeclared { why },
     };
 
     // And how many places it has left, the stages somebody is on having taken
@@ -4523,6 +4542,90 @@ Turns this askance clone into Verkstead.
         repo.branch("roadmaps/mvp/03-implementation");
 
         assert_eq!(repo.startable("mvp"), Startable::BranchTaken);
+    }
+
+    /// And a roadmap that declares badly is a clause of its own, carrying the
+    /// judgement's own sentence for the press to say.
+    ///
+    /// Not [`Startable::NoRoadmap`], which is what it used to be folded into:
+    /// the roadmap is there and readable, and what is wrong with it is a line the
+    /// human can go and fix. The notice and the page are unmoved either way —
+    /// both keep only [`Startable::stage`], and there is none — so what this
+    /// clause is for is the one path with somebody waiting on the answer.
+    #[test]
+    fn a_roadmap_that_declares_badly_refuses_with_the_fault_named() {
+        let repo = Repo::with(&[(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+        )]);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+
+        let startable = repo.startable("mvp");
+
+        let Startable::Misdeclared { why } = &startable else {
+            panic!(
+                "a declaration on one line and not the other refuses the whole roadmap: {startable:?}"
+            );
+        };
+
+        assert!(
+            why.contains("mvp") && why.contains("02"),
+            "which roadmap, and which line to go and read: {why:?}",
+        );
+        assert!(
+            startable.clone().stage().is_none(),
+            "so the notice and the page offer nothing off it either",
+        );
+
+        // And the same roadmap with the other line declaring too is a roadmap
+        // something can run: nothing here is refusing a declaration for being one.
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01\n",
+        );
+        repo.commit();
+
+        assert_eq!(
+            repo.startable("mvp")
+                .stage()
+                .expect("stage 01 stands on nothing, so it may start")
+                .stage
+                .label,
+            "01",
+        );
+    }
+
+    /// And the carry-on's reading of the same roadmap starts nothing, with the
+    /// judgement's sentence to leave on the Timeline.
+    ///
+    /// The same words at both ends of the refusal, because they are the one
+    /// judgement's: a roadmap the human meets refused at the press and refused
+    /// again on a Timeline should read as one fault rather than two.
+    #[test]
+    fn a_roadmap_that_declares_badly_starts_nothing_when_a_stage_settles() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let Next::Unstartable { why } = repo.next("mvp", "roadmaps/mvp/01-workbench") else {
+            panic!("nothing of a roadmap that declares badly may start, here as anywhere");
+        };
+
+        assert!(
+            why.contains("mvp") && why.contains("02"),
+            "which roadmap, and which line to go and read: {why:?}",
+        );
     }
 
     /// Which is what keeps a stage currently mid-flight under Verkstead out of

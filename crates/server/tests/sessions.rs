@@ -22227,6 +22227,90 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     );
 }
 
+/// What `/next-stage` writes on a roadmap somebody has half-declared: the
+/// annotation as ever, and a declaration on this stage's line and no other.
+///
+/// Which is how a running roadmap comes to declare badly at all. The
+/// declarations are read afresh off the top of the chain at every start, so a
+/// line somebody added by hand and committed takes effect at the next settle —
+/// and a declaration on some lines and not others is the first of the
+/// judgement's four faults: a bare line is a root and a forgotten declaration at
+/// once, and there is no telling which.
+const DECLARES_BADLY: &str = r#"    sed -i "/($stage.md)/s|\$| — no dependencies *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md"#;
+
+/// A settle on a roadmap that declares badly starts nothing, and leaves the
+/// judgement's own sentence on the Timeline.
+///
+/// The other half of the refusal the roadmap's own session meets at `verkstead
+/// done` — here there is no such session, the roadmap having been adopted rather
+/// than staged, and the half-written line arrived on the branch afterwards. So
+/// this is the path the refusal was written for: nobody is watching, one stage
+/// has just settled, and the thing to say is what a human would have to go and
+/// fix.
+///
+/// Refused rather than repaired, and never run in order instead: stage 02 stands
+/// on stage 01 by the roadmap's own order, and starting it anyway would be
+/// running a roadmap in a way nobody wrote down.
+#[tokio::test]
+async fn a_settle_on_a_badly_declaring_roadmap_starts_nothing_and_says_why() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, DECLARES_BADLY),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            let said = notices(view).join("\n");
+
+            said.contains("No stage of the roadmap could be started")
+                .then_some(said)
+        })
+        .await;
+
+    assert!(
+        said.contains("declares what some of its stages stand on and not others")
+            && said.contains("stage 02 declares nothing after its link"),
+        "the Timeline carries the judgement's own sentence, fault and all: {said:?}",
+    );
+
+    // The premise, held to rather than assumed: the roadmap on the branch the
+    // declarations are read off really is the half-declared one.
+    let settled = fixture.view().await;
+    let worktree = PathBuf::from(settled.worktree.expect("a stage has a Worktree").path);
+    let index =
+        std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md")).unwrap();
+
+    assert!(
+        index.contains("01-counter.md) — no dependencies") && index.contains("02-refusing.md)\n"),
+        "one line declares and the other does not: {index:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and nothing was started: nothing of a roadmap that declares badly may \
+         start anywhere",
+    );
+
+    let planned = std::fs::read_to_string(&planning).unwrap_or_default();
+
+    assert_eq!(
+        planned.matches("planned=").count(),
+        1,
+        "so no session was launched inside the next-stage fork either — the one \
+         planning session is the adopted stage's own: {planned:?}",
+    );
+}
+
 /// A stub that plans one task, works it at a gate the test opens, and then
 /// finishes the stage — writing a line per `next-task` session so that a test
 /// can say which of the two steps ran and which did not.

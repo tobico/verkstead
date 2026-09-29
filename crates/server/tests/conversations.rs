@@ -7403,6 +7403,28 @@ Turns this askance clone into Verkstead.
 - [ ] 02: Grilling — [brief](02-grilling.md)
 ";
 
+/// And the same roadmap declaring badly: stage 04's line says nothing after its
+/// link while the three above it do.
+///
+/// The first of the judgement's four faults, and the one a human writing a
+/// roadmap by hand actually makes — a bare line is a root and a forgotten
+/// declaration at once, and there is no telling which. Which fault it is does not
+/// matter to anything here: what is being asked is whether a refusal reaches the
+/// press with its own words on it, and the judgement has already been tested on
+/// all four.
+const MISDECLARED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
 /// And a declaring roadmap with two stages standing on nothing, which is the
 /// shape the scheduler is for: 01 and 02 are both ready from the start, 03 stands
 /// on 02 and 04 waits for both 01 and 03.
@@ -9690,6 +9712,72 @@ async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
     // And a note left over from an attempt that was abandoned too stops
     // nothing: the branch is the fact, and it is not there.
     git(&repo, &["branch", "-D", "someone-elses"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+}
+
+/// A roadmap that declares badly is refused at all three doors of the adoption:
+/// the notice offers nothing, the page names no stage, and the press says which
+/// line to go and fix.
+///
+/// The press is the one of the three with a human waiting on an answer, and a
+/// roadmap written by hand or by the old tools — which is what adoption is for —
+/// is the likeliest to declare badly. So it names the fault where the press was
+/// made rather than leaving it on a Timeline nobody has opened, and the sentence
+/// it names it in is the judgement's own: the same words `verkstead done` refuses
+/// the roadmap's own session in, and the same words a running roadmap leaves on a
+/// Timeline. One fault reads as one fault wherever the human meets it.
+///
+/// Refused rather than repaired, and never run in order instead — which would
+/// run a roadmap in a way nobody wrote down.
+#[tokio::test]
+async fn adopting_a_roadmap_that_declares_badly_is_refused_with_the_fault_named() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        MISDECLARED,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    // The notice under the new-conversation box has nothing to say about this
+    // Repo, and neither has the compose page beside it — they are one reading, so
+    // they offer the same nothing. The human cannot press what would be refused.
+    assert_eq!(
+        waiting(&app).await,
+        Vec::new(),
+        "nothing of a roadmap that declares badly is offered",
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    // Nor does the page the press is actually on, which reads the roadmap afresh
+    // at this Conversation's own base.
+    assert_eq!(
+        opened(&app, id)
+            .await
+            .adopting
+            .expect("this Conversation is adopting a roadmap")
+            .stage,
+        None,
+        "the adopting page names no stage off it either",
+    );
+
+    let refused = press_adopt(&app, id).await;
+
+    let Adopted::Misdeclared { why } = &refused else {
+        panic!("the press is where the fault is worth wording, got {refused:?}");
+    };
+
+    assert!(
+        why.contains("mvp") && why.contains("04"),
+        "which roadmap, and which line to go and read: {why:?}",
+    );
+
+    nothing_adopted(&app, id, &repo).await;
+
+    // And the line put right is a roadmap the press starts, nothing here having
+    // refused a declaration for being one.
+    roadmap(&repo, DECLARING, &[]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 }

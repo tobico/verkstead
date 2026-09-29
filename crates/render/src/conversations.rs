@@ -4586,6 +4586,22 @@ pub enum Adopted {
     /// plans nothing.
     NoRoadmap,
 
+    /// The roadmap is there and declares badly, so nothing of it may start
+    /// anywhere — and this is the fault, in the words the judgement refuses it
+    /// in.
+    ///
+    /// The one refusal that carries a whole sentence, for
+    /// [`Adopted::BranchInTheWay`]'s reason: what there is to go and do about it
+    /// is in a line of `ROADMAP.md`, and no phrasing of *that roadmap cannot
+    /// start* could say which line or what is wrong with it. The same sentence a
+    /// running roadmap leaves on a Timeline and the roadmap's own session is
+    /// refused by at `verkstead done`, so one fault reads as one fault wherever
+    /// the human meets it.
+    Misdeclared {
+        /// Why, as the judgement put it.
+        why: String,
+    },
+
     /// Every stage of it is done. The roadmap finished — between the notice
     /// being drawn and the button being pressed, if it had a stage a moment
     /// ago.

@@ -80,10 +80,22 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
 /// carry what they carry: git will not make a branch under a path another branch
 /// is a file at, and which name that is is the whole of what there is to go and
 /// do about it.
+///
+/// A roadmap that declares badly carries a whole sentence rather than a name,
+/// and it is the server's own: the same words a running roadmap leaves on a
+/// timeline, and the ones the roadmap's own session is refused by at
+/// `verkstead done`, so one fault reads as one fault wherever the human meets
+/// it. Nothing here rewords it — which line of `ROADMAP.md` and what is wrong
+/// with it is the whole of what there is to go and do about it, and only the
+/// judgement knows.
 export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    }
+
+    if ("Misdeclared" in outcome) {
+      return `That roadmap declares badly, so nothing of it can start: ${outcome.Misdeclared.why}.`;
     }
 
     return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;
