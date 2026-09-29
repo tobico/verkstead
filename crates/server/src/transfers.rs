@@ -33,17 +33,24 @@
 //! left exactly where it is either way — this stage moves the record and the
 //! next ones move the work.
 //!
-//! **What crosses in this stage is the Conversation itself**: the Repo the
-//! matching settled, the branch, the lifecycle, the Pairings as ids of the far
-//! end's own, the **Rank** verbatim and the **birth key**. No Timeline, no branch
-//! and no Worktree — see the tasks after this one.
+//! **What crosses is the Conversation and its whole record**: the row first —
+//! the Repo the matching settled, the branch, the lifecycle, the Pairings as
+//! ids of the far end's own, the **Rank** verbatim and the **birth key** — and
+//! then the **slice**, which is the Timeline and everything hanging off it,
+//! renumbered as it lands. See [`store::slice`] for what a slice is and
+//! [`record`] for the leg that carries it. The branch and the Worktree are the
+//! tasks after this one.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use serde::{Deserialize, Serialize};
 use verkstead_render::{
     Arrived, BirthKey, ConversationAcross, PairingAcross, PickedAcross, ProfileAcross, Transferring,
 };
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::attachments::Attachments;
 use crate::peer::transfers::TRANSFERS;
 use crate::relaying::{self, Call, Refusal, Streamed, as_json};
 use crate::store::{self, Lifecycle};
@@ -55,6 +62,59 @@ use crate::store::{self, Lifecycle};
 /// without stopping. See [`crate::preflight::MOST_THE_HARNESSES_ARE`], the same
 /// bound one reading along.
 const MOST_AN_ANSWER_IS: usize = 1024;
+
+/// The most a record may be on the wire: **twice what the rows themselves may
+/// weigh**.
+///
+/// The bound that matters is [`store::MOST_A_SLICE_IS`], which is over the bytes
+/// of the record — the Transcript lines and the Capture chunks and the attached
+/// files, counted as they are read. This is the same bound said again over what
+/// goes down the wire, which is bigger than what it carries: JSON escapes what
+/// it quotes and base64 is four bytes for every three. Twice is comfortably past
+/// either, and it is here for the reason every body limit on this listener is —
+/// a caller that starts writing and does not stop.
+pub(crate) const MOST_A_RECORD_IS: usize = 2 * store::MOST_A_SLICE_IS;
+
+/// A Conversation's whole record, as it crosses.
+///
+/// **Not a viewer type**, for [`ConversationAcross`]'s reason: the two ends of it
+/// are two Verksteads. And not a `verkstead_render` type either, because what it
+/// carries is the store's own rows — a slice is read out of one database and
+/// written into another, and nothing between the two renders it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RecordAcross {
+    /// Every row of the record, with the ids as they stand on the device it came
+    /// off — see [`store::Slice`].
+    pub(crate) slice: store::Slice,
+
+    /// Which of **the receiving device's** Repos each of those is, as the match
+    /// settled it: a row landing under the wrong repository is the failure that
+    /// whole rule exists to prevent, so nothing is guessed at the other end.
+    pub(crate) repos: Vec<(i64, i64)>,
+
+    /// And every Agent Profile the record names, by the device each is at home
+    /// on and the id it has there — which is the one name for an account that
+    /// means the same thing on both machines.
+    pub(crate) profiles: Vec<(i64, ProfileAcross)>,
+
+    /// The attached files' bytes, beside the rows that name them. Each lands in
+    /// the far end's own attachments directory, under its own Conversation id,
+    /// so a session there is given the paths its own sandbox expects.
+    pub(crate) files: Vec<AttachedFile>,
+}
+
+/// One attached file on the way across.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AttachedFile {
+    /// What it is called in the Conversation's directory, which is the name on
+    /// the row — the counted-up one where the directory already had that name,
+    /// so the row and the file agree on both machines by construction.
+    pub(crate) name: String,
+
+    /// Its bytes, base64 — the way a memory store's files cross, and for the
+    /// same reason: the envelope is JSON and an attachment is a screenshot.
+    pub(crate) bytes: String,
+}
 
 /// Press *Transfer to…*: write down that this Conversation is going to `device`.
 ///
@@ -476,6 +536,15 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         landed: None,
     })?;
 
+    // And the record itself, which is the leg with everything about the work in
+    // it. A failure from here on has a copy over there to take back.
+    if let Err(saying) = record(state, device, conversation_id, arrived.id).await {
+        return Err(Went {
+            saying,
+            landed: Some(arrived.id),
+        });
+    }
+
     // The commit point is behind us: that device has the work. What is left is
     // saying so here, and a failure at this one step is the one that has
     // something over there to take back.
@@ -501,6 +570,232 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     }
 
     Ok(arrived.id)
+}
+
+/// Put the Conversation's whole record over: the Timeline and everything hanging
+/// off it, and the attached files beside the rows that name them.
+///
+/// **A leg of its own, after the row.** The row is what the far end numbers, and
+/// the number is what everything here is written against — so the record cannot
+/// go until there is something for it to land beside. Which also makes this the
+/// one part of a move that can fail with a copy already over there, and the
+/// caller sweeps it: see [`across`], where the commit point is.
+///
+/// **The two ids the store cannot renumber for itself are settled here**: which
+/// of the far end's Repos each of ours is, by the match the whole cluster runs
+/// on, and what each Agent Profile is called across a cluster, which is the
+/// device it is at home on and its id there. A repository with nowhere to land
+/// refuses the move by name; an account the far end has never heard of leaves
+/// its column empty over there, that being history rather than a Pairing
+/// anything is going to be launched under.
+///
+/// `Err` is the sentence the Notice carries.
+async fn record(
+    state: &AppState,
+    device: &str,
+    conversation_id: i64,
+    there: i64,
+) -> Result<(), String> {
+    let slice = store::slice(&state.pool, conversation_id)
+        .await
+        .map_err(|why| format!("{why:#}"))?;
+
+    let repos = matched(state, device, &slice).await?;
+    let profiles = accounts(state, &slice).await?;
+    let files = attached(state, conversation_id, slice.weight()).await?;
+
+    let saying = serde_json::to_vec(&RecordAcross {
+        slice,
+        repos,
+        profiles,
+        files,
+    })
+    .map_err(|why| format!("the Conversation's record could not be written down to send: {why}"))?;
+
+    relaying::put_to(
+        state.devices.as_ref(),
+        device,
+        Call {
+            method: reqwest::Method::POST,
+            onwards: format!("{TRANSFERS}/{there}/record"),
+            headers: as_json(),
+            body: Streamed::saying(saying),
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|refusal| refusal.saying)
+}
+
+/// Which of `device`'s Repos each of the ones this record names is.
+///
+/// Refused by name where one of them is nothing over there — the preflight asks
+/// the same question of the Conversation's own repository and each Companion,
+/// and this is every repository the *record* names, which is those and whatever
+/// a commit was once recorded in.
+async fn matched(
+    state: &AppState,
+    device: &str,
+    slice: &store::Slice,
+) -> Result<Vec<(i64, i64)>, String> {
+    let ids: Vec<i64> = slice.repos().into_iter().collect();
+
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Err(
+            "this server holds no device identity to match repositories through".to_owned(),
+        );
+    };
+
+    let mut ours = Vec::with_capacity(ids.len());
+
+    for id in &ids {
+        match store::load_repo(&state.pool, *id).await {
+            Ok(Some(repo)) => ours.push(repo),
+            Ok(None) => {
+                return Err(format!(
+                    "the record names repository {id}, which is not registered on this device \
+                     any more",
+                ));
+            }
+            Err(why) => {
+                return Err(format!(
+                    "a repository the record names could not be read: {why:#}"
+                ));
+            }
+        }
+    }
+
+    let theirs = crate::matching::each_across(devices, device, &ours)
+        .await
+        .map_err(|refusal| refusal.saying)?;
+
+    let mut across = Vec::with_capacity(ids.len());
+
+    for ((id, repo), there) in ids.into_iter().zip(&ours).zip(theirs) {
+        let Some(there) = there else {
+            return Err(format!(
+                "no repository there is {name}, which this Conversation's record names",
+                name = repo.name,
+            ));
+        };
+
+        across.push((id, there.id));
+    }
+
+    Ok(across)
+}
+
+/// And what each Agent Profile the record names is called across a cluster.
+///
+/// One read of the registry for all of them, the way an arriving Conversation's
+/// three Pairings are resolved against one. A Profile that is not in it any more
+/// is left out: what names one here is a Steer somebody ran a year ago, and an
+/// account deleted since is a name the record cannot keep on either machine.
+async fn accounts(
+    state: &AppState,
+    slice: &store::Slice,
+) -> Result<Vec<(i64, ProfileAcross)>, String> {
+    let ids = slice.profiles();
+
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let profiles = store::profiles(&state.pool)
+        .await
+        .map_err(|why| format!("this device's Agent Profiles could not be read: {why:#}"))?;
+
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| {
+            let profile = profiles.iter().find(|profile| profile.id == id)?;
+
+            Some((id, profile_across(profile, &state.device)))
+        })
+        .collect())
+}
+
+/// The attached files' bytes, read off this device's attachments directory.
+///
+/// **Counted towards the same bound the rows are**, which is what makes it one
+/// bound over a record rather than two over halves of one — see
+/// [`store::MOST_A_SLICE_IS`]. Past it the move is refused whole, naming the
+/// Conversation: half a record is worse than a move that did not happen.
+///
+/// A row whose file has gone from the directory is a row and no file, which is
+/// what it already was here: the record crosses and the bytes do not, and the
+/// far end draws exactly what this one drew.
+///
+/// Blocking, off the runtime's threads: these are as much as thirty-two
+/// megabytes apiece.
+async fn attached(
+    state: &AppState,
+    conversation_id: i64,
+    weighs: usize,
+) -> Result<Vec<AttachedFile>, String> {
+    let rows = store::attachments(&state.pool, conversation_id)
+        .await
+        .map_err(|why| {
+            format!("the files attached to this Conversation could not be read: {why:#}")
+        })?;
+
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let directories = Attachments::under(&state.data_dir);
+
+    tokio::task::spawn_blocking(move || {
+        let mut held = weighs;
+        let mut files = Vec::with_capacity(rows.len());
+
+        for row in rows {
+            let path = directories.file(conversation_id, &row.name);
+
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(why) if why.kind() == std::io::ErrorKind::NotFound => {
+                    tracing::warn!(
+                        conversation_id,
+                        name = %row.name,
+                        "an attached file is not in the Conversation's directory, so the row \
+                         crossed without it",
+                    );
+
+                    continue;
+                }
+                Err(why) => {
+                    return Err(format!(
+                        "the attached file {name} could not be read: {why}",
+                        name = row.name,
+                    ));
+                }
+            };
+
+            held += bytes.len();
+
+            if held > store::MOST_A_SLICE_IS {
+                return Err(format!(
+                    "the record of Conversation {conversation_id} is larger than the {most} \
+                     bytes one may be to cross a link",
+                    most = store::MOST_A_SLICE_IS,
+                ));
+            }
+
+            files.push(AttachedFile {
+                name: row.name,
+                bytes: STANDARD.encode(&bytes),
+            });
+        }
+
+        Ok(files)
+    })
+    .await
+    .map_err(|why| format!("the attached files could not be read: {why}"))?
 }
 
 /// A move that did not finish: sweep what reached the far end, take the request
@@ -618,29 +913,32 @@ fn picked(picked: &store::Picked, here: &str) -> PickedAcross {
     }
 }
 
-/// And one Pairing, with its Profile named the way a cluster names one: the
-/// device it is at home on, and the id it has **there**.
+/// And one Pairing: the Profile named the way a cluster names one — see
+/// [`profile_across`] — and the model beside it.
+fn pairing_across(pairing: &store::Pairing, here: &str) -> PairingAcross {
+    PairingAcross {
+        profile: profile_across(&pairing.profile, here),
+        model: pairing.model.clone(),
+    }
+}
+
+/// One Agent Profile, named the way a cluster names one.
 ///
 /// A mirror carries both already — it is a row of this device's marked with
 /// where the account lives. One of this device's own is at home here, so the
 /// pair is this device's id and the row's own: which is exactly what the far end
 /// turns back into a mirror of its own, the work having moved to the machine
 /// that was the member.
-fn pairing_across(pairing: &store::Pairing, here: &str) -> PairingAcross {
-    let profile = match &pairing.profile.mirror {
+fn profile_across(profile: &store::Profile, here: &str) -> ProfileAcross {
+    match &profile.mirror {
         Some(mirror) => ProfileAcross {
             device: mirror.device.clone(),
             id: mirror.id,
         },
         None => ProfileAcross {
             device: here.to_owned(),
-            id: pairing.profile.id,
+            id: profile.id,
         },
-    };
-
-    PairingAcross {
-        profile,
-        model: pairing.model.clone(),
     }
 }
 

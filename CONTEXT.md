@@ -379,6 +379,33 @@ before that answer leaves the Conversation live and **stopped** where it was,
 with a Notice naming what failed, and whatever reached the far end is swept
 rather than left as a half-record. The Worktree on the sending device is left
 exactly where it is either way.
+**And then the record itself, in a leg of its own.** Everything about *that
+Conversation* and nothing about the machine it was on: the Timeline Events, the
+Question Sets asked from them with their Responses and their deferrals and their
+deliveries, the Captures, the Transcripts, the session names and Pairings and
+endings, the Steers, the stops and escalations, the commits recorded, the pull
+request and wrap-up bookkeeping, the unseen mark, the shares, the Companion
+rows, and the Attachments — their rows in the record and their bytes beside it,
+landing in the receiving device's own attachments directory under its own
+Conversation id, so a session there is given the paths its own sandbox expects.
+What stays behind is the device's own: its Repos, its Agent Profiles, what it
+remembers of a Repo's Pairings, its Members, its joins, its push subscriptions,
+its Remote access banner — and the Worktrees, which each machine cuts for
+itself.
+**Every id is renumbered as it lands**, because both ends issue their own and
+every Verkstead has a Conversation 1: an Event id a Capture, a Transcript, a
+session Pairing or a Set points at comes out naming the Event it actually landed
+as, and a Set's own id moves with it — which is what leaves one left open
+answerable on the far end, its Answers reaching a session running *there*. Two
+ids are not the record's to renumber and are settled by the devices instead: the
+Repos, by the same match that settled the Conversation's own, refused by name
+where one has nowhere to land; and the Agent Profiles, named across the cluster
+by the device each is at home on, the column landing empty where the far end has
+never heard of the account — which is a Steer whose account was deleted a year
+later rather than a Pairing anything is about to run under. A record is prose
+and binary and can be large, so it crosses under a bound of its own and is
+refused whole rather than in part, naming the Conversation that was too big to
+move.
 _Avoid_: migrate, hand off, sync, failover
 
 **Worktree**:

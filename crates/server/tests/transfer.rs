@@ -13,10 +13,12 @@
 //! press has to arrive while a session is genuinely part way through one, and
 //! what the press promises is that nothing is cut short.
 //!
-//! **What crosses in this stage is the Conversation itself** — the Repo the
-//! matching settled, the branch, the lifecycle, the Pairings as B's own Profile
-//! ids, the Rank verbatim and the birth key. The Timeline, the branch and the
-//! Worktree are the tasks after this one, and nothing here asks after them.
+//! **What crosses is the Conversation and its whole record** — the row first,
+//! carrying the Repo the matching settled, the branch, the lifecycle, the
+//! Pairings as B's own Profile ids, the Rank verbatim and the birth key; then
+//! the **slice**, which is the Timeline and everything hanging off it, every id
+//! renumbered as it lands. The branch and the Worktree are the tasks after this
+//! one, and nothing here asks after them.
 //!
 //! **On the machine this suite is about**: the sandbox is bwrap and the
 //! terminal is a real pseudo-terminal, which is what `tests/sessions.rs` and
@@ -127,9 +129,11 @@ struct Verkstead {
     /// crossing is made of.
     listening: JoinHandle<anyhow::Result<()>>,
 
-    /// The Data Directory: the identity, the database and every session's own
-    /// profile are in it. Held for the length of the test rather than read: what
-    /// it is for is that none of it is swept out from under a running session.
+    /// The Data Directory: the identity, the database, every session's own
+    /// profile and the attached files are in it. Held for the length of the test
+    /// so that none of it is swept out from under a running session — and read
+    /// for the one thing a test looks at directly, which is where an Attachment
+    /// landed.
     _dir: tempfile::TempDir,
 
     /// And what `~` is for a session on this device, held for the same reason.
@@ -141,14 +145,14 @@ struct Verkstead {
 }
 
 impl Verkstead {
-    /// A Verkstead that runs no session of its own, which is what B is here: the
-    /// work arrives as a row, and starting it again is stage 07's.
-    async fn answering(id: &str) -> Verkstead {
-        Verkstead::standing(id, None, Path::new("/")).await
-    }
-
-    /// And one that runs its sessions on `stub`, with `spill` bound into the
-    /// sandbox so a session can see the gate the test opens.
+    /// A Verkstead equipped the way a served one is: its sessions run on `stub`,
+    /// with `spill` bound into the sandbox so one can see the gate the test
+    /// opens.
+    ///
+    /// **Both machines, though only A ever runs anything.** Nothing starts a
+    /// session on the far end in this stage — that is Resume, and it is stage
+    /// 07's — but a device taking work in needs what a served one has: a Data
+    /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
         Verkstead::standing(id, Some(stub), spill).await
     }
@@ -359,9 +363,12 @@ impl Verkstead {
         waited.unwrap_or_else(|_| panic!("no Profile called {name} was ever listed: {last:#?}"))
     }
 
-    /// A Conversation grilling under `profile`, started the way the composer and
-    /// the setup card start one.
-    async fn grilling_under(&self, profile: i64) -> i64 {
+    /// A Conversation of this device's, written the way the composer writes one
+    /// and left a draft — which is where a file is put on one: a Conversation
+    /// takes attachments while it is drafting and no longer.
+    ///
+    /// What starts it is [`Self::grills`], one press along.
+    async fn drafting_under(&self, profile: i64) -> i64 {
         let repos: Vec<verkstead_render::RepoEntry> =
             reading(&self.workbench, "/api/ui/repos").await;
 
@@ -406,6 +413,11 @@ impl Verkstead {
 
         assert_eq!(saved, "\"Saved\"", "writing the Brief");
 
+        conversation
+    }
+
+    /// And the press that starts it, which is where the draft stops being one.
+    async fn grills(&self, conversation: i64) {
         let grilling = press(
             &self.workbench,
             &format!("/api/ui/conversations/{conversation}/grill"),
@@ -414,8 +426,98 @@ impl Verkstead {
         .await;
 
         assert_eq!(grilling, "\"Started\"", "starting the grilling");
+    }
 
-        conversation
+    /// Put a file on a drafting Conversation, the way the paperclip does, and
+    /// answer with the id the record gave it.
+    async fn attaches(&self, conversation: i64, name: &str, bytes: &[u8]) -> i64 {
+        let attached = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/ui/conversations/{conversation}/attachments/{name}"
+                    ))
+                    .body(Body::from(bytes.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = attached.status();
+        let body = attached.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&body).into_owned();
+
+        assert_eq!(status, StatusCode::OK, "attaching {name}: {said}");
+        assert!(said.contains("Attached"), "attaching {name}: {said}");
+
+        self.view(conversation)
+            .await
+            .attachments
+            .iter()
+            .find(|attachment| attachment.name == name)
+            .expect("the file is on the record")
+            .id
+    }
+
+    /// The bytes of one of its files, read the way the browser downloads one.
+    async fn attached_bytes(&self, conversation: i64, attachment: i64) -> Vec<u8> {
+        let read = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/ui/conversations/{conversation}/attachments/{attachment}/bytes"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            read.status(),
+            StatusCode::OK,
+            "reading attachment {attachment}"
+        );
+
+        read.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    /// Ask a Question Set the way a session's CLI does: to the base URL its
+    /// sandbox was given, which is this Conversation's own.
+    async fn asks(&self, conversation: i64, yaml: &str) -> i64 {
+        let asked = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conversation}/api/v1/sets"))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = asked.status();
+        let body = asked.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&body).into_owned();
+
+        assert_eq!(status, StatusCode::CREATED, "asking a Set: {said}");
+
+        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&said).unwrap();
+
+        created.id
     }
 
     /// Press *Transfer to…* for `device`, and answer with what it said.
@@ -548,6 +650,31 @@ impl Verkstead {
         Some(capture.text)
     }
 
+    /// The Question Set on its Timeline, by the id **this** device numbered it.
+    ///
+    /// Which is the whole point of reading it off the Timeline rather than
+    /// remembering what it was called on the machine it came from: every
+    /// Verkstead issues its own, and a wait is opened on the one it has here.
+    async fn set_on(&self, conversation: i64) -> Option<i64> {
+        self.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .find_map(|event| match event {
+                TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+                _ => None,
+            })
+    }
+
+    /// Where this device keeps that Conversation's attached files, which is the
+    /// directory its own sessions are given — see the server's `attachments`.
+    fn attachments_directory(&self, conversation: i64) -> PathBuf {
+        self._dir
+            .path()
+            .join("attachments")
+            .join(conversation.to_string())
+    }
+
     /// And every Notice on its Timeline, which is where Verkstead says what it
     /// did on its own account — a move that failed among them.
     async fn notices(&self, conversation: i64) -> Vec<String> {
@@ -668,8 +795,22 @@ fn probing(dir: &Path) -> Machine {
 /// The Conversation is grilling on A under that account, with its session
 /// waiting at `gate`.
 async fn ready_to_move(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = ready_to_draft(gate, spill).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// The same, stopped at the draft: the two machines linked and the Conversation
+/// written, with the press that starts it still to come.
+///
+/// Which is where a file is put on one — a Conversation takes attachments while
+/// it is drafting and no longer — and so is where the test about an Attachment
+/// crossing begins.
+async fn ready_to_draft(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
     let a = Verkstead::running(A, &waits_at(gate), spill).await;
-    let b = Verkstead::answering(B).await;
+    let b = Verkstead::running(B, &waits_at(gate), spill).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
 
@@ -687,7 +828,7 @@ async fn ready_to_move(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Hold
     let holding = b.holding();
     b.profile_called(ACCOUNT).await;
 
-    let conversation = a.grilling_under(account).await;
+    let conversation = a.drafting_under(account).await;
 
     (a, b, holding, conversation)
 }
@@ -1057,4 +1198,396 @@ async fn a_move_that_fails_leaves_the_source_live_and_stopped() {
         b.own_rows().await.is_empty(),
         "and nothing was left on the far end",
     );
+}
+
+/// **The Timeline on the far end reads as it read here**: the same Events in the
+/// same order, each drawing the card it drew, with the Captures and the session
+/// names behind them.
+///
+/// Read as the browser reads it, with the ids taken out — because the ids are the
+/// whole of what may differ. Every Verkstead numbers its own rows, so an Event on
+/// B is a different number from the Event on A it is a copy of; everything else
+/// on the card is the record, and any of it arriving changed would be the record
+/// changing as it moved.
+///
+/// And the rows keyed by an Event rather than by the Conversation are the ones
+/// worth naming: a Capture, a Transcript and a session's name each hang off one,
+/// so any of them left pointing at the number it had on A would be a card with
+/// nothing behind it.
+#[tokio::test]
+async fn the_timeline_on_the_far_end_reads_as_it_read_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    // A Set on the way, so the Timeline has a card of every kind the grilling
+    // writes rather than only the ones a start does.
+    a.asks(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let here = a.view(conversation).await;
+    let said = a.capture(conversation).await;
+    let names = session_names(&a.pool).await;
+
+    assert!(
+        here.timeline.len() >= 4,
+        "the Timeline this is read against has the Brief, the move, the session \
+         and the Set on it: {:#?}",
+        here.timeline,
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.view(there).await;
+
+    assert_eq!(
+        cards(&arrived.timeline),
+        cards(&here.timeline),
+        "the Timeline reads as it did, card for card",
+    );
+
+    assert_eq!(
+        b.capture(there).await,
+        said,
+        "and what the session printed is behind the Event it printed into",
+    );
+
+    assert_eq!(
+        session_names(&b.pool).await,
+        names,
+        "as is the name Verkstead ran that session under",
+    );
+
+    assert_eq!(
+        transcripts(&b.pool).await,
+        transcripts(&a.pool).await,
+        "and the log the session kept of itself, line for line",
+    );
+}
+
+/// **A Question Set left open is answerable where the work now is**, and its
+/// Answers reach whatever is waiting there.
+///
+/// The wait is opened on B through the very endpoint a session's CLI opens one
+/// on, over B's own Conversation id and B's own Set id — which is what the whole
+/// renumbering is for. A Set whose id had not moved with it would be a wait
+/// nothing could open, and one answered into A would be an Answer reaching a
+/// machine the work has left.
+#[tokio::test]
+async fn a_set_left_open_is_answerable_where_the_work_now_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    a.asks(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let set = b
+        .set_on(there)
+        .await
+        .expect("the Set crossed with the work, under an id of B's own");
+
+    // A session on B waiting for its Answers, which is what the endpoint is:
+    // held open until the Set is settled. Opened before anything answers, so
+    // what ends it is the answering rather than a read that was already true.
+    let waiting = tokio::spawn({
+        let workbench = b.workbench.clone();
+
+        async move {
+            let answered = workbench
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/conversations/{there}/api/v1/sets/{set}/response?hold=20"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            let status = answered.status();
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+
+            (status, String::from_utf8_lossy(&bytes).into_owned())
+        }
+    });
+
+    // And the human answering it on the machine the work is on now.
+    let taken = b
+        .workbench
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{there}/api/v1/sets/{set}/response"))
+                .header(CONTENT_TYPE, "application/yaml")
+                .body(Body::from(ANSWERED))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = taken.status();
+    let bytes = taken.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert!(status.is_success(), "answering it on B: {status} {said}");
+
+    let (status, handed) = tokio::time::timeout(WAITING, waiting)
+        .await
+        .expect("the wait on B ended once the Set was answered")
+        .unwrap();
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the wait was handed a Response: {handed}"
+    );
+    assert!(
+        handed.contains("shared between instances"),
+        "and it is the Answer that was given: {handed}",
+    );
+}
+
+/// **An Attachment opens on the far end**, at a path that device's own sessions
+/// are given, with the file's bytes unchanged.
+///
+/// Rows and bytes both, and the bytes are the half nothing else carries: the row
+/// travels in the slice and the file travels beside it, landing in B's own
+/// attachments directory under B's own Conversation id. Which is what makes the
+/// path one B's sandboxes can mount — a file left under A's id would be a
+/// listing in a prompt naming a directory that is not there.
+#[tokio::test]
+async fn an_attachment_opens_on_the_far_end_with_its_bytes_unchanged() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_draft(&gate, spill.path()).await;
+
+    // Bytes rather than text, because what a human has to hand is a screenshot:
+    // a file that crossed as anything but itself is the failure to catch.
+    let bytes: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+    let attached = a.attaches(conversation, "burst.bin", &bytes).await;
+
+    assert_eq!(
+        a.attached_bytes(conversation, attached).await,
+        bytes,
+        "it is on the record here to begin with",
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let row = b
+        .view(there)
+        .await
+        .attachments
+        .into_iter()
+        .find(|attachment| attachment.name == "burst.bin")
+        .expect("the file's row crossed with the work");
+
+    assert_eq!(
+        row.bytes,
+        bytes.len() as i64,
+        "the row says how large the file is",
+    );
+
+    assert_eq!(
+        b.attached_bytes(there, row.id).await,
+        bytes,
+        "and the file opens over there, byte for byte",
+    );
+
+    // And where it opens from: B's own attachments directory, under the
+    // Conversation id B gave it, which is the path B's sessions are handed.
+    assert!(
+        b.attachments_directory(there).join("burst.bin").is_file(),
+        "the file is in B's own directory for that Conversation",
+    );
+}
+
+/// **Nothing of the source machine crosses.** B's Repos, its Agent Profiles, its
+/// Members and what it remembers of a Repo's Pairings are exactly what they were
+/// before the work arrived.
+///
+/// Which is the other half of what a slice is: a Conversation's record is a fact
+/// about a piece of work, and a Repo, an account and a membership are facts about
+/// a machine. A move that carried any of them would be one device quietly
+/// registering things on another.
+#[tokio::test]
+async fn nothing_of_the_source_machine_crosses() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    a.asks(conversation, ASKED).await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let repos: Vec<verkstead_render::RepoEntry> = reading(&b.workbench, "/api/ui/repos").await;
+    let profiles: Vec<ProfileEntry> = reading(&b.workbench, PROFILES).await;
+    let members = store::members(&b.pool).await.unwrap();
+    let pairings = store::remembered_pairings(&b.pool, repos[0].id)
+        .await
+        .unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    a.view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await;
+
+    assert_eq!(
+        reading::<Vec<verkstead_render::RepoEntry>>(&b.workbench, "/api/ui/repos").await,
+        repos,
+        "B's Repos are what they were: a registration is a directory on a \
+         machine, and nothing about a piece of work registers one",
+    );
+    assert_eq!(
+        reading::<Vec<ProfileEntry>>(&b.workbench, PROFILES).await,
+        profiles,
+        "and its Agent Profiles, the mirror among them",
+    );
+    assert_eq!(
+        store::members(&b.pool).await.unwrap(),
+        members,
+        "and the cluster it is part of",
+    );
+    assert_eq!(
+        store::remembered_pairings(&b.pool, repos[0].id)
+            .await
+            .unwrap(),
+        pairings,
+        "and what it remembers of that Repo's Pairings, which is a fact about \
+         the machine's own last grilling",
+    );
+}
+
+/// The Set every test here asks, which asks one thing so that there is an Answer
+/// to give it.
+const ASKED: &str = r#"
+title: Where the counter lives
+preface: The API has no rate limiting at all.
+questions:
+  - label: Q1
+    text: Where should the counter live?
+    options:
+      - n: 1
+        text: In Redis
+        recommended: true
+      - n: 2
+        text: In the process
+"#;
+
+/// And the Answer given on the far end, with a word about why so that what the
+/// wait is handed can be told apart from the Set it answers.
+const ANSWERED: &str = r#"
+answers:
+  - label: Q1
+    selected: 1
+    free_text: shared between instances
+"#;
+
+/// The Timeline as the record rather than as a set of row numbers.
+///
+/// Every id taken out, because the ids are the whole of what two copies of one
+/// Conversation are allowed to differ by — and the standing with them, which is
+/// a reading of a moment: whether a Set is being waited on is about the session
+/// running now rather than about the record.
+fn cards(timeline: &[TimelineEvent]) -> serde_json::Value {
+    let mut drawn = serde_json::to_value(timeline).unwrap();
+
+    plainly(&mut drawn);
+
+    drawn
+}
+
+/// Every `id`, `set_id` and `standing` taken out of a drawn Timeline, however
+/// deep it is.
+fn plainly(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for named in ["id", "set_id", "standing"] {
+                fields.remove(named);
+            }
+
+            for (_, inside) in fields.iter_mut() {
+                plainly(inside);
+            }
+        }
+
+        serde_json::Value::Array(items) => {
+            for inside in items {
+                plainly(inside);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Every session name one device's store holds, in the order of the Events they
+/// hang off.
+async fn session_names(pool: &SqlitePool) -> Vec<(i64, String)> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT session_id FROM session_names
+         JOIN timeline_events ON timeline_events.id = session_names.event_id
+         ORDER BY timeline_events.id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    rows.into_iter()
+        .enumerate()
+        .map(|(at, (name,))| (at as i64, name))
+        .collect()
+}
+
+/// And every Transcript line, the same way.
+async fn transcripts(pool: &SqlitePool) -> Vec<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT line FROM transcript_lines
+         JOIN timeline_events ON timeline_events.id = transcript_lines.event_id
+         ORDER BY timeline_events.id, transcript_lines.seq",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    rows.into_iter().map(|(line,)| line).collect()
 }

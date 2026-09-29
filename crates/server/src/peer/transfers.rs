@@ -23,14 +23,20 @@
 //! [`super::router`] puts [`super::members_only`] over this, and a caller whose
 //! certificate this device holds no membership for never reaches it.
 
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use verkstead_render::{Arrived, ConversationAcross, PickedAcross, ProfileAcross};
 
+use crate::attachments::Attachments;
+use crate::transfers::{AttachedFile, MOST_A_RECORD_IS, RecordAcross};
 use crate::{AppState, store};
 
 /// Where a member puts a Conversation it is moving onto this device.
@@ -43,6 +49,14 @@ pub const TRANSFERS: &str = "/api/peer/v1/transfers";
 
 /// And where it takes one back, the id being the one this device answered with.
 pub const ONE_TRANSFER: &str = "/api/peer/v1/transfers/{id}";
+
+/// And where the record itself lands, once that row is there to land beside it.
+///
+/// **A leg of its own rather than more of the first call.** The ids everything
+/// in a record points at are this device's, and the first of them is the
+/// Conversation's own — which is what the first call answered with. So the row
+/// goes, this device numbers it, and the record follows against that number.
+pub const ONE_TRANSFERS_RECORD: &str = "/api/peer/v1/transfers/{id}/record";
 
 /// `POST /api/peer/v1/transfers` — write the arriving Conversation down, and
 /// answer with the id it goes by here.
@@ -119,6 +133,154 @@ pub(crate) async fn take(
     }
 }
 
+/// `POST /api/peer/v1/transfers/{id}/record` — the Timeline and everything
+/// hanging off it, written down against the Conversation this device numbered a
+/// moment ago.
+///
+/// **Every id is this device's by the time it is written.** The rows arrive
+/// carrying the numbers they had on the machine they came off — every Verkstead
+/// has a Conversation 1 — and the store renumbers them as they land, so an Event
+/// referenced by a Capture, a Transcript, a session Pairing or a Question Set
+/// comes out pointing at the Event it actually landed as. What the store cannot
+/// work out for itself is the two ids that are not this Conversation's: the
+/// Repos, which the sending device matched against this registry before it sent
+/// anything, and the Agent Profiles, which are named across a cluster by the
+/// device each is at home on — see [`resolved`], which is the same reading one
+/// call along.
+///
+/// **The files first, then the rows.** An attachment is a row and bytes both,
+/// and the row is what names the file: written the other way round there would
+/// be a moment in which a session on this device could be told about a path that
+/// is not there yet. A landing that then fails takes the directory back with it,
+/// the copy being one the sending device is about to sweep.
+pub(crate) async fn written(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(record): Json<RecordAcross>,
+) -> Response {
+    let profiles = match accounts(&state, &record).await {
+        Ok(profiles) => profiles,
+        Err(refusal) => return refusal,
+    };
+
+    let renaming = store::Renaming {
+        repos: record.repos.iter().copied().collect(),
+        profiles,
+    };
+
+    if let Err(why) = kept(&state, id, &record.files).await {
+        tracing::error!(error = ?why, conversation_id = id, "the files on a Conversation a member is transferring here could not be written");
+
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the attached files could not be written down on this device\n",
+        )
+            .into_response();
+    }
+
+    match store::land(&state.pool, id, &record.slice, &renaming).await {
+        Ok(()) => {
+            tracing::info!(
+                conversation_id = id,
+                tables = record.slice.tables.len(),
+                files = record.files.len(),
+                "the record of a Conversation transferred from a member landed here",
+            );
+
+            // The Timeline on every browser open on this device, and the sidebar
+            // of every member holding its list: there is work here now rather
+            // than the empty row the first leg left.
+            state
+                .nudges
+                .announce(verkstead_schema::Nudge::Conversation { conversation: id });
+            state
+                .nudges
+                .announce(verkstead_schema::Nudge::Conversations);
+
+            StatusCode::OK.into_response()
+        }
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "the record of a Conversation a member is transferring here could not be written down");
+
+            Attachments::under(&state.data_dir).remove(id);
+
+            (StatusCode::BAD_REQUEST, format!("{why:#}\n")).into_response()
+        }
+    }
+}
+
+/// Which of this device's Agent Profiles each one the record names is, where
+/// this device has one at all.
+///
+/// [`resolved`]'s reading over a whole record rather than over three Pairings,
+/// and with the missing ones left out rather than refused: what names a Profile
+/// here is a Steer somebody ran a year ago, and an account deleted since is a
+/// name no machine can keep. The column lands empty and the rest of the Steer
+/// stands — see `store::slices`.
+async fn accounts(state: &AppState, record: &RecordAcross) -> Result<HashMap<i64, i64>, Response> {
+    if record.profiles.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let profiles = match store::profiles(&state.pool).await {
+        Ok(profiles) => profiles,
+        Err(why) => {
+            tracing::error!(error = ?why, "this device's Profiles could not be read for an arriving record");
+
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device's Agent Profiles could not be read\n",
+            )
+                .into_response());
+        }
+    };
+
+    Ok(record
+        .profiles
+        .iter()
+        .filter_map(|(there, named)| Some((*there, here(&profiles, &state.device, named)?)))
+        .collect())
+}
+
+/// The attached files, written into this device's own directory for this
+/// Conversation.
+///
+/// Under the id this device gave it, which is what makes the path one its own
+/// sessions are given — see [`crate::attachments`]. Each keeps the name the row
+/// says it was stored under: the directory is one nothing has written to yet, so
+/// nothing is counted up and the row and the file agree.
+///
+/// Blocking, off the runtime's threads: an attachment is as much as thirty-two
+/// megabytes.
+async fn kept(state: &AppState, id: i64, files: &[AttachedFile]) -> anyhow::Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+
+    let directories = Attachments::under(&state.data_dir);
+    let files: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|file| {
+            Ok((
+                file.name.clone(),
+                STANDARD.decode(&file.bytes).map_err(|why| {
+                    anyhow::anyhow!("the bytes of {name} did not read: {why}", name = file.name)
+                })?,
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    tokio::task::spawn_blocking(move || {
+        for (name, bytes) in files {
+            directories.keep(id, &name, &bytes)?;
+        }
+
+        anyhow::Ok(())
+    })
+    .await?
+}
+
 /// `DELETE /api/peer/v1/transfers/{id}` — the device that sent this copy taking
 /// it back, its move having failed before it was finished.
 ///
@@ -137,6 +299,13 @@ pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) ->
                 outcome = ?swept,
                 "a member took back a Conversation whose transfer here failed",
             );
+
+            // And the files that came with it, which are bytes rather than rows
+            // and so are no part of the walk above. A copy that never finished
+            // arriving was never the human's to look at, and a directory of
+            // somebody else's attachments under an id nothing names is exactly
+            // the leftover this sweep is for.
+            Attachments::under(&state.data_dir).remove(id);
 
             state
                 .nudges
@@ -263,6 +432,13 @@ pub(crate) fn route() -> Router<AppState> {
     Router::new()
         .route(TRANSFERS, post(take))
         .route(ONE_TRANSFER, delete(sweep))
+        .route(
+            ONE_TRANSFERS_RECORD,
+            // Over the router's own default, the way the Question Set route and
+            // the memory store's raise theirs: a record is a Conversation's
+            // whole Timeline, and the bound over it is the record's own.
+            post(written).layer(DefaultBodyLimit::max(MOST_A_RECORD_IS)),
+        )
 }
 
 #[cfg(test)]
@@ -274,7 +450,7 @@ mod tests {
     /// write Conversations into somebody's database.
     #[test]
     fn the_transfers_are_not_one_of_the_un_gated_three() {
-        for path in [TRANSFERS, ONE_TRANSFER] {
+        for path in [TRANSFERS, ONE_TRANSFER, ONE_TRANSFERS_RECORD] {
             assert_ne!(path, super::super::IDENTITY);
             assert_ne!(path, super::super::joining::JOIN);
             assert_ne!(path, super::super::exchange::SETTLED);
@@ -287,7 +463,7 @@ mod tests {
     #[test]
     fn the_transfers_are_not_in_a_namespace_kept_back() {
         for prefix in super::super::workbench::KEPT_TO_ITSELF {
-            for path in [TRANSFERS, ONE_TRANSFER] {
+            for path in [TRANSFERS, ONE_TRANSFER, ONE_TRANSFERS_RECORD] {
                 assert!(
                     !path.starts_with(prefix),
                     "{path} would be held back with {prefix}/",

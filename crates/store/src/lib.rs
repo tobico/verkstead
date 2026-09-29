@@ -65,6 +65,7 @@ mod session_endings;
 mod session_names;
 mod session_pairings;
 mod shares;
+mod slices;
 mod steers;
 mod stops;
 mod transcripts;
@@ -161,6 +162,9 @@ pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{session_id, session_ids};
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
+pub use slices::{
+    Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
+};
 pub use steers::{
     PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
     scratch,
