@@ -110,6 +110,7 @@ function saying(standing: SettingsView, instructions: string): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
+    tried: [],
   };
 }
 

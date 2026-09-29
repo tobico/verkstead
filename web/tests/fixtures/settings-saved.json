@@ -81,6 +81,24 @@
     },
     "share_on_done": true
   },
+  "tried": [
+    {
+      "outcome": {
+        "Reached": {
+          "named": "Docs MCP"
+        }
+      },
+      "server": "docs"
+    },
+    {
+      "outcome": {
+        "Refused": {
+          "why": "It did not answer: failed to lookup address information."
+        }
+      },
+      "server": "tickets"
+    }
+  ],
   "verified": {
     "Account": {
       "login": "ada",

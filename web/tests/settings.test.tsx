@@ -511,6 +511,7 @@ describe("saving", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      tried: [],
     };
     theSettings(TOLD, json(rewritten));
     const { container } = mountBoth();
@@ -594,6 +595,7 @@ describe("saving", () => {
       verified: { Account: { login: "ada", missing: ["gist"] } },
       refused: [],
       refused_servers: [],
+      tried: [],
     };
     theSettings(UNSET, json(unscoped));
     const { container } = mountPane();
@@ -638,6 +640,7 @@ describe("saving", () => {
       verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
       refused: [],
       refused_servers: [],
+      tried: [],
     };
     theSettings(UNSET, json(unverified));
     mountPane();
@@ -735,6 +738,7 @@ describe("replacing and clearing the token", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      tried: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
     const { container } = mountBoth();
@@ -808,7 +812,13 @@ describe("the ignore rules", () => {
   /// What the save was answered with where it was turned down: neither file
   /// touched, so the settings are how they stood, and one row named.
   function turnedDown(...refused: SettingsSaved["refused"]): SettingsSaved {
-    return { settings: TOLD, verified: null, refused, refused_servers: [] };
+    return {
+      settings: TOLD,
+      verified: null,
+      refused,
+      refused_servers: [],
+      tried: [],
+    };
   }
 
   const RULE = TOLD.ignored_comments[0]!;
@@ -1078,6 +1088,7 @@ describe("the ignore rules", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      tried: [],
     };
     theSettings(TOLD, json(written));
     mountPane();
@@ -1099,6 +1110,7 @@ const answering = (standing: SettingsView): SettingsSaved => ({
   verified: null,
   refused: [],
   refused_servers: [],
+  tried: [],
 });
 
 /// The checkbox beside the token: whether Done shares the record to the pull

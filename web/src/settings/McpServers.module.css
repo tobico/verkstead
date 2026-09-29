@@ -91,6 +91,29 @@
   font-size: 0.85rem;
 }
 
+/* And what came of speaking to it when it was last saved, under the same box:
+   the token's own two lines, said about a server. Reached is the green the
+   account GitHub vouched for is said in, and refused is an `ErrorLine` — a
+   declaration that will not answer is worth a colour, and it is saved either
+   way. */
+.servers .reached,
+.servers .unreached {
+  margin: -0.2rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.servers .reached {
+  color: var(--added);
+}
+
+/* The name it gives for itself, which is the server's own word rather than the
+   one it is declared under — set apart the way the account a token belongs to
+   is. */
+.calls {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
 /* The headers a declaration is spoken to with, under its URL: a block of its
    own inside the row, because what is being read there is one declaration and
    the headers are a list inside it. Quieter than the row's own labels — it is a

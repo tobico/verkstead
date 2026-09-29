@@ -3257,7 +3257,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // The answer to the save, which is the other shape this page reads: the
     // settings as they now stand, and the account GitHub said the token is.
-    write("settings-saved.json", &pin_written_at(&saved, "settings"));
+    write(
+        "settings-saved.json",
+        &pin_tried(&pin_written_at(&saved, "settings")),
+    );
     write(
         "settings.json",
         &pin_written_at(&get(&app, "/api/ui/settings").await, ""),
@@ -3749,6 +3752,42 @@ fn pin_written_at(json: &str, under: &str) -> String {
         "no saved token here to pin:\n{settings}"
     );
     settings["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin what came of trying the two declarations, which is what the *network*
+/// would otherwise decide — `pin_health` below, said about a socket.
+///
+/// The fixture declares `mcp.example.com`, which is a name reserved so that it
+/// is nobody's: what happens when this server speaks to it is a resolver's
+/// answer and a machine's connectivity, so the real outcome is a different
+/// sentence on every machine and a diff on every run. What is pinned is the
+/// pair the page has the most to draw — one reached and naming itself, one
+/// refused — because both are shapes it has to say something about, and a
+/// fixture where both said the same would prove only one of them. That the
+/// server really tries them, and what it makes of each way one can fail, is
+/// `tests/settings.rs`'s subject.
+fn pin_tried(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert_eq!(
+        payload["tried"].as_array().map(Vec::len),
+        Some(2),
+        "no pair of declarations was tried here to pin:\n{payload}"
+    );
+
+    payload["tried"] = serde_json::json!([
+        { "server": "docs", "outcome": { "Reached": { "named": "Docs MCP" } } },
+        {
+            "server": "tickets",
+            "outcome": {
+                "Refused": {
+                    "why": "It did not answer: failed to lookup address information.",
+                },
+            },
+        },
+    ]);
 
     serde_json::to_string(&payload).unwrap()
 }

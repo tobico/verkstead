@@ -59,6 +59,15 @@
 //! A refusal is the whole request refused: nothing is written, and what comes
 //! back names the row and the box it is about. So it is drawn at that row, with
 //! everything the human typed left where they left it.
+//!
+//! **And a save that lands speaks to every declaration it wrote down**, once,
+//! and each row says what came of that under its URL — the way the Git pane
+//! says who the token it just saved authenticates as. It is a report rather
+//! than a refusal: a server that would not answer is drawn as one that is
+//! declared and was not reached, because it may be reachable from inside a
+//! session's network and never from here. Nothing is tried when a server is
+//! attached or when a session launches, so this is the only place the page ever
+//! hears whether one answers.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Index, Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
@@ -72,6 +81,7 @@ import type {
   McpServersEdit,
   ServerField,
   ServerRefused,
+  ServerTried,
   SettingsSaved,
   SettingsView,
 } from "../api/types";
@@ -250,6 +260,16 @@ export function McpServersPane(props: {
   // sent rather than what is on the page.
   const [refusals, setRefusals] = createSignal<ServerRefused[]>([]);
 
+  // And what came of speaking to each declaration the last save wrote down,
+  // by name. Emptied as the next save goes out, for the reason the refusals
+  // above are: it describes what was saved rather than what is on the page.
+  //
+  // By name rather than by row, unlike those: a try only ever happens on a save
+  // that landed, so every one of these is about a declaration with a name that
+  // is a name — and the rows go back to following the server the moment one
+  // lands, so the row a name is on is the row the server declared it on.
+  const [tries, setTries] = createSignal<ServerTried[]>([]);
+
   const told = (): SettingsView | undefined => settings.data;
 
   /// Everything else in `config.yaml` this pane is not about, as it stands — see
@@ -343,6 +363,32 @@ export function McpServersPane(props: {
     refusals().find((was) => was.server === at && was.field === field)?.why ??
     null;
 
+  /// And what came of speaking to the row standing at `at` when it was last
+  /// saved — `null` on a row no save has spoken to, which is every row until
+  /// one lands and every row of a save that was turned down.
+  const tried = (at: number): ServerTried["outcome"] | null => {
+    const row = drawn()[at];
+
+    return (
+      tries().find((was) => was.server === row?.name.trim())?.outcome ?? null
+    );
+  };
+
+  /// And that answer read the two ways the row draws it: what a server that
+  /// answered said about itself, and the words one that did not was refused in
+  /// — one of the two at a time, and neither until a save has spoken to it.
+  const reached = (at: number): { named: string | null } | null => {
+    const outcome = tried(at);
+
+    return outcome && "Reached" in outcome ? outcome.Reached : null;
+  };
+
+  const unreached = (at: number): string | null => {
+    const outcome = tried(at);
+
+    return outcome && "Refused" in outcome ? outcome.Refused.why : null;
+  };
+
   /// Whether a row is a declaration at all, which is whether anything was
   /// written in either box. Emptiness is decided the way the server decides it —
   /// by what is left after the spaces — so the two halves agree about which rows
@@ -429,6 +475,10 @@ export function McpServersPane(props: {
       setRows(null);
       setRefusals([]);
 
+      // And what came of speaking to each of them, which is what the rows say
+      // beside themselves until the next save.
+      setTries(saved.tried);
+
       // Taken from the answer rather than asked for again: what a save comes
       // back with *is* a fresh read of the two files, so a second read would
       // learn nothing and could only disagree with what is on screen.
@@ -443,6 +493,11 @@ export function McpServersPane(props: {
     // being made now: the answer to this one says what is wrong with what is
     // being sent this time.
     setRefusals([]);
+
+    // And so did what the last one made of speaking to them, for the same
+    // reason: the answer to this press says what these declarations are, and a
+    // line left standing would be about the ones before them.
+    setTries([]);
 
     // And a row nobody wrote anything in is not a declaration, so it goes before
     // the list is read off the page — see [`tidied`].
@@ -536,6 +591,37 @@ export function McpServersPane(props: {
                       <Show when={trouble(at, "Url")}>
                         {(why) => (
                           <ErrorLine class={styles.trouble}>{why()}</ErrorLine>
+                        )}
+                      </Show>
+
+                      {/* And what came of speaking to it when it was saved,
+                          under the box it is about: a declaration is tried
+                          once, here, and it is saved either way — a server
+                          that cannot be reached from this machine may be
+                          reachable from inside a session's network. */}
+                      <Show when={reached(at)}>
+                        {(answered) => (
+                          <p class={styles.reached}>
+                            <Show
+                              when={answered().named}
+                              fallback={<>It answered when it was saved.</>}
+                            >
+                              {(named) => (
+                                <>
+                                  It answered when it was saved, calling itself{" "}
+                                  <span class={styles.calls}>{named()}</span>.
+                                </>
+                              )}
+                            </Show>
+                          </p>
+                        )}
+                      </Show>
+                      <Show when={unreached(at)}>
+                        {(why) => (
+                          <ErrorLine class={styles.unreached}>
+                            It is declared, but it was not reached when it was
+                            saved. {why()}
+                          </ErrorLine>
                         )}
                       </Show>
 

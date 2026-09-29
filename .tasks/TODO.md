@@ -23,5 +23,5 @@ are allowed; an unreachable server never holds a launch.
 - [x] 03: A Claude session runs with it — [details](03-a-claude-session-runs-with-it.md)
 - [x] 04: Headers, as secrets — [details](04-headers-as-secrets.md)
 - [x] 05: Codex, Grok and OpenCode — [details](05-codex-grok-and-opencode.md)
-- [ ] 06: Try a server on save — [details](06-try-a-server-on-save.md)
+- [x] 06: Try a server on save — [details](06-try-a-server-on-save.md)
 - [ ] 07: The compose page — [details](07-the-compose-page.md)

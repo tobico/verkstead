@@ -4944,6 +4944,15 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
 /// pasted once, out of a page that will not show it again, and a verification
 /// that failed on the network is no reason to make the human go back for
 /// another one.
+///
+/// And the declarations a save wrote down are tried the same way and for the
+/// same reason — one MCP `initialize` apiece, with that declaration's own
+/// headers — see [`crate::mcp`]. It is the one thing this handler does that is
+/// neither a file nor a process, so it happens on the runtime rather than on the
+/// blocking hop, after the hop has said what there is to speak to. A save from
+/// another section speaks to nothing, that one saying nothing about the
+/// declarations; a save that was refused speaks to nothing either, nothing
+/// having been written down to speak to.
 async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
@@ -5016,15 +5025,21 @@ async fn save_settings(
         };
 
         if !refused.is_empty() || !refused_servers.is_empty() {
-            return Ok(SettingsSaved {
-                // How things stand, which is how they stood: nothing was
-                // written, and the page draws the errors over what the human
-                // still has in front of them.
-                settings: as_told(&settings, caches_compiles, &installed),
-                verified: None,
-                refused,
-                refused_servers,
-            });
+            return Ok((
+                SettingsSaved {
+                    // How things stand, which is how they stood: nothing was
+                    // written, and the page draws the errors over what the human
+                    // still has in front of them.
+                    settings: as_told(&settings, caches_compiles, &installed),
+                    verified: None,
+                    refused,
+                    refused_servers,
+                    // And nothing was spoken to. A refusal is the whole request
+                    // refused, so there is no declaration written down to try.
+                    tried: Vec::new(),
+                },
+                Vec::new(),
+            ));
         }
 
         settings.save_config(
@@ -5138,19 +5153,58 @@ async fn save_settings(
             Err(trouble) => Verified::Refused { why: trouble.why() },
         });
 
-        Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings, caches_compiles, &installed),
-            verified,
-            // Nothing turned down: a save that got this far was one there was
-            // nothing wrong with — of either list.
-            refused: Vec::new(),
-            refused_servers: Vec::new(),
-        })
+        // And the declarations this save wrote down, each with the header values
+        // just written beside it — which is what is spoken to below. Read back
+        // off the two files rather than built out of what came in, the way the
+        // view that rides back is: the files are the source of truth, and what a
+        // session would be handed is what is worth trying.
+        //
+        // Empty where the save said nothing about the declarations, which is
+        // every save from another section: this is a check at save, and a save
+        // about an email address is not one.
+        let config = settings.config();
+        let trying = match &edit.mcp_servers {
+            McpServersEdit::Keep => Vec::new(),
+            McpServersEdit::Set { .. } => {
+                let declared: Vec<_> = config
+                    .mcp_servers()
+                    .iter()
+                    .filter_map(|server| Some(server.name()?.to_owned()))
+                    .collect();
+
+                config.attached_among(&declared, &settings.secrets())
+            }
+        };
+
+        Ok::<_, std::io::Error>((
+            SettingsSaved {
+                settings: as_told(&settings, caches_compiles, &installed),
+                verified,
+                // Nothing turned down: a save that got this far was one there was
+                // nothing wrong with — of either list.
+                refused: Vec::new(),
+                refused_servers: Vec::new(),
+                // Filled in below, off the runtime rather than off this thread:
+                // trying a server is a request over the network, which is the one
+                // thing in this handler that is neither a file nor a process.
+                tried: Vec::new(),
+            },
+            trying,
+        ))
     })
     .await;
 
     match saved {
-        Ok(Ok(saved)) => Json(saved).into_response(),
+        Ok(Ok((mut saved, trying))) => {
+            // After the writing and never before it — see [`crate::mcp`]: a URL
+            // is typed once beside a token that will not be shown again, and a
+            // server that could not be reached this minute is still a
+            // declaration worth keeping. So this says what happened when each
+            // was spoken to, and changes nothing about what was saved.
+            saved.tried = crate::mcp::tried(&trying).await;
+
+            Json(saved).into_response()
+        }
         // The one way this fails: a file that would not be written. Something to
         // try again rather than something to read, so it is a status code and
         // not a named outcome — and worth saying loudly, because a settings page

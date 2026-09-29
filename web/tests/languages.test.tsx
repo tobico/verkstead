@@ -113,7 +113,13 @@ function theSettings(
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null, refused: [], refused_servers: [] };
+  return {
+    settings: standing,
+    verified: null,
+    refused: [],
+    refused_servers: [],
+    tried: [],
+  };
 }
 
 function sent(fetching: ReturnType<typeof serving>): unknown {

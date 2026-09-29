@@ -484,6 +484,19 @@ that one being nothing the session was launched with.
 harness makes of a server that will not answer is said inside it. A declaration
 is tried once on save, while the human is looking at the page, and that is a
 report rather than a refusal.
+**What the try is**: one MCP `initialize` over streamable HTTP, made by the
+Verkstead server itself with the declaration's own headers, after the save has
+been written and under a short deadline of its own — so a server that never
+answers cannot hold the press. The section says one of two things beside the
+server: **reached**, with the name the server gives for itself where it gives
+one, or **refused**, with which of the three ways it went wrong — it did not
+answer, it answered with a status that means the headers were not accepted, or
+what answered was not an MCP server. **It saves either way**; refusing the save
+was considered and turned down, a server unreachable from here being one that
+may be reachable tomorrow or only from inside a session's network. Nothing the
+server sent back is quoted, the header values being secrets and an error message
+being somewhere one could be echoed. And nothing is tried when a server is
+attached or when a session launches: this is a check at save and nowhere else.
 _Avoid_: tool server, integration, plugin, extension, connector
 
 **Build Cache**:

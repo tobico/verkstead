@@ -4136,6 +4136,30 @@ why: string, };
 export type ServerRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
+ * What came of trying one declared server as it was saved.
+ *
+ * The token's [`Verified`] said about a server, and for the reason that is
+ * carried back with a save rather than fetched afterwards: the moment a URL is
+ * typed is the moment a wrong one is worth saying something about, and the
+ * human is looking at the page then.
+ *
+ * **It is saved either way.** The outcome is told rather than enforced — a
+ * server that cannot be reached today is still declared, because it may be
+ * reachable tomorrow or only from inside a session's network. And it is tried
+ * here and nowhere else: an unreachable server never holds a launch, which is
+ * ADR-0021's.
+ */
+export type ServerTried = { 
+/**
+ * The declaration this is about, by the name it was saved under.
+ */
+server: string, 
+/**
+ * And what came of it.
+ */
+outcome: Tried, };
+
+/**
  * One stored Question Set as the browser receives it: the document where this
  * build can still read what was asked, and the record itself where it cannot.
  *
@@ -4398,7 +4422,19 @@ refused: Array<RuleRefused>,
  * what this says and what `refused` says are both drawn over what the human
  * still has in front of them.
  */
-refused_servers: Array<ServerRefused>, };
+refused_servers: Array<ServerRefused>, 
+/**
+ * And what came of speaking to each declaration that *was* written down,
+ * in the order they were declared — empty on every save that said nothing
+ * about them, and on one that was turned down, nothing having been written
+ * to speak to.
+ *
+ * By name rather than by position, unlike the two lists above: this is
+ * only ever about declarations that landed, so each of them has a name
+ * that is a name and no two share one — see [`McpServer`], where the name
+ * is the identity.
+ */
+tried: Array<ServerTried>, };
 
 /**
  * The settings as they stand, read off the two files at the moment they are
@@ -5595,6 +5631,24 @@ whole: boolean,
  * and the shape of it is [`Cursor`]'s business alone.
  */
 cursor: string, };
+
+/**
+ * Whether a declaration answered, and what it called itself or why it did not.
+ *
+ * **Nothing the server sent back is quoted in a refusal.** What it is spoken
+ * to with are the header values, which are secrets — see [`McpHeader`] — and a
+ * service that echoed one into an error message would otherwise put it on the
+ * page. So a refusal is Verkstead's own words about which of the three ways it
+ * went wrong, and the one thing carried over from the server itself is the
+ * name it gives for itself, which is what `initialize` is asked for.
+ */
+export type Tried = { "Reached": { 
+/**
+ * The name it gives for itself, where it gives one — `serverInfo.name`
+ * in what it answered. `null` on a server that named itself nothing,
+ * which is one that is reachable and says so in fewer words.
+ */
+named: string | null, } } | { "Refused": { why: string, } };
 
 /**
  * One thing that was said, or done, or put.

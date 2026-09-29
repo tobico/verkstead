@@ -34,6 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   McpServer,
   ServerRefused,
+  ServerTried,
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
@@ -116,19 +117,39 @@ function theSettings(
 function holding(
   standing: SettingsView,
   mcp_servers: McpServer[],
+  tried: ServerTried[] = [],
 ): SettingsSaved {
   return {
     settings: { ...standing, mcp_servers },
     verified: null,
     refused: [],
     refused_servers: [],
+    // What came of speaking to each of them, which every save that landed
+    // carries — empty where the test is not about that.
+    tried,
   };
+}
+
+/// One declaration reached, by the name it gave for itself.
+function reached(server: string, named: string | null = null): ServerTried {
+  return { server, outcome: { Reached: { named } } };
+}
+
+/// And one that was not, in the words it was refused in.
+function unreached(server: string, why: string): ServerTried {
+  return { server, outcome: { Refused: { why } } };
 }
 
 /// And what a save that was turned down answers with: nothing written, so the
 /// settings are how they stood, and one row named.
 function turnedDown(...refused_servers: ServerRefused[]): SettingsSaved {
-  return { settings: TOLD, verified: null, refused: [], refused_servers };
+  return {
+    settings: TOLD,
+    verified: null,
+    refused: [],
+    refused_servers,
+    tried: [],
+  };
 }
 
 function sent(fetching: ReturnType<typeof serving>): unknown {
@@ -152,8 +173,19 @@ function urlBox(at: number): HTMLInputElement {
   return box!;
 }
 
+function saveButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+}
+
 function save() {
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(saveButton());
+}
+
+/// Wait for the press to be pressable again, which is what a second save has to
+/// do first: the button is disabled while one is in flight, and a click on a
+/// disabled button is a click that never happened.
+async function pressable() {
+  await waitFor(() => expect(saveButton().disabled).toBe(false));
 }
 
 /// The name box of the header standing at `which` on the row at `at`.
@@ -727,5 +759,168 @@ describe("the pane", () => {
 
     expect(note.textContent).toContain("never shown again");
     expect(note.textContent).toContain("keeps what is there");
+  });
+});
+
+/// What came of speaking to each declaration as it was saved, which the section
+/// says beside the server the way the Git pane says who a token authenticates
+/// as.
+///
+/// The thing worth proving here is that it is a *report* rather than a refusal:
+/// a server that would not answer is drawn as one that was saved and not
+/// reached, with the rows following the server exactly as they do after any
+/// save that landed. The words themselves are the server's — what these check
+/// is that the row is the one they are drawn at, and that they go when the next
+/// press does.
+describe("what came of trying them", () => {
+  /// The whole of what a reached server says about itself, which is the name it
+  /// gives — not the name it is declared under.
+  it("says a server answered, by the name it gave", async () => {
+    theSettings(
+      TOLD,
+      json(holding(TOLD, TOLD.mcp_servers, [reached(DECLARED.name, "Docs MCP")])),
+    );
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+
+    const line = await waitFor(() => screen.getByText(/It answered when it was saved/));
+    expect(line.textContent).toContain("Docs MCP");
+  });
+
+  /// And one that named itself nothing is still a server that answered, said in
+  /// fewer words.
+  it("says one that named itself nothing answered all the same", async () => {
+    theSettings(
+      TOLD,
+      json(holding(TOLD, TOLD.mcp_servers, [reached(DECLARED.name)])),
+    );
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+
+    const line = await waitFor(() => screen.getByText(/It answered when it was saved/));
+    expect(line.textContent).not.toContain("calling itself");
+  });
+
+  /// A server that would not answer is a report and not a refusal: the words say
+  /// it is declared, and the rows have gone back to following the server, which
+  /// is what every save that landed does.
+  it("says one that was not reached is declared all the same", async () => {
+    theSettings(
+      TOLD,
+      json(
+        holding(TOLD, TOLD.mcp_servers, [
+          unreached(DECLARED.name, "It did not answer within 5 seconds."),
+        ]),
+      ),
+    );
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+
+    const line = await waitFor(() =>
+      screen.getByText(/It is declared, but it was not reached/),
+    );
+    expect(line.textContent).toContain("It did not answer within 5 seconds.");
+
+    // And the row follows the server again, which is what says nothing was
+    // turned down: what is drawn is what was written rather than what was typed.
+    await waitFor(() => expect(urlBox(0).value).toBe(DECLARED.url));
+  });
+
+  /// Each line is drawn at the row it is about, which is the whole point of
+  /// saying it beside the server rather than under the button.
+  it("draws each answer at the row it is about", async () => {
+    theSettings(
+      TOLD,
+      json(
+        holding(TOLD, TOLD.mcp_servers, [
+          reached(DECLARED.name, "Docs MCP"),
+          unreached(BESIDE.name, "It did not answer: connection refused."),
+        ]),
+      ),
+    );
+    const { container } = mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+
+    await waitFor(() =>
+      expect(container.querySelectorAll(`.${styles.reached}`).length).toBe(1),
+    );
+
+    const rows = container.querySelectorAll(`.${styles.row}`);
+
+    expect(rows[0]!.querySelector(`.${styles.reached}`)).not.toBeNull();
+    expect(rows[0]!.querySelector(`.${styles.unreached}`)).toBeNull();
+    expect(rows[1]!.querySelector(`.${styles.unreached}`)).not.toBeNull();
+  });
+
+  /// And nothing is said before a save has spoken to them: the section is drawn
+  /// from a read, and a read says nothing about whether anything answers.
+  it("says nothing about a declaration no save has tried", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => urlBox(0));
+
+    expect(container.querySelector(`.${styles.reached}`)).toBeNull();
+    expect(container.querySelector(`.${styles.unreached}`)).toBeNull();
+  });
+
+  /// And what the last press learned goes with the next one: the answer to this
+  /// save says what these declarations are, and a line left standing would be
+  /// about the ones before them.
+  it("drops what the last save learned as the next goes out", async () => {
+    const fetching = theSettings(
+      TOLD,
+      json(holding(TOLD, TOLD.mcp_servers, [reached(DECLARED.name, "Docs MCP")])),
+      // The second press is answered without the page ever being told what came
+      // of it, which is the save still in flight.
+      () => new Promise<Response>(() => {}),
+    );
+    mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+    await waitFor(() => screen.getByText(/It answered when it was saved/));
+    await pressable();
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/other" } });
+    save();
+
+    await waitFor(() =>
+      expect(screen.queryByText(/It answered when it was saved/)).toBeNull(),
+    );
+
+    expect(fetching).toHaveBeenCalled();
+  });
+
+  /// And a save that was turned down says nothing either: nothing was written,
+  /// so there was no declaration to speak to.
+  it("says nothing where the save was turned down", async () => {
+    theSettings(
+      TOLD,
+      json(turnedDown({ server: 0, field: "Name", why: "that is taken" })),
+    );
+    const { container } = mountPane();
+    await waitFor(() => urlBox(0));
+
+    fireEvent.input(urlBox(0), { target: { value: "https://docs.internal/mcp" } });
+    save();
+
+    await waitFor(() => screen.getByText("that is taken"));
+
+    expect(container.querySelector(`.${styles.reached}`)).toBeNull();
+    expect(container.querySelector(`.${styles.unreached}`)).toBeNull();
   });
 });

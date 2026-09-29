@@ -79,6 +79,16 @@
 //! header. A value box left blank keeps what is there, so correcting a URL does
 //! not take a key away.
 //!
+//! **And a declaration that is written down is then tried**, the way a token
+//! that is written down is: one MCP `initialize` over streamable HTTP, made by
+//! this server with the declaration's own headers, after the save has landed
+//! and never before it. What comes back is per server and says one of two
+//! things — reached, with the name the server gives for itself, or refused,
+//! with which of the three ways it went wrong. A report rather than a refusal:
+//! the declaration is saved either way, because a server that cannot be reached
+//! from here may be reachable from inside a session's network. See
+//! [`ServerTried`].
+//!
 //! What is different is which way a refusal points. A rule that will not compile
 //! silences nothing while reading as though it silenced something; a name that
 //! is taken would leave a Conversation's chip pointing at either of two servers.
@@ -564,6 +574,65 @@ pub struct SettingsSaved {
     /// what this says and what `refused` says are both drawn over what the human
     /// still has in front of them.
     pub refused_servers: Vec<ServerRefused>,
+
+    /// And what came of speaking to each declaration that *was* written down,
+    /// in the order they were declared — empty on every save that said nothing
+    /// about them, and on one that was turned down, nothing having been written
+    /// to speak to.
+    ///
+    /// By name rather than by position, unlike the two lists above: this is
+    /// only ever about declarations that landed, so each of them has a name
+    /// that is a name and no two share one — see [`McpServer`], where the name
+    /// is the identity.
+    pub tried: Vec<ServerTried>,
+}
+
+/// What came of trying one declared server as it was saved.
+///
+/// The token's [`Verified`] said about a server, and for the reason that is
+/// carried back with a save rather than fetched afterwards: the moment a URL is
+/// typed is the moment a wrong one is worth saying something about, and the
+/// human is looking at the page then.
+///
+/// **It is saved either way.** The outcome is told rather than enforced — a
+/// server that cannot be reached today is still declared, because it may be
+/// reachable tomorrow or only from inside a session's network. And it is tried
+/// here and nowhere else: an unreachable server never holds a launch, which is
+/// ADR-0021's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ServerTried {
+    /// The declaration this is about, by the name it was saved under.
+    pub server: String,
+
+    /// And what came of it.
+    pub outcome: Tried,
+}
+
+/// Whether a declaration answered, and what it called itself or why it did not.
+///
+/// **Nothing the server sent back is quoted in a refusal.** What it is spoken
+/// to with are the header values, which are secrets — see [`McpHeader`] — and a
+/// service that echoed one into an error message would otherwise put it on the
+/// page. So a refusal is Verkstead's own words about which of the three ways it
+/// went wrong, and the one thing carried over from the server itself is the
+/// name it gives for itself, which is what `initialize` is asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Tried {
+    /// It answered `initialize`, which is the whole of what being reachable
+    /// means here.
+    Reached {
+        /// The name it gives for itself, where it gives one — `serverInfo.name`
+        /// in what it answered. `null` on a server that named itself nothing,
+        /// which is one that is reachable and says so in fewer words.
+        named: Option<String>,
+    },
+
+    /// Or it did not, in words to put on the row: it did not answer, it
+    /// answered with a status that means the headers were not accepted, or what
+    /// answered was not an MCP server.
+    Refused { why: String },
 }
 
 /// One class of comment nobody wants an agent addressing.
