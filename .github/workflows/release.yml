@@ -2103,14 +2103,22 @@ jobs:
           fi
 
       # Everything every desktop leg built, under the artifact-name prefix that
-      # keeps it out of the count above. `merge-multiple` again, so `desktop/`
-      # holds the files themselves under the names they will carry as assets.
+      # keeps it out of the count above. `merge-multiple` again, so
+      # `desktop-assets/` holds the files themselves under the names they will
+      # carry as assets.
+      #
+      # `desktop-assets/` rather than `desktop/`, because this job checks the
+      # repository out for the tag below and `desktop/` is already the Electron
+      # app's own directory in it. Downloading over that leaves the installers
+      # sitting among the app's sources, where the step below reads every one of
+      # those sources as an asset that arrived unnamed — and where the upload's
+      # glob would have published them.
       - name: Fetch the desktop artifacts
         uses: actions/download-artifact@v8.0.1
         with:
           pattern: desktop-*
           merge-multiple: true
-          path: desktop
+          path: desktop-assets
 
       # Named rather than counted, which is the other half of the split above.
       # What can go wrong with a desktop artifact is its name — the name is
@@ -2130,7 +2138,7 @@ jobs:
             Verkstead-x86_64.msi
         run: |
           expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
-          found=$(ls -1 desktop 2> /dev/null | sort)
+          found=$(ls -1 desktop-assets 2> /dev/null | sort)
           if [ "$expected" != "$found" ]; then
             echo "::error::The desktop assets are not what this job expects."
             echo "Expected:"
@@ -2198,7 +2206,7 @@ jobs:
             *) prerelease=() ;;
           esac
           gh release create "$TAG" --generate-notes "${prerelease[@]}" \
-            binaries/verkstead-* desktop/*
+            binaries/verkstead-* desktop-assets/*
 
       # What GitHub says it now has, in the log of the run that put it there —
       # the asset names an adopter's url has to match, and whether the tag was
