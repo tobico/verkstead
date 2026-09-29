@@ -17,10 +17,12 @@
 //! being a local id here like any other. So what lands here is three ids of this
 //! database's own, exactly as a composer's presses would have left them.
 //!
-//! **And the row is the whole of what arrives in this stage.** No Timeline, no
-//! Worktree and no branch: a Conversation lands in the state it was in, under
-//! the repository the matching settled, and what fills it is the tasks after
-//! this one.
+//! **And the row is the first of three legs rather than the whole of a move.** A
+//! Conversation lands in the state it was in, under the repository the matching
+//! settled, and what fills it follows against the id this device gave it: the
+//! **slice**, which is the Timeline and everything hanging off it — see
+//! [`super::slices`] — and the **checkout**, which is the branch and the working
+//! changes. What the checkout leaves here is [`arrived_checkout`].
 //!
 //! **Nothing here is refused for the state it is in.** Which states may be moved
 //! is the sending device's rule, asked before the press was allowed at all; what
@@ -212,4 +214,60 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
     tx.commit().await.context("taking a Conversation in")?;
 
     Ok(Some(id))
+}
+
+/// Where the work that arrived was checked out here, and what its branch was cut
+/// from.
+///
+/// **Written after the checkout rather than with the row**, because the two are
+/// two legs of one move: the row is what the far end numbers and the branch is
+/// what it numbers *against* — a Worktree hangs off a Conversation, and there
+/// has to be one here for it to hang from. See the server's
+/// `peer::checkouts`, which is the leg that makes the directory.
+///
+/// **The path is this device's own** and nothing that arrived: a Worktree is a
+/// directory on one machine, so it is never in a slice and never on the wire —
+/// the device taking the work in names its own, under its own Data Directory.
+///
+/// **And the base travels** where the Worktree does not, being a fact about the
+/// work rather than about a machine: what reads it is the commit sweep, which
+/// leaves out everything the base already holds. A copy that landed without it
+/// would report the history under the branch as this Conversation's own.
+///
+/// One transaction, the three being one statement about where the work now is.
+pub async fn arrived_checkout(
+    pool: &SqlitePool,
+    id: i64,
+    worktree: &std::path::Path,
+    base_commit: Option<&str>,
+    base_ref: Option<&str>,
+) -> Result<()> {
+    let mut tx = super::writing(pool, "recording an arriving checkout").await?;
+
+    // Written over whatever is there rather than inserted, the way a start and a
+    // steer write theirs: a record that somehow holds a Worktree already is
+    // corrected to the one just cut.
+    sqlx::query(
+        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+    )
+    .bind(id)
+    .bind(super::repos::text(worktree)?)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the worktree Conversation {id} arrived into"))?;
+
+    sqlx::query("UPDATE conversations SET base_commit = ?, base_ref = ? WHERE id = ?")
+        .bind(base_commit)
+        .bind(base_ref)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording what Conversation {id} branched from"))?;
+
+    tx.commit()
+        .await
+        .context("recording an arriving checkout")?;
+
+    Ok(())
 }

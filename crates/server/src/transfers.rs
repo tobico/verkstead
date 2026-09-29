@@ -30,16 +30,23 @@
 //! over before the answer leaves the Conversation here live and **stopped**, with
 //! a Notice naming what failed, and anything that did reach the far end is swept
 //! rather than left as a half-record somebody has to find. The Worktree here is
-//! left exactly where it is either way — this stage moves the record and the
-//! next ones move the work.
+//! left exactly where it is either way: what a move makes on the far end is a
+//! copy, and the source's own checkout is the thing a failure has to leave
+//! standing.
 //!
-//! **What crosses is the Conversation and its whole record**: the row first —
-//! the Repo the matching settled, the branch, the lifecycle, the Pairings as
-//! ids of the far end's own, the **Rank** verbatim and the **birth key** — and
-//! then the **slice**, which is the Timeline and everything hanging off it,
-//! renumbered as it lands. See [`store::slice`] for what a slice is and
-//! [`record`] for the leg that carries it. The branch and the Worktree are the
-//! tasks after this one.
+//! **What crosses is the Conversation, its whole record and its work**, in three
+//! legs and in that order. The **row** first — the Repo the matching settled,
+//! the branch, the lifecycle, the Pairings as ids of the far end's own, the
+//! **Rank** verbatim and the **birth key** — because it is what the far end
+//! numbers and every id after it is written against that number. Then the
+//! **slice**, which is the Timeline and everything hanging off it, renumbered as
+//! it lands — see [`store::slice`], and [`record`], which is the leg that
+//! carries it. Then the **checkout**: the branch as a bundle packed against what
+//! the far end already holds, and the Worktree's working changes beside it — see
+//! [`checkouts`], which is after the record because a Worktree hangs off a
+//! Conversation and the far end needs one to hang it from.
+
+pub(crate) mod checkouts;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -424,6 +431,12 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         }
     };
 
+    // The branch the checkout is actually on, before anything is written down
+    // anywhere: the row and the bundle both carry the name, and a session that
+    // renamed its branch in the turn that has just ended is a record one name
+    // behind — see [`checkouts::followed`].
+    let conversation = checkouts::followed(state, conversation).await;
+
     let named = relaying::called(state.devices.as_ref(), device).await;
 
     let Some(devices) = state.devices.as_ref() else {
@@ -539,6 +552,17 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     // And the record itself, which is the leg with everything about the work in
     // it. A failure from here on has a copy over there to take back.
     if let Err(saying) = record(state, device, conversation_id, arrived.id).await {
+        return Err(Went {
+            saying,
+            landed: Some(arrived.id),
+        });
+    }
+
+    // Then the work: the branch as a bundle packed against what that device
+    // already holds, and the Worktree's working changes beside it. After the
+    // record because a Worktree hangs off a Conversation and the far end needs
+    // one to hang it from — see [`checkouts`].
+    if let Err(saying) = checkouts::across(state, device, &conversation, repo, arrived.id).await {
         return Err(Went {
             saying,
             landed: Some(arrived.id),

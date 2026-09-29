@@ -78,7 +78,7 @@ pub use archives::{
     Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
     showing_archived, unarchive_conversation,
 };
-pub use arrivals::{Arrival, ArrivingPicked, arrive};
+pub use arrivals::{Arrival, ArrivingPicked, arrive, arrived_checkout};
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,

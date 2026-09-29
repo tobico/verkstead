@@ -13,12 +13,19 @@
 //! press has to arrive while a session is genuinely part way through one, and
 //! what the press promises is that nothing is cut short.
 //!
-//! **What crosses is the Conversation and its whole record** — the row first,
-//! carrying the Repo the matching settled, the branch, the lifecycle, the
-//! Pairings as B's own Profile ids, the Rank verbatim and the birth key; then
-//! the **slice**, which is the Timeline and everything hanging off it, every id
-//! renumbered as it lands. The branch and the Worktree are the tasks after this
-//! one, and nothing here asks after them.
+//! **What crosses is the Conversation, its whole record and its work** — the
+//! row first, carrying the Repo the matching settled, the branch, the lifecycle,
+//! the Pairings as B's own Profile ids, the Rank verbatim and the birth key;
+//! then the **slice**, which is the Timeline and everything hanging off it,
+//! every id renumbered as it lands; then the **checkout**, which is the branch
+//! as a bundle and the Worktree's working changes beside it.
+//!
+//! **And the repositories are two ways round.** The tests about the record hold
+//! two repositories made separately, sharing a name and nothing else, which is
+//! the match doing its work; the tests about the git leg hold a clone of A's on
+//! B, which is what a cluster holding one repository actually looks like — a
+//! bundle packed against a history the far end already has is the whole point of
+//! that leg. See `Repositories`.
 //!
 //! **On the machine this suite is about**: the sandbox is bwrap and the
 //! terminal is a real pseudo-terminal, which is what `tests/sessions.rs` and
@@ -298,6 +305,52 @@ impl Verkstead {
         assert!(registered.contains("Added"), "registering the repository");
 
         path
+    }
+
+    /// The same repository again as a **clone** of `from`, registered here.
+    ///
+    /// Which is the ordinary shape of a cluster: two machines holding the same
+    /// repository, with history in common. What that history is for is the
+    /// bundle — a branch packed against the tips the far end already holds is
+    /// the branch and not the history under it.
+    ///
+    /// **And the clone's `origin` is taken off it**, because a clone has one and
+    /// the machine it was cloned from has none: a Repo with an origin never
+    /// matches one without, so the two would be two repositories. What is left
+    /// is two clones nobody has pushed anywhere, matched by name — which is
+    /// what `Self::repo` sets up on both sides, with the history added.
+    async fn cloned_from(&self, from: &Path) -> PathBuf {
+        let path = self.elsewhere.path().join(REPOSITORY);
+
+        git(
+            self.elsewhere.path(),
+            &["clone", &from.display().to_string(), REPOSITORY],
+        );
+        git(&path, &["remote", "remove", "origin"]);
+        git(&path, &["config", "user.email", "test@verkstead.invalid"]);
+        git(&path, &["config", "user.name", "Verkstead Test"]);
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(registered.contains("Added"), "registering the clone");
+
+        path
+    }
+
+    /// Where that Conversation's work is checked out, as this device's own
+    /// record has it.
+    async fn worktree(&self, conversation: i64) -> PathBuf {
+        store::load_conversation(&self.pool, conversation)
+            .await
+            .unwrap()
+            .expect("the Conversation is on this device")
+            .worktree
+            .expect("work past drafting has a Worktree")
     }
 
     /// An account of this device's own, really on disk, with a Profile saved over
@@ -802,6 +855,35 @@ async fn ready_to_move(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Hold
     (a, b, holding, conversation)
 }
 
+/// The same again with B's repository a **clone** of A's, which is what the git
+/// leg is about: two machines with history in common, so that what crosses is
+/// the branch rather than everything under it.
+///
+/// Every test about the branch and the working changes starts here.
+async fn ready_to_move_from_a_clone(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted(gate, spill, Repositories::Cloned).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// Whether the two machines' repositories share a history.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Repositories {
+    /// Two repositories made separately, sharing a name and nothing else —
+    /// which is every test about the record, where the history is beside the
+    /// point.
+    Apart,
+
+    /// B's is a clone of A's, which is what a cluster holding one repository
+    /// looks like.
+    Cloned,
+}
+
 /// The same, stopped at the draft: the two machines linked and the Conversation
 /// written, with the press that starts it still to come.
 ///
@@ -809,6 +891,15 @@ async fn ready_to_move(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Hold
 /// it is drafting and no longer — and so is where the test about an Attachment
 /// crossing begins.
 async fn ready_to_draft(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted(gate, spill, Repositories::Apart).await
+}
+
+/// Both of the above, and the one thing that differs between them.
+async fn drafted(
+    gate: &Path,
+    spill: &Path,
+    repositories: Repositories,
+) -> (Verkstead, Verkstead, Holding, i64) {
     let a = Verkstead::running(A, &waits_at(gate), spill).await;
     let b = Verkstead::running(B, &waits_at(gate), spill).await;
 
@@ -817,8 +908,12 @@ async fn ready_to_draft(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Hol
     let (machine, os) = this_machine();
     b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
 
-    a.repo().await;
-    b.repo().await;
+    let theirs = a.repo().await;
+
+    match repositories {
+        Repositories::Apart => b.repo().await,
+        Repositories::Cloned => b.cloned_from(&theirs).await,
+    };
 
     let account = a.account().await;
 
@@ -868,6 +963,26 @@ fn git(dir: &Path, args: &[&str]) {
         .expect("git should be on the PATH for these tests");
 
     assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// And run git in `dir` for what it says, which is how this suite reads a
+/// repository back: where a branch stands, and what a checkout is on.
+fn git_says(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}",
+        dir.display(),
+    );
+
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
 /// Whether a row of a merged list is this device's own copy of Conversation
@@ -1496,6 +1611,259 @@ async fn nothing_of_the_source_machine_crosses() {
          the machine's own last grilling",
     );
 }
+
+/// **The branch arrives at the commit it was on**, cut into a Worktree of B's
+/// own — and the bundle that carried it was packed against what B said it held
+/// rather than against nothing.
+///
+/// B's repository is a clone of A's here, which is what a cluster holding one
+/// repository looks like: the history under the branch is already over there,
+/// and what has to cross is the commit the session made. That the bundle leaves
+/// the history behind is `transfers::checkouts`'s own test; what this one is
+/// about is the branch landing where it stood.
+#[tokio::test]
+async fn the_branch_arrives_at_the_commit_it_was_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    // What the session committed, which is the one thing B has not got: the
+    // base under it came with the clone.
+    let worktree = a.worktree(conversation).await;
+
+    std::fs::write(worktree.join("limits.md"), "# Rate limiting\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    let branch = a.view(conversation).await.branch;
+    let at = git_says(&worktree, &["rev-parse", "HEAD"]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let theirs = b.elsewhere.path().join(REPOSITORY);
+
+    assert_eq!(
+        git_says(&theirs, &["rev-parse", &format!("refs/heads/{branch}")]),
+        at,
+        "the branch is at the same commit on both machines",
+    );
+
+    // And it is checked out, at a path B named for itself under its own Data
+    // Directory — never one of A's, which would mean nothing here.
+    let landed = b.worktree(there).await;
+
+    assert!(
+        landed.starts_with(b._dir.path().join("worktrees")),
+        "B cut the Worktree under its own Data Directory: {}",
+        landed.display(),
+    );
+    assert_ne!(landed, worktree, "and at a path of its own choosing");
+
+    assert_eq!(
+        git_says(&landed, &["symbolic-ref", "--short", "HEAD"]),
+        branch,
+        "the checkout is on the branch the work is on",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("limits.md")).unwrap(),
+        "# Rate limiting\n",
+        "and it holds what the session committed",
+    );
+}
+
+/// **Uncommitted changes on A are uncommitted changes on B**, a changed binary
+/// among them, and an untracked file arrives with its bytes unchanged.
+///
+/// Which is why the patch is a binary one: the Diff a Question Set carries is
+/// prose for a human and leaves a changed image out by design, and a move that
+/// carried that diff would land a Worktree missing whatever the session had
+/// done to a fixture.
+#[tokio::test]
+async fn the_uncommitted_changes_arrive_as_they_were() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    // Committed on the branch first, so that there is something for the changes
+    // below to be changes *to*.
+    std::fs::write(worktree.join("notes.md"), "as committed\n").unwrap();
+    std::fs::write(worktree.join("fixture.bin"), COMMITTED_BYTES).unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    // And left uncommitted on top of it, which is what a turn ends with: an
+    // edit, a rewritten binary and a file git has never heard of.
+    std::fs::write(worktree.join("notes.md"), "as the session left it\n").unwrap();
+    std::fs::write(worktree.join("fixture.bin"), LEFT_BYTES).unwrap();
+    std::fs::write(worktree.join("scratch.txt"), "never committed\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let landed = b.worktree(there).await;
+
+    assert_eq!(
+        std::fs::read_to_string(landed.join("notes.md")).unwrap(),
+        "as the session left it\n",
+        "the tracked change crossed",
+    );
+    assert_eq!(
+        std::fs::read(landed.join("fixture.bin")).unwrap(),
+        LEFT_BYTES,
+        "and so did the changed binary, byte for byte",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("scratch.txt")).unwrap(),
+        "never committed\n",
+        "and the untracked file arrived with its bytes unchanged",
+    );
+
+    // And they are uncommitted over there too, which is what they were: a move
+    // that committed them would be a move that changed the work.
+    assert!(
+        !git_says(&landed, &["status", "--porcelain"]).is_empty(),
+        "the far end's tree has uncommitted changes in it, as this one's had",
+    );
+}
+
+/// **A file the far end's own ignore rules cover is not carried.** A `target/`
+/// is the far end's to build, and on the other side of a move it may not even
+/// be the same operating system.
+#[tokio::test]
+async fn a_file_the_far_end_ignores_is_not_carried() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    std::fs::write(worktree.join(".gitignore"), "build/\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(worktree.join("build")).unwrap();
+    std::fs::write(worktree.join("build").join("out"), "a build\n").unwrap();
+    std::fs::write(worktree.join("kept.txt"), "somebody wrote this\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let landed = b.worktree(there).await;
+
+    assert!(
+        !landed.join("build").exists(),
+        "the build stayed behind: {}",
+        landed.display(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("kept.txt")).unwrap(),
+        "somebody wrote this\n",
+        "and the untracked file beside it did not",
+    );
+}
+
+/// **A branch a session renamed arrives under the name the checkout is on.**
+///
+/// Nothing tells Verkstead a session renamed its branch — it is read off the
+/// checkout — and the sweep that ordinarily follows one runs only while a
+/// session does. A move runs at the end of a turn, which is exactly when that
+/// sweep has stopped, so a rename in the last turn is a record one name behind
+/// at precisely the moment the work goes.
+#[tokio::test]
+async fn a_renamed_branch_arrives_under_the_name_the_checkout_is_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+    let invented = a.view(conversation).await.branch;
+
+    // What the naming instruction asks of a first session, done the way a
+    // session does it: in its own checkout, telling nobody.
+    git(&worktree, &["branch", "-m", RENAMED]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_ne!(
+        invented, RENAMED,
+        "the name Verkstead invented is not this one"
+    );
+    assert_eq!(
+        b.view(there).await.branch,
+        RENAMED,
+        "B's copy is on the name the checkout is on",
+    );
+
+    let theirs = b.elsewhere.path().join(REPOSITORY);
+
+    assert_eq!(
+        git_says(&theirs, &["rev-parse", &format!("refs/heads/{RENAMED}")]),
+        git_says(&worktree, &["rev-parse", "HEAD"]),
+        "and the branch over there is that one, at the commit the work is at",
+    );
+    assert_eq!(
+        git_says(
+            &b.worktree(there).await,
+            &["symbolic-ref", "--short", "HEAD"]
+        ),
+        RENAMED,
+        "and so is the checkout B cut",
+    );
+}
+
+/// The fixture as it was committed, and as the session left it — bytes rather
+/// than text, which is the whole point of them: a patch that was not a binary
+/// one would carry neither.
+const COMMITTED_BYTES: &[u8] = &[0x00, 0x01, 0x02, 0x03];
+const LEFT_BYTES: &[u8] = &[0xff, 0xfe, 0x00, 0x7f, 0x80];
+
+/// And what a session renames its branch to, which is nothing Verkstead would
+/// have invented.
+const RENAMED: &str = "rate-limiting";
 
 /// The Set every test here asks, which asks one thing so that there is an Answer
 /// to give it.

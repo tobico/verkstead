@@ -292,6 +292,19 @@ async fn kept(state: &AppState, id: i64, files: &[AttachedFile]) -> anyhow::Resu
 /// An id naming nothing answers as well as one naming something: the sender is
 /// asking for this not to be here, and it is not here.
 pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+    // Where its checkout went, read before the rows that name it are taken away:
+    // a directory nothing points at is one nobody would ever find again. Nothing
+    // is there for a copy swept before the git leg ran, which is most of them.
+    let checkout = match store::closable(&state.pool, id).await {
+        Ok(checkout) => checkout,
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "reading what a half-transferred Conversation had checked out failed");
+
+            None
+        }
+    };
+
     match store::sweep_arrival(&state.pool, id).await {
         Ok(swept) => {
             tracing::info!(
@@ -306,6 +319,21 @@ pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) ->
             // somebody else's attachments under an id nothing names is exactly
             // the leftover this sweep is for.
             Attachments::under(&state.data_dir).remove(id);
+
+            // And the checkout, for that reason again: a Worktree is a directory
+            // this device made for work that turned out never to have arrived.
+            // The branch stays — it is the work itself, and a bundle that landed
+            // is history this repository now has whatever became of the move.
+            if let Some(checkout) = checkout {
+                if let Some(worktree) = checkout.worktree {
+                    let repo = checkout.repo;
+
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::worktrees::remove(&repo, &worktree)
+                    })
+                    .await;
+                }
+            }
 
             state
                 .nudges

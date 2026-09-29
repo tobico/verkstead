@@ -406,6 +406,28 @@ later rather than a Pairing anything is about to run under. A record is prose
 and binary and can be large, so it crosses under a bound of its own and is
 refused whole rather than in part, naming the Conversation that was too big to
 move.
+**And then the work, in a third leg after the record** — because a Worktree hangs
+off a Conversation and the far end needs one to hang it from. The far end is
+asked first what it already holds of the matched Repo, the tips of its refs, and
+the branch is packed as a **git bundle** against exactly that: a machine that
+cloned the same repository yesterday is sent the branch rather than the history
+under it, and one standing on the branch's own tip is sent no bundle at all and
+just writes the ref. Beside it go the working changes, which are two different
+things. Tracked changes travel as a **binary patch** — `git diff --binary`
+against `HEAD`, which is what carries a changed image or a compiled fixture, and
+what the **Diff** a Question Set carries deliberately leaves out. Untracked files
+git does not ignore travel as raw bytes, each by its path relative to the
+Worktree; **ignored files stay behind** and the far end builds its own, and a
+file the far end's *own* rules cover is not written there either. The far end
+fetches the bundle, cuts the Worktree under its own Data Directory at a path it
+names itself, applies the patch and writes the untracked files: nothing that
+arrives is ever joined onto a directory there as a path, the way the memory sync
+names its own parts. Line endings need nothing done to them — a binary patch is
+index form, so `git apply` puts back whatever working-tree convention the far end
+keeps, and untracked files are converted by neither end. **And the branch is
+followed where a session renamed it**: what goes over is the name the checkout is
+actually on rather than the name the record was written with, read off the
+checkout before either leg is composed.
 _Avoid_: migrate, hand off, sync, failover
 
 **Worktree**:
@@ -417,9 +439,10 @@ reading.
 A Conversation may have more than one: its own, and one per Companion Repo,
 made when its own is made and given back when its own is. A steered
 Conversation keeps the one it has; where the directory has gone, one is checked
-out again on the branch that was worked, which is one of the two times a
+out again on the branch that was worked, which is one of the three times a
 Worktree is made without a branch being made with it — a read-only companion's,
-checked out detached, is the other.
+checked out detached, is the second, and the one a **Transfer** cuts on arrival
+is the third, its branch having come over in the bundle.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
 hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they

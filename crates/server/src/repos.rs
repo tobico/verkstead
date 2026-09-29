@@ -591,6 +591,22 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// `git diff --no-index` exits 1 when the two files differ, which for the
 /// untracked file [`crate::diffs`] asks it about is the ordinary case.
 pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String> {
+    // Paths and patches are whatever bytes the filesystem holds; a Set is UTF-8
+    // either way, so anything else is replaced rather than refused.
+    bytes(dir, args, ok).map(|stdout| String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// And the same run again with the bytes kept as bytes.
+///
+/// [`accepting`]'s own body, split out for the one reader that must not have
+/// its answer replaced a character at a time: a **git bundle** is a pack file
+/// on standard output, and every byte of it that did not read as UTF-8 would
+/// come back as a replacement character and the bundle would not open — see
+/// `crate::transfers::checkouts`.
+///
+/// Every other reader here is asking for text and takes [`accepting`], which is
+/// this with the lossy read on the end.
+pub(crate) fn bytes(dir: &Path, args: &[&str], ok: &[i32]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         // Reading a repository should never take a lock on it: an agent may well
         // be working in this one right now.
@@ -607,9 +623,7 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
         return None;
     }
 
-    // Paths and patches are whatever bytes the filesystem holds; a Set is UTF-8
-    // either way, so anything else is replaced rather than refused.
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    Some(output.stdout)
 }
 
 /// And the same run again with something written to it, which is the one git

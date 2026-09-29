@@ -15,6 +15,11 @@
 //! role runs under is a Profile row here, a mirror being one like any other, and
 //! a role picked away is a choice rather than an empty picker.
 //!
+//! And the **checkout**, which lands in a leg of its own after the row and is
+//! the other place the two devices' worlds have to be kept apart: the Worktree
+//! is a path of *this* machine's and is in nothing that crossed, while the base
+//! the branch was cut from is a fact about the work and came with it.
+//!
 //! The sweep is the other half of a failure being safe. A copy that reached here
 //! and whose move then fell over was never the human's to look at, so the device
 //! that sent it takes it back — which the archive does not authorise and does
@@ -265,3 +270,62 @@ async fn sweeping_something_that_is_not_there_is_not_a_failure() {
         "what the sender is asking for is that it not be here, and it is not",
     );
 }
+
+/// **The checkout is written down after the row**, which is the order the two
+/// legs of a move go in: the row is what the sending device numbers, and the
+/// branch is what it numbers *against*.
+///
+/// The path is this device's own and is never in what arrived — a Worktree is a
+/// directory on one machine, so it is in no slice and on no wire. The base is
+/// the other way round: what the branch was cut from is a fact about the work,
+/// and a copy that landed without it would report the history under the branch
+/// as this Conversation's own.
+#[tokio::test]
+async fn the_checkout_lands_against_the_row_that_arrived_before_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let profile = profile(&pool, "work").await;
+
+    let landed = arrive(&pool, &arriving(repo, profile))
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    let held = load_conversation(&pool, landed)
+        .await
+        .unwrap()
+        .expect("the Conversation that just landed");
+
+    assert_eq!(
+        held.worktree, None,
+        "the row arrives with nowhere to work, the checkout being a leg of its own",
+    );
+    assert_eq!(held.base_commit, None, "and with no base under it yet");
+
+    let here = Path::new("/here/data/worktrees/verkstead-rate-limiting");
+
+    verkstead_store::arrived_checkout(&pool, landed, here, Some(BASE), Some("main"))
+        .await
+        .unwrap();
+
+    let held = load_conversation(&pool, landed)
+        .await
+        .unwrap()
+        .expect("the Conversation the checkout landed against");
+
+    assert_eq!(
+        held.worktree.as_deref(),
+        Some(here),
+        "the work is checked out where this device put it",
+    );
+    assert_eq!(
+        held.base_commit.as_deref(),
+        Some(BASE),
+        "and the branch says what it was cut from",
+    );
+    assert_eq!(held.base_ref.as_deref(), Some("main"), "and off what");
+}
+
+/// What the branch was cut from on the machine the work came off, which is the
+/// same commit in every copy of a repository.
+const BASE: &str = "1c1ca65983a10208a9fec4326867f434ffeefdb5";

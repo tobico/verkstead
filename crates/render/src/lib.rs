@@ -107,8 +107,8 @@ pub use transcript::{
     rollout_cwd, statements, transcript_after, transcript_view, turns,
 };
 pub use transfer::{
-    Arrived, BirthKey, ConversationAcross, HarnessThere, Lacking, PairingAcross, PairingRole,
-    PickedAcross, Preflight, ProfileAcross, Transferring,
+    Arrived, BirthKey, CheckoutAcross, ConversationAcross, HarnessThere, Lacking, PairingAcross,
+    PairingRole, PickedAcross, Preflight, ProfileAcross, TipsThere, Transferring, UntrackedFile,
 };
 pub use update::UpdateNotice;
 pub use view::{

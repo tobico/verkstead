@@ -1265,7 +1265,12 @@ fn inside_git(root: &Path, path: &Path) -> bool {
 /// is not a repository, a repository mid-rebase — ignores nothing, so the
 /// folder lists whole. What that costs is a `target/` drawn in the tree of a
 /// checkout that was not a checkout, and what a refusal would cost is the tree.
-fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
+///
+/// **Shared with the arriving half of a transfer**, which asks the same question
+/// of a Worktree it has just cut: the untracked files a move carries were picked
+/// out by the *sending* machine's rules, and what a checkout here shows is this
+/// machine's — see `crate::peer::checkouts`.
+pub(crate) fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
     let asked: String = asking.iter().map(|ask| format!("{ask}\0")).collect();
 
     if asked.is_empty() {

@@ -76,6 +76,7 @@
 
 pub mod account;
 pub mod announcing;
+pub mod checkouts;
 pub mod dialling;
 pub mod exchange;
 pub mod harnesses;

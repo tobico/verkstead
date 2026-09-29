@@ -253,3 +253,113 @@ pub struct ProfileAcross {
 pub struct Arrived {
     pub id: i64,
 }
+
+/// What a device already holds of one repository: the commit ids at its refs.
+///
+/// **The negotiation the bundle is packed against.** A machine that cloned the
+/// same repository yesterday holds nearly everything the branch stands on, so
+/// what has to cross is the branch and not the history under it — and the only
+/// end that can say what it holds is the far end. See
+/// [`CheckoutAcross::bundle`].
+///
+/// **The tips rather than the refs.** What a bundle's prerequisites are is
+/// commits, and a ref's *name* on the far end is that machine's own business —
+/// a branch of somebody else's work there is as good a prerequisite as any, and
+/// naming it would be this device reading somebody's branch list for nothing.
+///
+/// **And the most recently moved first**, bounded rather than whole: a
+/// repository worked in for years holds thousands of refs, nearly all of them at
+/// commits some other tip already reaches, and the ones a transfer is packed
+/// against are the ones somebody has touched. Past the bound the bundle carries
+/// a little more history than it strictly had to, which costs bytes rather than
+/// correctness.
+///
+/// Not a viewer type: no browser draws this, and the device that asks for it
+/// hands it to git rather than to a page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TipsThere {
+    pub tips: Vec<String>,
+}
+
+/// A Conversation's checkout as it crosses the link: the branch, and whatever
+/// was uncommitted in the Worktree it was being worked in.
+///
+/// **Not a viewer type**, for [`ConversationAcross`]'s reason: the two ends of
+/// it are two Verksteads, and what a browser sees of a move is the Timeline it
+/// leaves on both sides.
+///
+/// **And no path of the sending machine is in it.** The far end names its own
+/// Worktree under its own Data Directory — the way the memory sync names its
+/// own parts — so what travels is a branch, some commits and some bytes, and
+/// nothing that could be joined onto a directory over there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckoutAcross {
+    /// The branch the checkout is **actually** on, which is not always the one
+    /// the record was written with: a session renames the branch it was given
+    /// where the name was Verkstead's own, and what goes over is the name it
+    /// now answers to.
+    pub branch: String,
+
+    /// Where that branch stands, so the far end can say whether the bundle put
+    /// it where it was — and so a bundle that was not needed at all still
+    /// leaves a branch behind.
+    pub commit: String,
+
+    /// What the branch was cut from, carried because it is a fact about the
+    /// work rather than about the machine: the commit, and the branch it was
+    /// resolved off where the record kept one.
+    ///
+    /// What reads it is the far end's commit sweep, which leaves out everything
+    /// the base already holds. A copy that arrived without it would report the
+    /// history under the branch as the Conversation's own work.
+    pub base_commit: Option<String>,
+    pub base_ref: Option<String>,
+
+    /// The branch as a git bundle, base64 — packed against exactly the tips the
+    /// far end said it held, so a machine that has the history under the work
+    /// is sent the work.
+    ///
+    /// `None` where the far end already holds every commit of the branch, which
+    /// is a bundle git refuses to make rather than an empty one: what is left to
+    /// do over there is the ref, and [`Self::commit`] is what it is written at.
+    pub bundle: Option<String>,
+
+    /// The tracked changes, as `git diff --binary` against `HEAD`, base64.
+    ///
+    /// **Binary because a Worktree holds binaries**: a changed image or a
+    /// compiled fixture is a change somebody made, and the prose diff a Question
+    /// Set carries leaves it out by design. `None` is a tree with nothing
+    /// uncommitted in it.
+    ///
+    /// The line endings need nothing done to them: a binary patch is written in
+    /// index form and `git apply` re-applies whatever working-tree convention
+    /// the far end keeps, so a tree with `core.autocrlf` on and one with it off
+    /// exchange patches in both directions.
+    pub patch: Option<String>,
+
+    /// And every untracked file git does not ignore, by its path relative to
+    /// the Worktree.
+    ///
+    /// Ignored files stay behind and the far end builds its own — a `target/`
+    /// is the far end's to make, and carrying one would be carrying a build for
+    /// a machine that may not even be the same operating system.
+    pub untracked: Vec<UntrackedFile>,
+}
+
+/// One untracked file on the way across.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UntrackedFile {
+    /// Its path relative to the Worktree, spelled git's way — `/` between the
+    /// segments on every platform, which is what makes one written on Windows
+    /// land on a Unix and back.
+    pub path: String,
+
+    /// Its bytes, base64 — the way an attachment crosses, and for the same
+    /// reason: the envelope is JSON and an untracked file is as likely to be a
+    /// screenshot as a note.
+    ///
+    /// Converted by neither end, which is right for a file git is not tracking:
+    /// there is no attribute to read and no index form to write, so what arrives
+    /// is what was there.
+    pub bytes: String,
+}
