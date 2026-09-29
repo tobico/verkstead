@@ -30,9 +30,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Arrival, ArrivingPicked, Birth, Deletion, Lifecycle, Picked, ProfileFacts, arrive,
-    birth, conversation_rank, conversations, create_profile, delete_conversation,
-    load_conversation, open_database, register_repo, start_conversation, sweep_arrival,
+    Account, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle, Picked,
+    ProfileFacts, arrive, birth, conversation_rank, conversations, create_profile,
+    delete_conversation, load_conversation, open_database, register_repo, start_conversation,
+    sweep_arrival,
 };
 
 /// The device this database belongs to.
@@ -304,7 +305,7 @@ async fn the_checkout_lands_against_the_row_that_arrived_before_it() {
 
     let here = Path::new("/here/data/worktrees/verkstead-rate-limiting");
 
-    verkstead_store::arrived_checkout(&pool, landed, here, Some(BASE), Some("main"))
+    verkstead_store::arrived_checkout(&pool, landed, here, Some(BASE), Some("main"), &[])
         .await
         .unwrap();
 
@@ -324,6 +325,68 @@ async fn the_checkout_lands_against_the_row_that_arrived_before_it() {
         "and the branch says what it was cut from",
     );
     assert_eq!(held.base_ref.as_deref(), Some("main"), "and off what");
+}
+
+/// **And the Companions' checkouts land with it**, on the side table a start
+/// writes them to and in the same transaction: a Conversation that said where its
+/// own work was checked out and not where the repositories beside it went would
+/// be one nothing could bind into a sandbox.
+///
+/// Each carries what it was cut from as well as where it went, which for a
+/// read-only Companion is the commit it is detached at — a Companion's base is a
+/// *name* on its row and a name moves, so this is the only thing that ever
+/// records which commit that name came to.
+#[tokio::test]
+async fn the_companions_checkouts_land_with_the_conversations_own() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let profile = profile(&pool, "work").await;
+
+    let beside = register_repo(&pool, Path::new("/here/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .expect("nothing was registered at that path yet")
+        .id;
+
+    let landed = arrive(&pool, &arriving(repo, profile))
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    let alongside = Path::new("/here/data/worktrees/askance-rate-limiting");
+
+    verkstead_store::arrived_checkout(
+        &pool,
+        landed,
+        Path::new("/here/data/worktrees/verkstead-rate-limiting"),
+        Some(BASE),
+        Some("main"),
+        &[CompanionWorktree {
+            repo_id: beside,
+            path: alongside.to_owned(),
+            base_commit: Some(BASE.to_owned()),
+        }],
+    )
+    .await
+    .unwrap();
+
+    let written: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT repo_id, path, base_commit FROM companion_worktrees WHERE conversation_id = ?",
+    )
+    .bind(landed)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        written,
+        vec![(
+            beside,
+            alongside.display().to_string(),
+            Some(BASE.to_owned()),
+        )],
+        "the companion is checked out where this device put it, off what it came from",
+    );
 }
 
 /// What the branch was cut from on the machine the work came off, which is the

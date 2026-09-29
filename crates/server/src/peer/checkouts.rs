@@ -192,9 +192,26 @@ pub(crate) async fn cut(
         }
     };
 
-    let carried = match unpacked(&arriving) {
+    let (carried, alongside) = match unpacked(&arriving) {
         Ok(carried) => carried,
         Err(why) => return (StatusCode::BAD_REQUEST, format!("{why}\n")).into_response(),
+    };
+
+    // The Companions as *this* device's record has them, which is where the mode
+    // and the base's name are read from: they arrived with the record a leg
+    // earlier, under Repos of this registry.
+    let companions = match store::companions(&state.pool, id).await {
+        Ok(companions) => companions,
+
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id = id, "reading the companions of a Conversation a member is moving here failed");
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read the Conversation's companions\n",
+            )
+                .into_response();
+        }
     };
 
     // The path this device would have cut that work in, named off its own Data
@@ -206,18 +223,41 @@ pub(crate) async fn cut(
         &arriving.branch,
     );
 
-    let repo = conversation.repo.path.clone();
-    let branch = arriving.branch.clone();
-    let at = worktree.clone();
+    let mut making = vec![Making {
+        repo: conversation.repo.path.clone(),
+        path: worktree.clone(),
+        branch: Some(arriving.branch.clone()),
+        companion: None,
+        base_commit: None,
+        carried,
+    }];
+
+    if let Err(why) = beside(&state, id, &companions, alongside, &mut making) {
+        tracing::error!(
+            conversation_id = id,
+            branch = %arriving.branch,
+            "a companion of a Conversation a member is moving here could not be placed: {why}",
+        );
+
+        return (StatusCode::BAD_REQUEST, format!("{why}\n")).into_response();
+    }
 
     // Blocking throughout: a fetch, a checkout of a whole tree and a walk over
-    // the untracked files, none of which belongs on the runtime's threads.
-    let made = tokio::task::spawn_blocking(move || landed(&repo, &at, &branch, &carried)).await;
+    // the untracked files, none of which belongs on the runtime's threads — and
+    // one task for every checkout, because they are made or unmade together. The
+    // plan goes in and comes back rather than being copied into it: what it holds
+    // is the bundles and the patches, which is as much as sixty-four megabytes.
+    let made = tokio::task::spawn_blocking(move || {
+        let outcome = landed(&making);
 
-    match made {
-        Ok(Ok(())) => {}
+        (making, outcome)
+    })
+    .await;
 
-        Ok(Err(why)) => {
+    let making = match made {
+        Ok((making, Ok(()))) => making,
+
+        Ok((_, Err(why))) => {
             tracing::error!(
                 conversation_id = id,
                 branch = %arriving.branch,
@@ -236,28 +276,26 @@ pub(crate) async fn cut(
             )
                 .into_response();
         }
-    }
+    };
 
-    // And where it went, so that everything downstream — a session's binds, the
-    // Code pane, the sweep that removes it — is looking at the directory this
-    // device just made. With what the branch was cut from beside it, which is
-    // what the commit sweep here leaves out of this Conversation's own work.
+    // And where they went, so that everything downstream — a session's binds, the
+    // Code pane, the sweep that removes them — is looking at the directories this
+    // device just made. With what each was cut from beside it, which is what the
+    // commit sweep here leaves out of this Conversation's own work.
     let written = store::arrived_checkout(
         &state.pool,
         id,
         &worktree,
         arriving.base_commit.as_deref(),
         arriving.base_ref.as_deref(),
+        &recorded(&making),
     )
     .await;
 
     if let Err(why) = written {
         tracing::error!(error = ?why, conversation_id = id, "the checkout of an arriving Conversation could not be written down");
 
-        let repo = conversation.repo.path.clone();
-        let at = worktree.clone();
-
-        let _ = tokio::task::spawn_blocking(move || crate::worktrees::remove(&repo, &at)).await;
+        let _ = tokio::task::spawn_blocking(move || taken_back(&making)).await;
 
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -271,6 +309,7 @@ pub(crate) async fn cut(
         branch = %arriving.branch,
         worktree = %worktree.display(),
         untracked = arriving.untracked.len(),
+        companions = arriving.companions.len(),
         "the checkout of a Conversation transferred from a member landed here",
     );
 
@@ -290,17 +329,104 @@ struct Carried {
     untracked: Vec<(String, Vec<u8>)>,
 }
 
+/// And a Companion's, with the Repo of this registry it named beside it.
+struct CarriedAlongside {
+    /// The Repo **here** it is a Companion in, which is the id the sending
+    /// device's matching settled and this device's own `companions` row is
+    /// against.
+    repo: i64,
+
+    /// The branch it is on, or `None` for a read-only Companion, which is
+    /// detached and holds none.
+    branch: Option<String>,
+
+    /// What its checkout was cut from, where the sending device's record knew.
+    base_commit: Option<String>,
+
+    carried: Carried,
+}
+
+/// One checkout this arrival is to make: which repository, where, and what it is
+/// to hold when it is finished.
+///
+/// **Named before anything is made**, which is what a grill start does for the
+/// same reason: a Conversation whose own checkout landed and whose Companion's
+/// did not is one no session could be launched in, so every directory is decided
+/// and then every directory is cut.
+struct Making {
+    /// The repository on this machine it is cut from.
+    repo: PathBuf,
+
+    /// And where it goes, which this device named off its own Data Directory.
+    path: PathBuf,
+
+    /// The branch it is to be on, or `None` for a read-only Companion — which is
+    /// checked out detached at [`Carried::commit`] and has nothing to commit.
+    branch: Option<String>,
+
+    /// The Companion's Repo id here, and `None` for the Conversation's own
+    /// Worktree — which is recorded on the row the store keeps one of per
+    /// Conversation rather than beside the Companions.
+    companion: Option<i64>,
+
+    /// What it was cut from, where the record that came over knows — carried
+    /// through to the row rather than looked up again, a Companion's base being
+    /// a name that moves and this the only thing that says what it came to.
+    ///
+    /// `None` on the Conversation's own, whose base goes on its own row.
+    base_commit: Option<String>,
+
+    carried: Carried,
+}
+
 /// The base64 read back, and every path in it held against what a path arriving
 /// from another machine may be.
 ///
 /// `Err` is the sentence the refusal carries, and it refuses the whole checkout:
 /// a member sending something this device will not write is a move that did not
 /// happen rather than a move that half did.
-fn unpacked(arriving: &CheckoutAcross) -> Result<Carried, String> {
-    if !is_an_object_id(&arriving.commit) {
+fn unpacked(arriving: &CheckoutAcross) -> Result<(Carried, Vec<CarriedAlongside>), String> {
+    let carried = off_the_wire(
+        &arriving.commit,
+        arriving.bundle.as_deref(),
+        arriving.patch.as_deref(),
+        &arriving.untracked,
+    )?;
+
+    let mut alongside = Vec::with_capacity(arriving.companions.len());
+
+    for companion in &arriving.companions {
+        alongside.push(CarriedAlongside {
+            repo: companion.repo,
+            branch: companion.branch.clone(),
+            base_commit: companion.base_commit.clone(),
+            carried: off_the_wire(
+                &companion.commit,
+                companion.bundle.as_deref(),
+                companion.patch.as_deref(),
+                &companion.untracked,
+            )?,
+        });
+    }
+
+    Ok((carried, alongside))
+}
+
+/// One checkout's bytes and paths, read back and judged.
+///
+/// The Conversation's own and each Companion's go through this same reading,
+/// because what arrives is a member's message either way: a commit that is no
+/// commit id and a path that climbs out of the directory are refused here rather
+/// than handed to git.
+fn off_the_wire(
+    commit: &str,
+    bundle: Option<&str>,
+    patch: Option<&str>,
+    files: &[UntrackedFile],
+) -> Result<Carried, String> {
+    if !is_an_object_id(commit) {
         return Err(format!(
-            "the commit {commit} the branch is to stand at is no commit id",
-            commit = arriving.commit,
+            "the commit {commit} the checkout is to stand at is no commit id",
         ));
     }
 
@@ -310,21 +436,12 @@ fn unpacked(arriving: &CheckoutAcross) -> Result<Carried, String> {
             .map_err(|why| format!("the {what} did not read: {why}"))
     };
 
-    let bundle = arriving
-        .bundle
-        .as_deref()
-        .map(|bytes| decoded("bundle", bytes))
-        .transpose()?;
+    let bundle = bundle.map(|bytes| decoded("bundle", bytes)).transpose()?;
+    let patch = patch.map(|bytes| decoded("patch", bytes)).transpose()?;
 
-    let patch = arriving
-        .patch
-        .as_deref()
-        .map(|bytes| decoded("patch", bytes))
-        .transpose()?;
+    let mut untracked = Vec::with_capacity(files.len());
 
-    let mut untracked = Vec::with_capacity(arriving.untracked.len());
-
-    for file in &arriving.untracked {
+    for file in files {
         let UntrackedFile { path, bytes } = file;
 
         if !inside(path) {
@@ -335,11 +452,149 @@ fn unpacked(arriving: &CheckoutAcross) -> Result<Carried, String> {
     }
 
     Ok(Carried {
-        commit: arriving.commit.clone(),
+        commit: commit.to_owned(),
         bundle,
         patch,
         untracked,
     })
+}
+
+/// Put every Companion that arrived beside the Conversation's own checkout, with
+/// a directory of this device's own naming.
+///
+/// **Matched against this device's own `companions` rows** rather than trusted
+/// off the wire: the **mode** is what decides whether a directory holds a branch
+/// or is detached, and the mode is the record's — it arrived with the slice a leg
+/// earlier, under a Repo of this registry. A checkout that arrived in the other
+/// shape from the one its row calls for is refused by name rather than made in the
+/// shape that came, which is how a read-only Companion is kept from being handed a
+/// branch nothing here would ever commit on.
+///
+/// **Every Companion once and every Companion at all.** A row here that nothing
+/// arrived for is a move that would land a Conversation with a repository missing
+/// from under it, and a repository named twice is one directory recorded and
+/// another left behind. Both are refused by name rather than half made: the
+/// sending device reads the refusal as *the move did not happen* and the work
+/// stays where it was.
+///
+/// `making` is added to rather than returned, and it is what stops two Companions
+/// being handed one directory — see [`crate::worktrees::unclaimed_path`], which
+/// is the same claim a grill start makes.
+fn beside(
+    state: &AppState,
+    id: i64,
+    companions: &[store::Companion],
+    arriving: Vec<CarriedAlongside>,
+    making: &mut Vec<Making>,
+) -> Result<(), String> {
+    for carried in arriving {
+        let Some(companion) = companions
+            .iter()
+            .find(|companion| companion.repo.id == carried.repo)
+        else {
+            return Err(format!(
+                "no companion of this Conversation is the repository {repo} the checkout named",
+                repo = carried.repo,
+            ));
+        };
+
+        if making
+            .iter()
+            .any(|made| made.companion == Some(companion.repo.id))
+        {
+            return Err(format!(
+                "the companion {name} arrived twice, which is one repository and two checkouts",
+                name = companion.repo.name,
+            ));
+        }
+
+        // The shape the record calls for, held against the shape that came.
+        match (companion.mode, &carried.branch) {
+            (store::CompanionMode::ReadOnly, Some(branch)) => {
+                return Err(format!(
+                    "the companion {name} is read-only here and arrived on the branch {branch}, \
+                     which is a branch nothing here could ever commit on",
+                    name = companion.repo.name,
+                ));
+            }
+
+            (store::CompanionMode::ReadWrite, None) => {
+                return Err(format!(
+                    "the companion {name} is read-write here and arrived holding no branch, so \
+                     there would be nowhere in it for the work to be committed",
+                    name = companion.repo.name,
+                ));
+            }
+
+            _ => {}
+        }
+
+        // Named for what the checkout holds, as a start names it: the branch
+        // where there is one, and the base's name where the checkout is
+        // detached — a read-only Companion holds no branch to be named for.
+        let holding = carried.branch.clone().unwrap_or_else(|| {
+            companion
+                .base_ref
+                .clone()
+                .unwrap_or_else(|| companion.repo.default_branch.clone())
+        });
+
+        let claimed: Vec<PathBuf> = making.iter().map(|made| made.path.clone()).collect();
+
+        making.push(Making {
+            repo: companion.repo.path.clone(),
+            path: crate::worktrees::unclaimed_path(
+                &state.data_dir,
+                id,
+                &companion.repo.name,
+                &holding,
+                &claimed,
+            ),
+            branch: carried.branch,
+            companion: Some(companion.repo.id),
+            base_commit: carried.base_commit,
+            carried: carried.carried,
+        });
+    }
+
+    // And nothing left behind, which is the reading the other way round: a
+    // Companion on the record with no checkout on the way is a repository the
+    // work needs and this device would have nowhere to do it in.
+    for companion in companions {
+        if !making
+            .iter()
+            .any(|made| made.companion == Some(companion.repo.id))
+        {
+            return Err(format!(
+                "nothing arrived for the companion {name}, which this Conversation's work is \
+                 done alongside",
+                name = companion.repo.name,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Where each Companion's checkout went and what it was cut from, for the record
+/// that follows the work.
+///
+/// The commit as well as the directory, which is a start's rule and the same fact
+/// by it: a Companion's base is a *name* on its row and a name moves, so the
+/// commit that name came to is the only thing that records where a read-only one
+/// is standing. What arrived is what is written, that being a fact about the work
+/// rather than about either machine.
+fn recorded(making: &[Making]) -> Vec<store::CompanionWorktree> {
+    making
+        .iter()
+        .filter_map(|made| {
+            Some(store::CompanionWorktree {
+                repo_id: made.companion?,
+                path: made.path.clone(),
+                base_commit: made.base_commit.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Whether a path off the wire is one that names a file **inside** a Worktree.
@@ -367,16 +622,82 @@ fn inside(path: &str) -> bool {
     })
 }
 
-/// The branch onto this repository, the Worktree cut, and the working changes
-/// put back into it.
+/// Every checkout of the arrival: the Conversation's own, and one per Companion.
+///
+/// **Everything or nothing.** A Companion that would not be made takes back the
+/// ones already there, the Conversation's own among them, because the sending
+/// device reads a refusal as *the move did not happen* and sweeps its copy: a
+/// directory left behind under a Conversation that has been swept is a checkout
+/// nobody can account for.
+///
+/// Blocking, which is what every line of it is.
+fn landed(making: &[Making]) -> Result<(), String> {
+    for (nth, made) in making.iter().enumerate() {
+        if let Err(why) = one(made) {
+            // This one included, and first: a checkout that fell over may have
+            // made its directory and not written into it.
+            taken_back(&making[..=nth]);
+
+            return Err(why);
+        }
+    }
+
+    Ok(())
+}
+
+/// Take back every directory of `made`, the branches staying where they are.
+///
+/// A branch that came out of a bundle is history this repository now has whatever
+/// became of the move, and one that was already here was never this device's to
+/// take away. What goes is the directory, which is the thing that was made for a
+/// move that did not finish.
+fn taken_back(made: &[Making]) {
+    for done in made.iter().rev() {
+        if done.path.exists() {
+            crate::worktrees::remove(&done.repo, &done.path);
+        }
+    }
+}
+
+/// One checkout: the branch onto this repository, the directory cut, and the
+/// working changes put back into it.
 ///
 /// **In that order and no other.** The ref has to be there before a checkout can
 /// be made of it, and the tree has to be there before a patch can be applied to
-/// it. Anything that fails takes the directory back with it: the sending device
-/// reads a refusal as a move that did not happen.
+/// it.
 ///
-/// Blocking, which is what every line of it is.
-fn landed(repo: &Path, worktree: &Path, branch: &str, carried: &Carried) -> Result<(), String> {
+/// **And a read-only Companion is the short way through.** It holds no branch, so
+/// there is no ref to write and no bundle that came: what it needs is the commit
+/// it was detached at, which is refused by name where this device has not got it.
+/// Nothing is applied to it either — a patch to a directory bound read-only would
+/// be changes a session was never able to make.
+fn one(made: &Making) -> Result<(), String> {
+    let Making {
+        repo,
+        path,
+        branch,
+        carried,
+        ..
+    } = made;
+
+    let Some(branch) = branch else {
+        if crate::worktrees::resolve(repo, &carried.commit).is_none() {
+            return Err(format!(
+                "this device does not hold the commit {commit} a read-only companion stands at",
+                commit = carried.commit,
+            ));
+        }
+
+        if !crate::worktrees::add_detached(repo, path, &carried.commit) {
+            return Err(format!(
+                "the commit {commit} could not be checked out on this device",
+                commit = carried.commit,
+            ));
+        }
+
+        return Ok(());
+    };
+
     let named = format!("refs/heads/{branch}");
 
     fetched(repo, &named, carried)?;
@@ -397,22 +718,11 @@ fn landed(repo: &Path, worktree: &Path, branch: &str, carried: &Carried) -> Resu
         None => return Err(format!("{branch} is not in this device's repository")),
     }
 
-    if !crate::worktrees::check_out(repo, worktree, branch) {
+    if !crate::worktrees::check_out(repo, path, branch) {
         return Err(format!("{branch} could not be checked out on this device",));
     }
 
-    match working(worktree, carried) {
-        Ok(()) => Ok(()),
-
-        Err(why) => {
-            // The branch stays — it is the work, and it was there a moment ago
-            // whether or not this device made it — and the directory goes, this
-            // being a checkout that was never finished.
-            crate::worktrees::remove(repo, worktree);
-
-            Err(why)
-        }
-    }
+    working(path, carried)
 }
 
 /// The branch onto this repository: out of the bundle where one came, and off

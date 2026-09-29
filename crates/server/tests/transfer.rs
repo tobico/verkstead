@@ -97,6 +97,10 @@ const MODEL: &str = "claude-opus-5";
 /// pushed anywhere.
 const REPOSITORY: &str = "verkstead";
 
+/// And the **Companion Repo** beside it, where a Conversation's work is in more
+/// than one repository.
+const COMPANION: &str = "askance";
+
 /// The Brief every Conversation here is started from.
 const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 
@@ -293,7 +297,13 @@ impl Verkstead {
     /// has an origin, so what says they are one repository is the directory's own
     /// name.
     async fn repo(&self) -> PathBuf {
-        let path = repository(self.elsewhere.path().join(REPOSITORY));
+        self.repo_called(REPOSITORY).await
+    }
+
+    /// The same again under a name of its own, which is what a **Companion Repo**
+    /// is: a second registered repository beside the Conversation's own.
+    async fn repo_called(&self, name: &str) -> PathBuf {
+        let path = repository(self.elsewhere.path().join(name));
 
         let registered = press(
             &self.workbench,
@@ -302,7 +312,7 @@ impl Verkstead {
         )
         .await;
 
-        assert!(registered.contains("Added"), "registering the repository");
+        assert!(registered.contains("Added"), "registering {name}");
 
         path
     }
@@ -320,11 +330,18 @@ impl Verkstead {
     /// is two clones nobody has pushed anywhere, matched by name — which is
     /// what `Self::repo` sets up on both sides, with the history added.
     async fn cloned_from(&self, from: &Path) -> PathBuf {
-        let path = self.elsewhere.path().join(REPOSITORY);
+        self.cloned_from_called(from, REPOSITORY).await
+    }
+
+    /// And a clone under a name of its own, for a **Companion Repo**: a
+    /// Companion's branch is bundled against what the far end holds of *that*
+    /// repository, so the two ends need a history in common there too.
+    async fn cloned_from_called(&self, from: &Path, name: &str) -> PathBuf {
+        let path = self.elsewhere.path().join(name);
 
         git(
             self.elsewhere.path(),
-            &["clone", &from.display().to_string(), REPOSITORY],
+            &["clone", &from.display().to_string(), name],
         );
         git(&path, &["remote", "remove", "origin"]);
         git(&path, &["config", "user.email", "test@verkstead.invalid"]);
@@ -351,6 +368,38 @@ impl Verkstead {
             .expect("the Conversation is on this device")
             .worktree
             .expect("work past drafting has a Worktree")
+    }
+
+    /// And where its **Companion** in the Repo called `name` is checked out, as
+    /// this device's own record has it.
+    async fn companion_worktree(&self, conversation: i64, name: &str) -> PathBuf {
+        self.companion_row(conversation, name)
+            .await
+            .worktree
+            .unwrap_or_else(|| panic!("the companion {name} has a checkout"))
+    }
+
+    /// The Companion row itself, which is what says the mode a sandbox would bind
+    /// its directory under.
+    async fn companion_row(&self, conversation: i64, name: &str) -> store::Companion {
+        store::companions(&self.pool, conversation)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|companion| companion.repo.name == name)
+            .unwrap_or_else(|| panic!("{name} is a companion of this Conversation"))
+    }
+
+    /// The id this device's registry gave the Repo called `name`.
+    async fn repo_row(&self, name: &str) -> i64 {
+        let repos: Vec<verkstead_render::RepoEntry> =
+            reading(&self.workbench, "/api/ui/repos").await;
+
+        repos
+            .iter()
+            .find(|repo| repo.name == name)
+            .unwrap_or_else(|| panic!("{name} is registered here: {repos:#?}"))
+            .id
     }
 
     /// An account of this device's own, really on disk, with a Profile saved over
@@ -871,6 +920,51 @@ async fn ready_to_move_from_a_clone(
     (a, b, holding, conversation)
 }
 
+/// The same again with a **Companion Repo** beside the Conversation's own, in
+/// `mode`, and a clone of it on B.
+///
+/// Every test about a Companion over the link starts here: the second repository
+/// is registered on both machines with a history in common, the Companion is put
+/// on the Conversation while it is still drafting — which is the only time a
+/// Companion may be added — and the grill start is what cuts its checkout beside
+/// the Conversation's own.
+async fn ready_to_move_alongside(
+    gate: &Path,
+    spill: &Path,
+    mode: store::CompanionMode,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted(gate, spill, Repositories::Cloned).await;
+
+    let theirs = a.repo_called(COMPANION).await;
+    b.cloned_from_called(&theirs, COMPANION).await;
+
+    let beside = a.repo_row(COMPANION).await;
+
+    assert_eq!(
+        store::add_companion(&a.pool, conversation, beside)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+        "putting the companion on the draft",
+    );
+
+    // Read-only is what a companion starts as, so only the other way needs
+    // saying — and saying it is what makes a branch be cut for it at all.
+    if mode == store::CompanionMode::ReadWrite {
+        assert_eq!(
+            store::configure_companion(&a.pool, conversation, beside, store::Change::Mode(mode))
+                .await
+                .unwrap(),
+            store::Configured::Saved,
+            "setting the companion read-write",
+        );
+    }
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
 /// Whether the two machines' repositories share a history.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Repositories {
@@ -963,6 +1057,21 @@ fn git(dir: &Path, args: &[&str]) {
         .expect("git should be on the PATH for these tests");
 
     assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// Whether the checkout at `dir` holds no branch at all, which is the shape a
+/// read-only Companion is given: `git symbolic-ref HEAD` answers with nothing and
+/// fails, there being no name for it to answer with.
+fn detached(dir: &Path) -> bool {
+    !Command::new("git")
+        .args(["symbolic-ref", "--quiet", "HEAD"])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("git should be on the PATH for these tests")
+        .success()
 }
 
 /// And run git in `dir` for what it says, which is how this suite reads a
@@ -1852,6 +1961,278 @@ async fn a_renamed_branch_arrives_under_the_name_the_checkout_is_on() {
         ),
         RENAMED,
         "and so is the checkout B cut",
+    );
+}
+
+/// **A read-write Companion arrives with both trees as they were**: both
+/// branches at their commits, both sets of uncommitted changes applied.
+///
+/// Which is the whole of the previous leg said again about another repository.
+/// What a read-write Companion is, is a repository a session commits in and
+/// leaves uncommitted work in, so nothing about it may be left behind — a
+/// Conversation whose own tree crossed and whose Companion's did not is one the
+/// work cannot go on in.
+#[tokio::test]
+async fn a_read_write_companion_arrives_with_both_trees_as_they_were() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let own = a.worktree(conversation).await;
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    // A commit in each, and then a change left uncommitted on top of it — which
+    // is what a turn ends with in both repositories.
+    for (worktree, said) in [(&own, "the server's work\n"), (&beside, "the library's\n")] {
+        std::fs::write(worktree.join("limits.md"), said).unwrap();
+        git(worktree, &["add", "-A"]);
+        git(worktree, &["commit", "-m", "the work so far"]);
+
+        std::fs::write(worktree.join("limits.md"), format!("{said}and more\n")).unwrap();
+        std::fs::write(worktree.join("scratch.txt"), "never committed\n").unwrap();
+    }
+
+    let branch = a.view(conversation).await.branch;
+    let ours = git_says(&own, &["rev-parse", "HEAD"]);
+    let theirs = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The branch of each repository on B, at the commit it is at on A.
+    for (name, at) in [(REPOSITORY, &ours), (COMPANION, &theirs)] {
+        assert_eq!(
+            &git_says(
+                &b.elsewhere.path().join(name),
+                &["rev-parse", &format!("refs/heads/{branch}")],
+            ),
+            at,
+            "{name}'s branch is at the same commit on both machines",
+        );
+    }
+
+    // And both checkouts, under B's own Data Directory and holding what each
+    // session left: what was committed, and what was not.
+    let landed = b.worktree(there).await;
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert!(
+        alongside.starts_with(b._dir.path().join("worktrees")),
+        "B cut the companion's Worktree under its own Data Directory: {}",
+        alongside.display(),
+    );
+    assert_ne!(alongside, beside, "and at a path of its own choosing");
+    assert_ne!(
+        alongside, landed,
+        "and not the one it cut for the work's own"
+    );
+
+    for (worktree, said) in [
+        (&landed, "the server's work\n"),
+        (&alongside, "the library's\n"),
+    ] {
+        assert_eq!(
+            git_says(worktree, &["symbolic-ref", "--short", "HEAD"]),
+            branch,
+            "the checkout is on the branch the work is on: {}",
+            worktree.display(),
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("limits.md")).unwrap(),
+            format!("{said}and more\n"),
+            "the tracked change crossed: {}",
+            worktree.display(),
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("scratch.txt")).unwrap(),
+            "never committed\n",
+            "and so did the untracked file: {}",
+            worktree.display(),
+        );
+    }
+}
+
+/// **A read-only Companion arrives detached and bound read-only**, at the commit
+/// it was on, with no patch applied to it.
+///
+/// It has nothing to commit and so nothing uncommitted: carrying a patch to one
+/// would be carrying changes a session was never able to make. What says
+/// *read-only* on the far end is the Companion's own row, which crossed with the
+/// record a leg earlier and is what a sandbox binds the directory by.
+#[tokio::test]
+async fn a_read_only_companion_arrives_detached_and_bound_read_only() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadOnly).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+    let at = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    assert!(
+        detached(&beside),
+        "a read-only companion is detached here, which is what it is to arrive as",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert_eq!(
+        git_says(&alongside, &["rev-parse", "HEAD"]),
+        at,
+        "it is at the commit it was at",
+    );
+
+    // Detached, which is what says no branch was taken in somebody's repository
+    // for a directory nothing will ever be committed in.
+    assert!(detached(&alongside), "the companion arrived detached");
+
+    // And nothing was applied to it: the tree is the commit, exactly.
+    assert!(
+        git_says(&alongside, &["status", "--porcelain"]).is_empty(),
+        "no patch was applied to a companion nothing could have written to",
+    );
+
+    assert_eq!(
+        b.companion_row(there, COMPANION).await.mode,
+        store::CompanionMode::ReadOnly,
+        "and the row over there binds it read-only, as the row here did",
+    );
+}
+
+/// **A Companion on the *mirroring* setting arrives under the name a rename gave
+/// it.** Its branch is the Conversation's own, followed as that one is renamed,
+/// so the act that moves the Conversation's name moves this one with it — and
+/// what goes over is the name each checkout is actually on.
+#[tokio::test]
+async fn a_mirroring_companion_arrives_under_the_name_a_rename_gave_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let invented = a.view(conversation).await.branch;
+    let own = a.worktree(conversation).await;
+
+    assert!(
+        a.companion_row(conversation, COMPANION)
+            .await
+            .branch
+            .is_empty(),
+        "the companion is on the mirroring setting, which is what it starts on",
+    );
+
+    // What a first session does when the naming instruction asks it to: rename
+    // its own branch, telling nobody.
+    git(&own, &["branch", "-m", RENAMED]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_ne!(invented, RENAMED, "the invented name is not this one");
+    assert_eq!(
+        b.view(there).await.branch,
+        RENAMED,
+        "B's copy is on the name the checkout is on",
+    );
+    assert_eq!(
+        git_says(
+            &b.companion_worktree(there, COMPANION).await,
+            &["symbolic-ref", "--short", "HEAD"],
+        ),
+        RENAMED,
+        "and so is the companion, the mirror rule resolving to the new name",
+    );
+    assert_eq!(
+        git_says(
+            &b.elsewhere.path().join(COMPANION),
+            &["rev-parse", &format!("refs/heads/{RENAMED}")],
+        ),
+        git_says(
+            &a.companion_worktree(conversation, COMPANION).await,
+            &["rev-parse", "HEAD"],
+        ),
+        "at the commit the companion's work is at",
+    );
+}
+
+/// **Ignored files in a Companion stay behind**, as they do in the Conversation's
+/// own repository: a build is the far end's to make, and on the other side of a
+/// move it may not even be the same operating system.
+#[tokio::test]
+async fn an_ignored_file_in_a_companion_stays_behind() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    std::fs::write(beside.join(".gitignore"), "build/\n").unwrap();
+    git(&beside, &["add", "-A"]);
+    git(&beside, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(beside.join("build")).unwrap();
+    std::fs::write(beside.join("build").join("out"), "a build\n").unwrap();
+    std::fs::write(beside.join("kept.txt"), "somebody wrote this\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert!(
+        !alongside.join("build").exists(),
+        "the companion's build stayed behind: {}",
+        alongside.display(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(alongside.join("kept.txt")).unwrap(),
+        "somebody wrote this\n",
+        "and the untracked file beside it did not",
     );
 }
 

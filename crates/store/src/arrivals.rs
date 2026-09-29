@@ -216,8 +216,8 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
     Ok(Some(id))
 }
 
-/// Where the work that arrived was checked out here, and what its branch was cut
-/// from.
+/// Where the work that arrived was checked out here, its Companions' checkouts
+/// beside it, and what each branch was cut from.
 ///
 /// **Written after the checkout rather than with the row**, because the two are
 /// two legs of one move: the row is what the far end numbers and the branch is
@@ -234,13 +234,19 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
 /// leaves out everything the base already holds. A copy that landed without it
 /// would report the history under the branch as this Conversation's own.
 ///
-/// One transaction, the three being one statement about where the work now is.
+/// **And the Companions go in the same breath**, on the side table a start writes
+/// them to: a Conversation that said where its own work was checked out and not
+/// where the repositories beside it went would be one nothing could bind into a
+/// sandbox. Empty for the ordinary Conversation, which has no Companions.
+///
+/// One transaction, the four being one statement about where the work now is.
 pub async fn arrived_checkout(
     pool: &SqlitePool,
     id: i64,
     worktree: &std::path::Path,
     base_commit: Option<&str>,
     base_ref: Option<&str>,
+    companions: &[super::CompanionWorktree],
 ) -> Result<()> {
     let mut tx = super::writing(pool, "recording an arriving checkout").await?;
 
@@ -264,6 +270,8 @@ pub async fn arrived_checkout(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("recording what Conversation {id} branched from"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
 
     tx.commit()
         .await

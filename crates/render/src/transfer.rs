@@ -344,6 +344,72 @@ pub struct CheckoutAcross {
     /// is the far end's to make, and carrying one would be carrying a build for
     /// a machine that may not even be the same operating system.
     pub untracked: Vec<UntrackedFile>,
+
+    /// And the same leg again for each **Companion Repo**, where a
+    /// Conversation's work is in more than one repository.
+    ///
+    /// **In the one message rather than a call apiece**, because a Conversation
+    /// whose own checkout landed and whose Companion's did not is one no session
+    /// could be launched in: the far end makes every checkout or none, which is
+    /// what a grill start on one machine does.
+    ///
+    /// Empty for the ordinary Conversation, which has no Companions.
+    pub companions: Vec<CompanionCheckoutAcross>,
+}
+
+/// One Companion's checkout on the way across.
+///
+/// **Which Companion it is, is said as a Repo of the receiving device's** — the
+/// match the whole cluster runs on, settled by the end that is going to act on
+/// it, exactly as the Conversation's own Repo crosses. The far end reads the
+/// *mode* off its own `companions` row, which arrived with the record a leg
+/// earlier, and a mode is what decides how a sandbox binds the directory.
+///
+/// **And the two kinds carry different things.** A read-write Companion is a
+/// repository a session commits in and leaves uncommitted work in, so it carries
+/// the whole of what the Conversation's own does: a branch, a bundle, a patch and
+/// its untracked files. A read-only one is checked out detached and bound
+/// read-only — nothing to commit and so nothing uncommitted — so it carries its
+/// commit and nothing else. Carrying a patch to one would be carrying changes a
+/// session was never able to make.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompanionCheckoutAcross {
+    /// The Repo **on the receiving device** this Companion is, as the sending
+    /// device's matching settled it — see [`RepoAcross`](crate::RepoAcross).
+    pub repo: i64,
+
+    /// The branch its checkout is on, or `None` for a read-only Companion,
+    /// which holds no branch at all.
+    ///
+    /// Read off the checkout rather than off the row, which is
+    /// [`CheckoutAcross::branch`]'s rule and the same fact by it: a Companion on
+    /// the empty *mirroring* setting takes its name from the Conversation's, so a
+    /// session's rename in the last turn is a record one name behind at
+    /// precisely the moment the work goes.
+    pub branch: Option<String>,
+
+    /// Where it stands: the branch's tip for a read-write Companion, and the
+    /// commit a read-only one is detached at.
+    pub commit: String,
+
+    /// What its checkout was cut from, where the record knows — a Companion's
+    /// base is a *name* on its row and a name moves, so the commit that name came
+    /// to when the checkout was made is the only thing that ever recorded it.
+    pub base_commit: Option<String>,
+
+    /// Its branch as a git bundle, base64, packed against the tips the far end
+    /// holds of *that* repository — [`CheckoutAcross::bundle`]'s rule, asked of
+    /// a Companion. `None` for a read-only one, and for a far end that holds
+    /// every commit of the branch already.
+    pub bundle: Option<String>,
+
+    /// Its tracked changes as a binary patch, base64. `None` for a read-only
+    /// Companion, which has none to have.
+    pub patch: Option<String>,
+
+    /// And its untracked unignored files. Empty for a read-only Companion, for
+    /// that reason again.
+    pub untracked: Vec<UntrackedFile>,
 }
 
 /// One untracked file on the way across.

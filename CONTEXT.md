@@ -428,6 +428,20 @@ keeps, and untracked files are converted by neither end. **And the branch is
 followed where a session renamed it**: what goes over is the name the checkout is
 actually on rather than the name the record was written with, read off the
 checkout before either leg is composed.
+**Companions travel in the same leg**, each matched on the far end by the rule
+the Conversation's own Repo is matched by and each cut beside the Conversation's
+own checkout there. What differs between the two kinds is what travels: a
+**read-write** Companion is a repository a session commits in and leaves
+uncommitted work in, so it gets the whole of the above — its branch as a bundle
+packed against what the far end holds of *that* repository, a binary patch and
+its untracked unignored files — while a **read-only** one is checked out detached
+and bound read-only and carries its commit and nothing else, a patch to one being
+changes a session was never able to make. A Companion on the empty *mirroring*
+setting moves with the Conversation's own branch, rename and all. It is all one
+message and the far end makes every checkout or none: a Conversation whose own
+checkout landed and whose Companion's did not is one no session could be launched
+in, and a move that would leave one behind is refused by name with the work still
+where it was.
 _Avoid_: migrate, hand off, sync, failover
 
 **Worktree**:

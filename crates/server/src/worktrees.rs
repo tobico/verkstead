@@ -936,6 +936,20 @@ fn head(worktree: &Path) -> Option<String> {
     (!head.is_empty()).then(|| head.to_owned())
 }
 
+/// The branch checked out at `worktree`, by its short name, or `None` where it
+/// is detached — which a read-only companion's checkout always is.
+///
+/// [`head`] without the `refs/heads/` in front of it, for the callers that want
+/// a name rather than a ref. What reads it is a transfer: what goes over is the
+/// name a checkout is *actually* on rather than the name the record was written
+/// with, and a companion knows its own name the way the Conversation's own
+/// checkout does.
+pub(crate) fn on_branch(worktree: &Path) -> Option<String> {
+    let head = head(worktree)?;
+
+    head.strip_prefix("refs/heads/").map(str::to_owned)
+}
+
 /// Whether there is still a worktree at `path` to do `repo`'s work in, on
 /// `branch`.
 ///

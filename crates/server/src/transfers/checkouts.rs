@@ -37,15 +37,30 @@
 //! written with — see [`crate::renames`], which does nothing at all where
 //! nothing was renamed.
 //!
+//! **The same leg again for every Companion Repo**, which is where a
+//! Conversation's work is in more than one repository. Each Companion's Repo is
+//! matched on the far end by the rule the Conversation's own is matched by, and
+//! what differs between the two kinds of Companion is what travels with it: a
+//! **read-write** one is a repository a session commits in and leaves
+//! uncommitted work in, so it gets the whole of the above — bundle, patch and
+//! untracked files — while a **read-only** one is checked out detached and bound
+//! read-only and carries its commit and nothing else. Carrying a patch to one
+//! would be carrying changes a session was never able to make.
+//!
+//! **All of it in the one message**, because a Conversation whose own checkout
+//! landed and whose Companion's did not is one no session could be launched in:
+//! the far end makes every checkout or none, which is what a grill start on one
+//! machine does.
+//!
 //! **Nothing of this machine's own paths crosses.** The far end names its own
 //! Worktree under its own Data Directory, the way the memory sync names its own
 //! parts: what travels is a branch, some commits and some bytes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use verkstead_render::{CheckoutAcross, TipsThere, UntrackedFile};
+use verkstead_render::{CheckoutAcross, CompanionCheckoutAcross, TipsThere, UntrackedFile};
 
 use crate::AppState;
 use crate::peer::checkouts::{ONE_TRANSFER_CHECKOUT, tips_of};
@@ -64,7 +79,8 @@ use crate::store;
 const MOST_THE_TIPS_WEIGH: usize = 128 * 1024;
 
 /// And the most a checkout may weigh on the way across: **sixty-four
-/// megabytes**, counted over the bundle and the working changes together.
+/// megabytes**, counted over the bundle and the working changes of the
+/// Conversation's own Worktree and every Companion's together.
 ///
 /// [`store::MOST_A_SLICE_IS`]'s bound said again over the other half of a move,
 /// and for its reason: past it the move is refused whole, naming the
@@ -115,7 +131,8 @@ pub(crate) async fn followed(
 ///
 /// `repo_there` is which of that device's Repos this repository is, as the match
 /// settled it a moment ago: the tips are asked of that Repo and the far end cuts
-/// its Worktree from it.
+/// its Worktree from it. Each Companion's Repo is matched here, by the same rule
+/// and for the same reason.
 ///
 /// The branch is the one on [`store::Conversation::branch`], which a move has
 /// already put through [`followed`] — so this leg and the row that went before
@@ -132,6 +149,7 @@ pub(crate) async fn across(
 ) -> Result<(), String> {
     let branch = conversation.branch.clone();
     let tips = tips(state, device, repo_there).await?;
+    let beside = alongside(state, device, conversation).await?;
 
     let repo = conversation.repo.path.clone();
     let worktree = conversation.worktree.clone();
@@ -147,6 +165,7 @@ pub(crate) async fn across(
             base_commit,
             base_ref,
             &tips,
+            &beside,
         )
     })
     .await
@@ -189,6 +208,108 @@ async fn tips(state: &AppState, device: &str, repo_there: i64) -> Result<Vec<Str
     Ok(held.tips)
 }
 
+/// One Companion of the move, with everything its packing needs that only the
+/// link could say.
+///
+/// Composed on the runtime's side and packed on a blocking one, which is the
+/// division the Conversation's own leg makes: the match and the tips are dials
+/// and the reading is git.
+struct Alongside {
+    /// What this repository is called here, which is what a refusal about it
+    /// names — the human has to know *which* Companion would not travel.
+    name: String,
+
+    /// Where it is on this machine.
+    repo: PathBuf,
+
+    /// And which of the far end's Repos it is, as the match settled it.
+    there: i64,
+
+    /// Where its checkout is, and `None` where the record holds none — a
+    /// Conversation whose directories were swept out from under it carries its
+    /// branches and nothing else.
+    worktree: Option<PathBuf>,
+
+    /// The branch the record says its work is done on, or `None` for a read-only
+    /// Companion, which holds no branch at all.
+    ///
+    /// The rule resolved rather than the column: an empty branch on a read-write
+    /// Companion is *mirroring*, which is the Conversation's own name — see
+    /// [`store::Companion::branch_for`]. What is finally sent is read off the
+    /// checkout where there is one, this being the fallback.
+    named: Option<String>,
+
+    /// What its checkout was cut from, which nothing but the record knows.
+    base_commit: Option<String>,
+
+    /// And the tips the far end holds of *that* repository, which is what its
+    /// bundle is packed against.
+    tips: Vec<String>,
+}
+
+/// Every Companion of the Conversation, matched against the far end's registry
+/// and with that device's tips of each beside it.
+///
+/// **Matched by the rule the Conversation's own repository is matched by**, and
+/// refused by name where one of them is nothing over there. The preflight asked
+/// this question when the press was made; it is asked again at the moment the
+/// work goes, for the reason the Conversation's own is — a checkout landing in
+/// the wrong repository is the one failure the whole matching rule exists to
+/// prevent.
+///
+/// **One reading of that registry for all of them**, which is what
+/// [`crate::matching::each_across`] is for: a Conversation with three Companions
+/// is not four questions to ask a machine. The tips are a question apiece,
+/// because they are a question about a repository rather than about a registry.
+async fn alongside(
+    state: &AppState,
+    device: &str,
+    conversation: &store::Conversation,
+) -> Result<Vec<Alongside>, String> {
+    if conversation.companions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Err(
+            "this server holds no device identity to match repositories through".to_owned(),
+        );
+    };
+
+    let ours: Vec<store::Repo> = conversation
+        .companions
+        .iter()
+        .map(|companion| companion.repo.clone())
+        .collect();
+
+    let theirs = crate::matching::each_across(devices, device, &ours)
+        .await
+        .map_err(|refusal| refusal.saying)?;
+
+    let mut beside = Vec::with_capacity(ours.len());
+
+    for (companion, there) in conversation.companions.iter().zip(theirs) {
+        let Some(there) = there else {
+            return Err(format!(
+                "no repository there is {name}, which this Conversation's work is done alongside",
+                name = companion.repo.name,
+            ));
+        };
+
+        beside.push(Alongside {
+            name: companion.repo.name.clone(),
+            repo: companion.repo.path.clone(),
+            there: there.id,
+            worktree: companion.worktree.clone(),
+            named: companion.branch_for(&conversation.branch),
+            base_commit: companion.base_commit.clone(),
+            tips: tips(state, device, there.id).await?,
+        });
+    }
+
+    Ok(beside)
+}
+
 /// The branch and the working changes, read off this machine.
 ///
 /// Blocking throughout: every part of it is a git run over a checkout, and a
@@ -205,6 +326,7 @@ fn packed(
     base_commit: Option<String>,
     base_ref: Option<String>,
     tips: &[String],
+    beside: &[Alongside],
 ) -> Result<CheckoutAcross, String> {
     let named = format!("refs/heads/{branch}");
 
@@ -230,6 +352,14 @@ fn packed(
         None => Vec::new(),
     };
 
+    // The Companions after it and against the same running count, a bound over
+    // the Conversation's own Worktree alone being no bound on what a move weighs.
+    let mut companions = Vec::with_capacity(beside.len());
+
+    for companion in beside {
+        companions.push(packed_alongside(companion, &mut weighs)?);
+    }
+
     if weighs > MOST_A_CHECKOUT_IS {
         return Err(format!(
             "the checkout of {branch} is larger than the {MOST_A_CHECKOUT_IS} bytes one may be \
@@ -242,6 +372,97 @@ fn packed(
         commit,
         base_commit,
         base_ref,
+        bundle: bundle.map(|bundle| STANDARD.encode(&bundle)),
+        patch: patch.map(|patch| STANDARD.encode(&patch)),
+        untracked,
+        companions,
+    })
+}
+
+/// One Companion's checkout, read off this machine.
+///
+/// **The two kinds are two readings.** A read-write Companion is the whole of
+/// [`packed`] asked of another repository: its branch as a bundle packed against
+/// what the far end holds of *that* repository, its tracked changes as a binary
+/// patch, and its untracked unignored files. A read-only one is detached and
+/// bound read-only, so what it needs is the commit it stands at — there is
+/// nothing to commit in it and so nothing uncommitted, and a patch would be
+/// changes a session was never able to make.
+///
+/// **And its branch is read off its checkout**, which is the Conversation's own
+/// rule and the same fact by it: a Companion left on the empty *mirroring*
+/// setting moves with the Conversation's branch, and the act that renames the
+/// Conversation's renames those alongside it — see [`crate::renames`]. The
+/// record's own rule stands in where there is no checkout to read.
+///
+/// `weighs` is the move's running count, so a Conversation with three Companions
+/// is bounded over all four checkouts rather than over each.
+fn packed_alongside(
+    companion: &Alongside,
+    weighs: &mut usize,
+) -> Result<CompanionCheckoutAcross, String> {
+    let Some(named) = &companion.named else {
+        // Read-only: what it needs is where it is detached. Off the checkout by
+        // preference, that being the truth about the directory, and off the
+        // record where the directory has gone.
+        let commit = companion
+            .worktree
+            .as_deref()
+            .and_then(|worktree| crate::worktrees::resolve(worktree, "HEAD"))
+            .or_else(|| companion.base_commit.clone())
+            .ok_or_else(|| {
+                format!(
+                    "the read-only companion {name} is at no commit this device could read",
+                    name = companion.name,
+                )
+            })?;
+
+        return Ok(CompanionCheckoutAcross {
+            repo: companion.there,
+            branch: None,
+            commit,
+            base_commit: companion.base_commit.clone(),
+            bundle: None,
+            patch: None,
+            untracked: Vec::new(),
+        });
+    };
+
+    let branch = companion
+        .worktree
+        .as_deref()
+        .and_then(crate::worktrees::on_branch)
+        .unwrap_or_else(|| named.clone());
+
+    let held = format!("refs/heads/{branch}");
+
+    let Some(commit) = crate::worktrees::resolve(&companion.repo, &held) else {
+        return Err(format!(
+            "the branch {branch} of the companion {name} is not in this device's copy of that \
+             repository any more",
+            name = companion.name,
+        ));
+    };
+
+    let bundle = bundle(&companion.repo, &held, &companion.tips)
+        .map_err(|why| format!("{why}, for the companion {name}", name = companion.name))?;
+
+    *weighs += bundle.as_ref().map_or(0, Vec::len);
+
+    let patch = companion.worktree.as_deref().and_then(tracked);
+
+    *weighs += patch.as_ref().map_or(0, Vec::len);
+
+    let untracked = match companion.worktree.as_deref() {
+        Some(worktree) => untracked(worktree, weighs)?,
+        None => Vec::new(),
+    };
+
+    Ok(CompanionCheckoutAcross {
+        repo: companion.there,
+        branch: Some(branch),
+        commit,
+        base_commit: companion.base_commit.clone(),
         bundle: bundle.map(|bundle| STANDARD.encode(&bundle)),
         patch: patch.map(|patch| STANDARD.encode(&patch)),
         untracked,

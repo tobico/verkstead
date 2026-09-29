@@ -320,19 +320,31 @@ pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) ->
             // the leftover this sweep is for.
             Attachments::under(&state.data_dir).remove(id);
 
-            // And the checkout, for that reason again: a Worktree is a directory
+            // And the checkouts, for that reason again: a Worktree is a directory
             // this device made for work that turned out never to have arrived.
-            // The branch stays — it is the work itself, and a bundle that landed
-            // is history this repository now has whatever became of the move.
+            // The Companions' among them, each being as much this device's making
+            // as the Conversation's own. The branches stay — they are the work
+            // itself, and a bundle that landed is history this repository now has
+            // whatever became of the move.
             if let Some(checkout) = checkout {
-                if let Some(worktree) = checkout.worktree {
-                    let repo = checkout.repo;
+                let mut removing: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
 
-                    let _ = tokio::task::spawn_blocking(move || {
-                        crate::worktrees::remove(&repo, &worktree)
-                    })
-                    .await;
+                if let Some(worktree) = checkout.worktree {
+                    removing.push((checkout.repo, worktree));
                 }
+
+                for companion in checkout.companions {
+                    if let Some(worktree) = companion.worktree {
+                        removing.push((companion.repo, worktree));
+                    }
+                }
+
+                let _ = tokio::task::spawn_blocking(move || {
+                    for (repo, worktree) in removing {
+                        crate::worktrees::remove(&repo, &worktree);
+                    }
+                })
+                .await;
             }
 
             state
