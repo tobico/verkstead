@@ -45,6 +45,15 @@
 //! the far end already holds, and the Worktree's working changes beside it — see
 //! [`checkouts`], which is after the record because a Worktree hangs off a
 //! Conversation and the far end needs one to hang it from.
+//!
+//! **And then the arrival, which is the one leg after the mark.** Everything
+//! above is in front of the commit point and is swept if the move falls over, so
+//! nothing over there may be *started* while any of it could still be taken back.
+//! Once this device's own copy is marked, the far end is told the move is over —
+//! and what it does about that word is put a Notice on its Timeline saying where
+//! the work came from and press its own Resume. This copy says the matching thing
+//! about where the work went. A failure at that last step is not the move's: the
+//! work is there either way, and what it costs is a press on Resume over there.
 
 pub(crate) mod checkouts;
 
@@ -52,15 +61,26 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use verkstead_render::{
-    Arrived, BirthKey, ConversationAcross, PairingAcross, PickedAcross, ProfileAcross, Transferring,
+    Arrived, BirthKey, CameFrom, ConversationAcross, PairingAcross, PickedAcross, ProfileAcross,
+    Transferring,
 };
 use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::attachments::Attachments;
-use crate::peer::transfers::TRANSFERS;
+use crate::peer::transfers::{ONE_TRANSFERS_ARRIVAL, TRANSFERS};
 use crate::relaying::{self, Call, Refusal, Streamed, as_json};
 use crate::store::{self, Lifecycle};
+
+/// How often the mover looks again at a session that was still starting: **every
+/// quarter of a second**.
+///
+/// A launch is not something to await — nothing hands out a handle on a session
+/// that is not on the register yet — so the one thing left is to look. Short
+/// enough that a launch which fails costs the move nothing anybody would notice,
+/// and long enough that a launch which takes a sandbox's worth of minutes is a
+/// few hundred glances at a mutex rather than a spin. See [`see_out`].
+const A_LAUNCH_IS_LOOKED_FOR_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The most the far end's answer may be: **one kilobyte**.
 ///
@@ -302,6 +322,16 @@ pub(crate) async fn moving(state: &AppState, conversation_id: i64) -> bool {
 /// launch decided before the request landed is a session that appears after the
 /// first wait — one lap, and then there is nothing running.
 ///
+/// **And a launch not yet on the register is looked for rather than waited on.**
+/// [`going`] refuses a launch that is *decided* after the request lands, and
+/// between one being decided and the session being on the register there is a
+/// sandbox to build — on one platform, minutes of it. Nothing hands out a handle
+/// on a session that does not exist yet, so the one thing left is to look again
+/// — see [`A_LAUNCH_IS_LOOKED_FOR_EVERY`]. What it is protecting is the
+/// **ordering**: a session away from home writes its account's login and this
+/// Repo's memory entries back as it ends, and a move that overtook a launch would
+/// leave the far end starting under a login this machine had not returned.
+///
 /// **And the same session is never waited on twice.** What tells one from
 /// another is the Timeline Event it is printing into; a register still naming
 /// the one that has just ended is a relay that died without taking itself off,
@@ -313,27 +343,57 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
         let _driving = driving;
         let mut seen: Option<i64> = None;
 
-        while let Some(mut session) = state.sessions.following(conversation_id) {
-            let writing = state.sessions.writing(conversation_id);
+        loop {
+            if let Some(mut session) = state.sessions.following(conversation_id) {
+                let writing = state.sessions.writing(conversation_id);
 
-            if writing.is_some() && writing == seen {
-                tracing::warn!(
+                if writing.is_some() && writing == seen {
+                    tracing::warn!(
+                        conversation_id,
+                        device,
+                        "a session that has ended is still on the register, so the move runs \
+                         without waiting on it again",
+                    );
+                    break;
+                }
+
+                tracing::info!(
                     conversation_id,
                     device,
-                    "a session that has ended is still on the register, so the move runs \
-                     without waiting on it again",
+                    "a Conversation is to be moved, so its session is being seen out",
                 );
-                break;
+
+                seen = writing;
+                session.ended().await;
+                continue;
             }
 
-            tracing::info!(
-                conversation_id,
-                device,
-                "a Conversation is to be moved, so its session is being seen out",
-            );
+            // A launch that was decided before the request landed, and has not
+            // reached the register yet. There is nothing to wait *on* — a
+            // session is on the register once its relay is up, and building the
+            // sandbox in front of that is minutes on one platform — so this is
+            // the one thing the mover looks for rather than awaits.
+            //
+            // **And it must look, rather than move.** What a session away from
+            // home does as it ends is write its account's login and this Repo's
+            // memory entries back to the device they are at home on, and a move
+            // that overtook a launch would be a slice and a bundle leaving
+            // while a session here was still to do that — the far end launching
+            // under a login this machine had not finished returning, which is
+            // the one ordering a transfer has to get right.
+            if state.sessions.starting(conversation_id) {
+                tracing::info!(
+                    conversation_id,
+                    device,
+                    "a session for a Conversation that is to be moved is still starting, so \
+                     the move waits for it to be one",
+                );
 
-            seen = writing;
-            session.ended().await;
+                tokio::time::sleep(A_LAUNCH_IS_LOOKED_FOR_EVERY).await;
+                continue;
+            }
+
+            break;
         }
 
         move_it(&state, conversation_id, &device).await;
@@ -593,7 +653,78 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         tracing::error!(error = ?error, conversation_id, "the transfer that has been made could not be forgotten");
     }
 
+    // What this copy has to say for itself from here, which is where the work
+    // went. The page redirects off a tombstone rather than drawing it — see
+    // [`verkstead_render::ConversationView::transferred`] — so what this is
+    // written for is the record itself: a Share of it, and the copy a transfer
+    // back replaces, both of which read this Timeline rather than that mark.
+    noted(
+        state,
+        conversation_id,
+        &format!(
+            "This Conversation was moved onto **{named}**. What is left here is a copy: the \
+             live record is on that device, and every link to this one leads there.",
+        ),
+    )
+    .await;
+
+    // And the word to that device that the move is over, which is the one thing
+    // it may act on: the mark above is written, so nothing is going to be swept,
+    // and what the far end does about it is put a Notice of its own on the
+    // Timeline and press Resume for itself. See [`crate::peer::transfers::arrived`].
+    //
+    // **After the commit point, so a failure here is not the move's.** The work
+    // is on that device whatever this says, so what a silence costs is a
+    // Conversation sitting there with nothing driving it — which is a press on
+    // Resume rather than a move to make again, and is what the second Notice says.
+    let told = relaying::put_to(
+        state.devices.as_ref(),
+        device,
+        Call {
+            method: reqwest::Method::POST,
+            onwards: ONE_TRANSFERS_ARRIVAL.replace("{id}", &arrived.id.to_string()),
+            headers: as_json(),
+            body: Streamed::saying(
+                serde_json::to_vec(&CameFrom { device: here }).unwrap_or_default(),
+            ),
+        },
+    )
+    .await;
+
+    if let Err(refusal) = told {
+        tracing::error!(
+            conversation_id,
+            device,
+            there = arrived.id,
+            "the work moved but the device holding it could not be told to take it up: {}",
+            refusal.saying,
+        );
+
+        noted(
+            state,
+            conversation_id,
+            &format!(
+                "Verkstead could not tell {named} that the move had finished — {}. The work is \
+                 there and nothing is driving it, so the fix is a press on Resume on that \
+                 device.",
+                refusal.saying,
+            ),
+        )
+        .await;
+    }
+
     Ok(arrived.id)
+}
+
+/// One sentence about a move on the Timeline of the copy it left behind.
+///
+/// Logged and carried on from where it cannot be written: the work has already
+/// moved by the time either of these is said, and a Notice that would not be
+/// written is no reason to describe a move that happened as one that did not.
+async fn noted(state: &AppState, conversation_id: i64, line: &str) {
+    if let Err(error) = store::note(&state.pool, conversation_id, line).await {
+        tracing::error!(error = ?error, conversation_id, "saying on the Timeline where the work went failed");
+    }
 }
 
 /// Put the Conversation's whole record over: the Timeline and everything hanging

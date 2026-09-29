@@ -390,6 +390,11 @@ impl Verkstead {
             .unwrap_or_else(|| panic!("{name} is a companion of this Conversation"))
     }
 
+    /// And where it is on this machine, which is where its own `git config` is.
+    fn repo_path(&self, name: &str) -> PathBuf {
+        self.elsewhere.path().join(name)
+    }
+
     /// The id this device's registry gave the Repo called `name`.
     async fn repo_row(&self, name: &str) -> i64 {
         let repos: Vec<verkstead_render::RepoEntry> =
@@ -597,13 +602,30 @@ impl Verkstead {
     /// Ask a Question Set the way a session's CLI does: to the base URL its
     /// sandbox was given, which is this Conversation's own.
     async fn asks(&self, conversation: i64, yaml: &str) -> i64 {
+        self.asking(conversation, yaml, false).await
+    }
+
+    /// And a **Deferred Ask**: the same Set, with nothing waiting on the Answer.
+    ///
+    /// Which is the one kind that survives its session. A relaunch locks every
+    /// Set the gone session was idling on — the human would be answering into
+    /// nothing — and leaves a Deferred Ask exactly where it stands, nobody having
+    /// been behind it to begin with. See `server::sets::Open`.
+    async fn defers(&self, conversation: i64, yaml: &str) -> i64 {
+        self.asking(conversation, yaml, true).await
+    }
+
+    /// Both, and the query the CLI spells the difference with.
+    async fn asking(&self, conversation: i64, yaml: &str, deferred: bool) -> i64 {
+        let query = if deferred { "?deferred=true" } else { "" };
+
         let asked = self
             .workbench
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/conversations/{conversation}/api/v1/sets"))
+                    .uri(format!("/conversations/{conversation}/api/v1/sets{query}"))
                     .header(CONTENT_TYPE, "application/yaml")
                     .body(Body::from(yaml.to_owned()))
                     .unwrap(),
@@ -620,6 +642,75 @@ impl Verkstead {
         let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&said).unwrap();
 
         created.id
+    }
+
+    /// Answer one of its Question Sets the way the human's own device does, over
+    /// the endpoint a session's CLI is waiting on.
+    ///
+    /// What it is for is the **digest**: a grilling started again is primed with
+    /// what has already been settled, and nothing is settled until a Set has an
+    /// Answer.
+    async fn answers(&self, conversation: i64, set: i64, yaml: &str) {
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response"
+                    ))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&bytes).into_owned();
+
+        assert!(status.is_success(), "answering Set {set}: {status} {said}");
+    }
+
+    /// The same over the raw status, for the times a refusal is the answer being
+    /// asked after.
+    async fn answering(&self, conversation: i64, set: i64, yaml: &str) -> StatusCode {
+        self.workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response"
+                    ))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// running.
+    ///
+    /// The press that writes the stop rather than asking for one — an ordinary
+    /// Stop is a request the next launch answers, and a grilling seen out has no
+    /// next launch to answer it. What it is here for is the arrival: a stop
+    /// somebody *decided on* crosses with the record and is left exactly where it
+    /// stands over there, so nothing is started on the far end and nothing locks
+    /// what the human has still to answer.
+    async fn stops_at_once(&self, conversation: i64) {
+        let said = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/force-stop"),
+            None,
+        )
+        .await;
+
+        assert_eq!(said, "\"Stopped\"", "pressing Force stop");
     }
 
     /// Press *Transfer to…* for `device`, and answer with what it said.
@@ -752,22 +843,26 @@ impl Verkstead {
         Some(capture.text)
     }
 
-    /// The Question Set on its Timeline, by the id **this** device numbered it.
+    /// Every Question Set on its Timeline, by the id **this** device numbered
+    /// each, in the order they were asked.
     ///
-    /// Which is the whole point of reading it off the Timeline rather than
-    /// remembering what it was called on the machine it came from: every
+    /// Which is the whole point of reading them off the Timeline rather than
+    /// remembering what they were called on the machine they came from: every
     /// Verkstead issues its own, and a wait is opened on the one it has here.
-    async fn set_on(&self, conversation: i64) -> Option<i64> {
+    async fn sets_on(&self, conversation: i64) -> Vec<i64> {
         self.view(conversation)
             .await
             .timeline
             .iter()
-            .find_map(|event| match event {
+            .filter_map(|event| match event {
                 TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
                 _ => None,
             })
+            .collect()
     }
 
+    /// Where this device keeps that Conversation's attached files, which is the
+    /// directory its own sessions are given — see the server's `attachments`.
     /// Where this device keeps that Conversation's attached files, which is the
     /// directory its own sessions are given — see the server's `attachments`.
     fn attachments_directory(&self, conversation: i64) -> PathBuf {
@@ -777,6 +872,80 @@ impl Verkstead {
             .join(conversation.to_string())
     }
 
+    /// Every session on that Conversation's Timeline, by the Event each printed
+    /// into.
+    ///
+    /// In Timeline order, so the last of them is the newest: what a Conversation
+    /// that has arrived here grows is a second one, started by this device's own
+    /// Resume beside the one that crossed with the record.
+    async fn sessions_on(&self, conversation: i64) -> Vec<i64> {
+        self.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::AgentOutput(output) => Some(output.id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What one of them printed, by the Event it printed into.
+    async fn capture_of(&self, conversation: i64, event: i64) -> String {
+        let capture: verkstead_render::Capture = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/capture/{event}"),
+        )
+        .await;
+
+        capture.text
+    }
+
+    /// The newest session's Capture, once it says `saying` — or a panic saying
+    /// what it says instead.
+    ///
+    /// The newest rather than the first, which is what [`Self::capture`] reads:
+    /// on the far end of a move the first is the session that crossed with the
+    /// record, and what this device started for itself is the one after it.
+    async fn latest_capture_saying(&self, conversation: i64, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+        let mut said = String::new();
+
+        loop {
+            if let Some(event) = self.sessions_on(conversation).await.last().copied() {
+                said = self.capture_of(conversation, event).await;
+            }
+
+            if said.contains(saying) {
+                return said;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "no session on Conversation {conversation} ever printed {saying:?}. \
+                 The newest printed: {said:?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// Where the account called `name` keeps its login on this device, which is a
+    /// real file under a real account directory.
+    fn login_of(&self, name: &str) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(name)
+            .join(".claude/.credentials.json")
+    }
+
+    /// And what it holds, where the account is at home here.
+    fn login_at_home(&self, name: &str) -> String {
+        std::fs::read_to_string(self.login_of(name)).unwrap_or_default()
+    }
+
+    /// And every Notice on its Timeline, which is where Verkstead says what it
+    /// did on its own account — a move that failed among them.
     /// And every Notice on its Timeline, which is where Verkstead says what it
     /// did on its own account — a move that failed among them.
     async fn notices(&self, conversation: i64) -> Vec<String> {
@@ -816,6 +985,56 @@ printf 'the turn is over\r\n'
 "#,
         gate = quoted(gate),
     )
+}
+
+/// The same again with a login refreshed before the wait, which is the one thing
+/// a harness does to the account it is running as.
+///
+/// What it is for is the **ordering**: a session away from home writes the login
+/// it now holds back to the device that account is at home on as it ends, and a
+/// move that overtook that write-back would leave the far end launching under a
+/// login this machine had not finished returning. So the session changes one, and
+/// the far end is asked what it is running under.
+fn refreshes_its_login_at(gate: &Path, token: &str) -> String {
+    format!(
+        "printf '{{\"claudeAiOauth\":{{\"accessToken\":\"%s\"}}}}' '{token}' \
+> \"$HOME/.claude/.credentials.json\"\nprintf 'refreshed the login\\r\\n'\n{}",
+        waits_at(gate),
+    )
+}
+
+/// And what stands where claude goes **on the far end**: the session that device's
+/// own Resume starts once the work has arrived.
+///
+/// It says three things, and each is something only the arrival could have given
+/// it. That it is running at all, which is the Resume; the **prompt** it was
+/// launched on, which is the record re-read on this machine — a grilling again
+/// carries the Brief and what has already been settled; and the **login** it is
+/// running under, which is the account the source was using, written home as that
+/// session ended.
+fn re_primed() -> String {
+    r#"
+printf 're-primed\r\n'
+printf 'prompt=%s\r\n' "$2"
+printf 'login=%s\r\n' "$(cat "$HOME/.claude/.credentials.json" 2>/dev/null)"
+"#
+    .to_owned()
+}
+
+/// Set `core.autocrlf` on a repository, the way the machine it is on would have
+/// it — and respell whatever is checked out of it so the trees agree with the
+/// switch.
+///
+/// **Which is what an operating system amounts to here.** A Windows checkout
+/// keeps CRLF in the working tree and LF in the index; a Unix one keeps LF in
+/// both. So two repositories set opposite ways are the two machines as far as
+/// anything about a patch can tell, and the crossing can be made on one of them.
+fn keeping_endings(repo: &Path, autocrlf: &str, worktrees: &[&Path]) {
+    git(repo, &["config", "core.autocrlf", autocrlf]);
+
+    for worktree in worktrees {
+        git(worktree, &["checkout", "HEAD", "--", "."]);
+    }
 }
 
 /// A path as a shell script can carry it.
@@ -994,8 +1213,23 @@ async fn drafted(
     spill: &Path,
     repositories: Repositories,
 ) -> (Verkstead, Verkstead, Holding, i64) {
-    let a = Verkstead::running(A, &waits_at(gate), spill).await;
-    let b = Verkstead::running(B, &waits_at(gate), spill).await;
+    drafted_running(&waits_at(gate), spill, repositories).await
+}
+
+/// The same with the session on A saying what this test needs of it, which is the
+/// one thing that differs between the setups.
+///
+/// **B's is never the same script.** Nothing was ever launched on the far end
+/// before this stage; now its own Resume starts a session the moment the work
+/// lands, and a suite whose two machines printed the same words could not say
+/// which of them had run. See [`re_primed`].
+async fn drafted_running(
+    stub: &str,
+    spill: &Path,
+    repositories: Repositories,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(A, stub, spill).await;
+    let b = Verkstead::running(B, &re_primed(), spill).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
 
@@ -1473,10 +1707,17 @@ async fn the_timeline_on_the_far_end_reads_as_it_read_here() {
         .expect("the mark the move wrote")
         .id;
 
-    let arrived = b.view(there).await;
+    // What crossed is the front of B's Timeline, and what B adds to it is its
+    // own: the Notice saying where the work came from, and the session its Resume
+    // started. So the wait is for that Notice — the first thing written here that
+    // was not carried — and what is read against A's is everything in front of
+    // it.
+    let arrived = b
+        .view_saying(there, |drawn| drawn.timeline.len() > here.timeline.len())
+        .await;
 
     assert_eq!(
-        cards(&arrived.timeline),
+        cards(&arrived.timeline[..here.timeline.len()]),
         cards(&here.timeline),
         "the Timeline reads as it did, card for card",
     );
@@ -1487,15 +1728,20 @@ async fn the_timeline_on_the_far_end_reads_as_it_read_here() {
         "and what the session printed is behind the Event it printed into",
     );
 
-    assert_eq!(
-        session_names(&b.pool).await,
-        names,
-        "as is the name Verkstead ran that session under",
-    );
+    let named = session_names(&b.pool).await;
 
     assert_eq!(
-        transcripts(&b.pool).await,
-        transcripts(&a.pool).await,
+        &named[..names.len()],
+        &names[..],
+        "as is the name Verkstead ran that session under: {named:#?}",
+    );
+
+    let here_lines = transcripts(&a.pool).await;
+    let there_lines = transcripts(&b.pool).await;
+
+    assert_eq!(
+        &there_lines[..here_lines.len()],
+        &here_lines[..],
         "and the log the session kept of itself, line for line",
     );
 }
@@ -1508,6 +1754,14 @@ async fn the_timeline_on_the_far_end_reads_as_it_read_here() {
 /// renumbering is for. A Set whose id had not moved with it would be a wait
 /// nothing could open, and one answered into A would be an Answer reaching a
 /// machine the work has left.
+///
+/// **Stopped before it is moved**, which is the shape in which a Set really
+/// outlives a move. The run is stopped by a press, that stop crosses with the
+/// record, and the far end leaves a stop somebody decided on exactly where it
+/// stands — so nothing is started over there and nothing locks what the human
+/// has still to answer. A grilling the far end *does* start again is the other
+/// half of the same rule, and it is
+/// `the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands`'s.
 #[tokio::test]
 async fn a_set_left_open_is_answerable_where_the_work_now_is() {
     let spill = tempfile::tempdir().unwrap();
@@ -1516,6 +1770,11 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
 
     a.printed(conversation, "grilling").await;
     a.asks(conversation, ASKED).await;
+
+    // The human pulling the brake, which is what makes the question theirs to
+    // answer wherever the work goes: a stop somebody decided on waits for a
+    // press, and an arrival is not somebody deciding differently about it.
+    a.stops_at_once(conversation).await;
 
     std::fs::write(&gate, "go").unwrap();
     a.view_saying(conversation, |drawn| !drawn.working).await;
@@ -1529,9 +1788,10 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
         .expect("the mark the move wrote")
         .id;
 
-    let set = b
-        .set_on(there)
+    let set = *b
+        .sets_on(there)
         .await
+        .first()
         .expect("the Set crossed with the work, under an id of B's own");
 
     // A session on B waiting for its Answers, which is what the endpoint is:
@@ -1594,6 +1854,81 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
     assert!(
         handed.contains("shared between instances"),
         "and it is the Answer that was given: {handed}",
+    );
+}
+
+/// **And the Set a session that has gone was waiting on is locked where the work
+/// lands**, by the very Resume that starts the work again there.
+///
+/// Which is the other side of the rule above, and it is not about the move at
+/// all: a grilling started again locks every Set the dead session was *idling
+/// on*, because the reader has gone and the human would be answering into
+/// nothing — and after a move the reader has gone in the most literal way there
+/// is, the machine it was on having handed the work over. The session the far end
+/// starts is primed with what was answered and asks again what it still needs.
+///
+/// **And the Deferred Ask beside it is left where it stands**, nobody having been
+/// behind it to begin with: it crosses, it lands open, and its Answers go into the
+/// prompt of a later session of this Conversation — which is now a session on
+/// another machine.
+#[tokio::test]
+async fn the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let idled = a.asks(conversation, ASKED).await;
+    a.defers(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(
+        crossed.len(),
+        2,
+        "both Sets crossed with the work, under ids of B's own",
+    );
+
+    // The blocking one, once the arrival's Resume has been over it: the session
+    // that asked is on a machine the work has left, so it is locked unanswered
+    // rather than left for the human to write into.
+    let shut = tokio::time::timeout(WAITING, async {
+        loop {
+            if b.answering(there, crossed[0], ANSWERED).await == StatusCode::GONE {
+                return;
+            }
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await;
+
+    assert!(
+        shut.is_ok(),
+        "the Set the gone session was idling on is locked unanswered here: \
+         {idled} on A, {} on B",
+        crossed[0],
+    );
+
+    // And the Deferred Ask, which the relaunch leaves exactly where it stands:
+    // still open on the machine the work is on now, and still the human's to
+    // answer there.
+    assert!(
+        b.answering(there, crossed[1], ANSWERED).await.is_success(),
+        "the Deferred Ask is answerable where the work now is",
     );
 }
 
@@ -1858,6 +2193,141 @@ async fn the_uncommitted_changes_arrive_as_they_were() {
     );
 }
 
+/// **The whole of a move crosses what an operating system brings with it**, and
+/// is read back on the far end: the Timeline, the Worktree and the working
+/// changes.
+///
+/// **Which is what makes the stage demonstrable across two of them.** Three
+/// things stand between a move and an OS boundary, and none of them needs a
+/// second machine to be wrong:
+///
+/// - the **line endings**, which is the repositories' own `core.autocrlf` — set
+///   here the way a Windows checkout has it on the sending side and the way a
+///   Unix one has it on the receiving side, so the tracked change is read out of
+///   a tree spelled with CRLF and lands in a tree that keeps LF. That it lands in
+///   the receiving tree's convention either way round is
+///   `peer::checkouts`'s own pair of tests, which run on both platforms in CI;
+///   this is the same crossing with the whole move behind it;
+/// - the **path separators**, which is why an untracked file's path is spelled
+///   git's way on the wire — a nested one, so that there is a separator in it to
+///   get wrong;
+/// - and the **Worktree's new path**, which the far end names off its own Data
+///   Directory rather than joining anything that arrived onto a directory of its
+///   own.
+///
+/// What is left of a two-OS run after all three is the run itself, which is a
+/// human with two machines.
+#[tokio::test]
+async fn the_move_crosses_what_an_operating_system_brings() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    // A is the Windows side and B is the Unix one, which between two repositories
+    // is the whole of what the difference comes to.
+    keeping_endings(&a.repo_path(REPOSITORY), "true", &[&worktree]);
+    keeping_endings(&b.repo_path(REPOSITORY), "false", &[]);
+
+    // Committed first, so the changes below are changes *to* something — written
+    // with CRLF, the way an editor on that machine writes a file, and stored with
+    // LF, the way git stores one.
+    std::fs::write(worktree.join("notes.md"), COMMITTED.replace('\n', "\r\n")).unwrap();
+    std::fs::write(worktree.join("fixture.bin"), COMMITTED_BYTES).unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    // And left uncommitted on top of it: the tracked text spelled that machine's
+    // way, a rewritten binary, and an untracked file down a path with a separator
+    // in it.
+    std::fs::write(worktree.join("notes.md"), LEFT.replace('\n', "\r\n")).unwrap();
+    std::fs::write(worktree.join("fixture.bin"), LEFT_BYTES).unwrap();
+    std::fs::create_dir_all(worktree.join("docs/reading")).unwrap();
+    std::fs::write(worktree.join("docs/reading/limits.md"), "not committed\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The Worktree, read back: B's own path under B's own Data Directory, on the
+    // branch the work is on.
+    let landed = b.worktree(there).await;
+
+    assert_ne!(landed, worktree, "the Worktree is B's own, at its own path");
+    assert!(
+        landed.starts_with(b._dir.path()),
+        "under B's own Data Directory: {}",
+        landed.display(),
+    );
+
+    // The working changes, read back: the text in B's convention, the binary byte
+    // for byte, and the nested untracked file where its path said.
+    assert_eq!(
+        std::fs::read_to_string(landed.join("notes.md")).unwrap(),
+        LEFT,
+        "the tracked change landed in B's own line endings",
+    );
+    assert_eq!(
+        std::fs::read(landed.join("fixture.bin")).unwrap(),
+        LEFT_BYTES,
+        "and the changed binary landed byte for byte, which is what a binary \
+         patch is for",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("docs/reading/limits.md")).unwrap(),
+        "not committed\n",
+        "and the untracked file landed down the path it was spelled with",
+    );
+
+    // Uncommitted over there too, which is what they were.
+    assert!(
+        !git_says(&landed, &["status", "--porcelain"]).is_empty(),
+        "the far end's tree has uncommitted changes in it, as this one's had",
+    );
+
+    // And the Timeline, read back: the session that ran on A, and the Notice
+    // saying which machine the work came from.
+    let (machine, _) = this_machine();
+
+    let arrived = b
+        .view_saying(there, |drawn| {
+            drawn
+                .timeline
+                .iter()
+                .any(|event| matches!(event, TimelineEvent::Notice(_)))
+        })
+        .await;
+
+    assert!(
+        arrived
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::AgentOutput(_))),
+        "the session that ran on A is on the far end's Timeline: {:#?}",
+        arrived.timeline,
+    );
+
+    let came = b.notices(there).await;
+
+    assert!(
+        came.iter().any(|notice| notice.contains(&machine)),
+        "and a Notice says which machine it came from: {came:#?}",
+    );
+}
+
+/// **A file the far end's own ignore rules cover is not carried.** A `target/`
+/// is the far end's to build, and on the other side of a move it may not even
+/// be the same operating system.
 /// **A file the far end's own ignore rules cover is not carried.** A `target/`
 /// is the far end's to build, and on the other side of a move it may not even
 /// be the same operating system.
@@ -2242,9 +2712,265 @@ async fn an_ignored_file_in_a_companion_stays_behind() {
 const COMMITTED_BYTES: &[u8] = &[0x00, 0x01, 0x02, 0x03];
 const LEFT_BYTES: &[u8] = &[0xff, 0xfe, 0x00, 0x7f, 0x80];
 
+/// And the text file beside it, written with `\n` here and spelled each
+/// machine's own way by whoever writes it into a tree — which is what a
+/// line-ending convention is.
+const COMMITTED: &str = "one\ntwo\n";
+const LEFT: &str = "one\ntwo\nthree\n";
+
 /// And what a session renames its branch to, which is nothing Verkstead would
 /// have invented.
 const RENAMED: &str = "rate-limiting";
+
+/// The login a session on A refreshes inside itself, which is what a harness does
+/// to the account it is running as — see [`refreshes_its_login_at`].
+const REFRESHED: &str = "sk-ant-oat01-refreshed-mid-turn";
+
+/// **A running grilling on the source continues as a re-primed grilling on the
+/// far end**, started by that device's own Resume.
+///
+/// Which is the whole of what an arrival is. Resume is the one standing way in —
+/// it asks what *ought* to be running now, from the lifecycle the Conversation is
+/// in and what the branch has written — and a Conversation that has just landed
+/// poses exactly that question. What it gives is a fresh session primed from the
+/// record: Verkstead's own Resume rather than the harness's, which is stage 10.
+///
+/// Read off the session B started rather than off a flag: the prompt it was
+/// launched on carries the Brief and what the grilling has already settled, and
+/// neither of those was on this machine a moment ago.
+#[tokio::test]
+async fn a_running_grilling_continues_as_a_re_primed_grilling_over_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A turn genuinely in flight, with something settled in it: the digest a
+    // relaunch is primed with is made of Answers, so an Answer is what makes the
+    // prompt on the far end more than the Brief.
+    a.printed(conversation, "grilling").await;
+
+    let set = a.asks(conversation, ASKED).await;
+    a.answers(conversation, set, ANSWERED).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let crossed = a.sessions_on(conversation).await;
+
+    assert_eq!(
+        crossed.len(),
+        1,
+        "one session ran here, and it is the one that crosses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // B started a session of its own, which is the one thing nothing but its
+    // Resume could have done: nothing on A asked for it, and B had never heard of
+    // this work.
+    let said = b.latest_capture_saying(there, "re-primed").await;
+
+    assert_eq!(
+        b.sessions_on(there).await.len(),
+        2,
+        "two sessions on the far end's Timeline: the one that crossed, and the \
+         one this device started — it printed {said:?}",
+    );
+
+    assert!(
+        said.contains("Rate limiting"),
+        "the session was primed with the Brief: {said:?}",
+    );
+    assert!(
+        said.contains("In Redis"),
+        "and with what the grilling had already settled, which is the digest a \
+         relaunch carries: {said:?}",
+    );
+
+    assert_eq!(
+        b.view(there).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **Each end's Timeline says what happened to it**: the far end's that the work
+/// came from that machine, and the source's that it went to the other one.
+///
+/// So the record reads as one story across the two databases rather than as a
+/// Conversation that appeared on one from nowhere and stopped on the other for no
+/// reason. By the name the human gave each machine, which is what every sentence
+/// about a member is written with.
+#[tokio::test]
+async fn each_end_says_where_the_work_came_from_and_went_to() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let (machine, _) = this_machine();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The source's, which is on the copy it kept: the page redirects off a
+    // tombstone rather than drawing it, so what this is written on is the record
+    // — which is what a Share of it reads, and what a transfer back replaces.
+    let here = a.notices(conversation).await;
+    let went = here
+        .last()
+        .expect("the move puts a Notice on the copy it left behind");
+
+    assert!(
+        went.contains(B_MACHINE),
+        "the source's Notice names the machine the work went to: {went}",
+    );
+
+    // And the far end's, which is the first thing written on its copy that did
+    // not cross with the record.
+    let arrived = b
+        .view_saying(there, |drawn| {
+            drawn
+                .timeline
+                .iter()
+                .any(|event| matches!(event, TimelineEvent::Notice(_)))
+        })
+        .await;
+
+    let came = arrived
+        .timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("the arrival puts a Notice on the copy that landed");
+
+    assert!(
+        came.contains(&machine),
+        "and the far end's names the machine the work came from: {came}",
+    );
+}
+
+/// **The account goes home before the work leaves**, and the session the far end
+/// starts runs under it.
+///
+/// A session away from home keeps a mirror of its account and writes the login it
+/// now holds back to the device that account is at home on as it ends — stage
+/// 08's machinery, unchanged. The move runs at the turn's end, which is exactly
+/// when that write-back happens, so the ordering is the thing this is about: the
+/// account is home *before* the slice and the bundle leave, or the far end would
+/// launch under a login the source had not finished returning.
+///
+/// The work runs on A under an account at home on **B**, which is the way round
+/// that makes the question askable at all: the write-back's destination is the
+/// machine the work is about to move to, so a move that overtook it would be
+/// visible on the far end as a session running signed in as somebody else.
+///
+/// Read at the moment B's **row** lands, which is the first of the three legs: the
+/// slice and the bundle come after it, so a login already home by then is one
+/// that was written before any of the work left.
+///
+/// **The login stands for both halves of the write-back.** A session's ending
+/// puts the memory store back first and the login after it — the account keeping
+/// its login inside the very data directory the memory sync carries whole, so the
+/// login has to have the last word over it. A login that is home is therefore a
+/// memory that is home; the memory sync's own end-to-end proof is
+/// `tests/accounts.rs`.
+#[tokio::test]
+async fn the_account_is_home_before_the_work_leaves_and_the_far_end_runs_under_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let a = Verkstead::running(A, &refreshes_its_login_at(&gate, REFRESHED), spill.path()).await;
+    let b = Verkstead::running(B, &re_primed(), spill.path()).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    b.repo().await;
+
+    // The account is B's, and what A holds is a mirror of it — the other way
+    // round from every other test here, which is the point.
+    b.account().await;
+
+    let _holding = a.holding();
+    let mirror = a.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(mirror.id).await;
+    a.grills(conversation).await;
+
+    // The session is up, has been lent B's account, and has refreshed the login
+    // inside it — which is the one file of an account a harness really changes.
+    a.printed(conversation, "refreshed the login").await;
+
+    assert!(
+        !b.login_at_home(ACCOUNT).contains(REFRESHED),
+        "nothing has been written home while the turn is still running",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    std::fs::write(&gate, "go").unwrap();
+
+    // The row is the first thing to cross, so this is the earliest moment the
+    // work can be said to have left at all.
+    let deadline = Instant::now() + WAITING;
+
+    let landed = loop {
+        let rows = b.own_rows().await;
+
+        if let Some(row) = rows.first() {
+            break row.id;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing ever arrived on the far end",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    };
+
+    let held = b.login_at_home(ACCOUNT);
+
+    assert!(
+        held.contains(REFRESHED),
+        "the login the session refreshed was home before the work left: the \
+         account holds {held:?}",
+    );
+
+    // And the session B's own Resume starts is running as that account, with the
+    // login this turn left in it.
+    let said = b.latest_capture_saying(landed, "login=").await;
+
+    assert!(
+        said.contains(REFRESHED),
+        "the session on the far end runs under the account the source had, with \
+         the login it was left holding: {said:?}",
+    );
+}
 
 /// The Set every test here asks, which asks one thing so that there is an Answer
 /// to give it.

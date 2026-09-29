@@ -57,6 +57,12 @@
 //! whoever put it there, so the ending asks for the recompute rather than working
 //! out a second answer of its own. See [`landed`], which is the recompute over a
 //! registration handed in rather than taken, and nothing about the press itself.
+//!
+//! **And so does a Conversation that has just been moved here** (ADR-0020,
+//! *Transfer*). A device that has taken work in is holding a Conversation nothing
+//! on it is driving, in a state something ought to be driving — a restart's
+//! condition reached another way — so it presses this for itself, and leaves the
+//! same stops alone for the same reason. See [`on_arrival`].
 
 use std::future::Future;
 use std::pin::Pin;
@@ -72,17 +78,19 @@ use crate::store::{self, Lifecycle};
 /// Who asked for the run to start again.
 ///
 /// Two things turn on it and nothing else does, the recompute itself being the
-/// same for all three — which is the whole point of there being one.
+/// same for all four — which is the whole point of there being one.
 ///
 /// **The fix attempts a wrapping Conversation's checks have already spent.** A
 /// human who has read what stopped and pressed Resume is asking for another go,
 /// so the counters are forgotten; a server coming back up has read nothing and
 /// asked for nothing, and an attempt spent before the restart is one it must not
-/// spend again — see [`crate::checks`]. An ending that landed the Conversation
-/// here is the press's case rather than the restart's: what arrives is a wrap-up
-/// that has been away and come back, exactly as a follow-up's ending brings one
-/// back, and a count left standing would be a watcher that stopped again on its
-/// first poll without dispatching anything.
+/// spend again — see [`crate::checks`]. Work that has just arrived from another
+/// machine is the same case: a move is not a fresh go at the checks, it is the
+/// same go somewhere else. An ending that landed the Conversation here is the
+/// press's case rather than the restart's: what arrives is a wrap-up that has
+/// been away and come back, exactly as a follow-up's ending brings one back, and
+/// a count left standing would be a watcher that stopped again on its first poll
+/// without dispatching anything.
 ///
 /// **And what the press decides about the press**: the stop it clears and the
 /// half-written steer it abandons — see [`starting`]. A restart clears the stop
@@ -106,6 +114,16 @@ pub(crate) enum Resuming {
     /// stop it clears and the half-written steer it abandons. Nothing was
     /// pressed here, so neither is touched.
     Landed,
+
+    /// And a Conversation that has just been moved onto this device (ADR-0020,
+    /// *Transfer*): the same question, asked on a machine that has never run a
+    /// session for this work.
+    ///
+    /// A restart in every respect that decides anything. Nobody pressed
+    /// anything here, and the fix attempts that arrived with the record are
+    /// attempts the run really has spent — a move is not a fresh go at the
+    /// checks, it is the same go on another machine.
+    Arrived,
 }
 
 /// Press Resume: recompute what should be driving this Conversation, clear the
@@ -519,7 +537,7 @@ async fn recompute(
                 // the five taking a registration of its own as it is spawned,
                 // which is the handover the press makes by holding its across
                 // the spawn.
-                Resuming::Restarted => {
+                Resuming::Restarted | Resuming::Arrived => {
                     crate::wrapping::watching(
                         state,
                         conversation_id,
@@ -716,7 +734,16 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 
             match resume(&state, conversation.id, Resuming::Restarted).await {
                 Ok(Resumed::Resumed) => {}
-                Ok(refusal) => refused(&state, conversation.id, lifecycle, refusal).await,
+                Ok(refusal) => {
+                    refused(
+                        &state,
+                        conversation.id,
+                        lifecycle,
+                        refusal,
+                        "as the server came back up",
+                    )
+                    .await;
+                }
                 Err(error) => {
                     tracing::error!(error = ?error, conversation_id = conversation.id, "starting to drive a Conversation a restart left failed");
                 }
@@ -740,15 +767,116 @@ async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::
         .is_some_and(|stopped| stopped.decision.decided()))
 }
 
-/// Stop a Conversation a restart could not start anything for, with the refusal
-/// as its Notice.
+/// Press Resume on a Conversation that has just been moved onto this device
+/// (ADR-0020, *Transfer*).
 ///
-/// A refusal at startup has nobody in front of it: the press answers the browser
-/// that is holding a request open, and this answers nothing at all. So it goes
-/// where the human will find it — the Timeline, in the words the button would
-/// have used — and the Conversation stops rather than being swept a minute later
-/// under *nothing is driving it*, which is the same Conversation described by
-/// something that knows less.
+/// **Resume is the standing way in, and this is the question it answers.** A
+/// Conversation that has arrived is a Conversation nothing on this machine is
+/// driving, in a state something ought to be driving — which is exactly the
+/// condition a restart leaves behind and exactly the one the button is drawn on.
+/// So the recompute is asked of the record as it now stands here: the lifecycle
+/// that crossed, and the branch in the Worktree this device has just cut. What
+/// that gives is a fresh session re-primed from the record, which is Verkstead's
+/// own Resume; continuing the agent's own context where the harness has one is
+/// stage 10 and is not this.
+///
+/// `from` is the machine the work came off, by the name this device knows it by:
+/// it goes into the Notice a refusal writes, a Conversation that arrived and
+/// could not be started being one whose human has to be told which of the two
+/// things happened.
+///
+/// **A stop somebody decided on is left exactly where it stands**, which is the
+/// rule a restart keeps and the same reasoning: a Conversation stopped by a press
+/// or by Verkstead pulling the brake is waiting for a human, and moving it onto
+/// another machine is not somebody deciding differently about it. The stop crossed
+/// with the record, so the copy here reads as it read there and the press that
+/// clears it is the human's. See [`waiting_for_a_press`].
+///
+/// Nothing is announced on the way out: either something starts, which shows up
+/// on the Timeline as the session it is, or the refusal stops the Conversation
+/// with a Notice saying so.
+pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &str) {
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        tracing::error!(
+            conversation_id,
+            "a Conversation that arrived here could not be read, so nothing was started for it",
+        );
+        return;
+    };
+
+    // Drafting, Done and Closed are states nothing was ever driving, so there is
+    // nothing for an arrival to take up: a Draft does not move at all, and a Done
+    // or Closed Conversation arrives as the record of work that has finished. The
+    // same rule the button is drawn by — see [`driven`].
+    if !driven(conversation.state) {
+        tracing::info!(
+            conversation_id,
+            state = ?conversation.state,
+            "a Conversation arrived here in a state nothing drives, so nothing was started for it",
+        );
+        return;
+    }
+
+    match waiting_for_a_press(state, conversation_id).await {
+        Ok(true) => {
+            tracing::info!(
+                conversation_id,
+                from,
+                "a Conversation arrived here stopped by a decision, so it waits for a press \
+                 rather than being started",
+            );
+            return;
+        }
+        Ok(false) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation that arrived was waiting on the human failed");
+            return;
+        }
+    }
+
+    tracing::info!(
+        conversation_id,
+        from,
+        state = ?conversation.state,
+        "a Conversation was moved onto this device, so what ought to be running is being started",
+    );
+
+    match resume(state, conversation_id, Resuming::Arrived).await {
+        Ok(Resumed::Resumed) => {}
+        Ok(refusal) => {
+            refused(
+                state,
+                conversation_id,
+                conversation.state,
+                refusal,
+                &format!("when the work arrived from {from}"),
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "starting the work a Conversation arrived with failed");
+        }
+    }
+}
+
+/// Stop a Conversation nothing could be started for, with the refusal as its
+/// Notice.
+///
+/// `occasion` is the clause the sentence opens on — *as the server came back up*,
+/// or *when the work arrived from the-laptop* — because those are the two
+/// presses nobody made and the human reading the Notice has to know which of
+/// them this was. The words after it are the button's own: see [`why`].
+///
+/// A refusal nobody pressed for has nobody in front of it: the press answers the
+/// browser that is holding a request open, and this answers nothing at all. So it
+/// goes where the human will find it — the Timeline, in the words the button
+/// would have used — and the Conversation stops rather than being swept a minute
+/// later under *nothing is driving it*, which is the same Conversation described
+/// by something that knows less.
 ///
 /// [`store::Decision::Verkstead`], which is what it is: Verkstead looked at this
 /// Conversation and decided nothing could be started for it. Nothing but the
@@ -758,12 +886,19 @@ async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::
 ///
 /// A Conversation already stopped keeps the stop it has: there is one per
 /// Conversation, and the first Notice is the one that explains it.
-async fn refused(state: &AppState, conversation_id: i64, lifecycle: Lifecycle, refusal: Resumed) {
+async fn refused(
+    state: &AppState,
+    conversation_id: i64,
+    lifecycle: Lifecycle,
+    refusal: Resumed,
+    occasion: &str,
+) {
     let Some(why) = why(refusal) else {
         tracing::info!(
             conversation_id,
             ?refusal,
-            "a Conversation moved on before a restart could take it up, so nothing was written",
+            occasion,
+            "a Conversation moved on before it could be taken up, so nothing was written",
         );
         return;
     };
@@ -774,7 +909,7 @@ async fn refused(state: &AppState, conversation_id: i64, lifecycle: Lifecycle, r
         conversation_id,
         crate::stopping::Decided::Verkstead,
         crate::stalls::driving(lifecycle),
-        &format!("nothing could be started for it as the server came back up: {why}"),
+        &format!("nothing could be started for it {occasion}: {why}"),
         crate::stalls::said_last(state, conversation_id).await,
     )
     .await;
@@ -896,7 +1031,7 @@ async fn starting(
 ) -> anyhow::Result<()> {
     match resuming {
         Resuming::Landed => Ok(()),
-        Resuming::Restarted => clear(state, conversation_id).await,
+        Resuming::Restarted | Resuming::Arrived => clear(state, conversation_id).await,
         Resuming::Pressed => {
             store::discard_pending_steer(&state.pool, conversation_id).await?;
 

@@ -395,8 +395,8 @@ itself.
 **Every id is renumbered as it lands**, because both ends issue their own and
 every Verkstead has a Conversation 1: an Event id a Capture, a Transcript, a
 session Pairing or a Set points at comes out naming the Event it actually landed
-as, and a Set's own id moves with it — which is what leaves one left open
-answerable on the far end, its Answers reaching a session running *there*. Two
+as, and a Set's own id moves with it — which is what leaves one still open
+answerable on the far end, its Answers reaching a wait opened *there*. Two
 ids are not the record's to renumber and are settled by the devices instead: the
 Repos, by the same match that settled the Conversation's own, refused by name
 where one has nowhere to land; and the Agent Profiles, named across the cluster
@@ -442,6 +442,36 @@ message and the far end makes every checkout or none: a Conversation whose own
 checkout landed and whose Companion's did not is one no session could be launched
 in, and a move that would leave one behind is refused by name with the work still
 where it was.
+**And the arrival, which is the leg after the mark.** The sending device marks its
+own copy and only then tells the receiving one that the move is over: every leg in
+front of that is in front of the commit point, and a session started in a checkout
+that was about to be swept would be an agent working in a directory nobody could
+account for. What the far end does with that word is two things. It puts a Notice
+on the Timeline saying which machine the work came from — the sending device's own
+copy carrying the matching one, saying where it went — so the record reads as one
+story across two databases rather than as a Conversation that appeared from
+nowhere. And it presses **Resume** for itself: the one standing way in, which asks
+what *ought* to be running now from the state the Conversation is in and what the
+branch has written, which is exactly the question a Conversation that has just
+landed poses. What that gives is a fresh session re-primed from the record —
+Verkstead's own Resume rather than the harness's, continuing the agent's own
+context being a thing for later. The refusals are Resume's own and land as a stop
+with a Notice naming the arrival. **A stop somebody decided on crosses and is left
+exactly where it stands**, the way a restart leaves one: moving work onto another
+machine is not somebody deciding differently about a brake the human pulled. And
+what a relaunched grilling does to the Sets the gone session was idling on, it does
+here too — it locks them unanswered, the reader being on a machine the work has
+left, and asks again what it still needs. A **Deferred Ask** had nobody behind it
+to begin with and lands open, answerable where the work now is.
+**Before any of it, the account goes home.** A session away from home keeps a
+mirror of its account's login and of this Repo's memory entries and writes both
+back to the device they are at home on as it ends — and the move runs at the turn's
+end, which is exactly when that happens. So the ordering is the thing: the write-back
+is the last thing a session's ending does before the word that it is over, the mover
+waits for that word, and a launch that has been decided but has not reached the
+register yet is waited for too. The account is home before the slice and the bundle
+leave, or the far end would launch under a login the source had not finished
+returning.
 _Avoid_: migrate, hand off, sync, failover
 
 **Worktree**:

@@ -921,42 +921,85 @@ mod tests {
     /// this code does for itself.
     #[test]
     fn a_binary_patch_crosses_a_line_ending_convention() {
-        let dir = tempfile::tempdir().unwrap();
-        let sending = dir.path().join("sending");
+        let (text, bytes) = crossing("false", "true");
 
-        std::fs::create_dir_all(&sending).unwrap();
-        run(&sending, &["init", "--initial-branch", "main"]);
-        run(
-            &sending,
-            &["config", "user.email", "test@verkstead.invalid"],
+        assert_eq!(
+            text,
+            LEFT.replace('\n', "\r\n"),
+            "the text file landed in the receiving tree's own convention",
         );
-        run(&sending, &["config", "user.name", "Verkstead Test"]);
-        run(&sending, &["config", "core.autocrlf", "false"]);
+        assert_eq!(bytes, LEFT_BYTES, "and the binary one landed byte for byte");
+    }
 
-        std::fs::write(sending.join("notes.md"), COMMITTED).unwrap();
-        std::fs::write(sending.join("fixture.bin"), COMMITTED_BYTES).unwrap();
-        run(&sending, &["add", "-A"]);
-        run(&sending, &["commit", "-m", "the work so far"]);
+    /// **And it crosses back**, which is the same sentence in the direction a
+    /// transfer home takes: made where the switch is on and applied where it is
+    /// off.
+    ///
+    /// Both ways rather than one, because a move is demonstrated *and back* —
+    /// and because the two are not the same operation. Going out, the patch is
+    /// read off a tree spelled with CRLF and normalised on its way into the
+    /// diff; coming home it is read off one already spelled with LF. What has to
+    /// be true of both is that the tree it lands in keeps its own convention.
+    #[test]
+    fn a_binary_patch_crosses_a_line_ending_convention_coming_home() {
+        let (text, bytes) = crossing("true", "false");
 
-        std::fs::write(sending.join("notes.md"), LEFT).unwrap();
-        std::fs::write(sending.join("fixture.bin"), LEFT_BYTES).unwrap();
+        assert_eq!(
+            text, LEFT,
+            "the text file landed in the receiving tree's own convention",
+        );
+        assert_eq!(bytes, LEFT_BYTES, "and the binary one landed byte for byte");
+    }
 
-        let patch = repos::bytes(&sending, &["diff", "--binary", "HEAD"], &[0])
+    /// One crossing: a tree keeping `sending`'s convention, its uncommitted
+    /// changes as a binary patch, and a clone keeping `receiving`'s with that
+    /// patch applied.
+    ///
+    /// What comes back is what the receiving tree's two files say afterwards —
+    /// the text one and the binary one, which land by different rules.
+    fn crossing(sending: &str, receiving: &str) -> (String, Vec<u8>) {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("sending");
+
+        std::fs::create_dir_all(&from).unwrap();
+        run(&from, &["init", "--initial-branch", "main"]);
+        run(&from, &["config", "user.email", "test@verkstead.invalid"]);
+        run(&from, &["config", "user.name", "Verkstead Test"]);
+        run(&from, &["config", "core.autocrlf", sending]);
+
+        // Written the way an editor on that machine writes them, which is the
+        // whole of what a convention is: git normalises what it stores and puts
+        // the tree's own endings back on what it checks out.
+        let spelled = |text: &str| match sending {
+            "true" => text.replace('\n', "\r\n"),
+            _ => text.to_owned(),
+        };
+
+        std::fs::write(from.join("notes.md"), spelled(COMMITTED)).unwrap();
+        std::fs::write(from.join("fixture.bin"), COMMITTED_BYTES).unwrap();
+        run(&from, &["add", "-A"]);
+        run(&from, &["commit", "-m", "the work so far"]);
+
+        std::fs::write(from.join("notes.md"), spelled(LEFT)).unwrap();
+        std::fs::write(from.join("fixture.bin"), LEFT_BYTES).unwrap();
+
+        let patch = repos::bytes(&from, &["diff", "--binary", "HEAD"], &[0])
             .expect("the tree has something uncommitted in it");
 
         // And the receiving machine, which keeps the other convention: a clone
-        // with the switch on, checked out again so the tree is spelled its way.
-        let receiving = dir.path().join("receiving");
+        // with the switch set its way, checked out again so the tree is spelled
+        // that way.
+        let to = dir.path().join("receiving");
 
         run(
             dir.path(),
-            &["clone", &sending.display().to_string(), "receiving"],
+            &["clone", &from.display().to_string(), "receiving"],
         );
-        run(&receiving, &["config", "core.autocrlf", "true"]);
-        run(&receiving, &["checkout", "HEAD", "--", "."]);
+        run(&to, &["config", "core.autocrlf", receiving]);
+        run(&to, &["checkout", "HEAD", "--", "."]);
 
         working(
-            &receiving,
+            &to,
             &Carried {
                 commit: "0".repeat(40),
                 bundle: None,
@@ -966,16 +1009,10 @@ mod tests {
         )
         .expect("the patch applies");
 
-        assert_eq!(
-            std::fs::read_to_string(receiving.join("notes.md")).unwrap(),
-            LEFT.replace('\n', "\r\n"),
-            "the text file landed in the receiving tree's own convention",
-        );
-        assert_eq!(
-            std::fs::read(receiving.join("fixture.bin")).unwrap(),
-            LEFT_BYTES,
-            "and the binary one landed byte for byte",
-        );
+        (
+            std::fs::read_to_string(to.join("notes.md")).unwrap(),
+            std::fs::read(to.join("fixture.bin")).unwrap(),
+        )
     }
 
     /// Both are a member's calls, so they go where a member's calls go rather

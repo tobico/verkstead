@@ -1937,6 +1937,28 @@ impl Sessions {
             })
     }
 
+    /// Whether this Conversation has a session on its way up: one decided on and
+    /// not yet on the register.
+    ///
+    /// **The one question about a launch that the register cannot answer.** A
+    /// session is written down once its relay is up, and in front of that there
+    /// is a prompt to build and a sandbox to make — on the platform whose
+    /// boundary is written rather than wrapped, minutes of it. So a Conversation
+    /// with nothing *running* may still be a Conversation about to have an agent
+    /// in its Worktree, and something that has to know whether the Worktree is
+    /// about to be busy asks this beside [`Sessions::following`].
+    ///
+    /// What asks is the mover: a move that ran while a session was starting
+    /// would carry the work away from under it, and away from the write-back
+    /// that session's ending owes the device its account is at home on. See
+    /// [`crate::transfers`].
+    pub(crate) fn starting(&self, conversation_id: i64) -> bool {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .contains_key(&conversation_id)
+    }
+
     /// Which Conversations have a session running right now.
     ///
     /// The whole set at once rather than a question per Conversation, because
@@ -4274,6 +4296,48 @@ exit 1
         assert!(idle.idling());
     }
 
+    /// And a launch in flight is one the register cannot answer for, so it is
+    /// asked after in its own right.
+    ///
+    /// **What asks is the mover** (ADR-0020, *Transfer*): a Conversation with
+    /// nothing *running* may still be one about to have an agent in its Worktree,
+    /// and a move that ran in that window would carry the work away from under a
+    /// session starting — and away from the write-back that session's ending owes
+    /// the device its account is at home on. From before the Capture is open,
+    /// because that is where the window begins.
+    #[test]
+    fn a_launch_in_flight_is_a_session_on_its_way_up() {
+        let sessions = Sessions::none();
+
+        assert!(
+            !sessions.starting(CONVERSATION),
+            "nothing is starting before a launch has begun",
+        );
+
+        {
+            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+
+            assert!(
+                sessions.starting(CONVERSATION),
+                "a launch is in flight from before it has a Capture to write into",
+            );
+
+            launching.printing_into(31);
+
+            assert!(
+                sessions.starting(CONVERSATION),
+                "and still, with one open and no session on the register yet",
+            );
+        }
+
+        assert!(
+            !sessions.starting(CONVERSATION),
+            "and no launch is in flight once it is over, whatever it left",
+        );
+    }
+
+    /// A launch names the Event it is writing into from the moment the Capture
+    /// is open, rather than leaving it to the register.
     /// A launch names the Event it is writing into from the moment the Capture
     /// is open, rather than leaving it to the register.
     ///

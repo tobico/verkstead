@@ -18,6 +18,14 @@
 //! and the device that sent it takes it back rather than leaving a half-record
 //! on a machine the work never reached.
 //!
+//! **Which is why nothing here starts anything.** Everything the sending device
+//! sends before its own copy is marked is a thing it may take back, and a session
+//! launched in a checkout that was about to be swept would be an agent working in
+//! a directory nobody could account for. So there is a last call — see
+//! [`arrived`] — which the sending device makes once the mark is written, and
+//! *that* is the one this device acts on: a Notice saying which machine the work
+//! came from, and **Resume** pressed by this device for itself.
+//!
 //! **Gated to members like everything else on this listener.** Writing a
 //! Conversation into somebody's database is not a stranger's press:
 //! [`super::router`] puts [`super::members_only`] over this, and a caller whose
@@ -33,7 +41,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use verkstead_render::{Arrived, ConversationAcross, PickedAcross, ProfileAcross};
+use verkstead_render::{Arrived, CameFrom, ConversationAcross, PickedAcross, ProfileAcross};
 
 use crate::attachments::Attachments;
 use crate::transfers::{AttachedFile, MOST_A_RECORD_IS, RecordAcross};
@@ -57,6 +65,10 @@ pub const ONE_TRANSFER: &str = "/api/peer/v1/transfers/{id}";
 /// Conversation's own — which is what the first call answered with. So the row
 /// goes, this device numbers it, and the record follows against that number.
 pub const ONE_TRANSFERS_RECORD: &str = "/api/peer/v1/transfers/{id}/record";
+
+/// And where the device that sent it says the move is over, which is the one call
+/// this device may act on — see [`arrived`].
+pub const ONE_TRANSFERS_ARRIVAL: &str = "/api/peer/v1/transfers/{id}/arrival";
 
 /// `POST /api/peer/v1/transfers` — write the arriving Conversation down, and
 /// answer with the id it goes by here.
@@ -208,6 +220,76 @@ pub(crate) async fn written(
             (StatusCode::BAD_REQUEST, format!("{why:#}\n")).into_response()
         }
     }
+}
+
+/// `POST /api/peer/v1/transfers/{id}/arrival` — the device that sent the work
+/// saying the move is over, and this device taking it up.
+///
+/// **The one leg after the commit point, and the only one this device may act
+/// on.** Every call before it is in front of the mark the sending device writes:
+/// a move that falls over there is swept — see [`sweep`] — and a session started
+/// in a checkout that was about to be taken back would be an agent working in a
+/// directory nobody could account for. By the time this arrives the sending
+/// device has let go, so the work is *here*, and two things follow from that.
+///
+/// **A Notice saying where it came from**, so the record reads as one story
+/// across the two machines rather than as a Conversation that appeared from
+/// nowhere. By the name this device knows that machine by, the way every sentence
+/// about a member is written — see [`crate::relaying::called`].
+///
+/// **And Resume, pressed by this device for itself.** Resume is the one standing
+/// way in: it asks what *ought* to be running now, from the lifecycle the
+/// Conversation is in and what the branch has written, which is exactly the
+/// question a Conversation that has just arrived poses. See
+/// [`crate::resume::on_arrival`], where the refusals are written down.
+///
+/// **`Ok` whatever the Resume decided**, because there is nothing the sending
+/// device could do with the answer: its copy is already the tombstone and the
+/// work is already here. What a refusal leaves is a stop on this device's own
+/// Timeline, which is where the human who has to act on it is looking.
+pub(crate) async fn arrived(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(from): Json<CameFrom>,
+) -> Response {
+    if !matches!(store::load_conversation(&state.pool, id).await, Ok(Some(_))) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "no Conversation on this device has that id\n",
+        )
+            .into_response();
+    }
+
+    let named = crate::relaying::called(state.devices.as_ref(), &from.device).await;
+
+    tracing::info!(
+        conversation_id = id,
+        device = from.device,
+        "a member says the Conversation it moved here has finished arriving",
+    );
+
+    let noted = store::note(
+        &state.pool,
+        id,
+        &format!(
+            "This Conversation was moved onto this device from **{named}**. Its branch, its \
+             Worktree and whatever was uncommitted in it are here, and the record above it \
+             came across with them.",
+        ),
+    )
+    .await;
+
+    if let Err(error) = noted {
+        tracing::error!(error = ?error, conversation_id = id, "saying on the Timeline where a Conversation arrived from failed");
+    }
+
+    state
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversation { conversation: id });
+
+    crate::resume::on_arrival(&state, id, &named).await;
+
+    StatusCode::OK.into_response()
 }
 
 /// Which of this device's Agent Profiles each one the record names is, where
@@ -479,6 +561,7 @@ pub(crate) fn route() -> Router<AppState> {
             // whole Timeline, and the bound over it is the record's own.
             post(written).layer(DefaultBodyLimit::max(MOST_A_RECORD_IS)),
         )
+        .route(ONE_TRANSFERS_ARRIVAL, post(arrived))
 }
 
 #[cfg(test)]
@@ -490,7 +573,12 @@ mod tests {
     /// write Conversations into somebody's database.
     #[test]
     fn the_transfers_are_not_one_of_the_un_gated_three() {
-        for path in [TRANSFERS, ONE_TRANSFER, ONE_TRANSFERS_RECORD] {
+        for path in [
+            TRANSFERS,
+            ONE_TRANSFER,
+            ONE_TRANSFERS_RECORD,
+            ONE_TRANSFERS_ARRIVAL,
+        ] {
             assert_ne!(path, super::super::IDENTITY);
             assert_ne!(path, super::super::joining::JOIN);
             assert_ne!(path, super::super::exchange::SETTLED);
@@ -503,7 +591,12 @@ mod tests {
     #[test]
     fn the_transfers_are_not_in_a_namespace_kept_back() {
         for prefix in super::super::workbench::KEPT_TO_ITSELF {
-            for path in [TRANSFERS, ONE_TRANSFER, ONE_TRANSFERS_RECORD] {
+            for path in [
+                TRANSFERS,
+                ONE_TRANSFER,
+                ONE_TRANSFERS_RECORD,
+                ONE_TRANSFERS_ARRIVAL,
+            ] {
                 assert!(
                     !path.starts_with(prefix),
                     "{path} would be held back with {prefix}/",

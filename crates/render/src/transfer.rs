@@ -243,6 +243,26 @@ pub struct ProfileAcross {
     pub id: i64,
 }
 
+/// The word that the move is over, and which machine the work came off.
+///
+/// **Sent last of all, after the sending device has marked its own copy**, which
+/// is what makes it the one call the far end may act on. Every leg before it
+/// stands in front of the commit point: a move that falls over there is swept,
+/// and a session started in a checkout that was about to be taken back would be
+/// an agent working in a directory nobody could account for. By the time this
+/// arrives nothing is going to be swept, so what the far end does about it is
+/// press Resume for itself and say on its Timeline where the work came from.
+///
+/// **The Device Id in the body rather than read off the certificate**, which is
+/// how every other call over this link names a device — see [`ProfileAcross`].
+/// The gate has already settled that the caller is a member; this says *which*
+/// member, and what it is for is a sentence with a machine's name in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameFrom {
+    /// The **Device Id** of the machine the work was moved off.
+    pub device: String,
+}
+
 /// What the receiving device answers: the id it numbered its copy.
 ///
 /// Which is what the sending device writes on its own copy as the mark saying
