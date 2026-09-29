@@ -3097,7 +3097,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "verkstead-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "verkstead-render"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ammonia",
  "pulldown-cmark",
@@ -3131,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "verkstead-schema"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde-saphyr",
@@ -3140,7 +3140,7 @@ dependencies = [
 
 [[package]]
 name = "verkstead-server"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "avt",
@@ -3183,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "verkstead-store"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64",
