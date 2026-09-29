@@ -53,6 +53,7 @@ import {
   DIRECTIONS,
 } from "../directions";
 import { ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
@@ -845,51 +846,6 @@ function Row(props: {
       </Show>
     </tr>
   );
-}
-
-/// The press a row of the sheet answers to: the row's own click, counted once.
-///
-/// A row that wraps its control in a `<label>` is offered as one thing to press,
-/// and the browser makes good on that by forwarding the label's click to the
-/// control — which is what a pick used to ride on. It withholds that forwarding
-/// the moment the pointer moved at all between the press and the release. So a
-/// hand that slid a pixel over an Option's words got a sliver of them selected
-/// and nothing picked: the one gesture the row has was also the one way to miss
-/// it, and a row of words is a thing people press without holding perfectly
-/// still.
-///
-/// The row answers its own click instead, which arrives whether the pointer moved
-/// or not, and cancels the forwarding so that one gesture cannot come through
-/// twice. Cancelling it takes the focus the forwarding also moved, so the control
-/// is focused by hand in its place: nothing about a press that did not slide
-/// changes, and a slid one now does the same thing.
-///
-/// A press that landed on the control itself is left alone — the control's own
-/// handlers have it, and that press is also how the keyboard picks. A forwarded
-/// click is indistinguishable from one here, both arriving from the control,
-/// which is why the forwarding is cancelled rather than told apart.
-///
-/// The other half of it is in the stylesheet: a row takes no selection, so there
-/// is no sliver left to be rid of. See `.option label` in `Sheet.module.css`.
-///
-/// The rows of an Answer Table come through here too, and there is no label to
-/// wrap a `tr` in: nothing is forwarded to them, so nothing is cancelled, and
-/// what they take from this is the focus. Every row a Set is answered by is then
-/// one arrangement rather than two that happen to agree. See [`Row`].
-function rowPress(
-  act: () => void,
-): (event: MouseEvent & { currentTarget: HTMLElement }) => void {
-  return (event) => {
-    const control = event.currentTarget.querySelector("input");
-
-    if (event.target === control) {
-      return;
-    }
-
-    event.preventDefault();
-    control?.focus();
-    act();
-  };
 }
 
 /// What one Option on offer is marked as: an Option, and the one the agent

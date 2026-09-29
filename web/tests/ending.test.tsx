@@ -23,6 +23,7 @@ import sheet from "../src/set/Sheet.module.css";
 import { draftKey } from "../src/set/filling";
 import { answering, sent } from "./reading";
 import { json, readable } from "./serving";
+import { slidPress } from "./sliding";
 import following from "./fixtures/set-following-up.json" with { type: "json" };
 import investigating from "./fixtures/set-investigating.json" with {
   type: "json",
@@ -165,34 +166,21 @@ describe("the option on an investigation's Set", () => {
 });
 
 describe("ticking it", () => {
-  /// A press on the option's words that slid before it was let go: the row's own
-  /// click, with the click a label forwards to its box not happening.
-  ///
-  /// A browser withholds that forwarding the moment the pointer moved between
-  /// the press and the release. jsdom has no pointer and forwards regardless, so
-  /// the withholding is staged by cancelling it — what the row is handed is the
-  /// same either way. `tests/answering.test.tsx` asks the same of an Option's
-  /// row, which is where the arrangement is written down.
-  function slidPress(page: ParentNode): void {
-    const withhold = (event: Event) => event.preventDefault();
-
-    document.addEventListener("click", withhold, true);
-    try {
-      fireEvent.click(page.querySelector(`.${sheet.endingName}`)!);
-    } finally {
-      document.removeEventListener("click", withhold, true);
-    }
+  /// A press on the option's words that slid before it was let go — see
+  /// [`slidPress`](./sliding.ts), which says what is staged and why.
+  function slidWords(page: ParentNode): void {
+    slidPress(page.querySelector(`.${sheet.endingName}`)!);
   }
 
   it("ticks on a press that slid over its words, not only on a still one", async () => {
     const { page } = await answering(FOLLOWING_UP);
 
-    slidPress(page);
+    slidWords(page);
     expect(option(page).checked).toBe(true);
 
     // And once: a gesture counted twice would tick the box and untick it again,
     // so this press would be ticking rather than clearing.
-    slidPress(page);
+    slidWords(page);
     expect(option(page).checked).toBe(false);
   });
 

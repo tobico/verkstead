@@ -187,7 +187,7 @@
 
   /* And it is a thing to press rather than words to sweep a caret over, so it
      says so and takes no selection. A press that slid a pixel used to leave one
-     character of the Option highlighted — see `rowPress` in `Answering.tsx` for
+     character of the Option highlighted — see `rowPress` in `src/rows.ts` for
      what that cost, which is the other half of this.
 
      Nothing is given up by it. The Option's words are the agent's, they are on

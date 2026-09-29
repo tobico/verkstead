@@ -11,6 +11,11 @@
   font-size: 0.95rem;
   color: var(--ink);
   cursor: pointer;
+
+  /* And no selection, for the reason the switch beside this takes none — see
+     `.switch` in `Switch.module.css`, and `rowPress` in `src/rows.ts` for what a
+     press that slid used to do instead. */
+  user-select: none;
 }
 
 .check input {

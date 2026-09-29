@@ -35,6 +35,7 @@ import {
   withTable,
 } from "./reading";
 import { json, readable } from "./serving";
+import { slidPress } from "./sliding";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -309,10 +310,10 @@ describe("selecting an Option", () => {
     // And it arrives once, which is what the second press proves: a gesture
     // counted twice would select the Option and clear it again, so this one
     // would be selecting rather than clearing.
-    slidPress(page, "Q1", 1);
+    slidOption(page, "Q1", 1);
     expect(option(page, "Q1", 1).checked).toBe(true);
 
-    slidPress(page, "Q1", 1);
+    slidOption(page, "Q1", 1);
     expect(
       option(page, "Q1", 1).checked,
       "and a second press on the row clears it, as one on the radio does",
@@ -325,7 +326,7 @@ describe("selecting an Option", () => {
     // What the label did for nothing until the row took the press off it, and
     // so what the row now does by hand: the arrow keys move within the group
     // the human just pressed into, rather than from wherever focus had been.
-    slidPress(page, "Q1", 2);
+    slidOption(page, "Q1", 2);
 
     expect(document.activeElement).toBe(option(page, "Q1", 2));
   });
@@ -400,26 +401,12 @@ describe("the rows a Set is answered by", () => {
   });
 });
 
-/// A press on an Option's words that slid before it was let go: the row's own
-/// click, with the click a label forwards to its control not happening.
-///
-/// That is the gesture at issue, and the browser's part in it is a withholding —
-/// it forwards nothing the moment the pointer moved between the press and the
-/// release. jsdom has no pointer and forwards unconditionally, so the
-/// withholding is staged here by cancelling the forwarding from outside. What
-/// the row is handed is the same either way, which is the whole of what these
-/// ask: its own click, and none on the radio.
-function slidPress(page: ParentNode, label: string, n: number): void {
-  const withhold = (event: Event) => event.preventDefault();
-
-  document.addEventListener("click", withhold, true);
-  try {
-    fireEvent.click(
-      option(page, label, n).closest("label")!.querySelector(`.${sheet.optionText}`)!,
-    );
-  } finally {
-    document.removeEventListener("click", withhold, true);
-  }
+/// A press on an Option's words that slid before it was let go — see
+/// [`slidPress`](./sliding.ts), which says what is staged and why.
+function slidOption(page: ParentNode, label: string, n: number): void {
+  slidPress(
+    option(page, label, n).closest("label")!.querySelector(`.${sheet.optionText}`)!,
+  );
 }
 
 /// What one top-level rule of the sheet's stylesheet declares, read off the

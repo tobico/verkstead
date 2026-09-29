@@ -46,6 +46,13 @@
   gap: 0.5rem;
   align-items: baseline;
   font-weight: 600;
+
+  /* Each is a row to press anywhere on, so it says so and takes no selection —
+     see `rowPress` in `src/rows.ts` for what a press that slid over the words
+     used to do instead. The note under either row is outside it, being what the
+     row means rather than the row. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .steerTarget .optionNote,
