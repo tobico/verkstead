@@ -260,7 +260,7 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
     Arc::new(tokio::sync::Semaphore::new((cores * 2).clamp(4, 16)))
 });
 
-/// And the two tests here that count sccache servers, one at a time.
+/// And the tests here that count sccache servers, or start one, one at a time.
 ///
 /// **Because what they count is the machine's**, not this suite's: an sccache
 /// server is a process outside every Verkstead, so the only way to say *this
@@ -268,6 +268,11 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
 /// tests doing that at once each see the other's server as their own, which is
 /// a failure that depends on which of them is scheduled first. So they take
 /// turns, and each holds this for as long as its own diff is open.
+///
+/// **And a fixture handed a cache is one of them**, whatever its Repo holds:
+/// the Compile Server comes up on the switch rather than on a manifest — see
+/// [`Builds`] — so a session given a cache is a server on this machine for as
+/// long as that fixture lives, and a diff running beside it would count it.
 static COUNTING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// The pace these sessions are driven at.
@@ -656,9 +661,9 @@ fn joined(target: &Path, name: &Path) {
     );
 }
 
-/// And the same again in a Repo a session would build Rust in, which is what
-/// puts the Compile Server up: the session start asks the checkout for a
-/// manifest, and nothing else on this Timeline would ever want one.
+/// And the same again in a Repo a session would really build Rust in: a
+/// manifest to compile, and the machine's own rustup home joined into the
+/// fixture's so that the toolchain is there to compile it with.
 async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
     grilling_caching(script, cache, Builds::Rust).await
 }
@@ -666,17 +671,20 @@ async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
 /// What the Repo a fixture registers holds, which is the one thing about it a
 /// test here ever varies.
 ///
-/// **A `Cargo.toml` at the root is what starts the Compile Server**, and
-/// nothing else does — see `build_cache::builds_rust`, which the session start
-/// asks of the checkout. So a fixture is asked which it is rather than every
-/// one of them paying for an sccache server it has nothing to compile.
+/// **Not what starts the Compile Server.** That comes up wherever a language
+/// naming the sccache capability is switched on and there is an sccache to run,
+/// whatever the checkout holds — see `languages::Languages::naming`, which the
+/// session start asks of the settings rather than of the Repo. So a cache
+/// handed to a fixture is a compile server either way, and what this decides is
+/// whether there is anything on disk for a session to compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Builds {
     /// A repository with a README and no manifest, which is every fixture here
     /// but the one about building.
     Nothing,
 
-    /// And one a session would build Rust in.
+    /// And one a session would build Rust in, with the machine's toolchain
+    /// reachable from inside.
     Rust,
 }
 
@@ -2167,9 +2175,23 @@ fn whose(pid: u32) -> String {
 /// The wrapper is the half that was missing for as long as a session ran inside
 /// an AppContainer — see
 /// [`verkstead_server::build_cache::compiles_through_an_sccache`].
+///
+/// **And the Repo holds no manifest**, which is the other half of what is being
+/// asked. A session is handed these variables whatever its checkout holds, and
+/// the Compile Server the wrapper reaches comes up for it all the same — so the
+/// servers are counted here as well: the one Verkstead started, and none the
+/// session started inside itself for want of it. That hazard is exactly the
+/// ordinary case, a manifest one directory down from the root.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
+    // Held for as long as this fixture is up. A session handed a cache is a
+    // Compile Server on this machine whatever its Repo holds, now that the
+    // server comes up on the switch — so this is one of the tests the two that
+    // count servers take turns with. See [`COUNTING`].
+    let _turn = COUNTING.lock().await;
+
     let cache = somewhere();
+    let already = servers();
 
     let fixture = grilling_caching(
         r#"
@@ -2233,6 +2255,16 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         std::fs::read_to_string(&downloaded).unwrap().trim(),
         "here",
         "and the session really wrote it, from inside its boundary",
+    );
+
+    let started: Vec<u32> = servers().difference(&already).copied().collect();
+
+    assert_eq!(
+        started.len(),
+        1,
+        "a Repo with no manifest at its root is a Compile Server all the same, \
+         and one is all of them: {already:?} were running before, {started:?} \
+         are new",
     );
 }
 

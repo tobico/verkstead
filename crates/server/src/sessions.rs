@@ -36,7 +36,7 @@ use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
 use crate::attachments::Attachments;
-use crate::build_cache::{self, BuildCache};
+use crate::build_cache::BuildCache;
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
@@ -315,14 +315,15 @@ impl Agents {
 
         // And the one sccache server this machine compiles through, up before
         // whatever will reach for it — see [`BuildCache::compiling`]. Here
-        // rather than at startup and only for a Repo that builds Rust, because
-        // a machine that never builds Rust never needs one; and every time
-        // rather than once, because the switch, the size and whether the server
-        // is still alive are all read at this moment.
-        if build_cache::builds_rust(&conversation.repo.path) {
-            self.cache
-                .compiling(config.rust_build_cache(), session_account.as_ref());
-        }
+        // rather than at startup, and asked of every session rather than of the
+        // Repo: what decides is whether a language naming the sccache capability
+        // is switched on, because the session is handed the wrapper variable
+        // whatever its checkout holds and a client with no server of Verkstead's
+        // to reach starts one inside its own sandbox. Every time rather than
+        // once, because the switch, the size and whether the server is still
+        // alive are all read at this moment.
+        self.cache
+            .compiling(config.rust_build_cache(), session_account.as_ref());
 
         let sandbox = Sandbox::for_conversation(
             conversation,

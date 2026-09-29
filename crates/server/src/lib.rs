@@ -111,6 +111,14 @@ mod investigations;
 /// an endpoint, and standing the served router up means saying which key it is
 /// keyed with.
 pub mod key;
+/// What a session is given of the language it builds in, said as data: the
+/// descriptors Verkstead ships, embedded in the binary in the grammar an
+/// installer writes (ADR-0021).
+///
+/// Public for the reason [`build_cache`] is: what a session's environment holds
+/// is the product's own promise rather than an implementation detail, and the
+/// suite that proves it stands outside this crate.
+pub mod languages;
 mod limits;
 /// Trying a declared MCP server as it is saved, which is the one place one is
 /// ever spoken to from here — see ADR-0021, where an unreachable server never

@@ -3855,7 +3855,11 @@ impl Sandbox {
             server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,
-            build_cache: cache.shared(config.rust_build_cache()),
+            // The descriptors' own, filled in against this machine: which
+            // sccache there is, and where a session on this platform reaches it
+            // — see [`sccache_inside`], which is read off the same executable
+            // the `PATH` above leads with.
+            build_cache: cache.shared(config.rust_build_cache(), homes.platform(), verkstead.bin()),
             platform: homes.platform(),
             conversation: conversation.id,
             data_dir: homes.data.clone(),
@@ -4362,19 +4366,20 @@ impl Sandbox {
             Reach::ReadOnly,
         );
 
-        // And the shared build cache: the directory writable at its own place,
-        // and the sccache that compiles into it read-only in the directory the
-        // binary above just made. After the empty HOME, so that a cache under
-        // the server's own home — which is where it is when nobody has
-        // configured one — is inside it rather than wiped by it. See
-        // [`crate::build_cache`].
+        // And what the languages this session is set up for are given: each
+        // directory a loaded descriptor's variables point into, writable at its
+        // own place, and the sccache that compiles into one of them read-only in
+        // the directory the binary above just made. After the empty HOME, so
+        // that a cache under the server's own home — which is where it is when
+        // nobody has configured one — is inside it rather than wiped by it. See
+        // [`crate::languages`], and [`crate::build_cache`].
         if let Some(cache) = &self.build_cache {
-            // Standing, for [`Surface::standing`]'s reason: one cache for the
-            // machine, written for the one account every session runs as, and
-            // the same grant whichever Conversation is behind it.
-            surface
-                .own(cache.dir(), Reach::ReadWrite)
-                .standing(cache.dir());
+            for dir in cache.dirs() {
+                // Standing, for [`Surface::standing`]'s reason: one store for
+                // the machine, written for the one account every session runs
+                // as, and the same grant whichever Conversation is behind it.
+                surface.own(dir, Reach::ReadWrite).standing(dir);
+            }
 
             if let Some(sccache) = cache.sccache() {
                 surface.elsewhere(sccache, self.sccache_inside(sccache), Reach::ReadOnly);
@@ -4465,10 +4470,12 @@ impl Sandbox {
             surface.set(RUSTUP_HOME, rustup);
         }
 
-        // Where a Rust build inside puts what it downloads and what it
-        // compiles. Nothing but a Rust build ever reads any of them, which is
-        // what makes them safe to set for every session whatever the repository
-        // holds.
+        // Where a build inside puts what it downloads and what it compiles, for
+        // every language that is switched on — see [`crate::languages`], which
+        // is where the names and the values are said and this is where they are
+        // set. Nothing but a build of that language ever reads any of them,
+        // which is what makes them safe to set for every session whatever the
+        // repository holds.
         //
         // `CARGO_INCREMENTAL` is deliberately not among them. Cargo compiles
         // dependencies non-incrementally already, which is exactly what sccache
@@ -4482,35 +4489,30 @@ impl Sandbox {
         // project whose dev shell exports these itself wins instead, because
         // `nix develop` layers its environment over this one — which is a
         // project saying what its own build needs, and is working as intended.
+        //
+        // A capability's own variables are among them only where this server
+        // can offer it: without an sccache what is left is a cache of downloads
+        // and nothing else — see [`crate::languages`] — and a `RUSTC_WRAPPER`
+        // naming a path that is not inside would be every Rust build inside
+        // failing rather than one running uncached.
+        //
+        // Which used to be the whole of what a Windows session got, there never
+        // being one to point at there — see
+        // [`crate::build_cache::compiles_through_an_sccache`], which is where
+        // that is decided and where the history of it is. A session on that
+        // platform is pointed at one like any other now, at the path the sccache
+        // really is, granted read-only to the account the session runs as.
+        //
+        // What that wrapper reaches is the compile server Verkstead is running
+        // outside, over the host's network — see
+        // [`crate::build_cache::BuildCache::compiling`], which is what puts one
+        // up before a session that compiles starts. The `SCCACHE_DIR` beside it
+        // is not redundant: it is what the client would start a server of its
+        // own into if Verkstead's were somehow missing, and that server should
+        // write into the machine's one cache like every other.
         if let Some(cache) = &self.build_cache {
-            surface.set("CARGO_HOME", cache.cargo_home());
-
-            // Only where there is an sccache to point at. Without one this is a
-            // cache of downloads and nothing else — see [`crate::build_cache`]
-            // — and a `RUSTC_WRAPPER` naming a path that is not inside would be
-            // every Rust build inside failing rather than one running uncached.
-            //
-            // Which used to be the whole of what a Windows session got, there
-            // never being one to point at there — see
-            // [`crate::build_cache::compiles_through_an_sccache`], which is
-            // where that is decided and where the history of it is. A session on
-            // that platform is pointed at one like any other now, at the path
-            // the sccache really is, granted read-only to the account the
-            // session runs as.
-            //
-            // What this reaches is the compile server Verkstead is running
-            // outside, over the host's network — see
-            // [`crate::build_cache::BuildCache::compiling`], which is what puts
-            // one up before a session that builds Rust starts. `SCCACHE_DIR` is
-            // said here all the same, and it is not redundant: it is what the
-            // client would start a server of its own into if Verkstead's were
-            // somehow missing, and that server should write into the machine's
-            // one cache like every other.
-            if let Some(sccache) = cache.sccache() {
-                surface
-                    .set("RUSTC_WRAPPER", self.sccache_inside(sccache))
-                    .set("SCCACHE_DIR", cache.sccache_dir())
-                    .set("SCCACHE_CACHE_SIZE", cache.size());
+            for (name, value) in cache.env() {
+                surface.set(name, value);
             }
         }
 

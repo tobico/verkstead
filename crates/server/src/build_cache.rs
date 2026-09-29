@@ -46,15 +46,19 @@
 //! arrangement exists not to be, whichever of the three renderings is making
 //! the boundary.
 //!
-//! **Rust by name**, deliberately. Nothing here generalises over languages: a
-//! node or a python cache would want its own directory, its own variables and
-//! its own switch, and a sibling of this module is where one would go. Naming
-//! this one for what it caches is what leaves room for that.
+//! **What a session is told is no longer named here.** Which variables a
+//! language gets is a descriptor — data, in the grammar an installer writes —
+//! and Rust is one descriptor among however many the machine has: see
+//! [`crate::languages`], which is where `CARGO_HOME` and the sccache's three
+//! are now written down, and ADR-0021 for why. What is left in this module is
+//! the half that could never be data: where the cache directory is, whether
+//! there is an sccache to point at, and the Compile Server itself.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+use crate::languages;
 use crate::platform::Platform;
 use crate::sandbox::account::Logon;
 use crate::sandbox::outliving;
@@ -73,16 +77,19 @@ use crate::settings::RustBuildCache;
 /// where it is under the Data Directory.
 pub(crate) const SCCACHE: &str = "sccache";
 
-/// What `CARGO_HOME` is inside the cache directory: the registry index, the
-/// `.crate` files downloaded into it, and the sources unpacked from them.
+/// What `SCCACHE_DIR` is inside the cache directory: the compiled objects,
+/// keyed by the hash of everything that went into producing them.
 ///
-/// Shared by every session at once, which cargo has locked properly since 1.68:
-/// two sessions resolving dependencies at the same moment queue on the registry
-/// lock rather than tearing it up between them.
-const CARGO: &str = "cargo";
-
-/// And what `SCCACHE_DIR` is beside it: the compiled objects, keyed by the
-/// hash of everything that went into producing them.
+/// Here rather than in the descriptor beside the one a session is told, because
+/// what reads this is the **Compile Server**, which is what actually writes
+/// them — see [`compile_server`]. A session's own `SCCACHE_DIR` says the same
+/// thing and is the descriptor's to say: it is what a client would start a
+/// server of its own into if Verkstead's were somehow missing.
+///
+/// The registry half is the descriptor's outright. Cargo has locked it properly
+/// since 1.68, so every session at once is two sessions queueing on the registry
+/// lock rather than tearing it up between them, and nothing on this side of the
+/// machine has to know where it is.
 const SCCACHE_DIR: &str = "sccache";
 
 /// How big the compiled half is allowed to get before sccache starts evicting,
@@ -399,6 +406,27 @@ impl BuildCache {
             )
         })?;
 
+        // And the directory beside it, **only where a loaded descriptor names
+        // it** — see [`crate::languages`], and the `{stores}` placeholder in
+        // the file this reads. With Rust the only language built in, nothing
+        // names it, nothing is made here and no session is opened onto one.
+        //
+        // Asked of every descriptor rather than of the enabled ones, because
+        // this is startup and the switch is a session's: a language turned off
+        // this morning is one turned on again this afternoon without the server
+        // being restarted.
+        if languages::built_in().names_stores() {
+            let stores = languages::stores(data_dir);
+
+            std::fs::create_dir_all(&stores).map_err(|error| {
+                anyhow::anyhow!(
+                    "the language store directory at {} could not be made ({error}): a \
+                     bind Verkstead cannot make is every session failing to start",
+                    stores.display()
+                )
+            })?;
+        }
+
         Ok(BuildCache {
             dir: Some(dir),
             sccache,
@@ -456,7 +484,7 @@ impl BuildCache {
     }
 
     /// Make sure the one sccache server this machine compiles through is
-    /// running, which is what a session about to build Rust needs before it
+    /// running, which is what a session about to compile needs before it
     /// starts.
     ///
     /// **Verkstead runs it rather than the sessions.** An sccache server is
@@ -477,10 +505,20 @@ impl BuildCache {
     /// the settings files in reach. Those sit in the Data Directory's root,
     /// outside the one bind this gets.
     ///
-    /// **Started here rather than at startup**, and only for a Conversation
-    /// whose Repo builds Rust — see [`builds_rust`]. A machine that never
-    /// builds Rust never runs one, and the switch and the size are the human's,
-    /// read at this moment like everything else a session is built from.
+    /// **Started here rather than at startup, and on the switch rather than on
+    /// detection.** It comes up wherever a language naming the
+    /// [`crate::languages::SCCACHE`] capability is enabled and there is an
+    /// sccache to run, whatever the Repo holds — see
+    /// [`crate::languages::Languages::naming`]. A Repo whose manifest is not at
+    /// its root is handed the wrapper variable all the same, and with no server
+    /// of Verkstead's up the client inside starts one in its own Sandbox, on the
+    /// loopback every Sandbox shares: the next such session's compiles then run
+    /// inside the first one's, where its Worktree is not bound, and the build
+    /// fails outright. That is the hazard this exists to remove, reached by the
+    /// ordinary case of a manifest one directory down. What it costs instead is
+    /// one idle server on a machine that compiles nothing, and the switch and
+    /// the size are still the human's, read at this moment like everything else
+    /// a session is built from.
     ///
     /// **And on Windows it is started as the session account**, which is what a
     /// boundary is on that platform: `session_account` is the local account of
@@ -498,7 +536,9 @@ impl BuildCache {
             return;
         };
 
-        if !settings.enabled() {
+        // Wanted by somebody, which is a language that is on and names the
+        // capability rather than a Repo that holds a manifest.
+        if !languages::built_in().naming(languages::SCCACHE, switched(settings)) {
             return;
         }
 
@@ -578,81 +618,115 @@ impl BuildCache {
             .unwrap_or_else(|held| held.into_inner())
     }
 
-    /// What one sandbox is given, or `None` where there is nothing to give:
-    /// no cache on this server, or the human has switched it off.
+    /// What one sandbox is given of every language that is switched on, or
+    /// `None` where there is nothing to give: no cache on this server, or every
+    /// language off.
+    ///
+    /// The variables are the descriptors' — see [`crate::languages`] — and what
+    /// is added here is the machine behind their placeholders: where the cache
+    /// is, where the Worktrees are, and the sccache this server found, at the
+    /// path a session on `platform` reaches it by. `ours` is the directory of
+    /// Verkstead's own that a session's binary is in, which is where that
+    /// sccache is joined in on the platforms that join it in at all — see
+    /// [`sandbox::sccache_inside`].
     ///
     /// `settings` is read at every session spawn rather than held from startup,
     /// so a switch flipped in the workbench applies to the next session.
-    pub fn shared(&self, settings: &RustBuildCache) -> Option<Shared> {
-        if !settings.enabled() {
+    pub fn shared(
+        &self,
+        settings: &RustBuildCache,
+        platform: Platform,
+        ours: &Path,
+    ) -> Option<Shared> {
+        let (dir, data_dir) = (self.dir.as_deref()?, self.data_dir.as_deref()?);
+
+        let machine = languages::Machine::of(
+            dir,
+            data_dir,
+            self.sccache
+                .as_deref()
+                .map(|sccache| sandbox::sccache_inside(platform, ours, sccache)),
+        );
+
+        let given = languages::built_in().given(&machine, switched(settings));
+
+        if given.is_empty() {
             return None;
         }
 
         Some(Shared {
-            dir: self.dir.clone()?,
-            sccache: self.sccache.clone(),
-            size: settings.size().to_owned(),
+            // Only where something asked for it: the file is bound in beside a
+            // session's `verkstead` so that a `RUSTC_WRAPPER` can name it, and
+            // with no language naming the capability there is nothing to name.
+            sccache: self.sccache.clone().filter(|_| given.sccache()),
+            given,
         })
     }
 }
 
-/// What one sandbox is given of the build cache: a directory to bind, an
-/// sccache to bind beside the `verkstead` binary where there is one, and the
-/// paths the environment is built out of.
+/// What the settings say about each language: the size where it is on, and
+/// nothing where it is off.
+///
+/// `rust_build_cache` is Rust's, which is what an install that wrote one keeps.
+/// Every other language is on at its own default, which is the rule every
+/// built-in follows — a human should never have a worse experience for not
+/// having checked the settings page. The next task is where `config.yaml` holds
+/// a map of its own and this reads that instead.
+fn switched(settings: &RustBuildCache) -> impl Fn(&str) -> Option<String> + '_ {
+    |name| match name {
+        languages::RUST => settings.enabled().then(|| settings.size().to_owned()),
+        _ => Some(SIZE.to_owned()),
+    }
+}
+
+/// What one sandbox is given of the languages it is set up for: the variables,
+/// the directories they name, and an sccache to bind beside the `verkstead`
+/// binary where something named the capability.
 ///
 /// Decided as the sandbox is built rather than held from startup, because half
 /// of it is the human's switch and their size — see [`BuildCache::shared`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shared {
-    dir: PathBuf,
+    given: languages::Given,
     sccache: Option<PathBuf>,
-    size: String,
 }
 
 impl Shared {
-    /// The directory bound writable into the sandbox, at the same path inside.
+    /// Every variable a session is set, in the order the descriptors name them.
+    pub fn env(&self) -> &[(String, String)] {
+        self.given.env()
+    }
+
+    /// The directories bound writable into the sandbox, each at the same path
+    /// inside: the ones a loaded descriptor's variables point into, and nothing
+    /// else.
     ///
-    /// The whole of it rather than the two halves separately: cargo makes what
-    /// it needs under `CARGO_HOME` and sccache makes its own, and a bind per
-    /// subdirectory would be two holes where one says the same thing.
-    pub fn dir(&self) -> &Path {
-        &self.dir
+    /// Whole rather than a bind per store underneath: cargo makes what it needs
+    /// under `CARGO_HOME` and sccache makes its own, and a bind per subdirectory
+    /// would be several holes where one says the same thing.
+    pub fn dirs(&self) -> &[PathBuf] {
+        self.given.dirs()
     }
 
-    /// What `CARGO_HOME` is inside: the registry, shared by every session.
-    pub fn cargo_home(&self) -> PathBuf {
-        self.dir.join(CARGO)
-    }
-
-    /// The sccache binary on the host, or `None` where the server found none —
-    /// which is the whole of the difference between a cache that shares
-    /// downloads and one that shares compiled objects too.
+    /// The sccache binary on the host, or `None` where the server found none or
+    /// no language asked for one — which is the whole of the difference between
+    /// a cache that shares downloads and one that shares compiled objects too.
     pub fn sccache(&self) -> Option<&Path> {
         self.sccache.as_deref()
     }
-
-    /// What `SCCACHE_DIR` is, where there is an sccache to read it.
-    pub fn sccache_dir(&self) -> PathBuf {
-        self.dir.join(SCCACHE_DIR)
-    }
-
-    /// And what `SCCACHE_CACHE_SIZE` is: the human's, or [`SIZE`].
-    pub fn size(&self) -> &str {
-        &self.size
-    }
 }
 
-/// Whether a Repo at `path` is one a session would build Rust in: a
-/// `Cargo.toml` at its root.
+/// Whether a Repo at `path` is one a session would build Rust in: one of the
+/// manifests Rust's descriptor detects it by, at its root.
 ///
-/// Asked of the checkout rather than remembered against the Repo, because it is
-/// a fact about what is on disk now and a repository gains and loses a manifest
-/// like any other file. Two things read it — whether to start the compile
-/// server for a Conversation, and whether to warn on the setup card that its
-/// compiles will not be cached — and they have to agree, so they ask the same
-/// question here.
+/// **The setup card's warning and nothing else**, now that the Compile Server
+/// starts on the switch rather than on what a checkout holds — see
+/// [`BuildCache::compiling`], and [`crate::languages::Descriptor::detected`],
+/// which is the question itself.
 pub fn builds_rust(repo: &Path) -> bool {
-    repo.join("Cargo.toml").is_file()
+    languages::built_in()
+        .get(languages::RUST)
+        .is_some_and(|rust| rust.detected(repo))
 }
 
 /// The compile server as a command: one sccache, in the foreground, in a
@@ -1011,6 +1085,23 @@ fn on_the_path(program: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// The directory of Verkstead's own a session's binary is in, which is
+    /// where the sccache is joined in beside it.
+    const OURS: &str = "/verkstead/bin";
+
+    /// What a session is given, asked the way a sandbox asks it.
+    fn shared(cache: &BuildCache, settings: &RustBuildCache) -> Option<Shared> {
+        cache.shared(settings, Platform::HERE, Path::new(OURS))
+    }
+
+    /// What a variable holds, or `None` where the session is not set it.
+    fn variable<'a>(shared: &'a Shared, name: &str) -> Option<&'a str> {
+        shared
+            .env()
+            .iter()
+            .find_map(|(named, value)| (named == name).then_some(value.as_str()))
+    }
+
     /// The switch is the human's and is read every time, so a cache that exists
     /// still hands out nothing while it is off.
     #[test]
@@ -1021,22 +1112,19 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        assert!(cache.shared(&RustBuildCache::of(false, None)).is_none());
+        assert!(shared(&cache, &RustBuildCache::of(false, None)).is_none());
     }
 
     /// And a server with no cache at all hands out nothing whatever the
     /// settings say.
     #[test]
     fn a_server_without_one_gives_a_sandbox_nothing_either() {
-        assert!(
-            BuildCache::none()
-                .shared(&RustBuildCache::default())
-                .is_none()
-        );
+        assert!(shared(&BuildCache::none(), &RustBuildCache::default()).is_none());
         assert!(!BuildCache::none().caches_compiles());
     }
 
-    /// The two halves are under the one directory, so one bind reaches both.
+    /// The two halves are under the one directory, so one bind reaches both —
+    /// and what names them is Rust's descriptor rather than anything here.
     #[test]
     fn the_two_halves_are_named_inside_the_one_directory() {
         let cache = BuildCache::at(
@@ -1044,22 +1132,41 @@ mod tests {
             Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
             PathBuf::from("/var/lib/verkstead"),
         );
-        let shared = cache
-            .shared(&RustBuildCache::default())
+        let shared = shared(&cache, &RustBuildCache::default())
             .expect("nothing configured is the feature on");
 
-        assert_eq!(shared.dir(), Path::new("/var/cache/verkstead"));
         assert_eq!(
-            shared.cargo_home(),
-            Path::new("/var/cache/verkstead/cargo"),
+            shared.dirs(),
+            [PathBuf::from("/var/cache/verkstead")],
+            "one bind, because both halves are inside it"
+        );
+        assert_eq!(
+            variable(&shared, "CARGO_HOME"),
+            Some("/var/cache/verkstead/cargo"),
             "the registry every session downloads into"
         );
         assert_eq!(
-            shared.sccache_dir(),
-            Path::new("/var/cache/verkstead/sccache"),
+            variable(&shared, "SCCACHE_DIR"),
+            Some("/var/cache/verkstead/sccache"),
             "and the compiled objects beside it"
         );
-        assert_eq!(shared.size(), SIZE, "the default where nobody has said");
+        assert_eq!(
+            variable(&shared, "SCCACHE_CACHE_SIZE"),
+            Some(SIZE),
+            "the default where nobody has said"
+        );
+        assert_eq!(
+            variable(&shared, "RUSTC_WRAPPER").map(Path::new),
+            Some(
+                sandbox::sccache_inside(
+                    Platform::HERE,
+                    Path::new(OURS),
+                    Path::new("/nix/store/whatever/bin/sccache"),
+                )
+                .as_path()
+            ),
+            "and where this platform's session reaches the one the server found",
+        );
     }
 
     /// An sccache the server never found is a cache that still shares the
@@ -1071,11 +1178,19 @@ mod tests {
             None,
             PathBuf::from("/var/lib/verkstead"),
         );
-        let shared = cache.shared(&RustBuildCache::default()).unwrap();
+        let shared = shared(&cache, &RustBuildCache::default()).unwrap();
 
         assert!(!cache.caches_compiles());
         assert_eq!(shared.sccache(), None);
-        assert_eq!(shared.cargo_home(), Path::new("/var/cache/verkstead/cargo"));
+        assert_eq!(
+            variable(&shared, "CARGO_HOME"),
+            Some("/var/cache/verkstead/cargo")
+        );
+        assert_eq!(
+            variable(&shared, "RUSTC_WRAPPER"),
+            None,
+            "the capability's variables go with the capability"
+        );
     }
 
     /// The directory is made rather than insisted on, which is what lets the
@@ -1093,6 +1208,11 @@ mod tests {
         assert!(
             dir.path().join("worktrees").is_dir(),
             "and the worktrees directory with it, which the compile server binds"
+        );
+        assert!(
+            !languages::stores(dir.path()).exists(),
+            "and nothing beside it: no descriptor built in names that placeholder, \
+             so there is nothing for a session to be opened onto"
         );
     }
 
@@ -1175,8 +1295,7 @@ mod tests {
 
         assert_eq!(cache.caches_compiles(), here);
         assert_eq!(
-            cache
-                .shared(&RustBuildCache::default())
+            shared(&cache, &RustBuildCache::default())
                 .expect("nothing configured is the feature on")
                 .sccache()
                 .is_some(),

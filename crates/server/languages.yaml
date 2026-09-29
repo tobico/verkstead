@@ -1,0 +1,67 @@
+# The languages Verkstead ships knowing about, and the grammar every descriptor
+# is written in — an installer's own as much as these. What is here is embedded
+# in the binary; what an installer writes goes under `languages:` in
+# `config.yaml` and merges into the entry of the same name, key by key, so
+# changing one variable keeps every later fix to the rest.
+#
+# A descriptor is **data**: a label for the settings page, the manifests that
+# detect the language in a Repo, the variables a session is given, and the
+# capabilities it names. It cannot say a command to run. Anything that is
+# behaviour — the Compile Server an sccache needs — is built into the server and
+# switched on by name here.
+#
+# Placeholders stand for the things only the server knows:
+#
+#   {cache}    the Build Cache: `--build-cache-dir`, or this machine's own cache
+#              directory where nobody has said. Where a store goes that nothing
+#              has to share a filesystem with.
+#
+#   {stores}   a directory beside the Worktrees, for a store that does. pnpm,
+#              bun and uv hardlink packages out of their store into the project
+#              rather than copying them, and fall back to copying the lot where
+#              the two are on different filesystems — and the Build Cache is
+#              free to be a disk of its own, which is what the packaged unit's
+#              separate `CacheDirectory` and `StateDirectory` are.
+#
+#   {size}     how big this language's store may grow: the settings page's to
+#              change, and the default where nobody has.
+#
+#   {sccache}  the sccache this server found, at the path a session reaches it
+#              by. Only inside the `sccache` capability below, which is what
+#              says there is one at all.
+#
+# A placeholder's directory is made, and granted writable to a session, only
+# where a loaded descriptor names it. With Rust alone, nothing names `{stores}`
+# and no session is opened onto one.
+
+languages:
+  rust:
+    # What the settings page calls it.
+    label: Rust
+
+    # What says a Repo builds this language, looked for at the root of a
+    # checkout. **For the setup card's warning and nothing else**: the variables
+    # below are every session's whatever the Repo holds, because a manifest is
+    # often not at the root and a variable nothing reads costs nothing.
+    detect:
+      - Cargo.toml
+
+    # The registry index, the `.crate` files downloaded into it and the sources
+    # unpacked from them. This is the half of the cache that works with no
+    # sccache anywhere, and what stops two Conversations downloading one crate
+    # twice.
+    env:
+      CARGO_HOME: "{cache}/cargo"
+
+    # And the capabilities this descriptor switches on. `sccache` is the Compile
+    # Server: one sccache server for the machine, in a sandbox of its own,
+    # started wherever a language naming this is enabled and there is an sccache
+    # to run. A capability's variables are set only where the server can offer
+    # it, so a machine with no sccache installed gets the downloads above and
+    # none of these.
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: "{sccache}"
+          SCCACHE_DIR: "{cache}/sccache"
+          SCCACHE_CACHE_SIZE: "{size}"
