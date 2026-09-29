@@ -192,6 +192,12 @@ const CONVERSATION_KEYED: &[&str] = &[
     "pending_steers",
     "pending_steer_additions",
     "pending_steer_upgrades",
+    // The key it was born under, and the mark saying a copy of it was handed on
+    // to another device — both of which go with the row they are about: what
+    // outlives a deleted Conversation somewhere else is the *other* device's
+    // copy, which is its own row with its own key.
+    "births",
+    "transferred",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

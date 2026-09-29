@@ -782,14 +782,14 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     Worked { id, event, set }
 }
 
-/// The six rows no press could leave where this fixture ends, written straight
-/// in.
+/// The rows no press could leave where this fixture ends, written straight in.
 ///
 /// Two are a Verkstead of before — an open Pause is how an account out of window
 /// was recorded before there were stops. Two belong to starts this Conversation
-/// did not have: a stage's branch, and the roadmap an adoption is of. And two
-/// are the worktrees, which closing sweeps away, so an archived Conversation
-/// never really has them.
+/// did not have: a stage's branch, and the roadmap an adoption is of. Two are the
+/// worktrees, which closing sweeps away, so an archived Conversation never really
+/// has them. And one is the mark saying a copy of this Conversation was
+/// transferred to another device, which is not something offered on a Closed one.
 ///
 /// Which is the point of writing them in rather than leaving them out. The walk
 /// takes every row naming a Conversation, and *this cannot happen* is not
@@ -896,6 +896,17 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .execute(pool)
     .await
     .unwrap();
+
+    // And the mark saying a copy of this Conversation was handed to another
+    // device, which nothing could have left on one that went on to be closed and
+    // archived here — a transfer is not offered from Closed, and the copy left
+    // behind is not worked again. The walk has to empty it all the same.
+    sqlx::query("INSERT INTO transferred (conversation_id, device, live_as) VALUES (?, ?, 3)")
+        .bind(id)
+        .bind("0011223344556677889900aabbccddee")
+        .execute(pool)
+        .await
+        .unwrap();
 
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, '/state/worktrees/x')")
         .bind(id)

@@ -2056,6 +2056,17 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         .await
         .context("ranking the Conversations of a database written before there were ranks")?;
 
+    // And the key each of them was born under, stamped on every Conversation
+    // that has none: this device's id and the row's own, which is what a
+    // Conversation that has never moved has (ADR-0020, *Transfer*) — see
+    // [`store::stamp_the_births`]. Here for the reason the ranking above is
+    // here, and before the routes for the same one: a sidebar answered ahead of
+    // it would be a merged list with rows nothing could tell from a copy of
+    // somebody else's work.
+    store::stamp_the_births(&pool, device.id())
+        .await
+        .context("stamping the Conversations of a database written before there were birth keys")?;
+
     // And the listener that presents it, taken now: the peer port is the second
     // address this start claims, and one somebody else is already on is a
     // misconfiguration to refuse here rather than a Verkstead that comes up

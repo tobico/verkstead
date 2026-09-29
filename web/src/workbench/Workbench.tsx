@@ -105,6 +105,7 @@ import {
 } from "solid-js";
 
 import { Panes, matching, type Pane } from "../Panes";
+import { useDevices } from "../devices";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { loadConversation, seeConversation } from "../api/client";
 import type {
@@ -535,6 +536,56 @@ export function Workbench(): JSX.Element {
     },
   };
 
+  /// Where the live record of this Conversation is, where the one the URL names
+  /// is a copy that has been transferred away — and `null` for every ordinary
+  /// Conversation, which is nearly all of them.
+  ///
+  /// A copy left behind by a transfer is a tombstone: it holds the id so that
+  /// every link anybody kept still leads to the work, and what it leads to is
+  /// wherever the work is now. So this page never draws one — see [`elsewhere`].
+  const away = createMemo(() => conversation.data?.transferred ?? null);
+
+  /// This device's own id, read only while something is standing on a tombstone.
+  ///
+  /// What it is for is the one thing the mark cannot say: it names the device
+  /// holding the record by its **Device Id**, and a local URL names this device
+  /// by saying nothing at all. So a transfer *back* — the work having returned to
+  /// the machine the browser is on — has to be recognised here, and the id is
+  /// what recognises it.
+  ///
+  /// Not asked for on an ordinary Conversation, which is what the guard is: the
+  /// reading is this device's membership, and no page needs it to draw a record
+  /// that is the record.
+  const devices = useDevices(() => away() !== null);
+
+  /// And where the page goes instead of drawing a tombstone: the live copy's own
+  /// path, on the device that has it. `null` is every Conversation that is the
+  /// record, which is what this page is for.
+  ///
+  /// **The Conversation's own path rather than the pane the URL named.** The copy
+  /// on the far end was written with ids of that device's own, so an Event id off
+  /// this one names nothing over there — and what a bare path does is land on the
+  /// end of the record, which is where somebody following an old link wants to
+  /// be.
+  ///
+  /// **And it is where the page goes whether or not that device is answering.**
+  /// Which copy is the record is not a question about who can be reached, and a
+  /// tombstone drawn because the far end was asleep would be a read-only copy of
+  /// the work presented as the work. What is drawn there of a device that is not
+  /// answering is what is drawn of any member that is not.
+  ///
+  /// `null` while the membership has not landed, which is one read and not a
+  /// state to draw anything for: the alternative is sending a Conversation that
+  /// has come home out through `/devices/` and redirecting again.
+  const elsewhere = createMemo((): string | null => {
+    const to = away();
+    const mine = devices.data?.this.device;
+
+    return to === null || mine === undefined
+      ? null
+      : pathOf(to.id, to.device === mine ? null : to.device);
+  });
+
   /// Whether this Conversation's record is the one Event, which is what takes
   /// the Timeline away.
   ///
@@ -649,7 +700,10 @@ export function Workbench(): JSX.Element {
     const id = selected();
     const read = conversation.data;
 
-    if (id === "" || read === undefined || event() !== null) {
+    // And nothing at all on a tombstone: the effect above is taking the page
+    // off it, and a pane opened on the way out would be one navigation racing
+    // another over a copy that is not the record.
+    if (id === "" || read === undefined || event() !== null || away() !== null) {
       return;
     }
 
@@ -677,7 +731,7 @@ export function Workbench(): JSX.Element {
     const id = selected();
     const read = conversation.data;
 
-    if (!advancing() || read === undefined) {
+    if (!advancing() || read === undefined || away() !== null) {
       return;
     }
 
@@ -688,7 +742,16 @@ export function Workbench(): JSX.Element {
   });
 
   return (
-    <Show when={!nothing()} fallback={<Navigate href="/compose" />}>
+    // And a tombstone is left rather than drawn: the frame is not put up at all
+    // for a copy whose work has moved on, and what stands in its place is the
+    // navigation to wherever that work is — see [`elsewhere`]. Beside the
+    // compose page's own redirect because it is the same kind of answer: this
+    // page has nothing to be about, and a page that has nothing to be about
+    // says where to go instead.
+    <Show
+      when={elsewhere() === null && !nothing()}
+      fallback={<Navigate href={elsewhere() ?? "/compose"} />}
+    >
       <Panes
         pane={showing()}
         middleLabel="Timeline"

@@ -55,6 +55,14 @@
 //! lives over there rather than here: this module runs at the open and that one
 //! runs at the serve, so a drop here would be a drop before the read.
 //!
+//! **And one rewrite here is about no column of this module's at all.** The
+//! **birth key** every Conversation carries arrives as a table of its own, which
+//! a `CREATE TABLE IF NOT EXISTS` declares over in [`super::births`] — but the
+//! rows already there still have to be given the key that says what was true of
+//! them before it existed, and that key names a device. So
+//! [`stamp_the_births`] sits beside [`rank_the_conversations`] and is called the
+//! same way, for the same reason and at the same moment.
+//!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
 //! rewrites rather than a version number kept somewhere. So a database opened
@@ -821,6 +829,42 @@ pub async fn rank_the_conversations(pool: &SqlitePool, device: &str) -> Result<(
         .context("taking away the places the sidebar used to be ordered by")?;
 
     tx.commit().await.context("ranking the Conversations")
+}
+
+/// Stamp every Conversation that has no **birth key** with one naming this
+/// device and its own local id (ADR-0020, *Transfer*) — which is exactly what a
+/// Conversation that has never moved has.
+///
+/// **The same shape as [`rank_the_conversations`], and for the same reason**: the
+/// key names a device, and the identity is read out of the very pool an open
+/// runs on — so nothing in [`apply`] can fill it. The table arrives empty there
+/// and this is called by the serve, once the identity is issued and before any
+/// route is answered: a sidebar answered ahead of it would be a merged list with
+/// rows that could not be told from a copy of somebody else's work.
+///
+/// **Every row this reaches was drafted here.** Nothing has been transferred to
+/// this device before this lands — there was no transfer to make — so the device
+/// half is this one's id and the id half is the row's own, with nothing to read
+/// off anything and no order to walk in.
+///
+/// One statement, and it is safe to run twice: what says whether there is
+/// anything to do is a row having no key, and after the first run there is none
+/// without one. So it runs at every start and finds nothing at all but the first
+/// time, and again after a database is opened by a Verkstead too old to stamp
+/// what it started.
+pub async fn stamp_the_births(pool: &SqlitePool, device: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO births (conversation_id, device, born_as)
+         SELECT c.id, ?, c.id
+         FROM conversations c
+         WHERE NOT EXISTS (SELECT 1 FROM births b WHERE b.conversation_id = c.id)",
+    )
+    .bind(device)
+    .execute(pool)
+    .await
+    .context("stamping the Conversations of a database written before there were birth keys")?;
+
+    Ok(())
 }
 
 /// Give every Conversation written before the base's branch was kept the column

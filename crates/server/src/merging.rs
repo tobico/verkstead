@@ -60,6 +60,20 @@
 //! to say about whose work it is drawing. Which of the two it is is the
 //! membership's to decide and so the server's, rather than the page's.
 //!
+//! **And the work is drawn once, however many machines hold a copy of it.** A
+//! Conversation that has been transferred has a row in the database it came from
+//! and a row in the one it went to — the source keeps its copy so that the links
+//! anybody kept still lead to the work — and the merge is where the second of
+//! them comes off: the copy that has been handed on says so, and every copy
+//! carries the **birth key** the work was drafted under, which is what tells two
+//! copies of one thing from two things (ADR-0020, *Transfer*). See
+//! [`one_per_birth_key`], and `store::births`.
+//!
+//! **Which is here rather than in the query each device answers**, for the reason
+//! everything else in this module is: a member answers its own rows and knows
+//! nothing of the copy on the machine that asked. A lone Verkstead never reaches
+//! any of it — there is nowhere for its work to have been transferred to.
+//!
 //! **And *Show archived conversations* is one switch for the whole of it.** It
 //! is the human's standing choice about a list rather than a setting on a
 //! machine, and the list they are looking at is the cluster's — so the position
@@ -77,7 +91,7 @@
 //! it, which is what lets a device with nothing archived of its own draw the
 //! switch while a member has something behind it — see [`anything_archived`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use verkstead_render::{ConversationEntry, RowDevice, ShowingArchived};
@@ -513,6 +527,10 @@ async fn read_member(state: &AppState, device: &str) {
 /// the stability is for the one case where a rank is absent, which is a
 /// database the rewrite has not reached and whose rows come out first in the
 /// order their own device answered them.
+///
+/// **And then one row per piece of work**, which is the other thing a merge is:
+/// the copies a transfer left behind come off here — see [`one_per_birth_key`].
+/// Untouched where there is no cluster, along with everything else.
 pub(crate) async fn merged(
     state: &AppState,
     own: Vec<ConversationEntry>,
@@ -579,7 +597,48 @@ pub(crate) async fn merged(
 
     rows.sort_by(|one, other| one.rank.cmp(&other.rank));
 
-    rows
+    // And the work drawn once, however many machines hold a copy of it: the
+    // tombstones dropped, and one row kept per birth key (ADR-0020,
+    // *Transfer*) — see [`one_per_birth_key`].
+    one_per_birth_key(rows)
+}
+
+/// The merged rows with every copy of one piece of work but one taken out: the
+/// tombstones dropped, and the first row of any birth key that is left standing
+/// for the rest.
+///
+/// **Which is what makes a transfer one row rather than two.** A Conversation
+/// that has moved has a row in the database it came from and a row in the one it
+/// went to, and both are on this list — the source keeps its copy so that old
+/// links still lead to the work. What tells the two apart from two separate
+/// pieces of work is the birth key they share; what says which of them is doing
+/// the work is the mark the source wears.
+///
+/// **The mark first, because it is the answer whenever it is there.** A row that
+/// says it has been handed on is not the record, whether or not the device
+/// holding the record is on this list at all — a member that is switched off
+/// contributes no rows, and drawing the tombstone then would be a read-only copy
+/// presented as the work.
+///
+/// **And the key behind it, for the moment between the two writes.** A transfer
+/// writes the copy on the far end and marks the source once that device has
+/// confirmed it, so for as long as that takes there are two rows saying they are
+/// live. Which of them is kept is the order this list is already in — this
+/// device's own rows ahead of a member's at an equal rank, the copy carrying its
+/// source's rank — and it lasts only until the mark lands. Two rows is what must
+/// not happen; which one stands for the moment is not worth a second opinion
+/// about.
+///
+/// A row with no birth key stands on its own: that is a database the backfill
+/// has not reached, and rows that have nothing to be told apart by are told
+/// apart from nothing. No answer of a running server holds one.
+fn one_per_birth_key(rows: Vec<ConversationEntry>) -> Vec<ConversationEntry> {
+    let mut drawn = HashSet::new();
+
+    rows.into_iter()
+        .filter(|row| !row.transferred)
+        .filter(|row| row.born.is_empty() || drawn.insert(row.born.clone()))
+        .collect()
 }
 
 /// One row of the merged list as a mint sees it: which device owns it, which id

@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod attachments;
 mod banners;
+mod births;
 mod captures;
 mod cleanup;
 mod commits;
@@ -79,6 +80,7 @@ pub use attachments::{
     set_attachment, set_attachments,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
+pub use births::{Birth, Transferred, birth, record_birth, transfer_away, transferred};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
     Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
@@ -125,7 +127,7 @@ pub use members::{
     member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
     record_member, record_renewal, renewal_acknowledged,
 };
-pub use migrations::rank_the_conversations;
+pub use migrations::{rank_the_conversations, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -742,6 +744,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the Conversations and the Repos both, because a companion's row
     // references one of each.
     companions::apply_schema(pool).await?;
+
+    // And the key each of them was born under, with the mark saying which copies
+    // of one are not the live record beside it. After the Conversations, because
+    // both hang off one — see [`births`].
+    births::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with every picker filled. After the Conversations only for

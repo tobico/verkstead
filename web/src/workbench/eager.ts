@@ -307,6 +307,12 @@ export function caughtUp(readAt: number): void {
 /// one is not on yet, and whose the row is is the merged list's own addition —
 /// see [`pressedRows`], which stamps the device on as it puts the row back, and
 /// puts it at the top whatever the rank says.
+///
+/// And the birth key is empty for the same kind of reason, with the mark beside
+/// it off: a key is what one row of a merged list is told from another by, and
+/// this row is on no list yet — an empty one stands on its own, which is exactly
+/// what a row waiting for the server's own is. Nothing that wears the mark is
+/// ever pressed: it is offered on a Conversation whose record is the record.
 export function rowFor(view: ConversationView): ConversationEntry {
   return {
     id: view.id,
@@ -322,6 +328,8 @@ export function rowFor(view: ConversationView): ConversationEntry {
     parked: null,
     unseen: false,
     rank: "",
+    born: "",
+    transferred: false,
     device: null,
   };
 }

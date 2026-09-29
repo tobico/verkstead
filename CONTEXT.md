@@ -291,6 +291,37 @@ re-ranked. It is the price of serving the merge from memory rather than a round
 trip per row.
 _Avoid_: position, index, place, sort order, priority
 
+**Birth Key**:
+What names a piece of work across a whole cluster: the **Device Id** of the
+device a **Conversation** was drafted on, and the id it was given there — stamped
+at creation and never touched again (ADR-0020, *Transfer*). Every Conversation has
+one from the moment it is started, and a Conversation written before there were
+any is stamped with this device's id and its own local id, which is exactly what a
+Conversation that has never moved has.
+**It exists because a transfer copies rather than moves.** A Conversation handed
+to another device is written into that device's own tables under ids that device
+issued, and the device it came from keeps its copy — so one piece of work has a
+row in several databases, none of which can name the others: ids are each
+device's own and collide by construction. The birth key is the one thing every
+copy of it says the same, which is what lets the **Merged List** draw the work
+once however many machines hold a copy, and what lets a transfer back find the
+row it is replacing. So it travels with the work rather than being invented by
+whoever receives it: a Conversation that has moved twice still answers to the key
+it was born under.
+**Where it is not the Rank.** A rank tells one *row* from another and a birth key
+tells one piece of *work* from another: two copies of one Conversation carry two
+ranks and one birth key. Both ride out on the sidebar row, and both are opaque to
+everything that reads them.
+**And beside it, the mark saying a copy is not the live one**: the device holding
+the record and the id it goes by there, written on the copy the work has left. A
+Conversation wearing it is a **tombstone** — nothing writes to it, the Merged List
+does not draw it, and its own URL leads to wherever the work is now, whether or
+not the device holding it is answering. It is kept rather than deleted so that
+every link anybody kept still leads to the work and so that a transfer back has a
+row to replace under the id it already had. A forwarding stub with no record
+behind it was the recommendation; keeping the copy was the human's call.
+_Avoid_: global id, UUID, canonical id, origin, the stub
+
 **Worktree**:
 The checkout a Conversation's work is done in, made when the work starts along
 with the branch it holds — whichever **Process** it starts on, every one of them
@@ -1626,6 +1657,15 @@ drawn dimmed, the row's own flag saying the device is not there — while a memb
 never reached holds nothing and contributes nothing. The dimming is the one a
 finished Conversation wears, so what tells the two apart is the label read
 aloud, which says *unreachable* beside the device it names.
+**And a piece of work is drawn once however many machines hold a copy of it**,
+which is what the **Birth Key** on every row is for: a **Conversation** that has
+been transferred has a row in the database it came from and a row in the one it
+went to, and both are on this list. The copy that has been handed on says so, and
+it comes off; the key is what says the two are one piece of work rather than two,
+for the moment between a copy landing and the mark on its source arriving. So the
+merge is *one row per birth key, and no tombstones*, which is here rather than in
+the query each device answers for itself — a member answers its own rows and
+knows nothing of the copy on the machine that asked.
 **And a row is addressed by its device everywhere in the sidebar**, ids being
 each device's own and colliding by construction: which row is selected, which
 one a press was on, what a drag is holding and what the DOM carries are each a

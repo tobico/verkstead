@@ -53,8 +53,8 @@ use verkstead_render::{
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
     SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -1253,6 +1253,15 @@ async fn conversations(
                 // that merges the lists cannot order them without it — see
                 // [`ConversationEntry::rank`].
                 rank: conversation.rank,
+                // And the key it was born under, which is what the merge tells
+                // two copies of one piece of work apart by — see
+                // [`ConversationEntry::born`].
+                born: conversation.born,
+                // And whether this copy has been handed on, which is what the
+                // merge drops it for. Nothing here does the dropping: a member
+                // asked this endpoint over the link gets its own rows as they
+                // stand, and the hub is where the cluster's one sidebar is made.
+                transferred: conversation.transferred,
                 // And whose the row is, which the merge below says: nothing
                 // here, because this half of the answer is this device's own
                 // work and a row over the link says no device at all.
@@ -2097,6 +2106,13 @@ pub(crate) async fn conversation_view(
         attachments: attached,
         mcp_servers: servers,
         pending_steer,
+        // And where the live record is, where this copy is not it: what takes
+        // the page off a tombstone and onto the device doing the work — see
+        // [`ConversationView::transferred`].
+        transferred: conversation.transferred.map(|to| TransferredTo {
+            device: to.device,
+            id: to.id,
+        }),
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question

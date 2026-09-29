@@ -405,6 +405,15 @@ pub struct Conversation {
     /// Conversation acts on these too — the root its sessions are given and the
     /// prompt they are started on.
     pub mcp_servers: Vec<String>,
+
+    /// Where the live record is, where this copy is not it — see
+    /// [`super::transferred`].
+    ///
+    /// `None` is every ordinary Conversation: this database's row is the record.
+    /// `Some` is a tombstone, a copy that has been transferred to the device
+    /// named inside and goes by the id beside it there. Nothing writes to one,
+    /// and its own URL leads to wherever the work is now.
+    pub transferred: Option<super::Transferred>,
 }
 
 /// Where a sidebar row's state word got to: the state it names, or the word
@@ -515,6 +524,32 @@ pub struct ConversationRow {
     /// a null too. A serve ranks every row before it answers anything, so no
     /// answer of a running server carries one.
     pub rank: String,
+
+    /// And the key it was born under, as one string — see
+    /// [`super::Birth::key`].
+    ///
+    /// **What one row of a merged list is told apart from another by.** The
+    /// sidebar of a cluster is this device's rows and every member's together,
+    /// and a piece of work that has been transferred has a row in more than one
+    /// of those databases: every copy of it carries this same string, which is
+    /// what lets the merge draw the work once. See `server::merging`.
+    ///
+    /// Empty where the row has none, which is a database the backfill has not
+    /// reached — and a row with nothing to be told apart by is told apart from
+    /// nothing, so it stands on its own. No answer of a running server carries
+    /// one: a serve stamps every Conversation before it answers anything, the
+    /// way it ranks every one of them.
+    pub born: String,
+
+    /// And whether this row is a tombstone: a copy that has been transferred
+    /// away, whose live record is on another device.
+    ///
+    /// **Which is a row the merged list does not draw.** The mark holds the id
+    /// so that old links keep working and a transfer back has somewhere to
+    /// land; what it does not do is stand in the sidebar beside the copy that
+    /// is doing the work — see `server::merging`, and [`super::transferred`],
+    /// which is where the device holding that record is read.
+    pub transferred: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1801,6 +1836,22 @@ async fn started(
         return Ok(None);
     };
 
+    // And the key it was born under, which is this device and the id the insert
+    // just issued: a Conversation drafted here has never moved, and that is
+    // exactly what the pair says. Inside this transaction for the rank's reason —
+    // a Conversation whose key went missing to a later failure would be one the
+    // Merged List could not tell from a copy of somebody else's work. See
+    // [`super::births`].
+    super::births::stamp(
+        &mut tx,
+        id,
+        &super::Birth {
+            device: device.to_owned(),
+            id,
+        },
+    )
+    .await?;
+
     // Empty, because nothing has been written yet. It is an Event all the same:
     // the Brief is the first thing on the Timeline whether or not it says
     // anything, and the Timeline is where the human writes it.
@@ -1976,6 +2027,16 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// above, because the two say different things and the row says which in words:
 /// *something wants you* against *there is news here*.
 ///
+/// And the key each row was born under rides along a fourth time, with the mark
+/// saying whether this copy is a tombstone beside it — see
+/// [`ConversationRow::born`] and [`super::births`]. Both out of the join rather
+/// than asked per row, for the reason the three above are.
+///
+/// **A tombstone is on this list.** What drops it is the merge, one layer up,
+/// because that is where a cluster's one sidebar is made and where the live copy
+/// of the same work is in hand — see `server::merging`. A lone Verkstead has no
+/// merge and so no such row either, nothing having been transferred anywhere.
+///
 /// What the human has archived is not here at all, unless `showing_archived`
 /// says they have asked to be shown it — see [`super::archive_conversation`]
 /// and [`super::showing_archived`]. Archiving is the one thing that takes a
@@ -2017,6 +2078,9 @@ pub async fn conversations(
         bool,
         bool,
         String,
+        Option<String>,
+        Option<i64>,
+        bool,
     );
 
     let rows: Vec<Row> = sqlx::query_as(&format!(
@@ -2042,9 +2106,14 @@ pub async fn conversations(
                     SELECT 1 FROM unseen_conversations u
                     WHERE u.conversation_id = c.id
                 ) AS unseen,
-                COALESCE(c.rank, '') AS rank
+                COALESCE(c.rank, '') AS rank,
+                b.device AS born_on, b.born_as,
+                EXISTS (
+                    SELECT 1 FROM transferred t WHERE t.conversation_id = c.id
+                ) AS transferred
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
+         LEFT JOIN births b ON b.conversation_id = c.id
          WHERE ?
             OR NOT EXISTS (
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
@@ -2071,6 +2140,9 @@ pub async fn conversations(
                 narrowed_to_checks,
                 unseen,
                 rank,
+                born_on,
+                born_as,
+                transferred,
             )| ConversationRow {
                 id,
                 branch,
@@ -2089,6 +2161,13 @@ pub async fn conversations(
                 narrowed_to_checks,
                 unseen,
                 rank,
+                // The two halves of the key put back together, or nothing at
+                // all where the row has neither — see [`ConversationRow::born`].
+                born: match (born_on, born_as) {
+                    (Some(device), Some(id)) => super::Birth { device, id }.key(),
+                    _ => String::new(),
+                },
+                transferred,
             },
         )
         .collect())
@@ -2294,6 +2373,10 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
         mcp_servers: super::mcp_servers(pool, id).await?,
+        // A read of its own beside the row for the worktree's reason: nearly
+        // every Conversation has no mark at all, and a `LEFT JOIN`'s worth of
+        // column would say nothing this does not — see [`super::births`].
+        transferred: super::transferred(pool, id).await?,
     }))
 }
 

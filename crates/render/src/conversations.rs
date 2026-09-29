@@ -234,6 +234,38 @@ pub struct ConversationEntry {
     /// included, so that the list reads as one list rather than as this
     /// device's work with somebody else's mixed in.
     pub device: Option<RowDevice>,
+
+    /// The key this Conversation was born under, as one string: the device it
+    /// was drafted on and the id it was given there (ADR-0020, *Transfer*).
+    ///
+    /// **What one row of a merged list is told apart from another by.** A piece
+    /// of work that has been transferred has a row in more than one database, and
+    /// every copy of it carries this same string — so the merge draws the work
+    /// once however many machines hold a copy of it. The rank tells one *row*
+    /// from another and this tells one piece of *work* from another, which is why
+    /// there are two: two copies of one Conversation carry two ranks and one
+    /// birth key.
+    ///
+    /// Opaque to everything that reads it: it is compared for equality and never
+    /// taken apart, exactly as a rank is. Empty where the row has none, which is
+    /// a database the backfill has not reached — and one that is empty stands on
+    /// its own rather than merging with every other empty one. No served answer
+    /// carries one: a serve stamps every Conversation before it answers
+    /// anything.
+    pub born: String,
+
+    /// Whether this row is a copy that has been transferred away, its live
+    /// record being on another device.
+    ///
+    /// **Which is the row the merged list drops.** A device that has handed its
+    /// Conversation on keeps the copy as a tombstone — it holds the id so that
+    /// old links still lead to the work — and what a tombstone is not is a
+    /// second row of the sidebar beside the copy doing the work.
+    ///
+    /// It rides out here because the dropping is the hub's: a member answers its
+    /// own rows and has no idea that the device asking is merging them with
+    /// anything. See the server's `merging`.
+    pub transferred: bool,
 }
 
 /// Which device a sidebar row belongs to, as the row itself says it.
@@ -871,6 +903,42 @@ pub struct ConversationView {
     /// has no place in the record and is drawn after everything that does — and
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
+
+    /// Where the live record of this Conversation is, where this copy is not it
+    /// (ADR-0020, *Transfer*).
+    ///
+    /// `null` on every ordinary Conversation, which is nearly all of them: this
+    /// device's row *is* the record. Anything else is a tombstone — a copy this
+    /// device transferred away and keeps so that old links still lead to the
+    /// work — and what the page does about one is leave: the URL naming it
+    /// redirects to the device and the id inside, the way the Terminal pane's
+    /// old path redirects to Code.
+    ///
+    /// **And it redirects whether or not that device is answering.** The
+    /// redirect is about which copy is the record rather than about who can be
+    /// reached, and a tombstone drawn because the far end was asleep would be a
+    /// read-only copy of the work presented as the work.
+    pub transferred: Option<TransferredTo>,
+}
+
+/// Which copy of a transferred Conversation is the live one: the device holding
+/// it, and the id it goes by there.
+///
+/// **The Device Id rather than `null` for this device**, unlike the block a
+/// sidebar row carries. A record is read through whichever device the browser
+/// opened — this one's own, or a member's over the Relay — so the answer is that
+/// machine's account of where the work went, and a `null` in it would mean
+/// *whoever answered* rather than *here*. What turns it back into a path is the
+/// page, which knows which device it is reading and what this one's id is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TransferredTo {
+    /// The **Device Id** of the machine holding the live record.
+    pub device: String,
+
+    /// And the id that machine numbered its copy, which is the other half of
+    /// where the redirect goes.
+    pub id: i64,
 }
 
 /// A pending steer as the page receives it: when the press was made, and the

@@ -320,6 +320,55 @@ impl Verkstead {
         waited.unwrap_or_else(|_| panic!("the switch never said it: {last:#?}"))
     }
 
+    /// A Conversation of somebody else's copied onto this device the way a
+    /// transfer copies one: this device's own row, numbered here, carrying the
+    /// **birth key** the work was drafted under and the rank it already had.
+    ///
+    /// Written to the store rather than through an endpoint, for the reason
+    /// [`starts`] is: what puts a copy here is a transfer, and a transfer is the
+    /// stages after this one. What is being asked here is what the merged list
+    /// makes of the rows it leaves behind.
+    async fn takes_a_copy(&self, repo: i64, branch: &str, born: &store::Birth, rank: &str) -> i64 {
+        let copy = store::start_conversation(&self.pool, repo, branch, self.device.id())
+            .await
+            .unwrap()
+            .expect("the Repo is registered");
+
+        store::record_birth(&self.pool, copy, born).await.unwrap();
+        store::rank_conversation(&self.pool, copy, rank)
+            .await
+            .unwrap();
+
+        self.nudges.announce(Nudge::Conversations);
+
+        copy
+    }
+
+    /// And one of its own Conversations marked as handed on: the copy stays,
+    /// saying which device holds the record and the id it goes by there.
+    async fn hands_on(&self, conversation: i64, to: &str, there: i64) {
+        store::transfer_away(
+            &self.pool,
+            conversation,
+            &store::Transferred {
+                device: to.to_owned(),
+                id: there,
+            },
+        )
+        .await
+        .unwrap();
+
+        self.nudges.announce(Nudge::Conversations);
+    }
+
+    /// The key one of its Conversations was born under.
+    async fn born(&self, conversation: i64) -> store::Birth {
+        store::birth(&self.pool, conversation)
+            .await
+            .unwrap()
+            .expect("every Conversation is stamped as it is started")
+    }
+
     /// The sidebar as this device's own browser reads it.
     async fn sidebar(&self) -> Vec<ConversationEntry> {
         rows(&self.workbench, SIDEBAR).await
@@ -836,22 +885,39 @@ async fn the_sidebar_is_told_again_once_a_members_list_has_landed() {
 
     b.starts(there, "the-cross-device-drag").await;
 
-    // The Nudge A announces about its own world, past the one it said under B:
-    // that one is B's news relayed, and a page that read the list on it alone
-    // would have read it before A had B's rows.
-    let told = page.own_nudge().await;
+    // And the page reads once each time it is told, which is the whole of what a
+    // browser does about a Nudge — no polling of its own, and no second look
+    // between them.
+    //
+    // **Which of A's own Nudges carries it is not the claim.** A holds B's list
+    // again for each thing that asks it to — the stream being taken up, and then
+    // B's own news — and it says so on its own account every time it has kept
+    // one, so a page that opened between two of those reads is told twice and
+    // finds the row on the later one. What is being tested is that it is told at
+    // all: without that word there is no Nudge a page could ever read the row
+    // back on, whatever it did.
+    let read_back = tokio::time::timeout(WAITING, async {
+        loop {
+            let told = page.own_nudge().await;
 
-    assert_eq!(
-        told.get("kind").and_then(serde_json::Value::as_str),
-        Some("conversations"),
-        "the sidebar's own list is what moved: {told}",
-    );
+            assert_eq!(
+                told.get("kind").and_then(serde_json::Value::as_str),
+                Some("conversations"),
+                "the sidebar's own list is what moved: {told}",
+            );
 
-    // Read once, the way a page reads once — no waiting and no second look.
-    assert_eq!(
-        branches(&a.sidebar().await),
-        ["the-cross-device-drag", "the-merged-list"],
-        "the list a page reads back on that Nudge holds the member's row",
+            let rows = a.sidebar().await;
+
+            if branches(&rows) == ["the-cross-device-drag", "the-merged-list"] {
+                return;
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        read_back.is_ok(),
+        "no Nudge of A's own left the page a list with the member's row on it",
     );
 }
 
@@ -1494,4 +1560,94 @@ fn id_on(rows: &[ConversationEntry], branch: &str) -> i64 {
         .find(|row| row.branch == branch)
         .unwrap_or_else(|| panic!("{branch} is on the merged list"))
         .id
+}
+
+/// A Conversation that has been transferred is one row of the merged list, drawn
+/// wherever the live record is — and it is one row throughout, the copies sharing
+/// a **birth key** being what says they are one piece of work (ADR-0020,
+/// *Transfer*).
+///
+/// Read from both ends, because both are merges and each has the other's rows the
+/// other way round: A holds the tombstone and draws B's copy, and B holds the
+/// tombstone as a member's row and draws its own.
+#[tokio::test]
+async fn a_conversation_transferred_to_a_member_is_one_row_of_the_merged_list() {
+    let (a, b) = linked_up().await;
+    let _holding_here = a.holding();
+    let _holding_there = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    // A's own, and what a transfer of it would carry: the key it was born under
+    // and the rank it sits at.
+    let mine = a.starts(here, "the-transfer").await;
+    a.sidebar_saying(|rows| branches(rows) == ["the-transfer"])
+        .await;
+
+    let born = a.born(mine).await;
+    let rank = a.rank_on("the-transfer").await;
+
+    // The copy the transfer writes on B, and a Conversation of B's own after it.
+    // The second one is the sync point: A re-reads the whole of B's list on a
+    // Nudge, so a list with the marker in it is a list with the copy in it — and
+    // without one there is no telling a copy that has been merged away from a
+    // copy that has not arrived yet.
+    let theirs = b.takes_a_copy(there, "the-transfer", &born, &rank).await;
+    b.starts(there, "b-own").await;
+
+    // Both copies say they are live, which is the moment between B's write and
+    // A's mark landing. One row all the same.
+    let between = a
+        .sidebar_saying(|rows| branches(rows).contains(&"b-own"))
+        .await;
+
+    assert_eq!(
+        branches(&between),
+        ["b-own", "the-transfer"],
+        "one row for the work and one for B's own, rather than two copies drawn \
+         beside each other",
+    );
+    assert_eq!(
+        whose(&between),
+        [Some(B), None],
+        "and while nothing says otherwise it is A's own copy that stands",
+    );
+
+    // And then the mark lands: A's copy is not the record, whatever else is true
+    // of it.
+    a.hands_on(mine, B, theirs).await;
+
+    let after = a
+        .sidebar_saying(|rows| whose(rows) == [Some(B), Some(B)])
+        .await;
+
+    assert_eq!(
+        branches(&after),
+        ["b-own", "the-transfer"],
+        "the tombstone is off the list and the live copy is on it, at the rank \
+         the work has always sat at",
+    );
+    assert_eq!(
+        after[1].id, theirs,
+        "and the row is B's copy, by the id B numbered it",
+    );
+    assert_eq!(
+        after[1].born,
+        born.key(),
+        "which is the row A's copy was born under: the ids are two and the work \
+         is one",
+    );
+
+    // And the same list from B, where the tombstone is a member's row rather than
+    // its own and the live copy is its own rather than a member's.
+    let theirs = b
+        .sidebar_saying(|rows| whose(rows) == [None, None] && rows.len() == 2)
+        .await;
+
+    assert_eq!(
+        branches(&theirs),
+        ["b-own", "the-transfer"],
+        "B draws the work it is doing once, and nothing of the copy A kept",
+    );
 }

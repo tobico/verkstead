@@ -197,6 +197,7 @@
       }
     }
   ],
+  "transferred": null,
   "trimmed": false,
   "waiting": true,
   "waiting_on_checks": false,
