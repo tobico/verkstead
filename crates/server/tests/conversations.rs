@@ -11710,6 +11710,15 @@ async fn a_fix_merge_issues_pointed_into_a_stack_records_the_whole_chain() {
         said.contains("#40") && said.contains("#42"),
         "and names the pull requests it found: {said}",
     );
+
+    // And a link nobody is on is left alone and said to be nobody's, which is
+    // what it has always been: there is no Conversation here to close, and
+    // nothing standing on the branch for a sync to be refused over.
+    assert!(
+        said.contains("#40 belongs to no Conversation")
+            && said.contains("#42 belongs to no Conversation"),
+        "a neighbour that is nobody's is noted rather than acted on: {said}",
+    );
 }
 
 /// A lone pull request records one, and a chain whose next link is in a fork is
@@ -11757,6 +11766,336 @@ async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
         stack(dir.path(), under, repo_id).await,
         [50],
         "the chain stops where the fork is rather than following it out of the Repo",
+    );
+}
+
+/// Every branch of a three-deep chain on the upstream, which is what a stack of
+/// stages pushes.
+#[cfg(unix)]
+fn a_stack_on_origin(upstream: &Path) {
+    for branch in ["stage-01", "stage-02", "stage-03"] {
+        head_on_origin(upstream, branch);
+    }
+}
+
+/// A **Review** taken up over one link of the stack, which is what each stage of
+/// one is: a Conversation with that pull request on its record and a Worktree
+/// with that branch checked out.
+///
+/// A Review rather than a Fix Merge Issues, because only the latter walks a
+/// chain — what these are standing in for is the stage Conversations that built
+/// the stack, and none of those ever walked anything.
+#[cfg(unix)]
+async fn standing_on(
+    app: &Router,
+    repo_id: i64,
+    number: i64,
+    implementation: i64,
+    review: i64,
+) -> i64 {
+    let id = ready_to_review_under(
+        app,
+        repo_id,
+        &format!("Wrap #{number} up.\n"),
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(app, id).await, TakenUp::TakenUp);
+
+    id
+}
+
+/// The case this whole backlog was opened for: a **Fix Merge Issues** pointed at
+/// the middle of a stack Verkstead built closes the Conversations standing on the
+/// links either side of it, and nothing is left holding a branch of the chain.
+///
+/// Which is what makes the press useful at all. The conflict is low in the stack
+/// and the session sent at it is told to run `gh stack sync`, which rebases and
+/// force-pushes every branch of the chain — and git will not move a branch that is
+/// checked out in another worktree. Every link of such a stack is a stage
+/// Conversation's, usually Done, and every one of those keeps its checkout.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbours() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    finished_with_it(&app, above).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::TakenUp,
+        "both neighbours had finished, so both made way",
+    );
+
+    for holder in [below, above] {
+        let view = opened(&app, holder).await;
+
+        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(
+            view.worktree, None,
+            "closed by the ordinary Close, so the checkout it was standing on went with it",
+        );
+    }
+
+    let view = opened(&app, fixing).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "stage-02");
+    assert_eq!(
+        stack(dir.path(), fixing, repo_id).await,
+        [40, 41, 42],
+        "and the whole chain is this wrap-up's to watch",
+    );
+
+    // Nothing of the chain is checked out anywhere but the Conversation that took
+    // it up, which is the thing a sync was going to be refused over.
+    let mine = PathBuf::from(&view.worktree.as_ref().expect("it is wrapping").path);
+    let mine = mine.canonicalize().unwrap_or(mine);
+
+    assert_eq!(
+        worktrees(&repo),
+        vec![repo.canonicalize().unwrap_or(repo.clone()), mine],
+        "the Repo and the new Worktree, and nobody standing on stage-01 or stage-03",
+    );
+
+    // And the Timeline names what was closed, where it already says what the
+    // stack is and whose each link was.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "#40 belonged to the Conversation on <code>stage-01</code>, which had finished with \
+             it and was closed to make way"
+        ),
+        "the note names the Conversation that was closed off the link below: {said}",
+    );
+    assert!(
+        said.contains(
+            "#42 belonged to the Conversation on <code>stage-03</code>, which had finished with \
+             it and was closed to make way"
+        ),
+        "and the one above it: {said}",
+    );
+}
+
+/// And one neighbour still at work refuses the whole start, naming it — with
+/// every Done Conversation left Done.
+///
+/// All or nothing, because a sync is all or nothing: it rebases and force-pushes
+/// the whole chain, so a chain with one branch it cannot move is a chain it
+/// cannot sync. Closing the Conversations standing on the rest would be several
+/// Conversations given up for a run that was never going to work.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    // The link below has finished with its pull request, the one above has not —
+    // and the pull request being named has a finished holder of its own.
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+
+    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    finished_with_it(&app, holder).await;
+
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::AlreadyHeld {
+            conversation: above,
+        },
+        "the refusal leads to the Conversation that will not give its link up",
+    );
+
+    nothing_taken_up_alongside(&app, fixing).await;
+
+    for finished in [below, holder] {
+        let view = opened(&app, finished).await;
+
+        assert_eq!(
+            view.state,
+            Lifecycle::Done,
+            "nothing was closed for a start that was refused",
+        );
+        assert!(
+            view.worktree.is_some(),
+            "and the checkout it was standing on is still its own",
+        );
+    }
+
+    assert_eq!(opened(&app, above).await.state, Lifecycle::Wrapping);
+    assert_eq!(
+        worktrees(&repo).len(),
+        4,
+        "the Repo and the three Conversations' checkouts, exactly as before the press",
+    );
+}
+
+/// And a link checked out by somebody who is no Conversation refuses the start
+/// the way the branch being taken up already does — said about the neighbour.
+///
+/// Which is the refusal Verkstead cannot work round: a Conversation that has
+/// finished is closed and its Worktree given back, and a checkout that is nobody's
+/// here is one nothing may take away. Git will refuse the sync over it all the
+/// same.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_checked_out_by_nobody_refuses_the_start_naming_where() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    // Somebody's own checkout of the link below, made by hand and belonging to no
+    // Conversation.
+    let theirs = elsewhere.path().join("somebody-elses-checkout");
+    git(
+        &repo,
+        &["fetch", "--quiet", "origin", "stage-01:refs/heads/stage-01"],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            &theirs.to_string_lossy(),
+            "stage-01",
+        ],
+    );
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::CheckedOutElsewhere {
+            at: theirs.to_string_lossy().into_owned(),
+        },
+    );
+
+    nothing_taken_up_alongside(&app, fixing).await;
+}
+
+/// A Conversation refused a take-up has not moved and has checked nothing out —
+/// the whole of [`nothing_taken_up`] but the count of the Repo's worktrees, which
+/// a stack's own Conversations are among.
+#[cfg(unix)]
+async fn nothing_taken_up_alongside(app: &Router, id: i64) {
+    let view = opened(app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::PullRequest(_))),
+        "and nothing was recorded against it",
+    );
+}
+
+/// And the neighbours holding uncommitted changes are named in the one list the
+/// pull request's own holder is named in, which one press confirms.
+///
+/// One question for the whole stack: a stack of five closed one at a time would be
+/// five presses, and what the human is being asked is one question about one
+/// start. The list is every Conversation that would lose something, and the press
+/// that follows it is the one that can confirm it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stacks_uncommitted_changes_are_asked_about_in_one_list() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+    left_uncommitted(&app, below, Change::Untracked).await;
+
+    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    finished_with_it(&app, holder).await;
+    left_uncommitted(&app, holder, Change::Modified).await;
+
+    // And a neighbour with nothing to lose, which is closed without being asked
+    // about.
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    finished_with_it(&app, above).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![
+                Uncommitted {
+                    conversation: holder,
+                    branch: "stage-02".to_owned(),
+                },
+                Uncommitted {
+                    conversation: below,
+                    branch: "stage-01".to_owned(),
+                },
+            ],
+        },
+        "the pull request's own holder and the neighbour, in one list",
+    );
+
+    for untouched in [below, holder, above] {
+        assert_eq!(
+            opened(&app, untouched).await.state,
+            Lifecycle::Done,
+            "nothing is closed by the press that asks",
+        );
+    }
+
+    assert_eq!(
+        press_take_up_confirming(&app, fixing, &[holder, below]).await,
+        TakenUp::TakenUp,
+        "and one confirming press closes every one of them",
+    );
+
+    for closed in [below, holder, above] {
+        let view = opened(&app, closed).await;
+
+        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(view.worktree, None);
+    }
+
+    let view = opened(&app, fixing).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        worktrees(&repo),
+        vec![repo.canonicalize().unwrap_or(repo.clone()), {
+            let mine = PathBuf::from(&view.worktree.as_ref().expect("it is wrapping").path);
+            mine.canonicalize().unwrap_or(mine)
+        },],
+        "and nothing of the chain is checked out anywhere else",
     );
 }
 
@@ -11821,6 +12160,12 @@ async fn a_chain_gh_would_not_list_is_said_on_the_timeline() {
 /// is a Conversation per pull request, so the neighbours nearly always belong to
 /// somebody: recording them is what lets this wrap-up wait on the whole chain,
 /// and it is not a claim on any of them.
+///
+/// The neighbour here is a Closed Conversation, which is one with nothing left to
+/// give up — the case that leaves a record to name and no close to do. A
+/// neighbour still at work refuses the start outright, and a Done one is closed
+/// to make way; both are the rule about *standing* on a link rather than about
+/// recording one.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claimed() {
@@ -11831,10 +12176,11 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
-    // The bottom of the stack, taken up by a Conversation of its own — which is
-    // what a stacked stage leaves behind.
+    // The bottom of the stack, taken up by a Conversation of its own and stopped
+    // since — which is what a stacked stage that has been closed leaves behind.
     let below = ready_to_fix_under(&app, repo_id, "Wrap #40 up.\n", implementation).await;
     assert_eq!(press_take_up(&app, below).await, TakenUp::TakenUp);
+    assert_eq!(close(&app, below).await, ConversationClosed::Closed);
 
     // And the middle, which is a link of the same chain and nobody's work.
     let id = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
@@ -11858,19 +12204,17 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
     );
 
     // And the refusal is untouched where it is about the pull request somebody
-    // was pointed at and is still at work on: a third Conversation over `#40`
+    // was pointed at and is still at work on: a third Conversation over `#41`
     // leads to the one on it.
-    let second = ready_to_fix_under(&app, repo_id, "Wrap #40 up too.\n", implementation).await;
+    let second = ready_to_fix_under(&app, repo_id, "Wrap #41 up too.\n", implementation).await;
 
     assert_eq!(
         press_take_up(&app, second).await,
-        TakenUp::AlreadyHeld {
-            conversation: below,
-        },
+        TakenUp::AlreadyHeld { conversation: id },
     );
     assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
     assert_eq!(
-        opened(&app, below).await.state,
+        opened(&app, id).await.state,
         Lifecycle::Wrapping,
         "and a holder still at work is refused for rather than closed",
     );

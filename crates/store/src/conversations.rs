@@ -2241,6 +2241,42 @@ pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
+/// Which Conversation is working in `path`, where one is — in its own Worktree
+/// or in a companion's.
+///
+/// What a take-up asks about a branch git says is checked out somewhere. Git
+/// holds one checkout per branch and a stack sync moves every branch of a chain,
+/// so whoever is standing on a link of it has to make way; git names the
+/// directory, and this is what turns a directory into somebody to ask.
+///
+/// **Both tables**, because both are directories a Conversation was given to
+/// work in and both go back when it is closed. A companion checkout of the same
+/// repository is unusual and is a checkout all the same: what git refuses over is
+/// the directory, whichever column its path was written in.
+///
+/// `None` is a checkout that is nobody's here — the human's own clone, or a
+/// worktree somebody made by hand — which is nothing Verkstead may close and so
+/// nothing it can make way with.
+pub async fn conversation_at_worktree(
+    pool: &SqlitePool,
+    path: &std::path::Path,
+) -> Result<Option<i64>> {
+    let named = path.to_string_lossy().into_owned();
+
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT conversation_id FROM worktrees WHERE path = ?
+         UNION
+         SELECT conversation_id FROM companion_worktrees WHERE path = ?",
+    )
+    .bind(&named)
+    .bind(&named)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading which Conversation is working in {named}"))?;
+
+    Ok(row.map(|(id,)| id))
+}
+
 /// Every Conversation whose work has not stopped, by id.
 ///
 /// The keep-set the boundary sweep decides by, and the one place in the store

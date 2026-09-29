@@ -2509,12 +2509,24 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// See [`making_way`] — and [`refused_having_made_way`] for what a refusal
 /// reached over a close that has already happened says.
 ///
+/// **And a stack's neighbours make way by the same rule.** Where the Process
+/// walks a chain, what a conflict in it dispatches is one session told to run
+/// `gh stack sync`, which rebases and force-pushes every branch of the chain —
+/// and git will not move a branch that is checked out elsewhere. So whoever is
+/// standing on a link is asked to give it up: the Conversation the pull request
+/// is on, and whoever has that branch checked out, which is what git will
+/// actually refuse over. All or nothing — one link still at work refuses the
+/// whole start with every Done Conversation left Done — and the chain is read
+/// before anything is closed for that reason. See [`crate::stacks::walk`] and
+/// [`standing_on`].
+///
 /// **And a close discards what was uncommitted, so that is asked about first and
 /// nothing else is.** A press over a holder with changes in a checkout it may
 /// write in comes back as [`TakenUp::WouldDiscard`] naming it, having closed
 /// nothing and made nothing; the press after it carries those Conversations in
 /// `discarding`, which is the human saying to go ahead. Read at the press rather
-/// than taken from the one before — see [`to_lose`].
+/// than taken from the one before — see [`to_lose`]. One list for the whole
+/// stack, so a chain of five is asked about once.
 ///
 /// **Two roles rather than three, and one where the Process never reviews.** The
 /// work on a pull request is built, so there is no round for a grilling to open
@@ -2649,7 +2661,24 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // above it — nothing is closed for a start that was going to be refused
     // anyway, for its Profiles, its Target, a fork or a pull request GitHub has
     // nothing open under.
+    //
+    // **And the chain around it is read before any of that**, where this Process
+    // walks one. A conflict low in a stack is fixed by a sync that rebases and
+    // force-pushes every branch of the chain, and git will not move a branch that
+    // is checked out somewhere — so who is standing on the *neighbours* is as much
+    // a part of whether this start can happen as who is standing on the one named.
+    // Recording the chain stays where it was, after the take-up's own pull request
+    // is on the record; what moves ahead is knowing the links. See
+    // [`crate::stacks::walk`].
+    let walked = match number {
+        Some(number) if walks_the_stack(conversation.process) => {
+            crate::stacks::walk(state, &conversation.repo, number).await
+        }
+        _ => crate::stacks::Walked::Nothing,
+    };
+
     let mut giving_way = Vec::new();
+    let mut named_holder = None;
 
     if let Some(number) = number
         && let Some(other) =
@@ -2657,12 +2686,38 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
         && other != id
     {
         match making_way(state, other).await? {
-            MadeWay::ToClose(holder) => giving_way.push(holder),
+            MadeWay::ToClose(holder) => {
+                named_holder = Some(holder.id);
+                giving_way.push(holder);
+            }
             MadeWay::NothingToGiveUp => {}
             MadeWay::StillAtWork => {
                 return Ok(TakenUp::AlreadyHeld {
                     conversation: other,
                 });
+            }
+        }
+    }
+
+    // And the neighbours by the same rule, all or nothing: one link still at work
+    // refuses the whole start with every Done Conversation left Done, because
+    // closing four of five would be four Conversations given up for a sync that
+    // still cannot run. See [`standing_on`].
+    if let Some(number) = number {
+        let neighbours = walked.neighbours(number);
+
+        if !neighbours.is_empty() {
+            let standing =
+                standing_on(state, id, &conversation.repo, &neighbours, &giving_way).await?;
+
+            match standing.refused {
+                Some(WillNotMakeWay::StillAtWork { conversation }) => {
+                    return Ok(TakenUp::AlreadyHeld { conversation });
+                }
+                Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
+                    return Ok(TakenUp::CheckedOutElsewhere { at });
+                }
+                None => giving_way.extend(standing.giving_way),
             }
         }
     }
@@ -2689,16 +2744,35 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // Nothing left to ask about, so the way is made: each holder closed by the
     // ordinary Close, and its branch kept for the Timeline of the Conversation
     // taking over.
+    //
+    // Two lists rather than one, because the Timeline says them in two places: the
+    // Conversation that had the pull request this start names goes in the sentence
+    // about the take-up itself, and the ones that were standing on the rest of the
+    // chain go in the note that already says what the stack is and whose each link
+    // was — see [`taken`] and [`crate::stacks::record`].
     let mut made_way = None;
+    let mut closed = Vec::new();
+    let mut branches = Vec::new();
 
     for holder in giving_way {
-        made_way = close_to_make_way(state, holder).await?;
+        let holder_id = holder.id;
+
+        if let Some(branch) = close_to_make_way(state, holder).await? {
+            if named_holder == Some(holder_id) {
+                made_way = Some(branch.clone());
+            }
+
+            closed.push(holder_id);
+            branches.push(branch);
+        }
     }
 
     // And from here on a refusal is one reached over a close that has already
     // happened, which is a thing to say rather than a thing to undo — see
-    // [`refused_having_made_way`].
-    let refused = |refusal: TakenUp| refused_having_made_way(refusal, id, made_way.as_deref());
+    // [`refused_having_made_way`]. Every branch that was closed, rather than the
+    // named pull request's holder alone: a stack's neighbours are closed here too,
+    // and a refusal after that moved as many Conversations as it closed.
+    let refused = |refusal: TakenUp| refused_having_made_way(refusal, id, &branches);
 
     // The branch the work is on: a pull request's head, or the name the field
     // held. Which is what everything below this turns on — the checkout, the
@@ -2885,13 +2959,18 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // some watchers, and none of them makes a directory.
     drop(making);
 
-    // And the rest of the stack, where this Process is one that walks: GitHub's
-    // chain both ways from the pull request just recorded, every link of it
-    // recorded beside it — see [`crate::stacks`]. Here rather than after the
-    // note, because what it found is part of what the note says; and after the
-    // checkouts are let go, because it goes to the network and makes no
-    // directory.
-    let stack = crate::stacks::walked(state, id).await;
+    // And the rest of the stack, where this Process is one that walks: the chain
+    // read at the press, every link of it now recorded beside the one taken up —
+    // see [`crate::stacks`]. Here rather than after the note, because what it
+    // found is part of what the note says; and here rather than where it was
+    // read, because a link recorded before this Conversation had a pull request
+    // of its own would be the pull request its work is on.
+    let stack = match number {
+        Some(number) => {
+            crate::stacks::record(state, id, &conversation.repo, number, &walked, &closed).await
+        }
+        None => None,
+    };
 
     let note = taken(&taking, &named, made_way.as_deref(), narrowed, stack);
 
@@ -3117,27 +3196,288 @@ async fn close_to_make_way(
     Ok(Some(holder.branch))
 }
 
+/// Who is standing on the neighbours of a chain, and what it would take for them
+/// to make way.
+///
+/// [`making_way`]'s answer for a whole stack rather than for one pull request.
+/// Nothing is closed here either: what this hands back is every Conversation a
+/// take-up would close, and the first reason it cannot, where there is one.
+struct Standing {
+    /// The Conversations to close, in the order the chain was walked in — from
+    /// the bottom.
+    ///
+    /// Boxed apiece, because that is how [`MadeWay::ToClose`] hands each of them
+    /// over and a record is a large thing to copy out of its box and back in: the
+    /// caller's own list is the same shape, and [`to_lose`] reads both as one
+    /// slice.
+    #[allow(clippy::vec_box)]
+    giving_way: Vec<Box<store::Conversation>>,
+
+    /// The first link somebody will not give up, where there is one. Which stops
+    /// the whole start: see [`WillNotMakeWay`].
+    refused: Option<WillNotMakeWay>,
+}
+
+/// Why a link of the chain cannot be made way on.
+///
+/// **All or nothing**, which is why this stops a start rather than narrowing it.
+/// A conflict low in a stack is fixed by one `gh stack sync`, which rebases and
+/// force-pushes every branch of the chain: a sync that cannot move one of them
+/// moves none of them, so closing the Conversations standing on the others would
+/// be four Conversations given up for a run that was never going to work.
+enum WillNotMakeWay {
+    /// A Conversation still at work on one of the links, which is the refusal the
+    /// named pull request's own holder gets: the way on is that Conversation
+    /// rather than a second one over the same branch.
+    StillAtWork {
+        /// The Conversation, for the way there.
+        conversation: i64,
+    },
+
+    /// A link's branch is checked out somewhere that is no Conversation's — the
+    /// human's own clone, or a worktree made by hand. Nothing here may close it
+    /// and git will not move the branch under it, so this is the refusal a take-up
+    /// already gives over its own head branch, said about the neighbour.
+    CheckedOutElsewhere {
+        /// Where it is checked out, as git named it.
+        at: String,
+    },
+}
+
+/// Read who is standing on each of `links`, and say whether they can make way.
+///
+/// **Two questions per link, because git and the record answer different
+/// things.** The record says which Conversation the pull request is on, which is
+/// the lookup [`making_way`] reads a state off. Git says where the link's branch
+/// is checked out, which is what a sync will actually be refused over: a Done
+/// Conversation keeps its Worktree, and a checkout that belongs to nobody here is
+/// one Verkstead cannot give back.
+///
+/// `already` is the Conversations the caller has gathered already — the holder of
+/// the pull request this start names — so that one standing on two links of the
+/// chain is closed once rather than twice.
+///
+/// Nothing is closed and nothing is refused for. The first link that will not
+/// make way stops the walk, because the start is refused whole either way.
+async fn standing_on(
+    state: &AppState,
+    taking_up: i64,
+    repo: &store::Repo,
+    links: &[&crate::github::Numbered],
+    already: &[Box<store::Conversation>],
+) -> Result<Standing> {
+    let pool = &state.pool;
+
+    let mut gathered: Vec<i64> = already.iter().map(|holder| holder.id).collect();
+    let mut giving_way = Vec::new();
+
+    for link in links {
+        // Whose the pull request is, which is the record's answer.
+        if let Some(other) = store::conversation_on_pull_request(pool, repo.id, link.number).await?
+            && other != taking_up
+            && !gathered.contains(&other)
+        {
+            match making_way(state, other).await? {
+                MadeWay::ToClose(holder) => {
+                    gathered.push(other);
+                    giving_way.push(holder);
+                }
+                MadeWay::NothingToGiveUp => gathered.push(other),
+                MadeWay::StillAtWork => {
+                    return Ok(Standing {
+                        giving_way,
+                        refused: Some(WillNotMakeWay::StillAtWork {
+                            conversation: other,
+                        }),
+                    });
+                }
+            }
+        }
+
+        // And who is standing on its branch, which is git's — and the one a sync
+        // is refused over. Off the runtime's threads, `git worktree list` being a
+        // process like any other.
+        let at = tokio::task::spawn_blocking({
+            let repo = repo.path.clone();
+            let head = link.head.clone();
+
+            move || worktrees::checked_out_at(&repo, &head)
+        })
+        .await?;
+
+        let Some(at) = at else {
+            continue;
+        };
+
+        match store::conversation_at_worktree(pool, &at).await? {
+            Some(other) if other == taking_up || gathered.contains(&other) => {}
+            Some(other) => match making_way(state, other).await? {
+                MadeWay::ToClose(holder) => {
+                    gathered.push(other);
+                    giving_way.push(holder);
+                }
+                MadeWay::NothingToGiveUp => gathered.push(other),
+                MadeWay::StillAtWork => {
+                    return Ok(Standing {
+                        giving_way,
+                        refused: Some(WillNotMakeWay::StillAtWork {
+                            conversation: other,
+                        }),
+                    });
+                }
+            },
+            None => {
+                return Ok(Standing {
+                    giving_way,
+                    refused: Some(WillNotMakeWay::CheckedOutElsewhere {
+                        at: at.display().to_string(),
+                    }),
+                });
+            }
+        }
+    }
+
+    Ok(Standing {
+        giving_way,
+        refused: None,
+    })
+}
+
+/// Make a chain's neighbours give way where there is nobody to ask about it, and
+/// say in words why they could not where they could not.
+///
+/// **The second door**, which is a take-up over a bare branch: nothing was
+/// recorded at the press, the `submitting` session it sent has just opened a pull
+/// request, and only now is there a chain to walk — see [`crate::wrapping::record`].
+/// The human pressed Start minutes ago and is not standing here, so nothing can be
+/// asked of them: a neighbour holding uncommitted changes stops the run exactly as
+/// one still at work does, rather than being closed over their head.
+///
+/// `Ok` is every Conversation that was closed, by id, for the note that says what
+/// the stack is. `Err` is the sentence the run is stopped with — which is a stop
+/// rather than a silence because what would follow it is a session told to run
+/// `gh stack sync`, and a sync cannot move a branch somebody is standing on.
+pub(crate) async fn neighbours_give_way(
+    state: &AppState,
+    id: i64,
+    repo: &store::Repo,
+    links: &[&crate::github::Numbered],
+) -> std::result::Result<Vec<i64>, String> {
+    let standing = match standing_on(state, id, repo, links, &[]).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading who is standing on this stack failed");
+
+            return Err(
+                "Verkstead could not read which Conversations are standing on the rest of this \
+                 stack, so it has not closed any of them: a sync rebases every branch of the \
+                 chain, and git will not move one that is checked out elsewhere."
+                    .to_owned(),
+            );
+        }
+    };
+
+    match standing.refused {
+        Some(WillNotMakeWay::StillAtWork { conversation }) => {
+            return Err(format!(
+                "{whose} is still at work on one of the pull requests of this stack, so nothing \
+                 here may take it over: there is one open Conversation per pull request. Nothing \
+                 was closed and no sync was dispatched — a sync rebases every branch of the \
+                 chain, and git will not move one that is checked out elsewhere.",
+                whose = by_branch(state, conversation).await,
+            ));
+        }
+        Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
+            return Err(format!(
+                "A branch of this stack is checked out at {at}, which is no Conversation's, so \
+                 Verkstead cannot give it back. Nothing was closed and no sync was dispatched — a \
+                 sync rebases every branch of the chain, and git will not move one that is checked \
+                 out elsewhere.",
+            ));
+        }
+        None => {}
+    }
+
+    // And the one thing a close cannot give back. At the press the human is asked
+    // about this; here there is nobody to ask, so it stops the run the same way a
+    // Conversation still at work does.
+    let holding = to_lose(&standing.giving_way, &[]).await;
+
+    if !holding.is_empty() {
+        let named: Vec<String> = holding
+            .iter()
+            .map(|held| format!("`{}`", held.branch))
+            .collect();
+
+        return Err(format!(
+            "The Conversation on {named} is standing on a pull request of this stack and has \
+             uncommitted changes, so closing it would throw them away and nobody is here to be \
+             asked. Nothing was closed and no sync was dispatched.",
+            named = named.join(", the Conversation on "),
+        ));
+    }
+
+    let mut closed = Vec::new();
+
+    for holder in standing.giving_way {
+        let holder_id = holder.id;
+
+        match close_to_make_way(state, holder).await {
+            Ok(Some(_)) => closed.push(holder_id),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, closing = holder_id, "closing a Conversation standing on this stack failed");
+
+                return Err(format!(
+                    "{whose} had finished with a pull request of this stack and could not be \
+                     closed to make way, so no sync was dispatched.",
+                    whose = by_branch(state, holder_id).await,
+                ));
+            }
+        }
+    }
+
+    Ok(closed)
+}
+
+/// A Conversation as a Notice names it: *the Conversation on `branch`*, which is
+/// what it is called once anybody has named one.
+///
+/// By its id where the record will not say — a Notice that named a number would
+/// still be a Notice the human could act on, and one that said nothing at all
+/// would not.
+async fn by_branch(state: &AppState, conversation: i64) -> String {
+    match store::load_conversation(&state.pool, conversation).await {
+        Ok(Some(held)) => format!("The Conversation on `{}`", held.branch),
+        _ => format!("Conversation {conversation}"),
+    }
+}
+
 /// Say on the log that a take-up was refused after it had already closed the
-/// Conversation that held the pull request, and hand the refusal back.
+/// Conversations that were standing on its pull request and on the rest of its
+/// chain, and hand the refusal back.
 ///
 /// Nothing is undone. A close is sessions ended and directories given back, so
 /// there is nothing to put back, and the way back into a Closed Conversation
 /// exists already: a Steer brings one into whichever state the work is in — see
 /// ADR-0020. What is owed is the *saying*, because the human pressed Start on one
-/// Conversation and a different one moved.
+/// Conversation and several others moved.
 ///
 /// Only where something was closed. Every other refusal is what it has always
 /// been, and a log line about a close that never happened would be a log line
 /// about nothing.
-fn refused_having_made_way(refusal: TakenUp, id: i64, made_way: Option<&str>) -> TakenUp {
-    if let Some(branch) = made_way {
+///
+/// `made_way` is every branch given up, by the name its Conversation goes under:
+/// a stack's neighbours are closed here alongside the holder of the pull request
+/// that was named, and a line naming one of four would be a line that hid three.
+fn refused_having_made_way(refusal: TakenUp, id: i64, made_way: &[String]) -> TakenUp {
+    if !made_way.is_empty() {
         tracing::warn!(
             conversation_id = id,
-            closed = branch,
+            closed = made_way.join(", "),
             refusal = ?refusal,
-            "a take-up was refused after the Conversation that held its pull request had been \
-             closed to make way for it, so that Conversation stays Closed — a Steer is the way \
-             back into it",
+            "a take-up was refused after the Conversations standing on its pull request had been \
+             closed to make way for it, so they stay Closed — a Steer is the way back into one",
         );
     }
 
@@ -3484,8 +3824,9 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// ordinary wrap-up is what a taken-up Conversation has always run.
 ///
 /// **And the stack, where the take-up walked one.** `stack` is
-/// [`crate::stacks::walked`]'s own account of the chain — what it is, from the
-/// bottom, and which of it belongs to another Conversation — and it goes in
+/// [`crate::stacks::record`]'s own account of the chain — what it is, from the
+/// bottom, which of it belongs to another Conversation, and which of those were
+/// closed to make way for this one — and it goes in
 /// ahead of the narrowing for the reason it is said at all: the pull requests
 /// above and below arrived on this record without anybody pressing anything, and
 /// a wrap-up that quietly waits on two more than the human named is a wrap-up
@@ -3498,7 +3839,10 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// `made_way` is the branch of the Conversation that had this pull request and had
 /// finished with it — see [`making_way`] — and it is named by its branch for the
 /// reason the stack note names a neighbour's holder by one: that is what a
-/// Conversation is called once anybody has named one. Worth saying because the
+/// Conversation is called once anybody has named one. The pull request that was
+/// *named* and nothing else: the Conversations that were standing on the rest of
+/// the chain are the stack note's to list, which is where the links they were
+/// standing on are already written out. Worth saying because the
 /// human pressed Start on this Conversation and a different one moved, and this
 /// Timeline is the one they are looking at when it did. `None` is every take-up
 /// over a pull request nobody had, which is most of them.

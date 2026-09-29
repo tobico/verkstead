@@ -20113,11 +20113,18 @@ async fn taking_up_however_reviewed(
 /// bare-branch road being the one road both come down: a **Review** settles the
 /// two roles a wrap-up runs under, and a **Fix Merge Issues** the one role it
 /// has, nothing about it ever reading the branch.
+///
+/// `standing` is a branch to leave checked out in a worktree of the Repo that is
+/// no Conversation's — the human's own, in effect. Which is somebody standing on
+/// a link of whatever chain the walk turns out to find, and what git refuses a
+/// stack sync over. Made before the press, because the walk at the second door
+/// runs minutes later with nobody watching.
 async fn reviewing_a_branch(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     base: Option<&str>,
+    standing: Option<&str>,
     process: Process,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
@@ -20130,6 +20137,22 @@ async fn reviewing_a_branch(
     // default branch the rule falls to.
     if let Some(base) = base {
         git(&bench.repo, &["branch", "--quiet", base]);
+    }
+
+    if let Some(standing) = standing {
+        let at = bench.elsewhere.path().join("somebody-elses-checkout");
+
+        git(
+            &bench.repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                standing,
+                &at.to_string_lossy(),
+            ],
+        );
     }
 
     let started: Started = post(
@@ -20250,6 +20273,7 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
+        None,
         Process::Review,
     )
     .await;
@@ -20345,6 +20369,7 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
+        None,
         Process::FixMergeIssues,
     )
     .await;
@@ -20446,6 +20471,7 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_listing_a_stack(&opened),
         None,
+        None,
         Process::FixMergeIssues,
     )
     .await;
@@ -20535,6 +20561,72 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
     }
 }
 
+/// And a bare branch whose chain turns out to have somebody standing on it stops
+/// the run with a Notice naming where, rather than carrying on into a sync that
+/// cannot move the branch.
+///
+/// The second door is where nobody can be asked anything: the human pressed Start
+/// minutes ago, the `submitting` session has just opened the pull request, and
+/// what a conflict in this chain would dispatch is one session told to run
+/// `gh stack sync` — which rebases and force-pushes every branch of it. Git holds
+/// one checkout per branch, so a link checked out in somebody else's worktree is a
+/// sync that was never going to work, and a go spent on one is a go the human paid
+/// for and got nothing from.
+///
+/// A checkout that is no Conversation's is the case Verkstead cannot put right by
+/// itself: a Conversation that has finished is closed and its Worktree given back,
+/// and this one it may not touch.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        // The link under this branch, checked out in a worktree that is nobody's
+        // here — which is what a human's own clone of the stage below looks like.
+        Some("stage-01"),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // The pull request lands, so the walk runs — and what it finds is somebody on
+    // the link below.
+    let view = fixture
+        .until(|view| {
+            notices_since_the_take_up(view)
+                .iter()
+                .any(|notice| notice.contains("no sync was dispatched"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("checked out at") && said.contains("somebody-elses-checkout"),
+        "the Notice names where the branch is checked out: {said}",
+    );
+    assert!(
+        said.contains("no sync was dispatched"),
+        "and says the run stopped rather than spending a go on it: {said}",
+    );
+    assert!(
+        said.contains("one of a stack of 3"),
+        "and the chain it found is on the record all the same: {said}",
+    );
+
+    // The worktree that would not make way is exactly where it was.
+    assert!(
+        git(&fixture.repo(), &["worktree", "list"]).contains("somebody-elses-checkout"),
+        "nothing here may take somebody else's checkout away",
+    );
+}
+
 /// And one whose session opens none stops the run with what that session last
 /// said — with Resume another go at the one thing still owed.
 ///
@@ -20551,6 +20643,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         spill,
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
         &gh_opened_by_hand(&opened),
+        None,
         None,
         Process::Review,
     )
@@ -21629,6 +21722,7 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
+        None,
         None,
         Process::FixMergeIssues,
     )

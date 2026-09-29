@@ -2213,9 +2213,28 @@ where it has finished, exactly as a lone pull request's holder is. A lone pull
 request finds a chain of itself, and nothing is said about a stack there is
 none of — but a `gh` that would not answer the question is said, that and a
 lone pull request leaving the same record otherwise and nothing walking a
-second time. **Over a bare branch the walk waits**, there being nothing to walk
-from until the `submitting` session has opened one: it runs where that pull
-request is recorded, with a Notice of its own.
+second time.
+
+**And the neighbours make way, by the rule the named pull request's own holder
+follows.** A conflict low in a stack is fixed by one `gh stack sync`, which
+rebases and force-pushes every branch of the chain, and git will not move a
+branch that is checked out anywhere else — so whoever is *standing* on a link
+gives it up before the start goes through: the Conversation the pull request is
+on, and any Conversation whose worktree has that branch checked out. Each Done
+one is closed, a Closed or Archived one has nothing to give up, and one still at
+work refuses the whole start naming it, **before anything is closed** — all or
+nothing, a sync that cannot move one branch being a sync that moves none. A
+checkout that is no Conversation's is refused over by where it is, the way the
+branch being taken up already is. Neighbours holding uncommitted changes join the
+one list the named pull request's holder is in, so a stack of five is asked about
+once, and the Timeline names what was closed where it already says what the stack
+is and whose each link was. Which is why the chain is read before anything is
+recorded or closed: the press needs to know the links to know who is standing on
+them. **Over a bare branch the walk waits**, there being nothing to walk from
+until the `submitting` session has opened one: it runs where that pull request is
+recorded, with a Notice of its own — and with nobody left to ask, a neighbour
+holding uncommitted changes stops the run with a Notice exactly as one still at
+work does, rather than dispatching a sync that cannot move the branch.
 
 **A branch is taken up the same way, with nothing at the end of it.** A Target
 that is neither a URL nor a `#number` is a branch: nothing is asked of GitHub,
