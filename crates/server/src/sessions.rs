@@ -4338,8 +4338,6 @@ exit 1
 
     /// A launch names the Event it is writing into from the moment the Capture
     /// is open, rather than leaving it to the register.
-    /// A launch names the Event it is writing into from the moment the Capture
-    /// is open, rather than leaving it to the register.
     ///
     /// **Because the two are a whole launch apart.** The Capture is opened
     /// before the sandbox is built, so that a launch has somewhere to say what
