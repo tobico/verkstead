@@ -36,7 +36,7 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 - [x] 08: Shared Profiles — [brief](08-shared-profiles.md)
 - [x] 09: Transfer — [brief](09-transfer.md)
 - [x] 10: Resuming the harness — [brief](10-resuming-the-harness.md)
-- [ ] 11: The agent's call — [brief](11-the-agents-call.md) *(in progress: `roadmaps/cluster-mode/11-the-agents-call`)*
+- [x] 11: The agent's call — [brief](11-the-agents-call.md)
 
 ## Left to do, from a rebase rather than from a stage
 
