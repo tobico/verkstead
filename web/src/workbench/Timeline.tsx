@@ -160,6 +160,7 @@ import { RemoteBanner } from "./RemoteBanner";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
+import { STAGE_STATE, settled } from "./stages";
 import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
@@ -1510,12 +1511,13 @@ function StageList(props: {
   selected: boolean;
   open: () => void;
 }): JSX.Element {
-  const done = () => props.stages.stages.filter((stage) => stage.done).length;
+  const done = () =>
+    props.stages.stages.filter((stage) => settled(stage.state)).length;
 
   // The same window the task list draws, because it is the same card one level
   // up — see `windowing.ts`.
   const shown = createMemo(() =>
-    windowed(props.stages.stages, (stage) => stage.done),
+    windowed(props.stages.stages, (stage) => settled(stage.state)),
   );
 
   return (
@@ -1538,16 +1540,18 @@ function StageList(props: {
         <Hidden count={shown().before} />
         <For each={shown().entries}>
           {(stage) => (
-            <li classList={{ [styles.done!]: stage.done }}>
-              <Box done={stage.done} />
+            <li classList={{ [styles.done!]: settled(stage.state) }}>
+              <Box done={settled(stage.state)} />
               <span class={styles.what}>{stage.title}</span>
+              {/* Where the stage is, in the words the server's reading settled —
+                  drawn rather than kept for the readers that need words, which
+                  is the one place this row parts company with a task's. There
+                  are four states now and a box can say two of them, so the word
+                  is what the row says and the box rides along with it. */}
+              <span class={styles.state}>{STAGE_STATE[stage.state]}</span>
               {/* At the far end of the row, as a task's is, and for the reason
                   a task's is. */}
               <span class={styles.n}>{stage.number}</span>
-              {/* The word travels with the row rather than being drawn by the
-                  stylesheet, for the reason a task's does: a list read aloud
-                  or copied out still says which stages are finished. */}
-              <span class={styles.state}>{stage.done ? "done" : "to do"}</span>
             </li>
           )}
         </For>

@@ -4925,13 +4925,13 @@ export type StageDocument = {
  */
 number: string, title: string, 
 /**
- * Whether the stage is finished, which here is the checkbox — see
- * [`StageEntry::done`]. Carried on the document because a finished stage
- * still has one: a brief stays where it is for ever, so the done state is
+ * Where the stage is — see [`StageEntry::state`], which is the same reading
+ * said the same way. Carried on the document because a stage that is over
+ * still has one: a brief stays where it is for ever, so the state is
  * something the section says about itself rather than the reason it is
  * empty.
  */
-done: boolean, 
+state: StageState, 
 /**
  * What the stage stands on, by the labels its line names — `["01", "03"]`
  * of `after 01, 03` — or `null` where nothing was declared, which is every
@@ -4969,7 +4969,7 @@ html: string | null, };
 
 /**
  * One stage of a roadmap: the number it answers to, what it is called, and
- * whether it is done.
+ * where it is.
  */
 export type StageEntry = { 
 /**
@@ -4977,12 +4977,15 @@ export type StageEntry = {
  */
 number: string, title: string, 
 /**
- * Whether the stage is finished, which here *is* the checkbox: a stage's
- * brief stays where it is for ever, being the record of what the stage was
- * for, so there is no file going away to read it off. The other way round
- * from a task — see [`TaskEntry::done`].
+ * Where the stage is: the word the card's row says in place of the *done*
+ * and *to do* it used to work out from the box.
+ *
+ * The server's answer rather than the viewer's — see [`StageState`] and the
+ * server's `stages` module, which is where the record and the boxes are put
+ * together. A task's box is still a box, there being no record beside a
+ * backlog to say anything else about it: see [`TaskEntry::done`].
  */
-done: boolean, };
+state: StageState, };
 
 /**
  * The roadmap as the Timeline shows it: what it is called, and every stage
@@ -5025,6 +5028,23 @@ export type StageListReached = { id: number,
  * When the roadmap landed, RFC 3339.
  */
 at: string, roadmaps: Array<StageListEvent>, };
+
+/**
+ * Where one stage of a roadmap is, as the card's row and the pane's heading say
+ * it.
+ *
+ * The server's own reading, which is the whole point of it being a word on the
+ * wire rather than a box: with stages worked side by side, each branch carries a
+ * `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
+ * record of the stage Conversations is one — so the viewer is told where a stage
+ * is and never works it out. See the server's `stages` module for the rule, and
+ * [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
+ *
+ * A roadmap the record holds no rows for — one worked by hand or by the old
+ * tools — comes out [`Done`](StageState::Done) or [`ToDo`](StageState::ToDo)
+ * throughout, off its boxes alone, which is exactly how it has always read.
+ */
+export type StageState = "Done" | "InProgress" | "Halted" | "ToDo";
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
@@ -5618,7 +5638,7 @@ number: string, title: string,
  * still has one: its file stays in `.tasks/` until the feature is over, so
  * the done state is something the section says about itself rather than the
  * reason it is empty. The same way round as a stage's — see
- * [`StageDocument::done`].
+ * [`StageDocument::state`].
  */
 done: boolean, 
 /**

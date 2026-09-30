@@ -27,7 +27,7 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
     PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
+    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing, Started,
     SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
     TargetRecorded, TimelineEvent, Uncommitted,
 };
@@ -7170,15 +7170,16 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     assert_eq!(
         pane.stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
             .collect::<Vec<_>>(),
         [
-            ("01", "Workbench", true),
-            ("02", "Grilling", true),
-            ("03", "Implementation", false),
-            ("04", "Wrap-up", false),
+            ("01", "Workbench", StageState::Done),
+            ("02", "Grilling", StageState::Done),
+            ("03", "Implementation", StageState::ToDo),
+            ("04", "Wrap-up", StageState::ToDo),
         ],
-        "the roadmap's own order, which is the order they get worked in",
+        "the roadmap's own order, which is the order they get worked in — and off \
+         its boxes, nothing here having started a stage of it",
     );
 
     // A stage's brief stays where it is for ever, so a done stage has its

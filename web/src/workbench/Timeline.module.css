@@ -442,8 +442,7 @@
    the layout and still in the document, so a row read aloud or copied out says
    which entries are finished. Not `display: none`, which would take it out of
    the accessibility tree along with the layout. */
-.taskList .state,
-.stageList .state {
+.taskList .state {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -453,6 +452,18 @@
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* A stage's is drawn, which is where the roadmap's card parts company with the
+   backlog's: a task is done or it is not and a box says which, where a stage is
+   in one of four places and only two of them are a box. So the word is on the
+   row for everybody, before the number at the edge, and quiet enough that the
+   titles are still what the column is read down. */
+.stageList .state {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 /* The ends of a list that is longer than the card shows: an ellipsis where the

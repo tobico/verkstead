@@ -56,23 +56,23 @@
         "name": "mvp",
         "stages": [
           {
-            "done": true,
             "number": "01",
+            "state": "Done",
             "title": "Workbench"
           },
           {
-            "done": true,
             "number": "02",
+            "state": "Done",
             "title": "Grilling"
           },
           {
-            "done": false,
             "number": "03",
+            "state": "ToDo",
             "title": "Implementation"
           },
           {
-            "done": false,
             "number": "04",
+            "state": "ToDo",
             "title": "Wrap-up"
           }
         ],
@@ -142,23 +142,23 @@
             "name": "mvp",
             "stages": [
               {
-                "done": true,
                 "number": "01",
+                "state": "Done",
                 "title": "Workbench"
               },
               {
-                "done": true,
                 "number": "02",
+                "state": "Done",
                 "title": "Grilling"
               },
               {
-                "done": false,
                 "number": "03",
+                "state": "ToDo",
                 "title": "Implementation"
               },
               {
-                "done": false,
                 "number": "04",
+                "state": "ToDo",
                 "title": "Wrap-up"
               }
             ],

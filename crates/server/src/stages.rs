@@ -9,6 +9,13 @@
 //! finishes. So the Event is a reading of the Worktree as it stands and cannot
 //! disagree with the branch it is read off.
 //!
+//! **Where** each stage of it is — *done*, *in progress*, *halted* or *to do* —
+//! is [`state`], which is what the card's rows and the pane's headings say. The
+//! same rule as [`done`] below and one word further: what a scheduler asks is
+//! whether a stage is done, so that it knows what may start, and what a human
+//! reading the roadmap asks is where each of its stages has got to. So the states
+//! that are not done are told apart there and are all one *not done* here.
+//!
 //! What says a stage is done is **Verkstead's own record where it has a row for
 //! that stage, and the checkbox in `ROADMAP.md` where it has none** — see
 //! [`done`], which is the whole of that rule, and
@@ -72,7 +79,7 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_render::{
     AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, RoadmapPane, StageEntry,
-    StageListEvent, StageSource,
+    StageListEvent, StageSource, StageState,
 };
 
 use crate::checklist;
@@ -172,17 +179,25 @@ pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 /// one reading: the pinned block and the row on the record where the roadmap
 /// landed draw the same cards.
 ///
+/// `record` is what Verkstead's own record says about this Repo's stages, which is
+/// where each stage's state comes from — see [`state`]. Read by the handler above
+/// this, which holds the pool, and handed in as a value, so that this stays a
+/// reading: the card and the pane are one Conversation's two views of one
+/// roadmap, and a card that asked the database for itself could disagree with the
+/// pane beside it.
+///
 /// Blocking work, so it happens off the runtime's threads — this is a git read
 /// and a file read per Conversation the human opens.
 pub(crate) async fn showing(
     worktree: Option<PathBuf>,
     base: Option<String>,
+    record: store::StageStandings,
 ) -> Vec<StageListEvent> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return Vec::new();
     };
 
-    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base)).await {
+    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base, &record)).await {
         Ok(pinned) => pinned,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's roadmaps failed");
@@ -199,10 +214,10 @@ pub(crate) async fn showing(
 /// a branch that touched two roadmaps has two worth showing — and sorted rather
 /// than taken as the filesystem hands them over, so a page that drew them twice
 /// cannot draw them in two orders.
-fn roadmaps(worktree: &Path, base: &str) -> Vec<StageListEvent> {
+fn roadmaps(worktree: &Path, base: &str, record: &store::StageStandings) -> Vec<StageListEvent> {
     touched(worktree, base)
         .iter()
-        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name)))
+        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name), record))
         .collect()
 }
 
@@ -1078,6 +1093,50 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
     }
 }
 
+/// **Where** one stage of a roadmap is, which is what the card's row and the
+/// pane's heading say about it.
+///
+/// [`done`] widened from a box into a word, and the same rule under it: the record
+/// decides wherever it says anything about the stage, and the box decides wherever
+/// it does not. What the two readings are *for* is what parts them — the
+/// schedulers ask whether a stage is done, so that they know what may start, and
+/// a human reading the roadmap asks where each of its stages has got to. So the
+/// states that are not done are told apart here and are all one *not done* there.
+///
+/// - **Settled** is [`StageState::Done`], whatever the box on the branch being
+///   drawn says, for [`done`]'s reason: each branch carries a `ROADMAP.md` of its
+///   own and the boxes stop being one fact, while the record is one.
+/// - **In flight** is [`StageState::InProgress`], unless the Conversation has
+///   stopped — which is [`StageState::Halted`], along with **abandoned**. One word
+///   for the two, because what a reader does about either is go and look at that
+///   Conversation; and where it parts company with [`done`], which leaves an
+///   abandoned stage's box to speak. Nothing is *started* on the strength of this
+///   reading, so nothing here has to be careful the way that one does: what the
+///   box says about a stage somebody walked away from is worth less to a reader
+///   than the walking away.
+/// - **No row at all** leaves the box to speak, and comes out
+///   [`StageState::Done`] or [`StageState::ToDo`] — which is every roadmap worked
+///   by hand or by the old tools, drawn exactly as it always was.
+fn state(
+    entry: &checklist::Entry<'_>,
+    roadmap: &str,
+    record: &store::StageStandings,
+) -> StageState {
+    match record.of(roadmap, entry.label) {
+        Some(store::StageStanding::Settled) => StageState::Done,
+        Some(store::StageStanding::Abandoned) => StageState::Halted,
+        Some(store::StageStanding::InFlight) => {
+            if record.stopped(roadmap, entry.label) {
+                StageState::Halted
+            } else {
+                StageState::InProgress
+            }
+        }
+        None if entry.checked => StageState::Done,
+        None => StageState::ToDo,
+    }
+}
+
 /// Whether what a roadmap wrote after a stage's link says the stage is in
 /// flight on `branch`.
 ///
@@ -1107,7 +1166,7 @@ fn named(path: &str) -> Option<&str> {
 /// A `ROADMAP.md` with no stages in it comes back as `None` rather than as an
 /// empty list, exactly as an empty backlog does: what would be pinned is a
 /// heading over nothing.
-fn roadmap(directory: &Path) -> Option<StageListEvent> {
+fn roadmap(directory: &Path, record: &store::StageStandings) -> Option<StageListEvent> {
     let index = directory.join(INDEX);
 
     let list = match std::fs::read_to_string(&index) {
@@ -1128,14 +1187,19 @@ fn roadmap(directory: &Path) -> Option<StageListEvent> {
         }
     };
 
+    // Which roadmap this is, which is what the record answers about a stage by:
+    // a Repo may hold any number of roadmaps and a label means nothing on its own.
+    let name = name(directory);
+
     let stages: Vec<StageEntry> = list
         .lines()
         .filter_map(checklist::entry)
         .map(|entry| StageEntry {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
-            // The box, and nothing else — see the module docs.
-            done: entry.checked,
+            // The record where it says anything about the stage, and the box
+            // where it does not — see [`state`], which is that rule.
+            state: state(&entry, &name, record),
         })
         .collect();
 
@@ -1144,7 +1208,7 @@ fn roadmap(directory: &Path) -> Option<StageListEvent> {
     }
 
     Some(verkstead_render::stage_list(
-        name(directory),
+        name,
         checklist::heading(&list),
         stages,
     ))
@@ -1183,18 +1247,22 @@ fn name(directory: &Path) -> String {
 /// is what the roadmap turns on, and a link is a string out of a file in a
 /// repository.
 ///
+/// `record` is the same record the card was drawn against and reaches this the
+/// same way — see [`showing`], which is where why is written down.
+///
 /// Blocking work, so it happens off the runtime's threads — this is a git read,
 /// a directory read and a file read per stage.
 pub(crate) async fn documents(
     worktree: Option<PathBuf>,
     base: Option<String>,
     name: String,
+    record: store::StageStandings,
 ) -> Option<RoadmapPane> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return None;
     };
 
-    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name)).await {
+    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name, &record)).await {
         Ok(pane) => pane,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's stage briefs failed");
@@ -1206,7 +1274,12 @@ pub(crate) async fn documents(
 /// The briefs of `worktree`'s `name` roadmap, or `None` where there is no
 /// roadmap of that name to open — which is what [`roadmaps`] would leave out,
 /// said the same way.
-fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
+fn opened(
+    worktree: &Path,
+    base: &str,
+    name: &str,
+    record: &store::StageStandings,
+) -> Option<RoadmapPane> {
     if !touched(worktree, base).contains(name) {
         return None;
     }
@@ -1242,11 +1315,11 @@ fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
             StageSource {
                 number: entry.label.to_owned(),
                 title: entry.title.to_owned(),
-                // The box, and nothing else — see the module docs. A stage's
-                // brief stays where it is for ever, so a done stage has a
-                // document like any other and the section says so on its
-                // heading.
-                done: entry.checked,
+                // The same state the card's row says, off the same reading — see
+                // [`state`]. A stage's brief stays where it is for ever, so a
+                // stage that is over has a document like any other and the
+                // section says where it is on its heading.
+                state: state(&entry, name, record),
                 // The root comes over as the empty list, which is what the pane
                 // draws it as: *stands on nothing*.
                 stands_on: declared
@@ -2580,16 +2653,28 @@ Turns this askance clone into Verkstead.
                 default_branch: "main".to_owned(),
             }
         }
-        /// The stage lists this worktree comes back with, which every test here
-        /// wants.
+        /// The stage lists this worktree comes back with, with a record holding
+        /// nothing — which is a roadmap worked by hand or by the old tools, read
+        /// off its boxes exactly as it always was.
         fn lists(&self) -> Vec<StageListEvent> {
-            roadmaps(self.path(), &self.base)
+            self.lists_with(&store::StageStandings::default())
         }
 
-        /// And one of them opened, which is the same reading a level deeper:
-        /// the briefs the stages name rather than the boxes beside them.
+        /// And with a record behind them, which is where a stage's state comes
+        /// from wherever it has a row.
+        fn lists_with(&self, record: &store::StageStandings) -> Vec<StageListEvent> {
+            roadmaps(self.path(), &self.base, record)
+        }
+
+        /// One of them opened, which is the same reading a level deeper: the
+        /// briefs the stages name rather than the lines beside them.
         fn opened(&self, name: &str) -> Option<RoadmapPane> {
-            opened(self.path(), &self.base, name)
+            self.opened_with(name, &store::StageStandings::default())
+        }
+
+        /// And that pane against a record, as the card above is.
+        fn opened_with(&self, name: &str, record: &store::StageStandings) -> Option<RoadmapPane> {
+            opened(self.path(), &self.base, name, record)
         }
     }
 
@@ -2667,10 +2752,143 @@ Turns this askance clone into Verkstead.
             repo.lists()[0]
                 .stages
                 .iter()
-                .map(|stage| stage.done)
+                .map(|stage| stage.state)
                 .collect::<Vec<_>>(),
-            [true, true, false]
+            [StageState::Done, StageState::Done, StageState::ToDo],
+            "the record holds nothing about this roadmap, so its boxes are the \
+             whole of what says where each stage is",
         );
+    }
+
+    /// A roadmap of four, one line per state there is: the record decides wherever
+    /// it says anything about a stage, and the box decides wherever it says
+    /// nothing.
+    ///
+    /// The boxes here are deliberately the wrong way round from the record —
+    /// stage 01 settled and is unticked, stage 04 is ticked and nothing has ever
+    /// been started on it — because that is what a branch cut before its
+    /// neighbours' finish commits actually holds, and reading it off the boxes is
+    /// what the record is here to stop.
+    const FOUR: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+- [x] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+    /// Where the states come from: the record where it has a row, the box where it
+    /// has none.
+    #[test]
+    fn the_record_says_where_each_stage_is_and_the_boxes_say_where_it_has_none() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        assert_eq!(
+            states(&repo.lists_with(&record([
+                ("mvp", "01", store::StageStanding::Settled),
+                ("mvp", "02", store::StageStanding::InFlight),
+                ("mvp", "03", store::StageStanding::Abandoned),
+            ]))),
+            [
+                StageState::Done,
+                StageState::InProgress,
+                StageState::Halted,
+                StageState::Done,
+            ],
+            "01 settled however its box reads here, 02 is somebody's now, 03 was \
+             walked away from, and 04 has only its ticked box to speak for it",
+        );
+    }
+
+    /// And a stage in flight whose Conversation has **stopped** is halted rather
+    /// than in progress: the same word an abandoned stage gets, because what a
+    /// reader does about either is go and look at that Conversation.
+    #[test]
+    fn a_stage_whose_conversation_has_stopped_reads_halted_rather_than_in_progress() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let in_flight = [("mvp", "01", store::StageStanding::InFlight)];
+
+        assert_eq!(
+            states(&repo.lists_with(&record(in_flight)))[0],
+            StageState::InProgress,
+            "nothing has stopped it, so somebody is on it",
+        );
+        assert_eq!(
+            states(&repo.lists_with(&halted(in_flight)))[0],
+            StageState::Halted,
+            "and a run that has stopped is not in progress, whatever else it is",
+        );
+    }
+
+    /// The pane says the same thing about a stage as the card does, off the same
+    /// record: they are one Conversation's two views of one roadmap, and a pane
+    /// that disagreed with the card that opened it would be two readings.
+    #[test]
+    fn the_pane_says_where_each_stage_is_exactly_as_the_card_does() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let record = record([
+            ("mvp", "01", store::StageStanding::Settled),
+            ("mvp", "02", store::StageStanding::InFlight),
+            ("mvp", "03", store::StageStanding::Abandoned),
+        ]);
+
+        let pane = repo
+            .opened_with("mvp", &record)
+            .expect("there is a roadmap to open");
+
+        assert_eq!(
+            pane.stages
+                .iter()
+                .map(|stage| stage.state)
+                .collect::<Vec<_>>(),
+            states(&repo.lists_with(&record)),
+        );
+    }
+
+    /// And the card says the same thing about a stage on the roadmap's own
+    /// Timeline as on that stage's, which is what reading the record rather than
+    /// the boxes buys.
+    ///
+    /// Two Worktrees of one Repo, holding `ROADMAP.md` as each of them last saw
+    /// it: the roadmap's own branch was cut before any stage finished and has
+    /// nothing ticked, and stage 02's branch ticked itself off at its own finish.
+    /// The boxes disagree; the record does not, so the cards do not either.
+    #[test]
+    fn the_card_says_the_same_thing_on_the_roadmaps_timeline_as_on_a_stages() {
+        let planner = Repo::with(&[]);
+        planner.write("mvp", FOUR);
+
+        let stage = Repo::with(&[]);
+        stage.write("mvp", &FOUR.replace("- [ ] 02", "- [x] 02"));
+
+        let record = record([
+            ("mvp", "01", store::StageStanding::Settled),
+            ("mvp", "02", store::StageStanding::InFlight),
+        ]);
+
+        assert_eq!(
+            states(&planner.lists_with(&record)),
+            states(&stage.lists_with(&record)),
+            "the tick stage 02 wrote on its own branch says its tasks are done \
+             rather than that it settled, and the record is what knows the \
+             difference",
+        );
+    }
+
+    /// The states of one reading's one roadmap, in the roadmap's own order.
+    #[track_caller]
+    fn states(lists: &[StageListEvent]) -> Vec<StageState> {
+        let [list] = lists else {
+            panic!("this reading should have come back with one roadmap: {lists:?}");
+        };
+
+        list.stages.iter().map(|stage| stage.state).collect()
     }
 
     /// A roadmap is this Conversation's whether the session has committed it
@@ -2719,7 +2937,7 @@ Turns this askance clone into Verkstead.
         repo.write("mvp", &MVP.replace("- [ ] 03", "- [x] 03"));
 
         assert_eq!(repo.lists().len(), 1);
-        assert!(repo.lists()[0].stages[2].done);
+        assert_eq!(repo.lists()[0].stages[2].state, StageState::Done);
     }
 
     #[test]
@@ -2793,12 +3011,12 @@ Turns this askance clone into Verkstead.
         assert_eq!(
             pane.stages
                 .iter()
-                .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+                .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
                 .collect::<Vec<_>>(),
             [
-                ("01", "Workbench", true),
-                ("02", "Grilling", true),
-                ("03", "Implementation", false),
+                ("01", "Workbench", StageState::Done),
+                ("02", "Grilling", StageState::Done),
+                ("03", "Implementation", StageState::ToDo),
             ]
         );
     }
@@ -2819,7 +3037,7 @@ Turns this askance clone into Verkstead.
         let pane = repo.opened("mvp").unwrap();
         let html = pane.stages[0].html.as_deref().expect("that file is there");
 
-        assert!(pane.stages[0].done);
+        assert_eq!(pane.stages[0].state, StageState::Done);
         assert!(
             html.contains("<h1>1. Workbench</h1>"),
             "rendered as markdown, like every other document on this wire: {html}",
@@ -2982,7 +3200,7 @@ Turns this askance clone into Verkstead.
             .join(ROADMAPS);
 
         for name in ["mvp", "public-release"] {
-            let list = roadmap(&roadmaps.join(name))
+            let list = roadmap(&roadmaps.join(name), &store::StageStandings::default())
                 .unwrap_or_else(|| panic!("{name} should read back as a stage list"));
 
             assert_eq!(list.name, name);
@@ -3145,10 +3363,29 @@ Turns this askance clone into Verkstead.
 ";
 
     /// What Verkstead's record says about the stages of this Repo's roadmaps.
+    ///
+    /// Nothing stopped, which is what the readings this feeds care about: whether
+    /// a stage halted is the card's question rather than theirs — see
+    /// [`halted`], which is where a record with a stop in it is built.
     fn record<'a>(
         rows: impl IntoIterator<Item = (&'a str, &'a str, store::StageStanding)>,
     ) -> store::StageStandings {
-        store::StageStandings::from_rows(rows)
+        store::StageStandings::from_rows(
+            rows.into_iter()
+                .map(|(roadmap, label, standing)| (roadmap, label, standing, false)),
+        )
+    }
+
+    /// And the same with the stage's Conversation **stopped**, which is the other
+    /// half of what the card is told: a stage in flight whose run has stopped is
+    /// halted rather than in progress.
+    fn halted<'a>(
+        rows: impl IntoIterator<Item = (&'a str, &'a str, store::StageStanding)>,
+    ) -> store::StageStandings {
+        store::StageStandings::from_rows(
+            rows.into_iter()
+                .map(|(roadmap, label, standing)| (roadmap, label, standing, true)),
+        )
     }
 
     /// A stage that settled is a stage done, whatever the box on the branch being
@@ -4495,7 +4732,7 @@ Turns this askance clone into Verkstead.
             "docs: 03 stands on 01 after all",
         );
 
-        let record = store::StageStandings::from_rows([
+        let record = record([
             ("rate-limiting", "01", store::StageStanding::Settled),
             ("rate-limiting", "02", store::StageStanding::InFlight),
         ]);
@@ -4558,11 +4795,7 @@ Turns this askance clone into Verkstead.
             "docs: a window to count in",
         );
 
-        let record = store::StageStandings::from_rows([(
-            "rate-limiting",
-            "01",
-            store::StageStanding::Settled,
-        )]);
+        let record = record([("rate-limiting", "01", store::StageStanding::Settled)]);
 
         let top = "roadmaps/rate-limiting/01-the-counter";
 

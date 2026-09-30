@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Driven, Edited, Event, Grilling, Joined,
-    Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage, RowState,
-    StageOf, StageStanding, Staged, Steer, Switched, Unarchiving, add_companion,
-    adopted_pull_request, adopting, any_archived, archive_conversation, archived,
+    Account, AdoptedPullRequest, Archiving, Closing, Decision, Driven, Edited, Event, Grilling,
+    Joined, Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage,
+    RowState, StageOf, StageStanding, Staged, Steer, Switched, Unarchiving, add_companion,
+    adopted_pull_request, adopting, any_archived, archive_conversation, archived, clear_stop,
     close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
     follow_branch, hold_pull_request, join_queue, load_conversation, open_database, pick_direction,
     queue_to_join, record_another_pull_request, record_pull_request, record_roadmap, register_repo,
@@ -17,7 +17,7 @@ use verkstead_store::{
     set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
     stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
     start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
-    steer_conversation, switch_repo, target, timeline, unarchive_conversation,
+    steer_conversation, stop, switch_repo, target, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1999,6 +1999,60 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
     );
 }
 
+/// And whether each of them has **stopped**, which is the reading beside the
+/// standing rather than a fourth answer inside it: a stage that stopped is in
+/// flight — it holds its place, its branch and its worktree — and what the stop
+/// changes is what a human reading the roadmap is told about it.
+#[tokio::test]
+async fn the_record_says_which_stages_have_stopped_beside_where_each_of_them_got_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // One going and one stopped, both in flight.
+    stage(&pool, repo_id, "mvp", "01").await;
+    let halted = stage(&pool, repo_id, "mvp", "02").await;
+
+    stop(
+        &pool,
+        halted,
+        Decision::Verkstead,
+        "The session fell over.",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(
+        standings.of("mvp", "02"),
+        Some(StageStanding::InFlight),
+        "a stopped stage is still in flight: nothing about the stop settles it or \
+         gives up its place",
+    );
+    assert!(standings.stopped("mvp", "02"));
+    assert!(
+        !standings.stopped("mvp", "01"),
+        "and the one nothing has stopped is going on",
+    );
+    assert!(
+        !standings.stopped("mvp", "03"),
+        "as is a stage the record holds nothing about, there being nothing there \
+         that could have stopped",
+    );
+
+    // And Resume takes it back, the stop being the standing state of a run rather
+    // than something that happened to it once.
+    clear_stop(&pool, halted).await.unwrap();
+
+    assert!(
+        !stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .stopped("mvp", "02"),
+    );
+}
+
 /// Two Conversations answer to one label where a stage was attempted twice, and
 /// the roadmap has one line for it either way: settled counts over in flight, and
 /// in flight over abandoned.
@@ -2033,6 +2087,39 @@ async fn the_furthest_of_two_attempts_at_one_stage_is_what_the_record_says() {
             .unwrap()
             .of("mvp", "01"),
         Some(StageStanding::Settled),
+    );
+}
+
+/// And the stop travels with the standing that is believed: the attempt whose
+/// standing wins is the one whose stop is reported, because a stop belonging to
+/// an attempt nobody is reading is nothing to say about the stage.
+#[tokio::test]
+async fn the_stop_reported_is_the_one_on_the_attempt_the_record_believes() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // The first attempt stopped and was closed part-way through; the second is
+    // somebody's now, and going.
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    stop(
+        &pool,
+        first,
+        Decision::Verkstead,
+        "The session fell over.",
+        None,
+    )
+    .await
+    .unwrap();
+    close_conversation(&pool, first).await.unwrap();
+
+    stage(&pool, repo_id, "mvp", "01").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "01"), Some(StageStanding::InFlight));
+    assert!(
+        !standings.stopped("mvp", "01"),
+        "the live attempt is the one being read, and nothing has stopped it",
     );
 }
 

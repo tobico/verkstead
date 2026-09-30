@@ -73,9 +73,9 @@ use verkstead_render::{
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
     ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached, SetReading,
-    SetView, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TargetRecorded,
-    TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView, TerminalsView,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened, Submitted,
+    TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView,
+    TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -7208,13 +7208,14 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
             .collect::<Vec<_>>(),
         [
-            ("01", "Count the requests", true),
-            ("02", "Refuse the rest", false),
+            ("01", "Count the requests", StageState::Done),
+            ("02", "Refuse the rest", StageState::ToDo),
         ],
-        "the roadmap's own order, numbers and titles, and the boxes as it wrote them",
+        "the roadmap's own order, numbers and titles, and its boxes read as states: \
+         nothing has started a stage of it, so the boxes are all there is to go on",
     );
 
     // And the same roadmap on the record, at the row the landing stamped —
@@ -18517,13 +18518,15 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
             .collect::<Vec<_>>(),
         [
-            ("01", "Count the requests", false),
-            ("02", "Refuse the rest", false),
+            ("01", "Count the requests", StageState::InProgress),
+            ("02", "Refuse the rest", StageState::ToDo),
         ],
-        "stage 01 is under way rather than done: what ticks it is the stage after it",
+        "stage 01 is under way rather than done, and the card says so in a word the \
+         boxes could never have said: this is that stage's own Conversation, and \
+         the record has it in flight",
     );
 
     assert!(

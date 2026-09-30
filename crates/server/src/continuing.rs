@@ -2260,10 +2260,13 @@ mod tests {
 
     /// And what the record says each of them got to, in the shape both
     /// readings of a roadmap take one.
+    ///
+    /// None of them stopped: whether a stage halted is nothing this reading asks
+    /// — see `store::StageStandings::stopped`, which the card is drawn from.
     fn standings(rows: &[(&'static str, store::StageStanding)]) -> store::StageStandings {
         store::StageStandings::from_rows(
             rows.iter()
-                .map(|(label, standing)| ("rate-limiting", *label, *standing)),
+                .map(|(label, standing)| ("rate-limiting", *label, *standing, false)),
         )
     }
 

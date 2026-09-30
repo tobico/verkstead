@@ -1495,7 +1495,7 @@ pub struct TaskDocument {
     /// still has one: its file stays in `.tasks/` until the feature is over, so
     /// the done state is something the section says about itself rather than the
     /// reason it is empty. The same way round as a stage's — see
-    /// [`StageDocument::done`].
+    /// [`StageDocument::state`].
     pub done: bool,
 
     /// The document rendered and sanitized, or `null` where there is nothing to
@@ -1565,12 +1565,12 @@ pub struct StageDocument {
 
     pub title: String,
 
-    /// Whether the stage is finished, which here is the checkbox — see
-    /// [`StageEntry::done`]. Carried on the document because a finished stage
-    /// still has one: a brief stays where it is for ever, so the done state is
+    /// Where the stage is — see [`StageEntry::state`], which is the same reading
+    /// said the same way. Carried on the document because a stage that is over
+    /// still has one: a brief stays where it is for ever, so the state is
     /// something the section says about itself rather than the reason it is
     /// empty.
-    pub done: bool,
+    pub state: StageState,
 
     /// What the stage stands on, by the labels its line names — `["01", "03"]`
     /// of `after 01, 03` — or `null` where nothing was declared, which is every
@@ -1613,7 +1613,10 @@ pub struct StageDocument {
 pub struct StageSource {
     pub number: String,
     pub title: String,
-    pub done: bool,
+
+    /// Where the stage is, worked out by the caller: this crate has no record to
+    /// read it out of, any more than it has a filesystem.
+    pub state: StageState,
 
     /// What its line declares it stands on, and the platform it names — read
     /// the same way round as [`StageDocument::stands_on`] and
@@ -1654,7 +1657,7 @@ pub struct StageListEvent {
 }
 
 /// One stage of a roadmap: the number it answers to, what it is called, and
-/// whether it is done.
+/// where it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageEntry {
@@ -1663,11 +1666,51 @@ pub struct StageEntry {
 
     pub title: String,
 
-    /// Whether the stage is finished, which here *is* the checkbox: a stage's
-    /// brief stays where it is for ever, being the record of what the stage was
-    /// for, so there is no file going away to read it off. The other way round
-    /// from a task — see [`TaskEntry::done`].
-    pub done: bool,
+    /// Where the stage is: the word the card's row says in place of the *done*
+    /// and *to do* it used to work out from the box.
+    ///
+    /// The server's answer rather than the viewer's — see [`StageState`] and the
+    /// server's `stages` module, which is where the record and the boxes are put
+    /// together. A task's box is still a box, there being no record beside a
+    /// backlog to say anything else about it: see [`TaskEntry::done`].
+    pub state: StageState,
+}
+
+/// Where one stage of a roadmap is, as the card's row and the pane's heading say
+/// it.
+///
+/// The server's own reading, which is the whole point of it being a word on the
+/// wire rather than a box: with stages worked side by side, each branch carries a
+/// `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
+/// record of the stage Conversations is one — so the viewer is told where a stage
+/// is and never works it out. See the server's `stages` module for the rule, and
+/// [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
+///
+/// A roadmap the record holds no rows for — one worked by hand or by the old
+/// tools — comes out [`Done`](StageState::Done) or [`ToDo`](StageState::ToDo)
+/// throughout, off its boxes alone, which is exactly how it has always read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum StageState {
+    /// Its work is finished: the record says the stage settled, or it holds no
+    /// row for the stage and the box is ticked.
+    Done,
+
+    /// The record has it in flight and nothing else is true of it: somebody — or
+    /// some unattended run — is on it now.
+    InProgress,
+
+    /// Its Conversation has stopped, or the record says it was abandoned: closed
+    /// without ever having wrapped up.
+    ///
+    /// One word for both, because what a reader does about either is the same —
+    /// go and look at that Conversation — and it is *not* in progress, which is
+    /// the distinction worth drawing. A halted stage holds up only the stages
+    /// that stand on it.
+    Halted,
+
+    /// Everything else: nothing has started it and nothing says why.
+    ToDo,
 }
 
 /// The pull request as the Timeline shows it: what it is called and what number
@@ -2968,7 +3011,7 @@ pub fn roadmap_pane(name: String, title: String, read: Vec<StageSource>) -> Road
         .map(|stage| StageDocument {
             number: stage.number,
             title: stage.title,
-            done: stage.done,
+            state: stage.state,
             stands_on: stage.stands_on,
             platform: stage.platform,
             html: stage

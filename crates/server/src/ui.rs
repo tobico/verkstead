@@ -1357,9 +1357,26 @@ pub(crate) async fn conversation_view(
     // roadmaps is this one's is asked of git against the base commit: a
     // repository keeps its finished roadmaps, and a Conversation is about the
     // one its branch has written to. See [`crate::stages`].
+    //
+    // Where each of its stages *is* is the one thing that does not come off the
+    // files: the boxes are one branch's and Verkstead's record of the stage
+    // Conversations is the Repo's, so the record is read here — where the pool is
+    // — and handed to the reading. A record that would not read leaves the card
+    // to its boxes, which is a roadmap drawn the way one nothing knows about is:
+    // a page with a card an hour behind is better than a Conversation that will
+    // not open.
+    let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
     let roadmaps = crate::stages::showing(
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
+        record,
     )
     .await;
 
@@ -3553,8 +3570,12 @@ async fn roadmap(
         return no_such_roadmap();
     };
 
-    let (worktree, base) = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => (conversation.worktree, conversation.base_commit),
+    let (worktree, base, repo_id) = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => (
+            conversation.worktree,
+            conversation.base_commit,
+            conversation.repo.id,
+        ),
         Ok(None) => return no_such_roadmap(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
@@ -3562,7 +3583,19 @@ async fn roadmap(
         }
     };
 
-    match crate::stages::documents(worktree, base, name).await {
+    // The same record the card was drawn against, read here for the reason it is
+    // read there: where a stage is comes off Verkstead's own rows rather than off
+    // the boxes in this branch's `ROADMAP.md`. One that would not read leaves the
+    // pane to its boxes, as the card's does.
+    let record = match store::stage_standings(&state.pool, repo_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
+    match crate::stages::documents(worktree, base, name, record).await {
         Some(pane) => Json(pane).into_response(),
         None => no_such_roadmap(),
     }

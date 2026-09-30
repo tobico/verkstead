@@ -5778,6 +5778,11 @@ pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<StageOf>
 /// saying they are finished with it. Nothing here is about a pull request having
 /// merged — a stage whose branch is still open is a stage the one after it stacks
 /// on, which is the whole of how a roadmap runs.
+///
+/// Nor is it about the run having **stopped**, which is a fact about the same row
+/// and not a fourth answer here: a stopped stage is in flight and holds everything
+/// an in-flight stage holds. See [`StageStandings::stopped`], which is where the
+/// reading beside this one is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageStanding {
     /// Its work is finished: it reached Done at some point, or it was closed
@@ -5828,20 +5833,22 @@ impl StageStanding {
 }
 
 /// What Verkstead's record says about the stages of one Repo's roadmaps: which
-/// of them settled, which are in flight, and which were abandoned.
+/// of them settled, which are in flight, and which were abandoned — and, of the
+/// ones in flight, which have **stopped**.
 ///
-/// One Repo's worth, read in one go, because that is the shape both readings
-/// want: the carry-on asks about the one roadmap the record named, and the
-/// adoption walks every roadmap of every registered Repo and would otherwise ask
-/// the database once per roadmap inside each of them. And one Repo's worth rather
+/// One Repo's worth, read in one go, because that is the shape every reading
+/// wants: the carry-on asks about the one roadmap the record named, the adoption
+/// walks every roadmap of every registered Repo and would otherwise ask the
+/// database once per roadmap inside each of them, and the card and the pane the
+/// human opens are two views of one Repo's roadmap. And one Repo's worth rather
 /// than the whole table, because a Conversation belongs to one Repo and two Repos
 /// may hold roadmaps of the same name — a stage of `mvp` over there answers for
 /// nothing here.
 ///
-/// A value rather than a query, so that the readings stay readings: neither of
-/// them asks the database, and what they are handed is this.
+/// A value rather than a query, so that the readings stay readings: none of them
+/// asks the database, and what they are handed is this.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StageStandings(HashMap<String, HashMap<String, StageStanding>>);
+pub struct StageStandings(HashMap<String, HashMap<String, Held>>);
 
 impl StageStandings {
     /// What the record says about stage `label` of `roadmap`, or `None` where it
@@ -5851,33 +5858,89 @@ impl StageStandings {
     /// worked by hand or by the old tools has no row, and its box is all there is
     /// to go on.
     pub fn of(&self, roadmap: &str, label: &str) -> Option<StageStanding> {
-        self.0.get(roadmap)?.get(label).copied()
+        self.held(roadmap, label).map(|held| held.standing)
+    }
+
+    /// And whether the Conversation that standing came from has **stopped**:
+    /// nothing is being driven until somebody presses Resume.
+    ///
+    /// Beside the standing rather than a fourth word inside it, because the
+    /// schedulers want nothing to do with it: a stage that stopped is still in
+    /// flight — it holds its place, its branch and its worktree — and what the
+    /// stop changes is only what a human reading the roadmap is told. See the
+    /// server's `stages` module, which is where the two are put together into the
+    /// word the card says.
+    ///
+    /// `false` where the record holds no row for the stage: a stage it knows
+    /// nothing about has nothing that could have stopped.
+    pub fn stopped(&self, roadmap: &str, label: &str) -> bool {
+        self.held(roadmap, label).is_some_and(|held| held.stopped)
     }
 
     /// One built from rows rather than from a database, for the readings' own
     /// tests: what they take is a value, so what a test hands them is one too.
     pub fn from_rows<'a>(
-        rows: impl IntoIterator<Item = (&'a str, &'a str, StageStanding)>,
+        rows: impl IntoIterator<Item = (&'a str, &'a str, StageStanding, bool)>,
     ) -> Self {
         let mut standings = Self::default();
 
-        for (roadmap, label, standing) in rows {
-            standings.record(roadmap, label, standing);
+        for (roadmap, label, standing, stopped) in rows {
+            standings.record(roadmap, label, standing, stopped);
         }
 
         standings
     }
 
+    /// What is kept about stage `label` of `roadmap`, which is what each of the
+    /// two readings above takes its half of.
+    fn held(&self, roadmap: &str, label: &str) -> Option<Held> {
+        self.0.get(roadmap)?.get(label).copied()
+    }
+
     /// Put one stage Conversation's standing in, behind whatever a second
-    /// Conversation answering to the same label already said — see
-    /// [`StageStanding::over`].
-    fn record(&mut self, roadmap: &str, label: &str, standing: StageStanding) {
+    /// Conversation answering to the same label already said — see [`Held::over`].
+    fn record(&mut self, roadmap: &str, label: &str, standing: StageStanding, stopped: bool) {
+        let held = Held { standing, stopped };
+
         self.0
             .entry(roadmap.to_owned())
             .or_default()
             .entry(label.to_owned())
-            .and_modify(|held| *held = held.over(standing))
-            .or_insert(standing);
+            .and_modify(|kept| *kept = kept.over(held))
+            .or_insert(held);
+    }
+}
+
+/// What is kept about one stage label: how far its Conversation got, and whether
+/// that Conversation has stopped.
+///
+/// One value rather than two maps, because the two halves are one row's and have
+/// to stay one row's — where a stage was attempted twice, the stop that counts is
+/// the one belonging to the attempt whose standing is believed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    standing: StageStanding,
+    stopped: bool,
+}
+
+impl Held {
+    /// Which of two readings of one label is the one to believe: the standing
+    /// [`StageStanding::over`] picks, with the stop that came in beside it.
+    ///
+    /// Where both attempts stand the same way, a stop on either is a stop: two
+    /// Conversations answering to one label with one of them halted is a stage
+    /// somebody has to go and look at, whichever of the two they find first.
+    fn over(self, other: Self) -> Self {
+        let standing = self.standing.over(other.standing);
+
+        Self {
+            standing,
+            stopped: match (standing == self.standing, standing == other.standing) {
+                (true, true) => self.stopped || other.stopped,
+                (true, false) => self.stopped,
+                _ => other.stopped,
+            },
+        }
     }
 }
 
@@ -5901,8 +5964,15 @@ impl StageStandings {
 /// Conversation that ever reached **Done** has finished its work, whatever it was
 /// steered into afterwards, and one that is **Closed** settled where it ever
 /// reached Wrapping or Done and was abandoned where it did not.
+///
+/// And **whether it stopped** comes off the Conversation's own stop columns, read
+/// in the same breath because it is another column on the same row — see
+/// [`StageStandings::stopped`], which is what it is for. Read for every row rather
+/// than for the ones in flight alone: which standing a stop belongs to is settled
+/// where two attempts at one label are weighed against each other, and a query
+/// that had already thrown half of them away could not weigh them.
 pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
-    let rows: Vec<(String, String, String, bool, bool)> = sqlx::query_as(
+    let rows: Vec<(String, String, String, bool, bool, bool)> = sqlx::query_as(
         "SELECT r.roadmap, r.stage, c.state,
                 EXISTS (
                     SELECT 1 FROM timeline_events e
@@ -5911,7 +5981,8 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
                 EXISTS (
                     SELECT 1 FROM timeline_events e
                     WHERE e.conversation_id = c.id AND e.kind = ? AND e.body IN (?, ?)
-                )
+                ),
+                c.stopped_at IS NOT NULL
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
          WHERE c.repo_id = ? AND r.stage IS NOT NULL
@@ -5929,7 +6000,7 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
 
     let mut standings = StageStandings::default();
 
-    for (roadmap, label, state, finished, wrapped) in rows {
+    for (roadmap, label, state, finished, wrapped, stopped) in rows {
         let standing = match (Lifecycle::read(&state)?, finished, wrapped) {
             // In Done, however it got there — including a database in which the
             // move was never written.
@@ -5943,7 +6014,7 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
             _ => StageStanding::InFlight,
         };
 
-        standings.record(&roadmap, &label, standing);
+        standings.record(&roadmap, &label, standing, stopped);
     }
 
     Ok(standings)

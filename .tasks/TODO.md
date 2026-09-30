@@ -18,7 +18,7 @@ Roadmap stage: [06: Every stage in flight](docs/roadmaps/parallel-stages/06-ever
 
 ## Tasks
 
-- [ ] 01: A stage has a state — [details](01-a-stage-has-a-state.md)
+- [x] 01: A stage has a state — [details](01-a-stage-has-a-state.md)
 - [ ] 02: Waiting on a named stage — [details](02-waiting-on-a-named-stage.md)
 - [ ] 03: Waiting to join — [details](03-waiting-to-join.md)
 - [ ] 04: Waiting for a place — [details](04-waiting-for-a-place.md)

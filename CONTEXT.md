@@ -2337,6 +2337,21 @@ done, and a ticked box on its own says *its tasks are done* rather than *it
 settled*, the tick landing before that pull request has even opened. See
 ADR-0021.
 
+**And where it is, is a word the viewer is told.** The pinned stage card's row
+and the roadmap's details pane both say where each Stage of the roadmap has got
+to — *done*, *in progress*, *halted* or *to do* — in place of the *done* and *to
+do* the card used to work out from the box. The words come off Verkstead's own
+reading, the same one above: *done* is a Stage that settled, or one the record
+holds nothing about whose box is ticked; *in progress* is one the record has in
+flight; *halted* is one whose Conversation has stopped or that was closed before
+it ever wrapped up, one word for the two because what a reader does about either
+is go and look at that Conversation; and *to do* is everything else. The viewer
+works none of them out — a card that decided for itself whether a Stage was
+under way would be a second opinion about something the record already knows —
+and a roadmap the record holds nothing about reads *done* or *to do* throughout,
+off its boxes, exactly as it always has. The pane says it twice, on the Stage's
+section heading and on the line the table of contents reaches it by.
+
 **And it joins its roadmap's chain at its finish, not before.** A roadmap is one
 chain of branches in the order its Stages finish, and a Stage joins it when its
 finish pushes its branch and opens its pull request — so the pull request

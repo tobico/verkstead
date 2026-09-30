@@ -52,7 +52,7 @@ pub use conversations::{
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
     SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
     SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
     TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,

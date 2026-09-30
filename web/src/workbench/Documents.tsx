@@ -41,9 +41,9 @@ export type DocumentSection = {
   /// brief nobody wrote is not.
   missing: string;
 
-  /// Whatever else the heading carries, at the far end of it — a stage's done
-  /// state. Nothing on a task: its document being gone is what says it is done,
-  /// and the box below already says so.
+  /// Whatever else the heading carries, at the far end of it — where a stage is.
+  /// Nothing on a task: its document being gone is what says it is done, and the
+  /// box below already says so.
   mark?: JSX.Element;
 
   /// What the entry's line declares, under the heading and above the box — a

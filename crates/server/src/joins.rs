@@ -804,12 +804,15 @@ mod tests {
     }
 
     /// What the record says became of each stage of the roadmap.
+    ///
+    /// None of them stopped, for the reason the carry-on's own helper says none
+    /// did: a stop is nothing the hold in front of a finish asks about.
     fn standings<'a>(
         rows: impl IntoIterator<Item = (&'a str, store::StageStanding)>,
     ) -> store::StageStandings {
         store::StageStandings::from_rows(
             rows.into_iter()
-                .map(|(label, standing)| (ROADMAP, label, standing)),
+                .map(|(label, standing)| (ROADMAP, label, standing, false)),
         )
     }
 

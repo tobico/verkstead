@@ -8,11 +8,18 @@
 //! `ROADMAP.md` that says what the stage is for. This is those briefs, every one
 //! of them, in the roadmap's own order.
 //!
-//! One thing is the roadmap's own: it is named by the roadmap rather than by the
-//! conversation, a worktree being allowed any number of roadmaps where it has
-//! one `.tasks/`. Everything else it does, the backlog pane does too — every
-//! stage has a document, done or not, and the done state is something the
-//! section's heading says rather than the reason it is empty.
+//! Two things are the roadmap's own. It is named by the roadmap rather than by
+//! the conversation, a worktree being allowed any number of roadmaps where it has
+//! one `.tasks/`; and where each of its stages *is* comes over as a state the
+//! server read off its own record — see `stages.ts`, which keeps the words — so
+//! this pane says one of four things about a stage where the backlog's says one
+//! of two. It says it twice, on the section's heading and on the line the table
+//! of contents reaches that section by, which is what makes the way around the
+//! roadmap an answer to where the effort has got to.
+//!
+//! Everything else it does, the backlog pane does too — every stage has a
+//! document, over or not, and its state is something the section's heading says
+//! rather than the reason it is empty.
 
 import { Match, Show, Switch, createMemo, type JSX } from "solid-js";
 
@@ -27,6 +34,7 @@ import { spied } from "../set/outline";
 import { Documents, type DocumentSection } from "./Documents";
 import styles from "./Documents.module.css";
 import { PaneHead } from "./PaneHead";
+import { STAGE_STATE } from "./stages";
 
 /// What one stage's section is reached by. Its own prefix, as a task's is, and
 /// a different one: the two panes are never open at once, but the anchors say
@@ -102,22 +110,28 @@ export function Roadmap(props: {
       // which is the human's to fix — the same thing `/next-stage` refuses to
       // guess past.
       missing: "The roadmap names a brief that is not there to read.",
-      // The done state on the heading rather than in the box, because a done
-      // stage still has its brief — see `Backlog.tsx`, which says it the same
-      // way for the same reason.
-      mark: stage.done ? "done" : "to do",
+      // Where the stage is, on the heading rather than in a box, because a
+      // stage that is over still has its brief — see `Backlog.tsx`, which says
+      // its own two words the same way for the same reason. The server's
+      // reading, in the words `stages.ts` keeps: what the card's row says about
+      // this stage, said again here.
+      mark: STAGE_STATE[stage.state],
       // What the roadmap's own line said about it, which is the one thing here
       // that comes off the list rather than out of the brief.
       declares: declares(stage),
     })),
   );
 
-  // One line per stage, done or not: the whole roadmap is what the pane is.
+  // One line per stage, wherever it has got to: the whole roadmap is what the
+  // pane is. Each carries the state as well, so the way around the roadmap says
+  // where every stage of it is without the reader scrolling the briefs — which is
+  // the nav answering the question the pane was opened with.
   const sections = createMemo((): Section[] =>
-    documents().map((stage) => ({
-      anchor: stage.anchor,
+    (opened.data?.stages ?? []).map((stage) => ({
+      anchor: anchor(stage),
       name: `${stage.number} ${stage.title}`,
       entries: [],
+      mark: STAGE_STATE[stage.state],
     })),
   );
 
