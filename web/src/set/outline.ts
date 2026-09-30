@@ -111,6 +111,12 @@ export type Section = {
   anchor: string;
   name: string;
   entries: Entry[];
+
+  /// Whatever else the list says about the section, under its name — a stage's
+  /// state on a roadmap's nav. Nothing on a Set's own sections, and nothing on a
+  /// backlog's: what is worth saying there the section's own heading says, and a
+  /// nav is a way around the page rather than the page.
+  mark?: string;
 };
 
 /// The files of a Diff as lines of the table of contents: one per fold, named

@@ -25,15 +25,16 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Ten of them are a column arriving rather than rows moving between tables —
+//! Eleven of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
 //! is a merge, which Answer an attached file was put on, whether a Profile
 //! shares its account's memory, the question a half-written steer would open
-//! an investigation on, and the branch a recorded pull request merges into —
-//! which is the same kind of one-time rewrite: the rows already there are given
-//! the value that says what was true of them before the column existed.
+//! an investigation on, the branch a recorded pull request merges into, and
+//! which stage of its roadmap a stage Conversation is — which is the same kind
+//! of one-time rewrite: the rows already there are given the value that says
+//! what was true of them before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -72,7 +73,49 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     standings_that_named_no_pull_request(pool).await?;
     settlements_that_were_one_per_repository(pool).await?;
     fix_attempts_that_were_one_per_repository(pool).await?;
-    pull_requests_that_named_no_base_branch(pool).await
+    pull_requests_that_named_no_base_branch(pool).await?;
+    stages_that_never_said_which_one_they_were(pool).await
+}
+
+/// Give every stage recorded before Verkstead wrote down *which* stage it was
+/// the column that holds the label.
+///
+/// Nobody has one: the label arrives with the column, and every row this reaches
+/// was written when the record held the roadmap alone. So the column's own
+/// emptiness is the whole of the rewrite and there is no `UPDATE` under it —
+/// which is the record saying what is true. The label is not worked out from the
+/// branch the stage was worked on, here or anywhere: a name guessed off a branch
+/// is the guess this record exists to stop, and a stage with no label is read as
+/// one Verkstead never wrote a label for. See
+/// [`super::conversations::StageOf::stage`], which is where the empty slot is
+/// read back, and what else it can mean.
+///
+/// A column arriving on a `STRICT` table rather than a table of its own beside
+/// it, which is the choice this module is what makes possible: `ALTER TABLE ...
+/// ADD COLUMN` is something SQLite will do in place, and `stage_roadmaps` is
+/// already keyed on the Conversation and already says *this one is a stage of
+/// something*.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn stages_that_never_said_which_one_they_were(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('stage_roadmaps') WHERE name = ?")
+            .bind("stage")
+            .fetch_optional(pool)
+            .await
+            .context("looking for which stage of its roadmap a stage Conversation is")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE stage_roadmaps ADD COLUMN stage TEXT")
+        .execute(pool)
+        .await
+        .context("giving the stages recorded before this a stage to have been")?;
+
+    Ok(())
 }
 
 /// Give every pull request recorded before the chain was worth reading the

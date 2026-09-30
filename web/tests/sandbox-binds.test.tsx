@@ -83,6 +83,9 @@ const REST = {
     trim: { enabled: true, days: "5" },
     delete: { enabled: true, days: "90" },
   },
+  // And how much Verkstead runs at once, as the strings a form holds — see
+  // [`heldAtOnce`].
+  at_once: { roadmap_stages: "1", conversations: "2" },
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
   // And the text every session is given, likewise: what is sent is what the

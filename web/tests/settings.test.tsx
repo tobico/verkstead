@@ -99,6 +99,11 @@ const CLEANUP = {
   trim: { enabled: true, days: "5" },
   delete: { enabled: true, days: "90" },
 };
+
+/// And how much Verkstead runs at once as a save puts it back: both numbers as
+/// the strings a form holds, carried by every section for that reason again —
+/// see [`heldAtOnce`].
+const AT_ONCE = { roadmap_stages: "1", conversations: "2" };
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
@@ -489,6 +494,7 @@ describe("saving", () => {
           size: TOLD.rust_build_cache.size,
         },
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -728,6 +734,7 @@ describe("replacing and clearing the token", () => {
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
         cleanup: TOLD.cleanup,
+        at_once: TOLD.at_once,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
@@ -759,6 +766,7 @@ describe("replacing and clearing the token", () => {
           size: TOLD.rust_build_cache.size,
         },
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -1165,6 +1173,7 @@ describe("sharing on Done", () => {
           size: TOLD.rust_build_cache.size,
         },
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
@@ -1287,6 +1296,7 @@ describe("how a conflict is resolved", () => {
           size: TOLD.rust_build_cache.size,
         },
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
